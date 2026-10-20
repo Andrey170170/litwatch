@@ -1,7 +1,11 @@
-/** In-memory job registry: one paper at a time, recent jobs kept for inspection. */
+/**
+ * In-memory job registry: one paper at a time, recent jobs kept for inspection. A submission may carry a key (litwatch
+ * sends its attempt): a key already known is answered with its job, so a submission sent again after a lost reply
+ * never starts a second job while that job is kept.
+ */
 
 import { randomUUID } from "node:crypto";
-import type { Outcome, Progress, Stats, TraceEvent } from "./agent.ts";
+import type { Failure, Outcome, Progress, Stats, TraceEvent } from "./agent.ts";
 import type { PaperInput, SelectionContext } from "./prompt.ts";
 
 export type JobStatus = "queued" | "running" | "done" | "error";
@@ -22,6 +26,8 @@ export interface Job {
   result?: Outcome["result"];
   trace?: TraceEvent[];
   error?: string;
+  failure?: Failure; // whose failure an `error` job's was
+  key?: string;
 }
 
 /** What a job carries into the run: the paper, the requested extensions, and the selections it is in. */
@@ -37,6 +43,7 @@ const EMPTY: Stats = { cells: 0, turns: 0, input: 0, output: 0, reasoning: 0, ca
 
 export class JobQueue {
   private readonly jobs = new Map<string, Job>();
+  private readonly keys = new Map<string, string>(); // a submission's key to its job's id
   private readonly inputs = new Map<string, JobInput>();
   private readonly queue: string[] = [];
   private running: string | null = null;
@@ -48,7 +55,9 @@ export class JobQueue {
     this.keep = keep;
   }
 
-  submit(paper: PaperInput, extensions: string[] = [], selections: SelectionContext[] = []): Job {
+  submit(paper: PaperInput, extensions: string[] = [], selections: SelectionContext[] = [], key?: string): Job {
+    const known = key === undefined ? undefined : this.byKey(key);
+    if (known) return known;
     const job: Job = {
       id: randomUUID(),
       paper_id: paper.id,
@@ -58,8 +67,10 @@ export class JobQueue {
       created_at: new Date().toISOString(),
       stats: { ...EMPTY },
       last_activity: new Date().toISOString(),
+      key,
     };
     this.jobs.set(job.id, job);
+    if (key !== undefined) this.keys.set(key, job.id);
     this.inputs.set(job.id, { paper, extensions, selections });
     this.queue.push(job.id);
     this.prune();
@@ -69,6 +80,12 @@ export class JobQueue {
 
   get(id: string): Job | undefined {
     return this.jobs.get(id);
+  }
+
+  /** The job a submission with this key started, while it is kept. */
+  byKey(key: string): Job | undefined {
+    const id = this.keys.get(key);
+    return id === undefined ? undefined : this.jobs.get(id);
   }
 
   /** Newest first, without traces and results. */
@@ -105,9 +122,12 @@ export class JobQueue {
       job.result = outcome.result;
       job.trace = outcome.trace;
       job.error = outcome.error;
+      job.failure = outcome.failure;
     } catch (e) {
+      // Before the model was asked: the sign-in, the model, the REPL.
       job.status = "error";
       job.error = e instanceof Error ? e.message : String(e);
+      job.failure = "service";
     } finally {
       job.finished_at = new Date().toISOString();
       job.last_activity = job.finished_at;
@@ -118,7 +138,10 @@ export class JobQueue {
 
   private prune(): void {
     const finished = [...this.jobs.values()].filter((j) => j.status === "done" || j.status === "error");
-    for (const j of finished.slice(0, Math.max(0, finished.length - this.keep))) this.jobs.delete(j.id);
+    for (const j of finished.slice(0, Math.max(0, finished.length - this.keep))) {
+      this.jobs.delete(j.id);
+      if (j.key !== undefined) this.keys.delete(j.key);
+    }
   }
 }
 

@@ -15,7 +15,7 @@ from typing import Any, Protocol, cast
 from pydantic import BaseModel, ValidationError
 
 from litwatch.config import Models, RoleConfig, secret
-from litwatch.llm.batches import MAX_REQUESTS, Batcher, BatchProvider
+from litwatch.llm.batches import MAX_REQUESTS, Answered, Batcher, BatchProvider
 from litwatch.llm.decisions import Decision, chat_request, decision_of
 from litwatch.llm.types import (
     DecisionRequest,
@@ -50,7 +50,8 @@ def _without_nul(value: Any) -> Any:
 
 class CallError(Exception):
     """A call produced no usable answer. `kind` is `truncated`, `refused`, `invalid`,
-    `timeout` or `provider`; the message carries the detail. `usage` is the reply's, when one
+    `timeout`, `provider` or `account` (the provider's 401, 402 or 403: never retried); the
+    message carries the detail. `usage` is the reply's, when one
     came back and was billed; `model` the model asked last (`provider:model@effort`). From
     `Gateway.ask`, `refused` means every model asked down the role's list refused."""
 
@@ -70,8 +71,8 @@ class CallError(Exception):
     @property
     def unusable(self) -> bool:
         """The model answered, and the answer could not be used: asking again is the same
-        question to the same model. A timeout, a provider error or missing credentials say
-        nothing about the paper."""
+        question to the same model. A timeout, a provider or account error or missing
+        credentials say nothing about the paper."""
         return self.kind in ("invalid", "refused", "truncated")
 
 
@@ -87,7 +88,9 @@ class Journal(Protocol):
     async def in_batch(self, key: str) -> dict[str, Any] | None: ...
     async def open_batches(self) -> list[dict[str, Any]]: ...
     async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None: ...
-    async def answered(self, batch_id: str, key: str, usage: Usage | None) -> None: ...
+    async def answered(
+        self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -215,6 +218,8 @@ class Gateway:
             except ProviderError as exc:
                 if exc.timeout:
                     raise CallError("timeout", str(exc)) from exc
+                if exc.account:
+                    raise CallError("account", str(exc)) from exc
                 if delay is None or not exc.transient:
                     raise CallError("provider", str(exc)) from exc
                 log.warning("role=%s %s, trying again in %ss", role_name, exc, delay)
@@ -325,6 +330,8 @@ class Gateway:
         journal = self.journal
         call_id, reply = await self._batched(role_name, role, key, request, paper_id, send)
         try:
+            if isinstance(reply, ProviderError):  # the account kept the batch from answering
+                raise CallError("account", str(reply))
             if reply is None:
                 reply = await self.complete(role_name, role, request, send)
             reply.usage.source_call_id = call_id
@@ -375,16 +382,19 @@ class Gateway:
         request: Request,
         paper_id: str | None,
         send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None,
-    ) -> tuple[int | None, Reply | None]:
-        """The call's journal row, and its reply when a batch gave one (None: send it as a
-        normal call). A key a dead run left in an open batch waits on that batch, on its row,
-        past the deadline too (the batch is cancelled then); one the batch did not answer is
-        sent as a normal call. A normal call has a row of its own when the batch it was given
-        up on may still answer it on its row. A fallback is batched as the role's model is."""
+    ) -> tuple[int | None, Answered]:
+        """The call's journal row, and its reply or account error when a batch gave one (None:
+        send it as a normal call). A key a dead run left in an open batch waits on that batch,
+        on its row, past the deadline too (the batch is cancelled then); one the batch did not
+        answer is sent as a normal call. A normal call has a row of its own when the batch it
+        was given up on may still answer it on its row. A fallback is batched as the role's
+        model is."""
         journal = self.journal
         batcher = self.batchers.get(role.provider) if send is None else None
         if batcher and journal and (row := await journal.in_batch(key)):
             if reply := await batcher.attach(row["batch_id"], key, row["id"]):
+                if isinstance(reply, ProviderError):
+                    return row["id"], reply
                 if reply.usage.reused:  # shared with a call on that row: a row of its own
                     return await journal.start(role_name, role.model, key, paper_id), reply
                 return row["id"], _of_role(reply, role)
@@ -397,7 +407,7 @@ class Gateway:
         reply = await batcher.ask(key, role, request, call_id)
         if reply is None and journal and call_id in batcher.unsettled:
             return await journal.start(role_name, role.model, key, paper_id), None
-        return call_id, _of_role(reply, role) if reply else None
+        return call_id, _of_role(reply, role) if isinstance(reply, Reply) else reply
 
 
 def _of_role(reply: Reply, role: RoleConfig) -> Reply:

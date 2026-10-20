@@ -10,10 +10,12 @@ from anthropic import AsyncAnthropic, transform_schema
 
 from litwatch.config import RoleConfig
 from litwatch.llm.prices import anthropic_cost
-from litwatch.llm.types import ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm.types import ACCOUNT_STATUSES, ProviderError, Reply, Request, Stop, Usage
 
 # Non-streaming requests stay under the SDK's timeout at this ceiling.
 DEFAULT_MAX_TOKENS = 16000
+# A batch's request errors that are the account's (401, 402, 403), by their error type.
+BATCH_ACCOUNT = frozenset({"authentication_error", "billing_error", "permission_error"})
 
 
 def messages_request(role: RoleConfig, request: Request) -> dict[str, Any]:
@@ -95,7 +97,8 @@ class AnthropicProvider:
         ) as exc:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except anthropic.APIError as exc:
-            raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
+            account = getattr(exc, "status_code", None) in ACCOUNT_STATUSES
+            raise ProviderError(f"{type(exc).__name__}: {exc}", account=account) from exc
         return reply_of(message, role)
 
     # Message Batches (models.md, batches): `custom_id` is the gateway's request key.
@@ -120,12 +123,17 @@ class AnthropicProvider:
     async def cancel(self, batch_id: str) -> None:
         await self.client.messages.batches.cancel(batch_id)
 
-    async def results(self, batch_id: str) -> dict[str, Reply | None]:
-        """Each request's reply, by its key; None for one the batch did not answer (errored,
-        cancelled, expired), which is asked again as a normal call."""
-        found: dict[str, Reply | None] = {}
+    async def results(self, batch_id: str) -> dict[str, Reply | ProviderError | None]:
+        """Each request's reply, by its key; an account error for one the account kept the
+        batch from answering, never asked again; None for one the batch did not answer
+        otherwise (errored, cancelled, expired), which is asked again as a normal call."""
+        found: dict[str, Reply | ProviderError | None] = {}
         async for line in await self.client.messages.batches.results(batch_id):
             result = line.result
-            ok = result.type == "succeeded"
-            found[line.custom_id] = reply_of(result.message, None, batch=True) if ok else None
+            if result.type == "succeeded":
+                found[line.custom_id] = reply_of(result.message, None, batch=True)
+            elif result.type == "errored" and (kind := result.error.error.type) in BATCH_ACCOUNT:
+                found[line.custom_id] = ProviderError(f"{kind} in batch {batch_id}", account=True)
+            else:
+                found[line.custom_id] = None
         return found

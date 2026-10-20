@@ -176,6 +176,33 @@ async def test_a_connection_that_never_opened_is_tried_again_and_a_read_timeout_
     assert len(client.sent) == 1
 
 
+def _status(sdk, code: int) -> Exception:
+    """The SDK's error for an HTTP status, as it raises one."""
+    http = sys.modules[type(sdk.DefaultAsyncHttpxClient()).__mro__[1].__module__.split(".")[0]]
+    request = http.Request("POST", "https://api.example.org")
+    client = sdk.AsyncAnthropic(api_key="k") if sdk is anthropic else sdk.AsyncOpenAI(api_key="k")
+    response = http.Response(code, request=request)
+    return client._make_status_error(f"status {code}", body=None, response=response)
+
+
+@pytest.mark.parametrize("code", [401, 402, 403])
+@pytest.mark.parametrize(
+    ("sdk", "provider", "role"),
+    [(anthropic, "anthropic", "writer"), (openai, "openrouter", "check")],
+)
+async def test_an_account_error_is_never_retried_and_journalled_as_its_kind(
+    conn, journal, sdk, provider, role, code
+):
+    client = SdkClient(_status(sdk, code), anthropic_message(GOOD))
+    gw = gateway(MODELS, **{provider: client}, journal=journal)
+    with pytest.raises(CallError) as caught:
+        await gw.ask(role, REQUEST, paper_id=None)
+    assert caught.value.kind == "account" and not caught.value.unusable
+    assert len(client.sent) == 1
+    (row,) = await calls(conn)
+    assert row["error"].startswith("account: ")
+
+
 async def test_a_role_without_credentials_fails_as_a_call_error():
     with pytest.raises(CallError, match="no credentials for openrouter"):
         await gateway(MODELS, SdkClient(anthropic_message(GOOD))).ask("check", REQUEST)

@@ -1,4 +1,7 @@
-/** Stack-internal HTTP surface: start a job, watch it, read the outcome. No auth by design. */
+/**
+ * Stack-internal HTTP surface: start a job, watch it, read the outcome. No auth by design. A submission's
+ * `Idempotency-Key` header names it: a key the service already has is answered (200) with that key's job.
+ */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { JobQueue } from "./jobs.ts";
@@ -48,6 +51,9 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
       extensions?: string[];
       selections?: SelectionContext[];
     };
+    const key = req.headers["idempotency-key"];
+    const known = typeof key === "string" ? deps.jobs.byKey(key) : undefined;
+    if (known) return json(res, 200, { id: known.id, status: known.status });
     const paper = body.paper;
     if (!paper || typeof paper.id !== "string" || typeof paper.title !== "string" || typeof paper.body !== "string")
       throw new HttpError(422, "paper.id, paper.title, and paper.body are required");
@@ -67,6 +73,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
       },
       extensions,
       body.selections ?? [],
+      typeof key === "string" ? key : undefined,
     );
     return json(res, 202, { id: job.id, status: job.status });
   }

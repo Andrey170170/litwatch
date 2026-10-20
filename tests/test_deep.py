@@ -1,7 +1,7 @@
 """Deep card passes: which papers get one and when (the owner's request, Unsave and Area picks
 included), working one against the archive and a fake deep service, the usage each attempt
-records, the lease and a worker that dies mid-job, the daily cap, revisions, and what the API
-shows."""
+records, the lease and a worker that dies mid-job, the service's failures and the paper's, no
+daily cap, revisions, and what the API shows."""
 
 import asyncio
 import contextlib
@@ -73,7 +73,7 @@ TOKEN = "t"
 
 def make(fake: FakeDeep, **kw) -> Deep:
     client = DeepClient("http://deep.test", http=mock(fake.handle), poll_seconds=0)
-    return Deep(client, **{"max_per_day": 10, **kw})
+    return Deep(client, **kw)
 
 
 def archive(fake: FakeArchive) -> ArchiveClient:
@@ -125,6 +125,14 @@ async def attempts(conn) -> list[dict]:
 
 async def work(conn, fake: FakeArchive, d: Deep, **kw):
     return await deep_passes.work(conn, archive(fake), d, **kw)
+
+
+async def unpause(conn) -> None:
+    """As if the queue's pause after the last service failure were over."""
+    await conn.execute(
+        "UPDATE deep_attempts SET service_failed_at = service_failed_at - %s",
+        (deep_passes.PAUSE,),
+    )
 
 
 async def outbox_of(conn, kind: str) -> list[dict]:
@@ -287,14 +295,15 @@ async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db):
 
 async def test_a_failed_job_records_its_usage_and_waits_for_the_owner_after_three_runs(db):
     await grade(db, Fit.CENTRAL)
-    fake = FakeDeep({"error": "cell budget exhausted", "stats": USAGE, "trace": []})
+    failed = {"error": "cell budget exhausted", "failure": "paper", "stats": USAGE, "trace": []}
+    fake = FakeDeep(failed)
     d = make(fake)
     for run in range(FAILED_RUNS):
         assert await fulltext_store.retry_failed(db, FAILED_RUNS) == (1 if run else 0)
         assert await work(db, with_text(P), d) == {"card_failed": 1}
     assert await fulltext_store.retry_failed(db, FAILED_RUNS) == 0  # no longer tried
-    assert [(a["usage"], a["error"]) for a in await attempts(db)] == [
-        (USAGE, "cell budget exhausted")
+    assert [(a["usage"], a["error"], a["failure"]) for a in await attempts(db)] == [
+        (USAGE, "cell budget exhausted", "paper")
     ] * FAILED_RUNS
     (row,) = await deep_rows(db)
     assert (row["state"], row["failed_runs"]) == ("failed", FAILED_RUNS)
@@ -302,7 +311,7 @@ async def test_a_failed_job_records_its_usage_and_waits_for_the_owner_after_thre
     (stuck,) = await fulltext_store.stuck(db, FAILED_RUNS)
     assert (stuck["id"], stuck["kind"]) == (row["id"], "deep")
     assert await fulltext_store.run_now(db, row["id"], FAILED_RUNS)
-    (row,) = await deep_rows(db)  # the owner's now: first in line, past the daily cap
+    (row,) = await deep_rows(db)  # the owner's now: first in line
     assert (row["state"], row["reason"], row["priority"]) == ("ready", "request", 0)
 
 
@@ -319,23 +328,76 @@ async def test_the_owners_request_tries_a_failed_pass_again(db):
     assert await work(db, with_text(P), d) == {"cards_written": 1}
 
 
-async def test_a_lost_job_or_an_answer_that_never_came_has_its_usage_unknown(db):
+async def test_a_job_the_service_lost_has_its_usage_unknown_and_counts_against_nothing(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.vanish = True
     d = make(fake)
-    assert await work(db, with_text(P), d) == {"card_failed": 1}
-    fake.vanish, fake.lose_answers = False, 1
-    await fulltext_store.retry_failed(db, FAILED_RUNS)
-    assert await work(db, with_text(P), d) == {"card_failed": 1}
-    found = await attempts(db)
-    assert [(a["usage"], a["ended_at"] is not None) for a in found] == [(None, True)] * 2
-    assert "vanished" in found[0]["error"] and "submitting failed" in found[1]["error"]
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    (lost,) = await attempts(db)
+    assert (lost["usage"], lost["failure"]) == (None, "service") and "vanished" in lost["error"]
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["failed_runs"]) == ("ready", 0)  # back in the queue, uncounted
 
-    await fulltext_store.retry_failed(db, FAILED_RUNS)
+    fake.vanish = False
+    await unpause(db)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
-    month = await cards.usage_since(db, found[0]["at"])
-    assert month == {"attempts": 3, "list_cost": USAGE["list_cost"], "unknown": 2}
+    month = await cards.usage_since(db, lost["at"])
+    assert month == {"attempts": 2, "list_cost": USAGE["list_cost"], "unknown": 1}
+
+
+async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_queue(db):
+    await grade(db, Fit.CENTRAL)
+    await grade(db, Fit.CENTRAL, Q.id)
+    signed_out = {"error": "not running on the ChatGPT subscription", "failure": "service"}
+    fake = FakeDeep(signed_out | {"stats": USAGE, "trace": []})
+    d = make(fake)
+    assert await work(db, with_text(P, Q), d) == {"card_service_failed": 1}
+    (failed,) = await attempts(db)
+    assert (failed["failure"], failed["usage"]) == ("service", USAGE)
+    assert failed["service_failed_at"] is not None
+    (tried,) = await deep_rows(db, failed["paper_id"])
+    assert (tried["state"], tried["failed_runs"]) == ("ready", 0)  # back in the queue, uncounted
+    assert await work(db, with_text(P, Q), d) == {}  # paused: the next paper waits too
+    assert len(fake.requests) == 1
+
+    fake.outcome = DONE
+    await unpause(db)
+    assert await work(db, with_text(P, Q), d) == {"cards_written": 2}
+    tried_first = failed["paper_id"]
+    assert fake.requests[1]["paper"]["id"] != tried_first  # the failed one went to the back
+
+
+async def test_a_submission_whose_answer_was_lost_is_sent_again_with_its_key_after_the_pause(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.lose_answers = 1  # the service took the job; its answer never came
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    (attempt,) = await attempts(db)
+    assert attempt["ended_at"] is None and attempt["service_failed_at"] is not None
+    assert "submitting failed" in attempt["error"]
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["failed_runs"]) == ("running", 0)
+    assert await work(db, with_text(P), d) == {}  # paused
+
+    await unpause(db)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    assert fake.keys_sent == [f"{attempt['id']}:{P.id}"] * 2
+    assert fake.started == 1 and len(await attempts(db)) == 1  # one job, followed
+
+
+async def test_a_submission_the_service_refused_is_sent_again_after_the_pause(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.fail_submits = 1
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    await unpause(db)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    (attempt,) = await attempts(db)
+    assert (attempt["failure"], attempt["usage"]) == (None, USAGE)
+    assert fake.started == 1
 
 
 async def test_a_job_left_by_a_dead_worker_is_followed_not_paid_for_twice(db):
@@ -364,30 +426,28 @@ async def test_a_failed_poll_lets_the_pass_go_and_its_next_claim_follows_the_job
     fake = FakeDeep(DONE)
     fake.fail_polls = 1
     d = make(fake)
-    assert await work(db, with_text(P), d) == {"card_following": 1}
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
     (row,) = await deep_rows(db)
     assert row["state"] == "running" and "following the deep job" in row["last_error"]
+    (attempt,) = await attempts(db)
+    assert attempt["ended_at"] is None and attempt["service_failed_at"] is not None
+    assert await work(db, with_text(P), d) == {}  # the queue waits
+    await unpause(db)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     assert len(fake.requests) == 1
 
 
-async def test_a_submitted_job_is_followed_past_the_daily_cap_and_a_dismissal(db):
-    await grade(db, Fit.CENTRAL)
+async def test_a_submitted_job_is_followed_past_a_dismissal(db):
+    await deep_passes.request(db, Q.id)
     fake = FakeDeep(DONE)
     fake.fail_polls = 1
-    d = make(fake, max_per_day=1)
-    assert await work(db, with_text(P), d) == {"card_following": 1}
-    assert await work(db, with_text(P), d) == {"cards_written": 1}  # the cap is spent
-
-    await deep_passes.request(db, Q.id)
-    fake.fail_polls = 1
-    assert await work(db, with_text(Q), d) == {"card_following": 1}
+    d = make(fake)
+    assert await work(db, with_text(Q), d) == {"card_service_failed": 1}
     await db.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (Q.id,))
+    await unpause(db)
     assert await work(db, with_text(Q), d) == {"cards_written": 1}
-    assert [(a["usage"], a["ended_at"] is not None) for a in await attempts(db)] == [
-        (USAGE, True)
-    ] * 2
-    assert len(fake.requests) == 2
+    assert [(a["usage"], a["ended_at"] is not None) for a in await attempts(db)] == [(USAGE, True)]
+    assert len(fake.requests) == 1
 
 
 async def test_a_request_that_takes_over_a_claimed_pass_makes_the_attempt_the_owners(
@@ -402,7 +462,7 @@ async def test_a_request_that_takes_over_a_claimed_pass_makes_the_attempt_the_ow
         return found
 
     monkeypatch.setattr(deep_passes, "read", read_then_request)
-    d = make(FakeDeep(DONE), max_per_day=1)
+    d = make(FakeDeep(DONE))
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     assert [a["automatic"] for a in await attempts(db)] == [False]
 
@@ -441,12 +501,16 @@ async def test_a_job_whose_polls_keep_failing_is_given_up_at_its_deadline(db):
     fake = FakeDeep(DONE)
     fake.fail_polls = 1
     d = make(fake)
-    assert await work(db, with_text(P), d) == {"card_following": 1}
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
     await db.execute("UPDATE deep_attempts SET at = now() - interval '2 hours'")
+    await unpause(db)
     fake.fail_polls = 100  # the service is gone for good
-    assert await work(db, with_text(P), d) == {"card_failed": 1}
-    ((usage, error),) = [(a["usage"], a["error"]) for a in await attempts(db)]
-    assert usage is None and "gave up" in error
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    (attempt,) = await attempts(db)
+    assert (attempt["usage"], attempt["failure"]) == (None, "service")
+    assert "gave up" in attempt["error"]
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["failed_runs"]) == ("ready", 0)
 
 
 async def test_one_worker_at_a_time_works_the_deep_passes(db):
@@ -471,19 +535,13 @@ async def test_a_pass_no_longer_wanted_at_claim_spends_nothing(db):
     assert fake.requests == [] and await deep_rows(db) == []
 
 
-async def test_the_daily_cap_holds_back_automatic_cards_and_never_the_owners_request(db):
+async def test_every_due_automatic_pass_is_worked_however_many_cards_were_made_today(db):
+    for _ in range(10):  # what the old daily cap allowed in 24 hours
+        await cards.add_attempt(db, Q.id, None, automatic=True)
     await grade(db, Fit.CENTRAL)
     await grade(db, Fit.CENTRAL, Q.id)
-    fake = FakeDeep(DONE)
-    d = make(fake, max_per_day=1)
-    assert await work(db, with_text(P, Q), d) == {"cards_written": 1}
-    (waiting,) = [
-        r for r in [*await deep_rows(db), *await deep_rows(db, Q.id)] if r["state"] != "done"
-    ]
-    assert waiting["tried_at"] is None  # not claimed, past the cap
-    await deep_passes.request(db, waiting["paper_id"])
-    assert await work(db, with_text(P, Q), d) == {"cards_written": 1}
-    assert [a["automatic"] for a in await attempts(db)] == [True, False]
+    d = make(FakeDeep(DONE))
+    assert await work(db, with_text(P, Q), d) == {"cards_written": 2}
 
 
 async def test_a_card_says_the_revision_it_read_and_is_remade_only_on_request(db):
@@ -554,13 +612,12 @@ async def test_an_area_pick_gets_its_deep_card_when_its_digest_is_published_and_
     ).fetchone()
     assert not (saved and saved["saved"]) and await outbox_of(db, events.PAPER_SAVED) == []
 
-    # Automatic: the daily cap holds it back, and the paper page shows why it is queued.
-    _, http = client(db, [make(FakeDeep(DONE), max_per_day=0)])
+    # Automatic, and the paper page shows why it is queued.
+    _, http = client(db, [make(FakeDeep(DONE))])
     async with http:
         page = (await http.get(f"/api/papers/{P.id}")).json()
     assert page["card_pass"]["reason"] == "pick"
     fake = FakeDeep(DONE)
-    assert await work(db, with_text(P), make(fake, max_per_day=0)) == {}
     assert await work(db, with_text(P), make(fake)) == {"cards_written": 1}
     (sent,) = fake.requests
     assert [s["name"] for s in sent["selections"]] == ["Interpretability"]
@@ -674,9 +731,9 @@ def client(conn, integrations) -> tuple:
 
 
 async def test_the_owner_may_ask_for_a_card_an_automatic_pass_waits_for(db):
-    """Held back by the daily cap, the automatic pass is open; asking takes it over."""
+    """While the automatic pass waits its turn, asking takes it over."""
     await grade(db, Fit.CENTRAL)
-    _, http = client(db, [make(FakeDeep(DONE), max_per_day=0)])
+    _, http = client(db, [make(FakeDeep(DONE))])
     async with http:
         page = (await http.get(f"/api/papers/{P.id}")).json()
         asked = await http.post(f"/api/papers/{P.id}/card")

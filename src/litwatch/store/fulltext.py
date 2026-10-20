@@ -231,7 +231,7 @@ class Claimed:
 
 
 # Held by the worker that works the Deep passes, so the service's and a terminal's never run
-# side by side: cards are made, and the daily cap counted, one at a time.
+# side by side: cards are made one at a time.
 DEEP_WORKER_LOCK = 7213915
 
 
@@ -260,7 +260,6 @@ async def claim(
     besides: set[int] | None = None,
     *,
     deep: bool = False,
-    automatic: bool = True,
     owners: bool | None = None,
 ) -> list[Claimed]:
     """Take up to `limit` text passes to try, least recently tried first, `besides` those
@@ -268,13 +267,11 @@ async def claim(
     ran out (the worker died). Each is held for `lease`. Only passes for their paper's current
     revision are taken (`drop_stale` removes the others); a dismissed paper's are left alone.
     With `deep`, Deep passes instead, the owner's requests first, of any revision (a Deep pass
-    reads the text the paper has when it runs), and the automatic ones only when `automatic`;
-    one whose job was submitted is taken whatever the cap or a dismissal says, as following its
-    job spends nothing new and ends its attempt. Text passes the owner ran now only when
-    `owners` is True, none of them when it is False."""
+    reads the text the paper has when it runs); one whose job was submitted is taken whatever a
+    dismissal says, as following its job spends nothing new and ends its attempt. Text passes
+    the owner ran now only when `owners` is True, none of them when it is False."""
     which = (
-        f"f.kind = 'deep' AND ({STARTED} OR (p.dismissed_at IS NULL "
-        "AND (%(automatic)s OR f.reason = 'request')))"
+        f"f.kind = 'deep' AND ({STARTED} OR p.dismissed_at IS NULL)"
         if deep
         else "f.kind <> 'deep' AND f.paper_revision = p.revision AND p.dismissed_at IS NULL"
     )
@@ -311,7 +308,6 @@ async def claim(
                 "besides": list(besides or ()),
                 "limit": limit,
                 "lease": lease,
-                "automatic": automatic,
             },
         )
     ).fetchall()
@@ -383,6 +379,16 @@ async def let_go(conn: psycopg.AsyncConnection, c: Claimed, error: str) -> None:
         "UPDATE fulltext_passes SET lease_until = now(), last_error = %s "
         "WHERE id = %s AND state = 'running' AND lease_until = %s",
         (error[:2000], c.id, c.lease_until),
+    )
+
+
+async def wait_again(conn: psycopg.AsyncConnection, c: Claimed, error: str) -> None:
+    """A Deep pass the service failed, with no job of it left: back in the queue, the failure not
+    counted, behind those tried less recently. Call it in a transaction that `held` it."""
+    await conn.execute(
+        "UPDATE fulltext_passes SET state = 'ready', lease_until = NULL, last_error = %s "
+        "WHERE id = %s",
+        (error[:2000], c.id),
     )
 
 
@@ -777,7 +783,7 @@ async def run_now(
 ) -> bool:
     """The owner's "run it now" on a pass waiting for them: three more runs, from the role's own
     model, and first in line.
-    A Deep pass becomes the owner's request, ahead of the automatic ones and past the daily cap;
+    A Deep pass becomes the owner's request, ahead of the automatic ones;
     a text pass too, ahead of them and the service worker's while a nightly runs.
     With `pdf` ("Use the PDF"), it reads the paper's PDF from then on, not its LaTeX. Returns
     False when it does not wait for the owner."""

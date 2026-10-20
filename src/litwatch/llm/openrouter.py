@@ -19,6 +19,7 @@ from openai.lib._pydantic import to_strict_json_schema
 
 from litwatch.config import RoleConfig
 from litwatch.llm.types import (
+    ACCOUNT_STATUSES,
     Choice,
     DecisionRequest,
     Predicate,
@@ -212,4 +213,5 @@ class OpenRouterProvider:
         ) as exc:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except openai.APIError as exc:
-            raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
+            account = getattr(exc, "status_code", None) in ACCOUNT_STATUSES
+            raise ProviderError(f"{type(exc).__name__}: {exc}", account=account) from exc

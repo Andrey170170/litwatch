@@ -55,8 +55,10 @@ def ask(n: int | str) -> Request:
     return Request(system="rubric", user=f"paper {n}", output=Answer)
 
 
-def respond(role: RoleConfig, request: Request) -> str | Reply:
+def respond(role: RoleConfig, request: Request) -> str | Reply | ProviderError:
     usage = Usage(model=role.model, via=role.provider, cost=0.001)
+    if request.user == "paper account" and role.provider == "anthropic":
+        return ProviderError("authentication_error in batch", account=True)
     if request.user == "paper refuse" and role.provider == "anthropic":
         return Reply("", Stop.REFUSED, usage, refusal="cyber")
     if request.user == "paper truncate":
@@ -152,6 +154,37 @@ async def test_a_batch_that_cannot_be_sent_goes_as_normal_calls(monkeypatch):
     monkeypatch.setattr(anthropic, "submit", refused)
     await asyncio.gather(gw.ask("brief", ask(0)), gw.ask("brief", ask(1)))
     assert len(anthropic.calls) == 2
+    await gw.close()
+
+
+async def test_an_account_error_in_a_batch_is_never_asked_again_nor_down_the_list(conn):
+    gw, anthropic, openrouter, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")))
+    asked = await asyncio.gather(
+        gw.ask("brief", ask("account")), gw.ask("brief", ask(0)), return_exceptions=True
+    )
+    assert isinstance(asked[0], CallError) and asked[0].kind == "account"
+    assert asked[1].value.yes
+    assert (anthropic.calls, openrouter.calls) == ([], [])
+    assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [
+        ("msgbatch_1", "account: authentication_error in batch"),
+        ("msgbatch_1", None),
+    ]
+    await gw.close()
+
+
+async def test_a_batch_the_account_kept_from_being_sent_fails_its_calls_on_the_account(
+    monkeypatch,
+):
+    gw, anthropic, _, _ = batching()
+
+    async def unauthorized(requests):
+        raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+    monkeypatch.setattr(anthropic, "submit", unauthorized)
+    with pytest.raises(CallError) as found:
+        await gw.ask("brief", ask("account"))  # sent as a normal call, which fails alike
+    assert found.value.kind == "account"
+    assert len(anthropic.calls) == 1  # never tried again
     await gw.close()
 
 
@@ -335,6 +368,32 @@ class Batches:
         return lines()
 
 
+async def test_anthropic_batch_requests_the_account_kept_unanswered_are_account_errors():
+    provider = AnthropicProvider(client=SimpleNamespace(messages=SimpleNamespace(batches=None)))
+
+    def errored(kind: str):
+        error = SimpleNamespace(error=SimpleNamespace(type=kind))
+        return SimpleNamespace(type="errored", error=error)
+
+    lines = [
+        SimpleNamespace(custom_id=kind, result=errored(kind))
+        for kind in ("authentication_error", "billing_error", "permission_error", "api_error")
+    ]
+
+    async def results(batch_id):
+        async def each():
+            for line in lines:
+                yield line
+
+        return each()
+
+    provider.client.messages.batches = SimpleNamespace(results=results)
+    found = await provider.results("msgbatch_1")
+    assert found["api_error"] is None  # asked again as a normal call
+    for kind in ("authentication_error", "billing_error", "permission_error"):
+        assert isinstance(found[kind], ProviderError) and found[kind].account
+
+
 async def test_anthropic_batches_carry_the_request_key_and_are_priced_at_half():
     haiku = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")
     message = anthropic_message(GOOD)
@@ -445,6 +504,33 @@ async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_agai
     anthropic.end("msgbatch_1")
     await settling
     assert [(c["answered"], c["cost"]) for c in await calls(conn)] == [(False, 0.0005)] * 2
+    await gw.close()
+
+
+async def test_an_account_error_a_dead_runs_batch_gave_is_journalled_as_one(conn):
+    dead = await runs.start(conn, "nightly")
+    gw, anthropic, _, clock = batching(Together(conn, dead, 2), hold=True)
+    asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in ("account", 0)]
+
+    async def recorded():
+        return all(c["batch_id"] for c in await calls(conn)) and len(await calls(conn)) == 2
+
+    await until(recorded)
+    for t in asked:
+        t.cancel()
+    await asyncio.gather(*asked, return_exceptions=True)
+    await gw.close()
+
+    gw, _, _, _ = batching(
+        CallJournal(conn, await runs.start(conn, "nightly")), provider=anthropic, clock=clock
+    )
+    await gw.recover()
+    anthropic.end("msgbatch_1")
+    await gw.settle()
+    assert [(c["error"], c["cost"]) for c in await calls(conn)] == [
+        ("account: authentication_error in batch", None),
+        (None, 0.0005),
+    ]
     await gw.close()
 
 

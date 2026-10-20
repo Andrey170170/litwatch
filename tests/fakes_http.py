@@ -247,15 +247,21 @@ class FakeArchive:
 
 class FakeDeep:
     """The deep service's job protocol: a job that needs two polls to finish, ending as
-    `outcome` (its result, stats and model, or its error). It can fail the next polls
-    (`fail_polls`), keep a job running (`hold`), forget its jobs (`vanish`, as a restart does),
-    or accept a submission and then lose the answer (`lose_answers`), as a dropped connection
-    would."""
+    `outcome` (its result, stats and model, or its error and whose failure it was). A
+    submission's key it has (`keys`) is answered with that key's job, not started again
+    (`started` counts those started). It can fail the next submissions (`fail_submits`) or
+    polls (`fail_polls`), keep a job running (`hold`), forget its jobs (`vanish`, as a restart
+    does), or accept a submission and then lose the answer (`lose_answers`), as a dropped
+    connection would."""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
         self.outcome = outcome
         self.polls = 0
         self.requests: list[dict[str, Any]] = []
+        self.keys: dict[str, str] = {}
+        self.keys_sent: list[str | None] = []
+        self.started = 0
+        self.fail_submits = 0
         self.fail_polls = 0
         self.hold = False
         self.vanish = False
@@ -264,7 +270,14 @@ class FakeDeep:
     def handle(self, req: httpx.Request) -> httpx.Response:
         if req.method == "POST" and req.url.path == "/process":
             self.requests.append(json.loads(req.content))
-            self.polls = 0
+            self.keys_sent.append(req.headers.get("idempotency-key"))
+            if self.fail_submits:
+                self.fail_submits -= 1
+                return httpx.Response(503)
+            key = self.keys_sent[-1]
+            if key in self.keys:
+                return httpx.Response(200, json={"id": self.keys[key], "status": "running"})
+            self.keys[key], self.started, self.polls = "job-1", self.started + 1, 0
             if self.lose_answers:
                 self.lose_answers -= 1
                 raise httpx.ReadTimeout("the answer never came", request=req)
