@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from litwatch import events, store
-from litwatch.api import create_app
+from litwatch.api import create_app, monitor
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import (
@@ -367,6 +367,35 @@ async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_que
     assert await work(db, with_text(P, Q), d) == {"cards_written": 2}
     tried_first = failed["paper_id"]
     assert fake.requests[1]["paper"]["id"] != tried_first  # the failed one went to the back
+
+
+async def deep_status(conn, d: Deep) -> dict:
+    found = await monitor.facts(conn, Config(), [d], None)
+    return next(c for c in monitor.components(found, Config()) if c["id"] == "deep")
+
+
+async def test_the_deep_component_reads_the_sign_in_and_a_service_failure_until_a_card(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep({"error": "usage limit reached", "failure": "service", "trace": []})
+    d = make(fake)
+    assert (await deep_status(db, d))["status"] == "healthy"
+    fake.auth = {"state": "missing", "detail": "no credential stored; run `login`"}
+    signed_out = await deep_status(db, d)
+    assert signed_out["status"] == "degraded"
+    said = "sign-in missing (no credential stored; run `login`); expected ok"
+    assert said in signed_out["reason"]
+
+    fake.auth = {"state": "ok"}
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    failed = await deep_status(db, d)
+    assert failed["status"] == "degraded"
+    assert "service failure at" in failed["reason"] and "usage limit reached" in failed["reason"]
+    # It holds after the pause, until the service makes a card again.
+    await unpause(db)
+    assert (await deep_status(db, d))["status"] == "degraded"
+    fake.outcome = DONE
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    assert (await deep_status(db, d))["status"] == "healthy"
 
 
 async def test_a_submission_whose_answer_was_lost_is_found_by_its_key_after_the_pause(db):

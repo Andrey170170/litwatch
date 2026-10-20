@@ -94,6 +94,7 @@ class Journal(Protocol):
     async def answered(
         self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
     ) -> None: ...
+    async def account_error(self, provider: str, error: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -373,6 +374,8 @@ class Gateway:
                 answered = self.debug and isinstance(reply, Reply)
                 kept = _without_nul(reply.raw or reply.text) if answered else None
                 await journal.reject(call_id, str(exc), kept)
+                if exc.kind == "account":  # a normal call's or a batch's, alike
+                    await journal.account_error(role.provider, str(exc))
             raise
         if journal:
             await journal.accept(call_id, value.model_dump(mode="json"))

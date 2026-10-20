@@ -119,14 +119,39 @@ class CallJournal:
             (Jsonb(usage.model_dump(mode="json")), batch_id, key),
         )
         await self._retally(await cur.fetchone())
+        await self._replied(usage)
 
     async def record(self, call_id: int, usage: Usage) -> None:
+        """A reply came for the call: its accounting, whether or not the answer is usable."""
         cur = await self.conn.execute(
             "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() "
             "WHERE id = %s RETURNING run_id",
             (Jsonb(usage.model_dump(mode="json")), call_id),
         )
         await self._retally(await cur.fetchone())
+        await self._replied(usage)
+
+    async def _replied(self, usage: Usage) -> None:
+        """The provider replied (`provider_observations`); a reply shared from another call is
+        not one of its own."""
+        if usage.via is None or usage.reused:
+            return
+        await self.conn.execute(
+            "INSERT INTO provider_observations (provider, replied_at) "
+            "VALUES (%s, clock_timestamp()) "
+            "ON CONFLICT (provider) DO UPDATE SET replied_at = EXCLUDED.replied_at",
+            (usage.via,),
+        )
+
+    async def account_error(self, provider: str, error: str) -> None:
+        """The provider refused a call or a batch for the account (models.md, the gateway)."""
+        await self.conn.execute(
+            "INSERT INTO provider_observations (provider, account_error, account_error_at) "
+            "VALUES (%s, %s, clock_timestamp()) ON CONFLICT (provider) DO UPDATE SET "
+            "account_error = EXCLUDED.account_error, "
+            "account_error_at = EXCLUDED.account_error_at",
+            (provider, error[:2000]),
+        )
 
     async def _retally(self, row: dict[str, Any] | None) -> None:
         """A charge on another run's call (a dead run's batch, read later) is in that run's cost
@@ -237,3 +262,25 @@ async def mean_cost(
         )
     ).fetchone()
     return row["cost"]
+
+
+async def observations(conn: psycopg.AsyncConnection) -> dict[str, dict[str, Any]]:
+    """Each provider's latest account error and latest reply, by provider."""
+    rows = await (await conn.execute("SELECT * FROM provider_observations")).fetchall()
+    return {r["provider"]: r for r in rows}
+
+
+async def outcomes(conn: psycopg.AsyncConnection, run_id: int) -> dict[str, dict[str, int]]:
+    """Per provider, the run's calls that failed without an answer (provider errors and
+    timeouts) and those it replied to (reused replies left out)."""
+    rows = await (
+        await conn.execute(
+            "SELECT usage->>'via' AS provider, "
+            "count(*) FILTER (WHERE error LIKE 'provider%%' OR error LIKE 'timeout%%') "
+            "AS failed, count(*) FILTER (WHERE responded_at IS NOT NULL "
+            "AND NOT coalesce((usage->>'reused')::boolean, false)) AS replied "
+            "FROM inference_calls WHERE run_id = %s AND usage->>'via' IS NOT NULL GROUP BY 1",
+            (run_id,),
+        )
+    ).fetchall()
+    return {r["provider"]: {"failed": r["failed"], "replied": r["replied"]} for r in rows}

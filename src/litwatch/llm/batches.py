@@ -41,6 +41,8 @@ type Answered = Reply | ProviderError | None
 class BatchProvider(Protocol):
     """A provider that batches (anthropic.AnthropicProvider). `custom_id` is the request key."""
 
+    name: str
+
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str: ...
     async def status(self, batch_id: str) -> str: ...  # in_progress, canceling, ended or gone
     async def cancel(self, batch_id: str) -> None: ...
@@ -53,6 +55,7 @@ class BatchJournal(Protocol):
         self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
     ) -> None: ...
     async def gone(self, batch_id: str) -> None: ...
+    async def account_error(self, provider: str, error: str) -> None: ...
 
 
 def _size(request: Request) -> int:
@@ -293,8 +296,11 @@ class Batcher:
                 log.exception("batch %s could not be read; trying again", batch_id)
                 return
             # Not read again this run: its calls fail on the account, and the batch is left
-            # open on its rows for a later run to account for.
+            # open on its rows for a later run to account for. Seen even when no call waits on
+            # it (a dead run's batch): the provider is failed for its account.
             log.error("batch %s could not be read for the account: %s", batch_id, exc)
+            if self.journal:
+                await self.journal.account_error(self.provider.name, f"account: {exc}")
             del self._open[batch_id]
             self._give_up(batch)
             for key in batch.waiting:
@@ -314,6 +320,7 @@ class Batcher:
                     continue
                 if isinstance(reply, ProviderError):
                     await self.journal.answered(batch_id, key, None, f"account: {reply}")
+                    await self.journal.account_error(self.provider.name, f"account: {reply}")
                 else:
                     await self.journal.answered(batch_id, key, reply and reply.usage)
         del self._open[batch_id]

@@ -743,6 +743,22 @@ async def count_stuck(
     return row["n"]
 
 
+async def stopped_between(
+    conn: psycopg.AsyncConnection, since: datetime, until: datetime, runs: int
+) -> int:
+    """The distinct papers whose Brief or Weight pass stopped between `since` and `until`:
+    failed `runs` runs, or refused by every model, on a try that started then. A pass left for
+    the owner is not tried again, so its last try is the one that stopped it."""
+    row = await (
+        await conn.execute(
+            "SELECT count(DISTINCT paper_id) AS n FROM fulltext_passes WHERE kind <> 'deep' "
+            "AND state = 'failed' AND failed_runs >= %s AND tried_at BETWEEN %s AND %s",
+            (runs, since, until),
+        )
+    ).fetchone()
+    return row["n"]
+
+
 # Since when a pass waiting on the owner (`STUCK`) waits, which names its failure: a failed one
 # from its last try, as no run takes it again but on the owner's word; one awaiting its text from
 # when it was queued, which only the owner's run-now moves. A failure after the text arrived,

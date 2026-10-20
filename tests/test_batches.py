@@ -24,6 +24,7 @@ from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.batches import DRAIN, MAX_REQUESTS, Batcher
 from litwatch.llm.prices import anthropic_cost
+from litwatch.store import calls as calls_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import runs
@@ -346,6 +347,40 @@ async def test_a_batch_given_up_on_is_left_open_on_its_row_for_a_later_run_to_ac
         ("msgbatch_1", False, 0.0005),
         (None, True, 0.001),
     ]
+    await later.close()
+
+
+@pytest.mark.parametrize("refused", ["the read", "the request"])
+async def test_a_dead_runs_batch_refused_for_the_account_fails_the_provider_without_a_call(
+    conn, monkeypatch, refused
+):
+    gw, anthropic, _, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")), hold=True)
+    asked = asyncio.create_task(gw.ask("brief", ask("account" if refused == "the request" else 0)))
+    await until(lambda: anthropic.batches)
+    asked.cancel()  # the run dies with its batch open
+    with pytest.raises(asyncio.CancelledError):
+        await asked
+    await gw.close()
+    # The next run reads the batch, which no call of its own waits on.
+    later, _, _, _ = batching(
+        CallJournal(conn, await runs.start(conn, "nightly")), provider=anthropic
+    )
+    if refused == "the read":
+
+        async def unauthorized(batch_id):
+            raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+        monkeypatch.setattr(anthropic, "status", unauthorized)
+        said = "account: AuthenticationError: invalid x-api-key"
+    else:
+        anthropic.end("msgbatch_1")
+        said = "account: authentication_error in batch"
+    await later.recover()
+    await later.settle()
+    # The provider is failed for its account, and the calls and their cost are as they were.
+    seen = (await calls_store.observations(conn))["anthropic"]
+    assert (seen["account_error"], seen["replied_at"]) == (said, None)
+    assert [(c["batch_id"], c["cost"]) for c in await calls(conn)] == [("msgbatch_1", None)]
     await later.close()
 
 

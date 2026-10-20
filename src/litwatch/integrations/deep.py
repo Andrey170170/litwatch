@@ -96,10 +96,12 @@ class DeepClient:
         self.poll_seconds = poll_seconds
         self.timeout_seconds = timeout_seconds
 
-    async def health(self) -> None:
-        """Raise unless the service answers its health check."""
+    async def health(self) -> dict[str, Any]:
+        """The service's health check, its sign-in in `auth` (`state`, and `detail` when not
+        ok); raises unless it answers."""
         resp = await self.http.get(f"{self.base_url}/healthz", timeout=10.0)
         resp.raise_for_status()
+        return resp.json()
 
     async def submit(self, submission: dict[str, Any], *, key: str) -> str:
         """Submit one paper; returns the job's id. `key` names the submission: the service
