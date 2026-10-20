@@ -49,8 +49,9 @@ class Outcome:
     """How a job ended. `usage` is the job's usage as the service reported it (turns, tokens,
     list cost); None when it never reported (the job was lost, or litwatch gave up waiting).
     `failure` says whose a failed job's failure was, as the service tagged it, or the service's
-    when the job was lost or never ended. `still_running`: litwatch gave up waiting at the
-    job's deadline, but the job may yet end, and is to be followed once more."""
+    when the job was lost or never ended. `still_running`: litwatch stopped waiting at the
+    job's deadline, but the job may yet run: followed again after each pause until it ends,
+    or until it has run past the deadline by the service's own clock (`DeepClient.follow`)."""
 
     result: dict[str, Any] | None
     trace: list[dict[str, Any]]
