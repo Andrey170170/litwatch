@@ -200,6 +200,7 @@ export async function processPaper(
 
   const clock = setTimeout(() => {
     failure = `wall clock of ${Math.round(opts.wallClockMs / 60000)} minutes exceeded`;
+    session.abort();
     agent.abort();
   }, opts.wallClockMs);
 

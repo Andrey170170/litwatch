@@ -4,7 +4,7 @@ import dns from "node:dns";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
-import { buildHosts, fetchPublic, guardedLookup, htmlToText, isPublic, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
+import { buildHosts, fetchPublic, guardedLookup, htmlToText, isPublic, pacer, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
 
 test("store.search asks v1's papers table with the read token and keeps the old hit shape", async () => {
   const asked: { url: string; auth: string | null }[] = [];
@@ -116,6 +116,12 @@ test("a private literal address is refused without a connection, however it is w
   await assert.rejects(fetchPublic("file:///etc/passwd", opts), /only http\(s\) URLs/);
   await assert.rejects(fetchPublic("not a url", opts), /not a URL/);
 });
+
+/** Waits for the test server to have done something, failing after two seconds. */
+async function until(done: () => boolean): Promise<void> {
+  for (const started = Date.now(); !done(); await new Promise((r) => setTimeout(r, 5)))
+    if (Date.now() - started > 2000) throw new Error("the test server never got there");
+}
 
 let server: Server;
 let port = 0;
@@ -233,7 +239,7 @@ test("a body is read only up to the byte cap", async () => {
   const page = (await fetchPublic(`http://site.test:${port}/big`, { ...local, maxChars: 3 * 1024 * 1024 })) as Record<string, unknown>;
   assert.equal((page.text as string).length, 2 * 1024 * 1024);
   assert.equal(page.truncated, true);
-  await new Promise((r) => setTimeout(r, 50));
+  await until(() => bigFinished !== undefined);
   assert.equal(bigFinished, false, "the server never got to send the whole 5 MB");
   const fractional = (await fetchPublic(`http://site.test:${port}/big`, { ...local, maxChars: 1 << 20, maxBytes: 0.1 * 1024 * 1024 })) as Record<string, unknown>;
   assert.equal((fractional.text as string).length, 104857, "a fractional cap is a whole number of bytes");
@@ -258,12 +264,25 @@ test("when a paper's session ends, its requests under way are aborted and its qu
   served = [];
   const underWay = hosts["store.search"]!(["a"]);
   const queued = hosts["store.search"]!(["b"]);
-  await new Promise((r) => setTimeout(r, 100));
+  await until(() => served.length === 1);
   session.abort();
   await assert.rejects(underWay, /abort/i);
   await assert.rejects(queued, /abort/i);
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(served.length, 1, "the queued search never reached the server");
+});
+
+test("an ended session's lanes drain at once instead of at the pace", async () => {
+  const session = new AbortController();
+  const pace = pacer(session.signal);
+  const ran: string[] = [];
+  const underWay = pace("slow.test", () => new Promise((_, reject) => session.signal.addEventListener("abort", () => reject(new Error("aborted")))), 10_000);
+  const queued = [1, 2].map((n) => pace("slow.test", async () => ran.push(`queued ${n}`), 10_000));
+  const started = Date.now();
+  session.abort();
+  for (const call of [underWay, ...queued]) await assert.rejects(call, /abort/i);
+  assert.deepEqual(ran, []);
+  assert.ok(Date.now() - started < 1000, "not ten seconds a call");
 });
 
 test("a paper's session stops fetching once its budget is used", async () => {

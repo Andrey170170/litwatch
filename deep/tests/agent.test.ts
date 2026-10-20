@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createModels, fauxAssistantMessage, fauxProvider, type Models } from "@earendil-works/pi-ai";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type Models } from "@earendil-works/pi-ai";
 import { processPaper, type RunOptions } from "../src/agent.ts";
 import { PROVIDER } from "../src/auth.ts";
 
@@ -43,4 +45,21 @@ test("no card submitted is the paper's failure", async () => {
   const outcome = await run(m);
   assert.equal(outcome.error, "the model stopped without submitting");
   assert.equal(outcome.failure, "paper");
+});
+
+test("the wall clock ends the paper without waiting on its host calls", async () => {
+  const server = createServer((_req, res) => void setTimeout(() => res.end('{"rows":[]}'), 3000));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  try {
+    const { models: m, faux } = models();
+    faux.setResponses([fauxAssistantMessage(fauxToolCall("run_code", { code: 'await store.search("x")' }), { stopReason: "toolUse" })]);
+    const litwatchUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const started = Date.now();
+    const outcome = await processPaper(PAPER, { extensions: [], selections: [] }, m, { ...HOSTS, litwatchUrl }, { ...OPTS, wallClockMs: 150 });
+    assert.match(String(outcome.error), /wall clock/);
+    assert.ok(Date.now() - started < 2000, "the search under way was aborted, not waited out");
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
 });

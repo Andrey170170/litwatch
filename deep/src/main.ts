@@ -27,6 +27,8 @@ const whole = (name: string, fallback: number, scale = 1, max = Number.MAX_SAFE_
 };
 /** Node's timers fire at once past this many milliseconds. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
+/** A body is decoded as one string, and V8's strings stop short of 512 Mi characters. */
+const MAX_BODY_BYTES = 256 * 1024 * 1024;
 const secret = (name: string): string | undefined => {
   if (process.env[name]) return process.env[name];
   const file = process.env[`${name}_FILE`];
@@ -43,7 +45,7 @@ const config = {
     contact: process.env.DEEP_CONTACT || undefined,
     maxFetchChars: whole("DEEP_MAX_FETCH_CHARS", 200000),
     maxFetches: whole("DEEP_MAX_FETCHES", 60),
-    maxFetchBytes: whole("DEEP_MAX_FETCH_MB", 2, 1024 * 1024),
+    maxFetchBytes: whole("DEEP_MAX_FETCH_MB", 2, 1024 * 1024, MAX_BODY_BYTES),
   } satisfies HostConfig,
   run: {
     model: env("DEEP_MODEL", "gpt-6.1-sol"),

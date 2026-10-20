@@ -83,7 +83,8 @@ const FETCH_PACING_MS = 1000;
 type Pace = <T>(host: string, work: () => Promise<T>, fallbackMs?: number) => Promise<T>;
 
 /** One request at a time per host, spaced by that host's pacing (else `fallbackMs`). Each paper's
- * session gets its own lanes, and once `ended` aborts, work still queued in them never starts. */
+ * session gets its own lanes; once `ended` aborts, work still queued in them never starts, and the
+ * lanes drain at once instead of at the pace. */
 export function pacer(ended?: AbortSignal): Pace {
   const lanes = new Map<string, Promise<void>>();
   return async (host, work, fallbackMs = 0) => {
@@ -97,7 +98,8 @@ export function pacer(ended?: AbortSignal): Pace {
       ended?.throwIfAborted();
       return await work();
     } finally {
-      setTimeout(release, wait);
+      if (ended?.aborted) release();
+      else setTimeout(release, wait);
     }
   };
 }
