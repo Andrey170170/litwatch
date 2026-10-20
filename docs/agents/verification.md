@@ -96,6 +96,10 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 ## Acceptable evidence
 
 - **Real Postgres, always.** SQL is never mocked; tests use `TEST_DATABASE_URL`.
+- **Tests see only their own environment.** Run them under `env -i` with `PATH`, `HOME` and `TEST_DATABASE_URL`,
+  plus any variable the test needs, so neither `.env` (production) nor the shell's exports (`ANTHROPIC_BASE_URL`,
+  the archive's settings) reach them. A delegated implementer or reviewer is told where the URL comes from
+  (`TEST_DATABASE_URL` in `.env.v1`, [dev-host.md](dev-host.md)), not handed `.env`; without it, a reviewer stalls.
 - **Fakes stand in for model providers and HTTP services in tests.** A claim about what a model writes or decides
   is shown by the quality harness or an evaluation, never by a fake.
 - **End-to-end runs use the sandbox**, a development database of real papers with the scheduler and integrations
