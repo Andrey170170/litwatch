@@ -417,7 +417,7 @@ three quarters of each strength. A quiet row (nothing new) has no stripe or glow
 best rarity ("2 new · 1 must read", "11 new · 1 pick", "Week · 3 picks"), then "· 3 updated" when the digest has
 updated papers; the Gist; up to three picks as paper rows
 (stripe, glow, title, date; no badges, the card names the topic); "+10 papers" when more are due. The whole card opens
-the digest. A quiet topic is the head alone, "Nothing new", in its slot; a failed one is one red line. On the phone the
+the digest. A quiet topic is the head alone, "Nothing new", in its slot, with "· 3 updated" when it has updated papers; a failed one is one red line. On the phone the
 count sits on its own line under the name, so it starts at the same place in every card.
 
 **Mark row** (History): the badge, the topic's name, the count at the right, with the stripe and glow.
