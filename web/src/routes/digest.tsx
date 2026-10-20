@@ -6,7 +6,7 @@
  */
 import { useInfiniteQuery, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearch, type LinkProps } from "@tanstack/react-router";
-import { Fragment, useEffect, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useReducer, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { ApiError, type Schemas } from "@/api/client";
 import { useWriteAgain } from "@/api/mutations";
 import { dayQuery, digestQuery, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
@@ -21,6 +21,7 @@ import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShor
 import { openedFrom } from "@/lib/listContext";
 import { useSteps } from "@/lib/steps";
 import { rowDate } from "@/lib/format";
+import { setShelfOpen, shelfOpen } from "@/lib/remember";
 import { rc } from "@/lib/rarity";
 import { Failed, Load } from "./settings/parts";
 
@@ -502,10 +503,17 @@ export function HistoryPage() {
 // -- a digest ------------------------------------------------------------------------------------------------------
 
 /** A section of a digest's papers: its name over the rows, or, for the updated papers, a head that folds or opens
- * them, folded until opened (DESIGN.md, "A digest"; the Acknowledged section on Needs you). The updated rows are a
- * list of their own for the paper's page. */
+ * them, folded until opened (DESIGN.md, "A digest"; the Acknowledged section on Needs you). Opened, it stays open for
+ * the session, so the way back from one of its papers lands among them. The updated rows are a list of their own for
+ * the paper's page. */
 function Papers({ s, digest, topic, list }: { s: Section; digest: number; topic: string; list: List }) {
-  const [open, setOpen] = useState(false);
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const key = `digest:${digest}:updated`;
+  const open = shelfOpen(key, false);
+  const setOpen = (o: boolean) => {
+    setShelfOpen(key, o);
+    rerender();
+  };
   const rows = (l: List) => (
     <div className="dlist">
       {s.papers.map((p) => (
@@ -529,7 +537,7 @@ function Papers({ s, digest, topic, list }: { s: Section; digest: number; topic:
           {s.name} · <b>{s.papers.length}</b>
         </span>
       </button>
-      {open && rows({ key: `digest:${digest}:updated`, ids, total: ids.length })}
+      {open && rows({ key, ids, total: ids.length })}
     </section>
   );
 }

@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
@@ -108,7 +108,7 @@ describe("the Digest", () => {
     expect(screen.getByText("Two measurement papers.")).toBeInTheDocument();
   });
 
-  it("folds a digest's updated papers under its papers, opens and closes them, each row one line with its version", async () => {
+  it("folds a digest's updated papers under its papers, opens them for the session and closes them, each row one line with its version", async () => {
     viewport(true);
     const updated = (n: number, over: object = {}) => ({ ...paper, id: `2605.0000${n}`, title: `Updated ${n}`, announced: "2026-05-12", role: "updated", version: 3, gist: `Gist ${n}.`, ...over });
     const withUpdated = { ...digest, counts: { ...counts, updated: 2 }, papers: [paper, related, updated(1), updated(2, { rarity: "rare" })] };
@@ -126,8 +126,13 @@ describe("the Digest", () => {
     expect(rows.map((r) => r.textContent)).toEqual(["Updated 1v3 · first out May 2026", "Updated 2v3 · first out May 2026"]);
     expect(rows[1]).toHaveStyle({ "--rc": "var(--r-rare)" });
     expect(screen.queryByText("Gist 1.")).toBeNull();
-    await userEvent.click(head);
-    expect(head).toHaveAttribute("aria-expanded", "false");
+    // the way back to the digest finds the list as it was left
+    cleanup();
+    renderApp("/digests/7");
+    const again = await screen.findByRole("button", { name: "Updated · 2" });
+    expect(again).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(again);
+    expect(again).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Updated 1")).toBeNull();
   });
 

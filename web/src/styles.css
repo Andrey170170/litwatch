@@ -959,7 +959,7 @@ button.car:hover { color: var(--fg); background: var(--line2); }
   :is(.row.dpr, .row.drow) { min-height: 40px; align-content: center; }
   .sws button { width: 40px; height: 40px; }
   .trow .grip, .crow .car { width: 40px; }
-  .ngrp > .caprow > .tpfold { min-height: 40px; }
+  .ngrp > .caprow > .tpfold, .dgfull .dfold > .tpfold { min-height: 40px; }
   .tin.sm { min-height: 40px; }
   .rseg { min-width: 40px; }
   /* the Brief rung's switch sits in its name's line: a 40px hit area drawn around it, the line unmoved */
