@@ -15,6 +15,29 @@ from litwatch.llm.types import Usage
 RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and accounted for
 RETALLY_LOCK = 7213912  # advisory lock namespace, beside jobs.lock.RUN_LOCK
 
+# What a provider said, kept in `provider_observations` by the same statement as the call row it
+# came with (`c`, returning `responded_at`), so the two never part and the reply's time is its
+# row's own. Observations from other processes can commit out of order: each keeps the later.
+_REPLIED = (
+    "o AS (INSERT INTO provider_observations AS o (provider, replied_at) "
+    "SELECT %(via)s::text, responded_at FROM c WHERE %(own)s "
+    "ON CONFLICT (provider) DO UPDATE SET "
+    "replied_at = greatest(o.replied_at, EXCLUDED.replied_at))"
+)
+_ACCOUNT_ERROR = (
+    "INSERT INTO provider_observations AS o (provider, account_error, account_error_at) "
+    "SELECT %(provider)s::text, %(error)s, clock_timestamp() {source} "
+    "ON CONFLICT (provider) DO UPDATE SET "
+    "account_error = CASE WHEN o.account_error_at > EXCLUDED.account_error_at "
+    "THEN o.account_error ELSE EXCLUDED.account_error END, "
+    "account_error_at = greatest(o.account_error_at, EXCLUDED.account_error_at)"
+)
+
+
+def _reply(usage: Usage) -> dict[str, Any]:
+    """`_REPLIED`'s parameters: a reply shared from another call is not one of the provider's."""
+    return {"via": usage.via, "own": usage.via is not None and not usage.reused}
+
 
 class CallJournal:
     """One run's calls. Give it a connection of its own: concurrent calls write here while
@@ -114,48 +137,32 @@ class CallJournal:
             )
             return
         cur = await self.conn.execute(
-            "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() "
-            "WHERE id = (SELECT min(id) FROM inference_calls WHERE batch_id = %s "
-            "AND request_key = %s AND usage->>'cost' IS NULL) RETURNING run_id",
-            (Jsonb(usage.model_dump(mode="json")), batch_id, key),
+            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
+            "responded_at = clock_timestamp() WHERE id = (SELECT min(id) FROM inference_calls "
+            "WHERE batch_id = %(batch)s AND request_key = %(key)s AND usage->>'cost' IS NULL) "
+            f"RETURNING run_id, responded_at), {_REPLIED} SELECT run_id FROM c",
+            {"usage": Jsonb(usage.model_dump(mode="json")), "batch": batch_id, "key": key}
+            | _reply(usage),
         )
-        await self._replied(usage)
         await self._retally(await cur.fetchone())
 
     async def record(self, call_id: int, usage: Usage) -> None:
-        """A reply came for the call: its accounting, whether or not the answer is usable."""
+        """A reply came for the call: its accounting, whether or not the answer is usable, and
+        that the provider replied."""
         cur = await self.conn.execute(
-            "UPDATE inference_calls SET usage = %s, responded_at = clock_timestamp() "
-            "WHERE id = %s RETURNING run_id",
-            (Jsonb(usage.model_dump(mode="json")), call_id),
+            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
+            "responded_at = clock_timestamp() WHERE id = %(id)s RETURNING run_id, responded_at), "
+            f"{_REPLIED} SELECT run_id FROM c",
+            {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id} | _reply(usage),
         )
-        await self._replied(usage)
         await self._retally(await cur.fetchone())
 
-    # Observations from other processes (the API's calls, a nightly) can commit out of order:
-    # each keeps the later of the two.
-    async def _replied(self, usage: Usage) -> None:
-        """The provider replied (`provider_observations`); a reply shared from another call is
-        not one of its own."""
-        if usage.via is None or usage.reused:
-            return
-        await self.conn.execute(
-            "INSERT INTO provider_observations AS o (provider, replied_at) "
-            "VALUES (%s, clock_timestamp()) ON CONFLICT (provider) DO UPDATE SET "
-            "replied_at = greatest(o.replied_at, EXCLUDED.replied_at)",
-            (usage.via,),
-        )
-
     async def account_error(self, provider: str, error: str) -> None:
-        """The provider refused a call or a batch for the account (models.md, the gateway), as
-        seen where it was: a normal call's by the gateway, a batch's by its batcher."""
+        """The provider refused a batch, or a request in one, for the account (models.md, the
+        gateway), seen by its batcher whether or not a call waits on it. A normal call's is its
+        `reject`."""
         await self.conn.execute(
-            "INSERT INTO provider_observations AS o (provider, account_error, account_error_at) "
-            "VALUES (%s, %s, clock_timestamp()) ON CONFLICT (provider) DO UPDATE SET "
-            "account_error = CASE WHEN o.account_error_at > EXCLUDED.account_error_at "
-            "THEN o.account_error ELSE EXCLUDED.account_error END, "
-            "account_error_at = greatest(o.account_error_at, EXCLUDED.account_error_at)",
-            (provider, error[:2000]),
+            _ACCOUNT_ERROR.format(source=""), {"provider": provider, "error": error[:2000]}
         )
 
     async def _retally(self, row: dict[str, Any] | None) -> None:
@@ -190,10 +197,16 @@ class CallJournal:
             "UPDATE inference_calls SET output = %s WHERE id = %s", (Jsonb(output), call_id)
         )
 
-    async def reject(self, call_id: int, error: str, reply: str | None = None) -> None:
+    async def reject(
+        self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
+    ) -> None:
+        """The call got no usable answer; with `account`, that provider refused it for the
+        account, which is observed with it."""
+        update = "UPDATE inference_calls SET error = %(error)s, reply = %(reply)s WHERE id = %(id)s"
+        observed = _ACCOUNT_ERROR.format(source="FROM c")
         await self.conn.execute(
-            "UPDATE inference_calls SET error = %s, reply = %s WHERE id = %s",
-            (error, reply, call_id),
+            f"WITH c AS ({update} RETURNING id), o AS ({observed}) SELECT 1" if account else update,
+            {"error": error, "reply": reply, "id": call_id, "provider": account},
         )
 
     async def refused(self, key: str, paper_id: str | None) -> bool:
