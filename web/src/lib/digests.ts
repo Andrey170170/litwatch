@@ -112,7 +112,8 @@ export type Section = { name: string; papers: DigestPaper[]; gist: boolean; fold
 
 /** The sections a digest's papers fall into, in order (DESIGN.md, "A digest"): picks, then the papers its text
  * names, then the rest, which a Focus digest splits by Fit (Related rows have no Gist); last the updated papers,
- * folded. Every role has its place: a role the switch lacks fails the type check. Rows keep the API's order. */
+ * folded. Every role has its place: a role the switch lacks fails the type check, and one this build does not know
+ * (a newer server under an open tab) shows under Other rather than vanishing. Rows keep the API's order. */
 export function sections(depth: Schemas["Depth"], period: Schemas["DigestPeriod"], papers: DigestPaper[]): Section[] {
   const weekly = period === "week";
   const focus = depth === "focus";
@@ -130,9 +131,12 @@ export function sections(depth: Schemas["Depth"], period: Schemas["DigestPeriod"
         return focus ? (p.fit === "related" ? related : central) : also;
       case "updated":
         return "Updated";
+      default:
+        p.role satisfies never;
+        return "Other";
     }
   };
-  return names
+  return [...names, "Other"]
     .map((name) => ({ name, papers: papers.filter((p) => place(p) === name), gist: name !== related && name !== "Updated", fold: name === "Updated" }))
     .filter((s) => s.papers.length);
 }

@@ -85,6 +85,13 @@ describe("a digest's sections", () => {
     // A Field weekly or a "Nothing new" digest may have nothing but updated papers.
     expect(sections("field", "week", [paper({ id: "u", role: "updated" })]).map((s) => [s.name, s.fold])).toEqual([["Updated", true]]);
   });
+  it("shows a role this build does not know rather than dropping it", () => {
+    const out = sections("area", "day", [paper({ id: "a" }), paper({ id: "n", role: "newer" })]);
+    expect(out.map((s) => [s.name, s.papers.map((p) => p.id), s.fold])).toEqual([
+      ["Also due", ["a"], false],
+      ["Other", ["n"], false],
+    ]);
+  });
 });
 
 /** Mon 5 Oct to Thu 15 Oct 2026: digests on the weekdays, weeklies for the week of 5 Oct, nothing before. */
