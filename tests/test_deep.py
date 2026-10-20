@@ -461,8 +461,12 @@ async def test_a_submission_the_service_turns_down_for_what_it_is_counts_and_pau
     assert await work(db, with_text(P, Q), make(fake)) == {"card_failed": 2}
     assert await cards.paused_until(db, deep_passes.PAUSE) is None
     first, _ = await attempts(db)
-    assert (first["failure"], first["service_failed_at"], first["usage"]) == ("paper", None, None)
+    assert (first["failure"], first["service_failed_at"]) == ("paper", None)
     assert first["ended_at"] is not None and f"{status} {said}" in first["error"]
+    # Nothing ran: its usage is known, and zero, not unknown.
+    assert first["usage"] == deep_passes.NOTHING_RAN
+    month = await cards.usage_since(db, first["at"])
+    assert (month["attempts"], month["unknown"], month["list_cost"]) == (2, 0, 0.0)
     (row,) = await deep_rows(db)
     assert (row["state"], row["failed_runs"]) == ("failed", 1)
     assert fake.started == 0

@@ -51,6 +51,10 @@ log = logging.getLogger(__name__)
 
 # After a service failure the queue waits this long before its next try.
 PAUSE = timedelta(minutes=15)
+# The usage of a submission the service turned down: nothing ran, so it is known, and zero.
+NOTHING_RAN = dict.fromkeys(
+    ("turns", "cells", "seconds", "input", "output", "reasoning", "cache_read", "list_cost"), 0
+)
 
 
 async def request(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
@@ -154,7 +158,7 @@ async def _work_one(
             # Sent again it would be turned down again: the paper's failure, which counts. A
             # wrong extension name in the configuration shows so too, as its topic's papers stop.
             error = f"the deep service rejected the submission: {exc}"
-            return await _ended(conn, c, attempt_id, None, error, "paper")
+            return await _ended(conn, c, attempt_id, NOTHING_RAN, error, "paper", ran=False)
         except httpx.HTTPError as exc:
             # The service may have taken it all the same: found by its key after the pause.
             return await _service_failed(conn, c, attempt_id, f"submitting failed: {exc}")
@@ -219,16 +223,19 @@ async def _ended(
     error: str,
     failure: Literal["paper", "service"],
     trace: list | None = None,
+    *,
+    ran: bool = True,
 ) -> str:
     """An attempt that made no card: its usage (None, unknown), the error and whose `failure` it
     was. The paper's fails the pass for this run, a run that counts; the service's puts it back
-    in the queue, which pauses."""
+    in the queue, which pauses. A job that never `ran` leaves the card's last stats as they
+    were."""
     log.warning("%s: deep card failed (%s): %s", c.paper.id, failure, error)
     async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
         await cards.attempt_ended(conn, attempt_id, usage, error, failure)
         if not await store_.held(conn, c):
             return "lost"
-        await cards.card_failed(conn, c.paper.id, error, usage, trace)
+        await cards.card_failed(conn, c.paper.id, error, usage if ran else None, trace)
         if failure == "service":
             await store_.wait_again(conn, c, error)
             return "card_service_failed"
