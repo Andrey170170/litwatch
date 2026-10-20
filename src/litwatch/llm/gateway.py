@@ -401,14 +401,14 @@ class Gateway:
         batcher = self.batchers.get(role.provider) if send is None else None
         if batcher and journal and (row := await journal.in_batch(key)):
             reply = await batcher.attach(row["batch_id"], key, row["id"])
+            if isinstance(reply, Reply):  # settles that row, given up on before or not
+                if reply.usage.reused:  # shared with a call on that row: a row of its own
+                    return await row_of_its_own(), reply
+                return row["id"], _of_role(reply, role)
             if row["id"] in batcher.unsettled:  # the batch may still answer it on that row
                 return await row_of_its_own(), reply
             if isinstance(reply, ProviderError):
                 return row["id"], reply
-            if reply:
-                if reply.usage.reused:  # shared with a call on that row: a row of its own
-                    return await row_of_its_own(), reply
-                return row["id"], _of_role(reply, role)
             await journal.reject(row["id"], "provider: the batch did not answer it")
             return await row_of_its_own(), None
         call_id = await row_of_its_own() if journal else None

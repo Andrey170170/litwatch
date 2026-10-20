@@ -212,6 +212,16 @@ async def test_a_batch_the_account_can_no_longer_read_fails_its_calls_and_stays_
         ("msgbatch_1", None),
         (None, "account: AuthenticationError: invalid x-api-key"),
     ]
+    # The account works again and the call is asked again: the batch's answer settles its own
+    # row, charged once there, and nothing is left open for a later run to charge again.
+    monkeypatch.undo()
+    anthropic.end("msgbatch_1")
+    await gw.ask("brief", ask(0))
+    assert [(c["batch_id"], c["answered"], c["error"]) for c in await calls(conn)] == [
+        ("msgbatch_1", True, None),
+        (None, False, "account: AuthenticationError: invalid x-api-key"),
+    ]
+    assert await CallJournal(conn, await runs.start(conn, "nightly")).open_batches() == []
     await gw.close()
 
 
