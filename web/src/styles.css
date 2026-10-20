@@ -448,6 +448,8 @@ html[data-theme="dark"] .tonight .hd::before { box-shadow: 0 0 6px currentColor;
 /* an updated paper's row: one line, the title cut short, so a long list keeps one row height */
 .row.dpr.up { grid-template-columns: minmax(0, 1fr) auto; }
 .row.dpr.up .ti { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* phone: the title takes the row's width, its version line under it, so every row is two lines */
+.phone .row.dpr.up { grid-template-columns: minmax(0, 1fr); row-gap: 1px; }
 .row.drow { grid-template-columns: auto 1fr auto; align-items: center; padding: 6px 10px 6px 14px; font-size: 13px; }
 .row.drow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.drow.quiet, .row.drow.quiet:hover { color: var(--fg3); box-shadow: none; background-image: none; }

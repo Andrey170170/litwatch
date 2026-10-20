@@ -114,7 +114,7 @@ rarity colour; the full text, where a paper it names reads as part of the senten
 Related, whose rows are one line each without a Gist. An Area daily digest: Picks, Mentioned (papers its text names), Also due. A weekly digest: "Central this
 week" for Focus, Picks for the others. Last, the updated papers ([digests.md](digests.md), updated papers), folded
 to "Updated · 3" until opened (its head folds or opens it, as the Acknowledged section on Needs you): one line each, a
-paper row (stripe, glow, title) with "v3 · first out May 2026" in place of its date, no Gist, by grade, then rarity, then
+paper row (stripe, glow, title) with "v3 · first out May 2026" in place of its date (on the phone, on a second line under the title), no Gist, by grade, then rarity, then
 the paper first out most recently. A digest with nothing due says so in one line, with
 its folded updated papers under it if it has any; a failed one says it could not be written and that the next run
 writes it again.
