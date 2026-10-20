@@ -278,7 +278,11 @@ owner's requests go first.
 
 A Deep job fails either because of the paper (no card within the job's budget, an invalid card) or because of the
 service (its model call failed: a sign-in expired, a usage limit, the provider; or litwatch could not submit the job).
-The `deep` service tags which. A paper failure counts as a failed run, as below; a service failure does not: the pass
+The `deep` service tags which. A submission the service turns down for what it is, a 4xx other than 404, 408 and 429
+(an unknown extension, a body too large, missing fields), starts no job and would be turned down again: it is the
+paper's failure, with the service's message. An unknown extension is the configuration's mistake, not the paper's,
+but counted so the topic's papers stop after three runs and wait on Quality, where the owner sees it; passed off as
+the service's it would pause the queue every 15 minutes and never show. A paper failure counts as a failed run, as below; a service failure does not: the pass
 goes back to waiting, the Deep worker pauses the whole queue for 15 minutes, and the status document shows it
 ([data.md](data.md), configuration). An error following a job already accepted is a service failure too, but the job
 may still be running: the pass keeps its attempt and stays running, to be followed by its next claim after the pause,

@@ -442,6 +442,47 @@ async def test_a_submission_the_service_refused_is_tried_again_after_the_pause(d
     assert made["usage"] == USAGE and fake.started == 1
 
 
+@pytest.mark.parametrize(
+    ("status", "said"),
+    [
+        (413, "body too large"),
+        (422, "paper.id, paper.title, and paper.body are required"),
+        (400, 'unknown extension "faithfulness"; known: methods'),  # the configuration's
+    ],
+)
+async def test_a_submission_the_service_turns_down_for_what_it_is_counts_and_pauses_nothing(
+    db, status, said
+):
+    await grade(db, Fit.CENTRAL)
+    await grade(db, Fit.CENTRAL, Q.id)
+    fake = FakeDeep(DONE)
+    fake.answer_submits = (status, said)
+    # Not paused: the next paper is tried in the same run, and turned down as well.
+    assert await work(db, with_text(P, Q), make(fake)) == {"card_failed": 2}
+    assert await cards.paused_until(db, deep_passes.PAUSE) is None
+    first, _ = await attempts(db)
+    assert (first["failure"], first["service_failed_at"], first["usage"]) == ("paper", None, None)
+    assert first["ended_at"] is not None and f"{status} {said}" in first["error"]
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["failed_runs"]) == ("failed", 1)
+    assert fake.started == 0
+
+
+@pytest.mark.parametrize("status", [503, 500, 429, 408, 404])
+async def test_a_submission_failing_on_the_service_pauses_the_queue_and_counts_nothing(db, status):
+    await grade(db, Fit.CENTRAL)
+    await grade(db, Fit.CENTRAL, Q.id)
+    fake = FakeDeep(DONE)
+    fake.answer_submits = (status, "not now")
+    assert await work(db, with_text(P, Q), make(fake)) == {"card_service_failed": 1}
+    assert await cards.paused_until(db, deep_passes.PAUSE) is not None
+    (attempt,) = await attempts(db)
+    assert attempt["failure"] is None and attempt["service_failed_at"] is not None
+    assert attempt["ended_at"] is None  # its key is looked up after the pause
+    (row,) = await deep_rows(db, attempt["paper_id"])
+    assert (row["state"], row["failed_runs"]) == ("running", 0)
+
+
 async def test_a_job_left_by_a_dead_worker_is_followed_not_paid_for_twice(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)

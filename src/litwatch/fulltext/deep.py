@@ -42,7 +42,7 @@ from litwatch.core import Cause
 from litwatch.core.fulltext import REQUESTED, TextRead
 from litwatch.feedback import word
 from litwatch.fulltext import TICK_SECONDS, judged, read, record, still_wanted
-from litwatch.integrations.deep import Deep
+from litwatch.integrations.deep import Deep, RejectedError
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
 from litwatch.store.fulltext import Claimed
@@ -150,6 +150,11 @@ async def _work_one(
             attempt_id = await cards.add_attempt(conn, c.paper.id, c.id, automatic=not requested)
         try:
             job_id = await deep.client.submit(submission, key=_key(attempt_id, c))
+        except RejectedError as exc:
+            # Sent again it would be turned down again: the paper's failure, which counts. A
+            # wrong extension name in the configuration shows so too, as its topic's papers stop.
+            error = f"the deep service rejected the submission: {exc}"
+            return await _ended(conn, c, attempt_id, None, error, "paper")
         except httpx.HTTPError as exc:
             # The service may have taken it all the same: found by its key after the pause.
             return await _service_failed(conn, c, attempt_id, f"submitting failed: {exc}")

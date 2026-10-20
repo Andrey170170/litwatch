@@ -59,6 +59,25 @@ class Outcome:
     failure: Literal["paper", "service"] | None = None
 
 
+# A 4xx the service answers a submission with that is not about the submission: a wrong
+# address (404), its own timeout (408) or load (429). Any other 4xx turns the submission down
+# for what it is (400, 413, 422 today), and it would be turned down again.
+NOT_REJECTIONS = frozenset({404, 408, 429})
+
+
+class RejectedError(Exception):
+    """The service turned a submission down for what it is, in its own words; no job started."""
+
+
+def _said(resp: httpx.Response) -> str:
+    """What the service said in its error answer (`{"error": ...}`)."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return resp.text[:500]
+    return str(body.get("error", body)) if isinstance(body, dict) else str(body)
+
+
 class DeepClient:
     """HTTP client for the deep service: submit a job, follow its progress, collect it."""
 
@@ -82,10 +101,12 @@ class DeepClient:
     async def submit(self, submission: dict[str, Any], *, key: str) -> str:
         """Submit one paper; returns the job's id. `key` names the submission: the service
         answers a key it has with that key's job, so one sent again after a lost answer never
-        starts a second."""
+        starts a second. Raises `RejectedError` when the service turns it down for what it is."""
         resp = await self.http.post(
             f"{self.base_url}/process", json=submission, headers={"Idempotency-Key": key}
         )
+        if 400 <= resp.status_code < 500 and resp.status_code not in NOT_REJECTIONS:
+            raise RejectedError(f"{resp.status_code} {_said(resp)}")
         resp.raise_for_status()
         return str(resp.json()["id"])
 

@@ -250,7 +250,8 @@ class FakeDeep:
     `outcome` (its result, stats and model, or its error and whose failure it was). A
     submission's key it has (`keys`) is answered with that key's job, not started again
     (`started` counts those started), and found by `GET /keys/<key>`. It can fail the next
-    submissions (`fail_submits`) or polls and lookups (`fail_polls`), keep a job running
+    submissions (`fail_submits`) or polls and lookups (`fail_polls`), answer every submission
+    with a status and its error (`answer_submits`, as it turns one down), keep a job running
     (`hold`), forget its jobs (`vanish`, as a restart does), or accept a submission and then
     lose the answer (`lose_answers`), as a dropped connection would."""
 
@@ -262,6 +263,7 @@ class FakeDeep:
         self.keys_sent: list[str | None] = []
         self.started = 0
         self.fail_submits = 0
+        self.answer_submits: tuple[int, str] | None = None
         self.fail_polls = 0
         self.hold = False
         self.vanish = False
@@ -274,6 +276,9 @@ class FakeDeep:
             if self.fail_submits:
                 self.fail_submits -= 1
                 return httpx.Response(503)
+            if self.answer_submits:
+                status, error = self.answer_submits
+                return httpx.Response(status, json={"error": error})
             key = self.keys_sent[-1]
             if key in self.keys:
                 return httpx.Response(200, json={"id": self.keys[key], "status": "running"})
