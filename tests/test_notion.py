@@ -1,6 +1,7 @@
 """The notion integration, driven through the dispatcher against an in-memory fake of Notion's
 API (`tests.fakes_http.FakeNotion`). Nothing here reaches Notion."""
 
+import json
 import re
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote
@@ -68,6 +69,7 @@ FAITHFUL, MONITORING = "Chain-of-thought faithfulness", "Chain-of-thought monito
 A = paper("2610.00001", title="Traces that hide steps", published="2026-10-01T12:00:00+00:00")
 B = paper("2610.00002", title="Watching the reasoning", abstract="Monitors read the trace.")
 C = paper("2610.00003", title="A third paper")
+NOTED = "A fetch was refused: the address is not a public one."
 CARD = {
     "summary": "First paragraph.\n\nSecond paragraph.",
     "key_claim": "Probes predict unfaithful reasoning.",
@@ -197,12 +199,15 @@ async def last_day(conn) -> str:
 async def test_a_must_read_with_a_deep_card_gets_every_column_and_its_deep_read(world):
     conn, fake = world, FakeNotion(PARENT)
     await texts(conn, A, gist="Probes catch hidden steps.", brief="First.\n\nSecond.")
+    # Process notes describe Deep's process, not the paper: they stay out of Notion.
+    noted = CARD | {"process_notes": [{"kind": "access", "source": "service", "note": NOTED}]}
     await integrations_store.put_card(
-        conn, A.id, CARD, "deep", {}, revision=1, version=1, source="latex", pass_id=None
+        conn, A.id, noted, "deep", {}, revision=1, version=1, source="latex", pass_id=None
     )
     await grade(conn, A, FAITH.slug, "must_read")
     n = notion(fake)
     assert await start(conn, n)
+    assert NOTED not in json.dumps(fake.requests)  # every request it was sent
 
     db = await state.database(conn, n.name)
     column = db.topics[FAITH.slug]["column"]

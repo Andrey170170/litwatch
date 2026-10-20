@@ -46,13 +46,14 @@ def turns(n: int) -> list[dict]:
 
 @pytest.fixture
 async def before_traces(conn, monkeypatch):
-    """`conn`'s schema rebuilt as it was before 0036, with a paper; `migrate` then applies it."""
+    """`conn`'s schema rebuilt as it was before 0036, with a paper; `migrate` then applies it, and
+    no later migration."""
     for table in await tables(conn):
         await conn.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
     every = db._migrations()
     monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] < TRACES])
     await store.migrate(conn)
-    monkeypatch.setattr(db, "_migrations", lambda: every)
+    monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] <= TRACES])
     await papers_store.upsert(conn, [paper("2610.00001"), paper("2610.00002")])
     return conn
 

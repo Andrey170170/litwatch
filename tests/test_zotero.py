@@ -2,6 +2,7 @@
 of the Zotero Web API, the WebDAV share and arXiv. Nothing here reaches a real service."""
 
 import io
+import json
 import zipfile
 
 import pytest
@@ -38,6 +39,7 @@ P = paper(
 )
 # What a stored card says it was written from.
 LABEL = {"revision": 1, "version": 1, "source": "latex", "pass_id": None}
+NOTED = "A fetch was refused: the address is not a public one."
 CARD = {
     "summary": "First paragraph.\n\nSecond paragraph.",
     "key_claim": "Probes predict unfaithful reasoning.",
@@ -217,12 +219,15 @@ async def test_grades_published_versions_and_cards_reach_the_notes(world):
     (note,) = fake.notes(key)
     assert "NeurIPS 2026" in note and "doi:10.1/x" in note
 
-    await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, **LABEL)
+    # Process notes describe Deep's process, not the paper: they stay out of Zotero.
+    noted = CARD | {"process_notes": [{"kind": "access", "source": "service", "note": NOTED}]}
+    await state.put_card(conn, P.id, noted, "deep-model", {"cells": 3}, **LABEL)
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
     await run(conn, z)
     notes = fake.notes(key)
     assert len(notes) == 2
     assert any("Probes predict unfaithful reasoning." in n for n in notes)
+    assert NOTED not in json.dumps(fake.items)  # every item and note it holds
     assert {"litwatch:processed", "litwatch:kind:method", "litwatch:code"} <= fake.tags(key)
     assert "INBOX" in fake.items[key]["data"]["collections"]
 

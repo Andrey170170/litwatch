@@ -151,6 +151,8 @@ async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
             "fulltext": await fulltext_store.stuck(c, FAILED_RUNS),
             # A digest whose writer call failed: the next run writes it again.
             "digests": await digests_store.failed(c),
+            # Deep cards with process notes: nothing waits, and they count in no status.
+            "deep_notes": await integrations_store.deep_notes(c),
         },
         "cost": [
             line.model_dump() for line in await budget_lines(c, request.app.state.config.budget)
@@ -185,30 +187,43 @@ class PassSeen(BaseModel):
     since: datetime
 
 
+class CardSeen(BaseModel):
+    """A Deep card's process notes as Needs you showed them: the paper, and when its card was
+    written, which names the card."""
+
+    paper_id: str
+    written_at: datetime
+
+
 class Acknowledgement(BaseModel):
-    """Items of Needs you, each as shown: stopped steps, full-text passes and failed digests
-    (by id). The owner's Acknowledge names them; the answer names those it marked."""
+    """Items of Needs you, each as shown: stopped steps, full-text passes, failed digests (by
+    id) and Deep cards with process notes. The owner's Acknowledge names them; the answer names
+    those it marked."""
 
     steps: list[StepSeen] = []
     passes: list[PassSeen] = []
     digests: list[int] = []
+    cards: list[CardSeen] = []
 
 
 @router.post("/acknowledge")
 async def acknowledge(body: Acknowledgement, c: Conn) -> Acknowledgement:
-    """Acknowledge on Needs you: the owner has seen these items, and they stop counting in the
-    run status. An item is marked only while it still waits on the owner as shown (the same
-    failure, not a later one); one that recovers and fails again comes back unacknowledged. It
-    moves no paper. A failed nightly run is not an item and is never acknowledged. Answers with
-    the items marked, for the page to fold those and only those; naming one again (a retry,
-    another tab) answers it again and keeps the first mark."""
+    """Acknowledge on Needs you: the owner has seen these items, and the failures stop counting
+    in the run status (Deep notes count in none). An item is marked only while it still waits on
+    the owner as shown (the same failure, not a later one; the same card, not one written
+    again); one that recovers and fails again comes back unacknowledged. It moves no paper. A
+    failed nightly run is not an item and is never acknowledged. Answers with the items marked,
+    for the page to fold those and only those; naming one again (a retry, another tab) answers
+    it again and keeps the first mark."""
     steps = [(x.step, x.paper_id, x.topic or "", x.revision, x.failed_at) for x in body.steps]
     passes = [(x.id, x.since) for x in body.passes]
+    cards = [(x.paper_id, x.written_at) for x in body.cards]
     async with c.transaction():
         return Acknowledgement(
             steps=await failures.acknowledge(c, steps, FAILED_RUNS),
             passes=await fulltext_store.acknowledge(c, passes, FAILED_RUNS),
             digests=await digests_store.acknowledge(c, body.digests),
+            cards=await integrations_store.acknowledge_notes(c, cards),
         )
 
 
