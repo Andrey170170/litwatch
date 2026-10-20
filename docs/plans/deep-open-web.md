@@ -85,8 +85,7 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
   - The allowed-host list (`prompt.ts`) becomes: any public page can be fetched; pages built by JavaScript may come
     back empty, so prefer a site's API or raw files.
   - "Checked, not assumed: an unreachable or empty repository is not available" stays.
-- **Effort.** `LITWATCH_DEEP_EFFORT` goes from `low` to `medium` in the stack at P1's deploy, so the remade cards get
-  it. The 30-minute wall clock is far above the longest run so far (83 s).
+- **Effort.** `LITWATCH_DEEP_EFFORT` goes from `low` to `medium` in the stack at P1's deploy. The 30-minute wall clock is far above the longest run so far (83 s).
 - **README.** `deep/README.md` gains the fetch policy and the new settings: budget, hops, byte cap.
 
 ### Traces (P2)
@@ -102,7 +101,7 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
     transaction, so the whole of 0035 rolls back: `deep_attempts.trace` is never added and `deep_cards.trace` stays
     as it was. The serve that ran it does not start, and the case is handled by hand before deploying again. A
     pytest case with a mismatched trace shows the rollback. On the production copy, all 46 cards pass (2026-10-20, read-only
-    query). P1's remakes come before P2, so the check runs again on a fresh production copy when P2 is built.
+    query). The check runs again on a fresh production copy when P2 is built.
   - Drops `deep_cards.trace` only after the copy and the check.
 - **Writes.** `attempt_ended` writes the trace. `put_card` and `card_failed` stop touching it. A lost or stuck job has
   no trace (null), not `[]`: `DeepClient`'s `Outcome` carries `trace: list | None` instead of turning a missing
@@ -169,8 +168,9 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
 
 - Each stage is one PR through `drive` at land.
 - `deep` and litwatch deploy together from one commit, as the stack README says.
-- After P1's deploy, the 5 production cards (2610.17976, 2610.23670, 2610.24495, 2610.24872, 2610.26551) are remade
-  through the paper page's "Write again".
+- After P2's deploy, the 5 production cards (2610.17976, 2610.23670, 2610.24495, 2610.24872, 2610.26551) are remade
+  through the paper page's "Write again". Not before: until P2, a remade card's trace replaces the old one, which
+  shows the blocked fetch.
 
 ## Structure
 
@@ -225,8 +225,8 @@ The owner settled four more in conversation:
 
 | Stage | Builds | Shows before the next starts |
 | --- | --- | --- |
-| P1, network | In `deep/`: the guard, hops, budget, byte cap, pacing, the 4open rewrite, prompt and README. Effort `medium` in the stack | Deep tests and typecheck pass. On a dev `deep`, 2610.24495's card finds its repository. Deployed, with the container's fetch refused for 192.168.0.1. The 5 cards are remade |
-| P2, traces | Migration 0035, traces per attempt, host failure reasons, hops, cell timeouts, reasoning summaries, the `litwatch deep` CLI, dev-host.md | The migration on a production-copy sandbox with counts. `litwatch deep trace` prints a real trace. Pytest passes |
+| P1, network | In `deep/`: the guard, hops, budget, byte cap, pacing, the 4open rewrite, prompt and README. Effort `medium` in the stack | Deep tests and typecheck pass. On a dev `deep`, 2610.24495's card finds its repository. Deployed, with the container's fetch refused for 192.168.0.1 |
+| P2, traces | Migration 0035, traces per attempt, host failure reasons, hops, cell timeouts, reasoning summaries, the `litwatch deep` CLI, dev-host.md | The migration on a production-copy sandbox with counts. `litwatch deep trace` prints a real trace. Pytest passes. Deployed; the 5 cards are remade, each with its own trace |
 | P3, process notes | The schema field and prompt, service notes, migration 0036, the card rung, the Needs you group with Acknowledge | Deep tests (fake provider) pass. A real run writes a note. Screenshots of the card and Needs you. Run-status counts unchanged |
 
 ## Verification
@@ -234,7 +234,7 @@ The owner settled four more in conversation:
 | Claim | Evidence |
 | --- | --- |
 | V1. Any public host can be fetched; no private address can, directly or through a redirect | `deep/tests/hosts.test.ts` against a local server and a stubbed lookup: every refused class (private, loopback, link-local, unique-local, site-local, CGNAT, reserved, NAT64, 6to4, IPv4-mapped), each as a literal (IPv6 bracketed) and as a DNS answer, and a redirect to a private address, all refused. After deploy, from the container: a public URL answers, 192.168.0.1 is refused |
-| V2. anonymous.4open.science repositories get checked | A rewrite unit test. On a dev `deep`, 2610.24495's card has `code_available: true` with its repository. The other 4 the same once remade in production |
+| V2. anonymous.4open.science repositories get checked | A rewrite unit test. On a dev `deep`, 2610.24495's card has `code_available: true` with its repository. The other 4 the same once remade in production after P2 |
 | V3. The budget and byte cap hold | Unit tests: the 61st fetch throws; a 5 MB body is cut at 2 MB without being read whole |
 | V4. Every attempt keeps its trace, none lost in the move | Pytest on a fresh schema, with a card whose trace survived a remake turned down before its job ran (it goes to the attempt that ran), and a trace whose turns match no attempt (the migration fails). On a production-copy sandbox: 46 traces before and after, none left on a card. A failed or lost attempt keeps its own trace, or none, never a wiped one |
 | V5. The agent can read what Deep did | `litwatch deep trace 2610.24495` output in P2's evidence: turns, cells, host calls with reasons and hops, timings |
