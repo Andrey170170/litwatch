@@ -3,7 +3,7 @@ import dns from "node:dns";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
-import { buildHosts, fetchPublic, guardedLookup, isPublic, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
+import { buildHosts, fetchPublic, guardedLookup, htmlToText, isPublic, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
 
 test("store.search asks v1's papers table with the read token and keeps the old hit shape", async () => {
   const asked: { url: string; auth: string | null }[] = [];
@@ -254,6 +254,34 @@ test("a paper's session stops fetching once its budget is used", async () => {
   const hosts = buildHosts({ litwatchUrl: "http://litwatch.test", maxFetchChars: 100, maxFetches: 2, maxFetchBytes: 1000 });
   for (let i = 0; i < 2; i++) await assert.rejects(hosts.fetch!(["http://10.0.0.1/"]), /not a public address/);
   await assert.rejects(hosts.fetch!(["https://example.com/"]), /fetch budget of 2 per paper is used up/);
+});
+
+test("HTML becomes its readable text", () => {
+  const page = `<html><head><style>p{x}</style><SCRIPT type="x">if (a < b) go()</SCRIPT></head><body>
+<NAV><a href="/">Home</a></NAV><header>Site</header><!-- note <p>hidden</p> -->
+<h1>Title &amp; more</h1><p>One&nbsp;line<br/>two\t\t lines</p>
+
+
+<div>Code &lt;here&gt; &quot;q&quot; &#39;s&#39;</div><svg><path d="M0"/></svg><footer>(c)</footer><script>never closed`;
+  assert.equal(htmlToText(page), "Title & more\nOne line\ntwo lines\nCode <here> \"q\" 's'\nnever closed");
+});
+
+test("hostile HTML up to the byte cap is read in linear time", () => {
+  const n = 2 * 1024 * 1024;
+  const pages = {
+    "unclosed tags": "<".repeat(n),
+    "unclosed blocks": "<nav".repeat(n / 4),
+    "unclosed comments": "<!--".repeat(n / 4),
+    "tags within tags": "<a".repeat(n / 2),
+    "breaks with no end": ("<br" + " ".repeat(29)).repeat(n / 32),
+    "whitespace with no newline": "\r".repeat(n),
+  };
+  for (const [name, page] of Object.entries(pages)) {
+    const started = performance.now();
+    htmlToText(page);
+    // The quadratic version took minutes on each of these; linear takes well under a second.
+    assert.ok(performance.now() - started < 2000, name);
+  }
 });
 
 test("anonymous.4open.science links go to its JSON API", () => {

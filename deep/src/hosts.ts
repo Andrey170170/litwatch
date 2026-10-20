@@ -350,22 +350,44 @@ async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: num
   return { raw: new TextDecoder().decode(Buffer.concat(chunks)), cut };
 }
 
-/** Readable text from HTML: scripts and styles dropped, block boundaries kept as newlines. */
+/** Readable text from HTML: scripts, styles and comments dropped, block boundaries kept as newlines.
+ * It runs on the event loop, outside any cell's time limit, so every step is linear in the page:
+ * a hostile page of unclosed tags must not hold the service for hours. */
 export function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style|noscript|svg|nav|header|footer)\b[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
+  return dropBlocks(html)
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|h[1-6]|tr|section|article|blockquote|pre|dd|dt)>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
+    .replace(/<[^<>]*>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\s*\n\s*/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ ?\n[ \n]*/g, "\n")
     .trim();
+}
+
+/** HTML without its comments and its script, style, noscript, svg, nav, header and footer elements.
+ * An opener whose closer never comes is left in place, and its kind is not searched for again. */
+function dropBlocks(html: string): string {
+  const opens = /<(script|style|noscript|svg|nav|header|footer)\b|<!--/gi;
+  const unclosed = new Set<string>();
+  let out = "";
+  let kept = 0;
+  for (let open = opens.exec(html); open; open = opens.exec(html)) {
+    const kind = open[1]?.toLowerCase() ?? "!--";
+    if (unclosed.has(kind)) continue;
+    const close = new RegExp(kind === "!--" ? "-->" : `</${kind}>`, "gi");
+    close.lastIndex = opens.lastIndex;
+    const end = close.exec(html);
+    if (!end) {
+      unclosed.add(kind);
+      continue;
+    }
+    out += html.slice(kept, open.index) + " ";
+    kept = opens.lastIndex = end.index + end[0].length;
+  }
+  return out + html.slice(kept);
 }
