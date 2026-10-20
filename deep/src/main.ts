@@ -15,12 +15,14 @@ import type { PaperInput, SelectionContext } from "./prompt.ts";
 import { buildServer } from "./server.ts";
 
 const env = (name: string, fallback: string) => process.env[name] ?? fallback;
-/** A numeric setting in its unit, as a whole number from 1 to `max` once multiplied by `scale`, refused at start
- * otherwise: a limit set to Infinity, a negative, a typo, or past what its consumer holds would quietly lift it. */
+/** A numeric setting as a whole number from 1 to `max` in its consumer's unit, refused at start otherwise: a limit
+ * set to Infinity, a negative, a typo, or past what its consumer holds would quietly lift it. A count is given whole;
+ * a setting in a larger unit (`scale`: MiB, seconds, minutes) may be fractional and is rounded down to the smaller. */
 const whole = (name: string, fallback: number, scale = 1, max = Number.MAX_SAFE_INTEGER): number => {
   const raw = env(name, String(fallback));
-  const value = Math.floor(Number(raw) * scale);
-  if (!(value >= 1 && value <= max)) throw new Error(`${name} is out of range: ${JSON.stringify(raw)}`);
+  const scaled = Number(raw) * scale;
+  const value = scale === 1 ? scaled : Math.floor(scaled);
+  if (!(Number.isInteger(value) && value >= 1 && value <= max)) throw new Error(`${name} is out of range: ${JSON.stringify(raw)}`);
   return value;
 };
 /** Node's timers fire at once past this many milliseconds. */

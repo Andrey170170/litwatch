@@ -50,8 +50,9 @@ the service's own user-agent, no cookies, and no headers the agent sets. Every a
 be public unicast, checked where the socket connects, and a literal address in the URL is checked up front, so
 loopback, the LAN, link-local (cloud metadata) and unique-local addresses are refused, and so are the IPv6
 transition ranges that embed an IPv4 address (NAT64, 6to4, Teredo). An IPv4-mapped IPv6 address
-(`::ffff:a.b.c.d`) is judged as the IPv4 address it carries. Numeric settings must come to a whole number of at least one
-in their unit (bytes, milliseconds) and within what their consumer holds, or the service refuses to start. Redirects are followed by hand, at most five, each hop checked again. Each site is paced at one
+(`::ffff:a.b.c.d`) is judged as the IPv4 address it carries. Counts must be whole numbers; a size or time may be fractional
+and is rounded down to bytes or milliseconds. Each must come to at least one and stay within what its consumer
+holds, or the service refuses to start. Redirects are followed by hand, at most five, each hop checked again. Each site is paced at one
 request a second at most (arXiv and Semantic Scholar slower). anonymous.4open.science links are read through
 its JSON API, since its pages are built in the browser. `store.search` and `s2.lookup` don't go through this
 guard: litwatch itself is on a private address.
