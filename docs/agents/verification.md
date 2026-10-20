@@ -97,8 +97,10 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 
 - **Real Postgres, always.** SQL is never mocked; tests use `TEST_DATABASE_URL`.
 - **Tests see only their own environment.** Run them under `env -i` with `PATH`, `HOME` and `TEST_DATABASE_URL`,
-  plus any variable the test needs, so neither `.env` (production) nor the shell's exports (`ANTHROPIC_BASE_URL`,
-  the archive's settings) reach them. A delegated implementer or reviewer is told where the URL comes from
+  plus any variable the test needs, so the shell's exports (`ANTHROPIC_BASE_URL`, the archive's settings) don't
+  reach them. That does not keep out `.env` (production): every litwatch command loads `./.env` from the working
+  directory and fills in whatever is unset, so a test that drives the CLI first changes to a temporary directory
+  (`monkeypatch.chdir(tmp_path)`). A delegated implementer or reviewer is told where the URL comes from
   (`TEST_DATABASE_URL` in `.env.v1`, [dev-host.md](dev-host.md)), not handed `.env`; without it, a reviewer stalls.
 - **Fakes stand in for model providers and HTTP services in tests.** A claim about what a model writes or decides
   is shown by the quality harness or an evaluation, never by a fake.
