@@ -13,6 +13,8 @@ test("the system prompt names each selection with subject and rubric", () => {
   assert.ok(p.includes("Rubric: Tier 1: measures or detects unfaithful traces."));
   assert.ok(p.includes("sae-methods: Sparse autoencoder methodology"));
   assert.ok(p.includes("Budget: 40 cells"));
+  assert.ok(p.includes("process_notes say what you could not do because of your tools, access or budget"));
+  assert.ok(p.includes('"process_notes"'), "the schema offers them");
 });
 
 test("the extension schema appears only when requested", () => {

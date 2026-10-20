@@ -85,7 +85,8 @@ async def put_card(
     pass_id: int | None,
 ) -> None:
     """Store the card, replacing any earlier one ("Write again"), labelled with the text it was
-    written from."""
+    written from. A card written again has its process notes unseen: the owner's Acknowledge was
+    for the card it replaces."""
     await conn.execute(
         """
         INSERT INTO deep_cards (paper_id, card, model, stats, written_at, paper_revision,
@@ -95,7 +96,8 @@ async def put_card(
             card = EXCLUDED.card, model = EXCLUDED.model, stats = EXCLUDED.stats,
             error = NULL, written_at = now(),
             paper_revision = EXCLUDED.paper_revision, arxiv_version = EXCLUDED.arxiv_version,
-            text_source = EXCLUDED.text_source, pass_id = EXCLUDED.pass_id
+            text_source = EXCLUDED.text_source, pass_id = EXCLUDED.pass_id,
+            notes_acknowledged_at = NULL
         """,
         (paper_id, Jsonb(card), model, Jsonb(stats), revision, version, source, pass_id),
     )  # fmt: skip
@@ -280,5 +282,48 @@ async def process_notes(
             ORDER BY c.written_at DESC, c.paper_id
             """,
             {"since": since},
+        )
+    ).fetchall()
+
+
+# A card with process notes, as Needs you's Deep notes list it: of `deep_cards c`, its paper (`p`)
+# not dismissed.
+_NOTED = (
+    "jsonb_typeof(c.card->'process_notes') = 'array' "
+    "AND jsonb_array_length(c.card->'process_notes') > 0 AND p.dismissed_at IS NULL"
+)
+
+
+async def deep_notes(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
+    """Needs you's Deep notes: each card with process notes, oldest first, with its paper's
+    title, when it was written, which names the card, and when the owner acknowledged its
+    notes. They wait on nothing, and count in no run status."""
+    return await (
+        await conn.execute(
+            "SELECT c.paper_id, p.title, c.written_at, c.card->'process_notes' AS notes, "
+            "c.notes_acknowledged_at AS acknowledged_at "
+            f"FROM deep_cards c JOIN papers p ON p.id = c.paper_id WHERE {_NOTED} "
+            "ORDER BY c.written_at, c.paper_id"
+        )
+    ).fetchall()
+
+
+async def acknowledge_notes(
+    conn: psycopg.AsyncConnection, items: list[tuple[str, datetime]]
+) -> list[dict[str, Any]]:
+    """The owner's Acknowledge on the named cards' process notes, each by its paper and when the
+    card was written: a card written again since is not the one the owner saw, and stays unseen.
+    One marked already keeps its time. Returns those marked."""
+    if not items:
+        return []
+    ids, written = map(list, zip(*items, strict=True))
+    return await (
+        await conn.execute(
+            "UPDATE deep_cards c "
+            "SET notes_acknowledged_at = coalesce(c.notes_acknowledged_at, now()) "
+            "FROM papers p, unnest(%(ids)s::text[], %(written)s::timestamptz[]) AS x (id, at) "
+            f"WHERE c.paper_id = x.id AND c.written_at = x.at AND p.id = c.paper_id AND {_NOTED} "
+            "RETURNING c.paper_id, c.written_at",
+            {"ids": ids, "written": written},
         )
     ).fetchall()

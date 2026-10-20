@@ -1910,7 +1910,7 @@
     "/api/settings/acknowledge": {
       "post": {
         "summary": "Acknowledge",
-        "description": "Acknowledge on Needs you: the owner has seen these items, and they stop counting in the\nrun status. An item is marked only while it still waits on the owner as shown (the same\nfailure, not a later one); one that recovers and fails again comes back unacknowledged. It\nmoves no paper. A failed nightly run is not an item and is never acknowledged. Answers with\nthe items marked, for the page to fold those and only those; naming one again (a retry,\nanother tab) answers it again and keeps the first mark.",
+        "description": "Acknowledge on Needs you: the owner has seen these items, and the failures stop counting\nin the run status (Deep notes count in none). An item is marked only while it still waits on\nthe owner as shown (the same failure, not a later one; the same card, not one written\nagain); one that recovers and fails again comes back unacknowledged. It moves no paper. A\nfailed nightly run is not an item and is never acknowledged. Answers with the items marked,\nfor the page to fold those and only those; naming one again (a retry, another tab) answers\nit again and keeps the first mark.",
         "operationId": "acknowledge_api_settings_acknowledge_post",
         "requestBody": {
           "content": {
@@ -3097,11 +3097,19 @@
             "type": "array",
             "title": "Digests",
             "default": []
+          },
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/CardSeen"
+            },
+            "type": "array",
+            "title": "Cards",
+            "default": []
           }
         },
         "type": "object",
         "title": "Acknowledgement",
-        "description": "Items of Needs you, each as shown: stopped steps, full-text passes and failed digests\n(by id). The owner's Acknowledge names them; the answer names those it marked."
+        "description": "Items of Needs you, each as shown: stopped steps, full-text passes, failed digests (by\nid) and Deep cards with process notes. The owner's Acknowledge names them; the answer names\nthose it marked."
       },
       "AmongRow": {
         "properties": {
@@ -3410,6 +3418,26 @@
           "pass_id"
         ],
         "title": "CardRequested"
+      },
+      "CardSeen": {
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "written_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Written At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paper_id",
+          "written_at"
+        ],
+        "title": "CardSeen",
+        "description": "A Deep card's process notes as Needs you showed them: the paper, and when its card was\nwritten, which names the card."
       },
       "Changes": {
         "properties": {

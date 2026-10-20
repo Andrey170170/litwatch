@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { acknowledged, answerOf, differs, labelled, level, noted, openSplits, runFailed, savedLine, sessionRow, settle, settleFromPaper, spendBar, spendTotals, toAcknowledge, toToml, took, waiting, type Quality, type Seen, type Session, type SessionItem } from "./settings";
+import { ACKNOWLEDGEABLE, acknowledged, acknowledgedCount, answerOf, any, differs, labelled, level, noted, openSplits, runFailed, savedLine, sessionRow, settle, settleFromPaper, spendBar, spendTotals, toAcknowledge, toToml, took, waiting, type Quality, type Seen, type Session, type SessionItem } from "./settings";
 
-const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [] };
+const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [], deep_notes: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01", since: "2026-10-03T03:00:00Z" } as const;
 const stuck = { paper_id: "1", revision: 1, title: "t", failed_runs: 3, last_error: null, failed_at: "2026-10-15T03:00:00Z" };
 const split = { paper_id: "1", revision: 1, topic: "a", depth: "focus", fit: "related", reason: "", split: true, escalated: false, one_lab: false, opinions: {}, recorded_at: "", title: "t", label: null } as const;
@@ -37,8 +37,9 @@ describe("toAcknowledge and acknowledged", () => {
       ],
       passes: [],
       digests: [],
+      cards: [],
     });
-    const later = settle(acknowledged(q, { steps: [], passes: [{ id: 7, since: "2026-10-03T03:00:00+00:00" }], digests: [] }, "2026-10-19T10:00:00Z"), "analysis_failed", { paper_id: "1" }, "Tried again");
+    const later = settle(acknowledged(q, { steps: [], passes: [{ id: 7, since: "2026-10-03T03:00:00+00:00" }], digests: [], cards: [] }, "2026-10-19T10:00:00Z"), "analysis_failed", { paper_id: "1" }, "Tried again");
     expect(toAcknowledge(later, ["awaiting_classification", "ungraded", "analysis_failed", "fulltext", "digests"])).toMatchObject({ passes: [], digests: [4] });
     expect(toAcknowledge(later, ["analysis_failed"]).steps).toEqual([]);
   });
@@ -52,6 +53,7 @@ describe("toAcknowledge and acknowledged", () => {
       ],
       passes: [],
       digests: [4],
+      cards: [],
     };
     const after = acknowledged(q, marked, "2026-10-19T10:00:00Z");
     // Topic b's row shows an earlier failure than the one named: not this row.
@@ -63,8 +65,33 @@ describe("toAcknowledge and acknowledged", () => {
   });
   it("leaves a row settled on this visit where it is", () => {
     const tried = settle(q, "fulltext", { paper_id: "3" }, "Running");
-    const after = acknowledged(tried, { steps: [], passes: [{ id: 7, since: pass.since }], digests: [] }, "2026-10-19T10:00:00Z");
+    const after = acknowledged(tried, { steps: [], passes: [{ id: 7, since: pass.since }], digests: [], cards: [] }, "2026-10-19T10:00:00Z");
     expect([after.night.fulltext[0]!.settled, after.night.fulltext[0]!.acknowledged_at]).toEqual(["Running", undefined]);
+  });
+});
+
+describe("Deep notes", () => {
+  const note = { kind: "access", source: "service", note: "A fetch was refused: the address is not a public one." } as const;
+  const card = { paper_id: "9", title: "t", written_at: "2026-10-20T03:00:00.123456Z", notes: [note] };
+  const q = { night: { ...night, analysis_failed: [stuck], deep_notes: [card, { ...card, paper_id: "8" }] } } as Quality;
+  it("count in nothing that waits", () => {
+    expect(waiting(q)).toBe(1);
+    expect(waiting({ ...q, night: { ...q.night, deep_notes: [] } })).toBe(1);
+  });
+  it("join Acknowledge all, each named by the card shown", () => {
+    expect(ACKNOWLEDGEABLE).toContain("deep_notes");
+    expect(toAcknowledge(q, ["deep_notes"])).toEqual({ steps: [], passes: [], digests: [], cards: [{ paper_id: "9", written_at: card.written_at }, { paper_id: "8", written_at: card.written_at }] });
+    expect(toAcknowledge(q, ACKNOWLEDGEABLE).cards).toHaveLength(2);
+    expect(toAcknowledge(q, ["analysis_failed"]).cards).toEqual([]);
+    expect(any({ steps: [], passes: [], digests: [], cards: [{ paper_id: "9", written_at: card.written_at }] })).toBe(true);
+  });
+  it("fold for the card the API marked, not a card written again, and count in the Acknowledged section", () => {
+    const marked = { steps: [], passes: [], digests: [], cards: [{ paper_id: "9", written_at: "2026-10-20T03:00:00.123456+00:00" }, { paper_id: "8", written_at: "2026-10-19T03:00:00Z" }] };
+    const after = acknowledged(q, marked, "2026-10-20T10:00:00Z");
+    expect(after.night.deep_notes.map((c) => c.acknowledged_at ?? null)).toEqual(["2026-10-20T10:00:00Z", null]);
+    expect(acknowledgedCount(after)).toBe(1);
+    expect(waiting(after)).toBe(waiting(q));
+    expect(toAcknowledge(after, ["deep_notes"]).cards).toEqual([{ paper_id: "8", written_at: card.written_at }]);
   });
 });
 

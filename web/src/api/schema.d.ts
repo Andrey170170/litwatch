@@ -549,12 +549,13 @@ export interface paths {
         put?: never;
         /**
          * Acknowledge
-         * @description Acknowledge on Needs you: the owner has seen these items, and they stop counting in the
-         *     run status. An item is marked only while it still waits on the owner as shown (the same
-         *     failure, not a later one); one that recovers and fails again comes back unacknowledged. It
-         *     moves no paper. A failed nightly run is not an item and is never acknowledged. Answers with
-         *     the items marked, for the page to fold those and only those; naming one again (a retry,
-         *     another tab) answers it again and keeps the first mark.
+         * @description Acknowledge on Needs you: the owner has seen these items, and the failures stop counting
+         *     in the run status (Deep notes count in none). An item is marked only while it still waits on
+         *     the owner as shown (the same failure, not a later one; the same card, not one written
+         *     again); one that recovers and fails again comes back unacknowledged. It moves no paper. A
+         *     failed nightly run is not an item and is never acknowledged. Answers with the items marked,
+         *     for the page to fold those and only those; naming one again (a retry, another tab) answers
+         *     it again and keeps the first mark.
          */
         post: operations["acknowledge_api_settings_acknowledge_post"];
         delete?: never;
@@ -1051,8 +1052,9 @@ export interface components {
         };
         /**
          * Acknowledgement
-         * @description Items of Needs you, each as shown: stopped steps, full-text passes and failed digests
-         *     (by id). The owner's Acknowledge names them; the answer names those it marked.
+         * @description Items of Needs you, each as shown: stopped steps, full-text passes, failed digests (by
+         *     id) and Deep cards with process notes. The owner's Acknowledge names them; the answer names
+         *     those it marked.
          */
         Acknowledgement: {
             /**
@@ -1070,6 +1072,11 @@ export interface components {
              * @default []
              */
             digests: number[];
+            /**
+             * Cards
+             * @default []
+             */
+            cards: components["schemas"]["CardSeen"][];
         };
         /**
          * AmongRow
@@ -1209,6 +1216,20 @@ export interface components {
         CardRequested: {
             /** Pass Id */
             pass_id: number;
+        };
+        /**
+         * CardSeen
+         * @description A Deep card's process notes as Needs you showed them: the paper, and when its card was
+         *     written, which names the card.
+         */
+        CardSeen: {
+            /** Paper Id */
+            paper_id: string;
+            /**
+             * Written At
+             * Format: date-time
+             */
+            written_at: string;
         };
         /**
          * Changes

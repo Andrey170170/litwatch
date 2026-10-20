@@ -1,7 +1,7 @@
 """Acknowledge on Needs you (DESIGN.md, Needs you; decision 72): the owner marks stopped steps,
 full-text passes and failed digests seen, each as the page showed it, and they stop counting in
 the run status. One that recovers and fails again comes back; a failed nightly run is never
-acknowledged."""
+acknowledged. Deep notes (decision 82) are acknowledged for the card shown, and count nowhere."""
 
 from datetime import date, datetime, timedelta
 
@@ -16,6 +16,7 @@ from litwatch.feedback import word
 from litwatch.store import digests as digests_store
 from litwatch.store import failures, verdicts
 from litwatch.store import fulltext as fulltext_store
+from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests.conftest import FAITH, TREE, paper
@@ -117,7 +118,7 @@ async def ack(client, body: dict) -> dict:
     return answer.json()
 
 
-NOTHING = {"steps": [], "passes": [], "digests": []}
+NOTHING = {"steps": [], "passes": [], "digests": [], "cards": []}
 
 
 async def status(client) -> dict:
@@ -267,3 +268,66 @@ async def test_a_new_text_or_a_text_that_arrives_brings_a_failure_back(client, c
     await fail_pass(conn, pass_id)
     back = await status(client)
     assert (back["awaiting_classification"], back["fulltext_failed"]) == (1, 1)
+
+
+NOTE = {"kind": "access", "source": "service", "note": "A fetch was refused: not public."}
+CARD = {"key_claim": "Probes find hidden steps.", "limitations": ["Two models only, both small."]}
+
+
+async def write_card(conn, p, notes: list | None = None) -> None:
+    """Deep writes `p`'s card, again if it had one, with process notes when given."""
+    card = CARD | ({"process_notes": notes} if notes is not None else {})
+    await cards.put_card(
+        conn, p.id, card, "m", {}, revision=1, version=1, source="latex", pass_id=None
+    )
+
+
+async def test_deep_notes_count_nowhere_and_are_acknowledged_for_the_card_shown(client, conn):
+    before = await status(client)
+    await write_card(conn, P, [NOTE, NOTE | {"kind": "budget", "note": "The budget ran out."}])
+    await write_card(conn, Q)  # no notes
+    await write_card(conn, R, [])  # an empty list is no notes
+    # Nothing waits: the run status and the summary's count are as they were.
+    assert await status(client) == before
+    assert before["state"] == "quiet"
+    assert (await client.get("/api/summary")).json()["settings"]["waiting"] == 0
+    (shown_,) = (await client.get("/api/settings/quality")).json()["night"]["deep_notes"]
+    assert (shown_["paper_id"], shown_["title"], shown_["acknowledged_at"]) == (P.id, P.title, None)
+    assert [n["kind"] for n in shown_["notes"]] == ["access", "budget"]
+    seen = {"paper_id": P.id, "written_at": shown_["written_at"]}
+
+    # The card is written again under the page: its Acknowledge names the card it showed, and
+    # the newer card's notes stay unseen.
+    await write_card(conn, P, [NOTE])
+    assert await ack(client, NOTHING | {"cards": [seen]}) == NOTHING
+    (row,) = (await client.get("/api/settings/quality")).json()["night"]["deep_notes"]
+    assert row["acknowledged_at"] is None
+
+    # Acknowledged as shown: marked, and the answer names it; again, the first mark stays.
+    seen = {"paper_id": P.id, "written_at": row["written_at"]}
+    marked = await ack(client, NOTHING | {"cards": [seen]})
+    assert [x["paper_id"] for x in marked["cards"]] == [P.id]
+    assert datetime.fromisoformat(marked["cards"][0]["written_at"]) == datetime.fromisoformat(
+        row["written_at"]
+    )
+    (row,) = (await client.get("/api/settings/quality")).json()["night"]["deep_notes"]
+    first = row["acknowledged_at"]
+    assert first is not None
+    assert await ack(client, NOTHING | {"cards": [seen]}) == marked
+    (row,) = (await client.get("/api/settings/quality")).json()["night"]["deep_notes"]
+    assert row["acknowledged_at"] == first
+    assert await status(client) == before
+
+    # A card that fails to be written again keeps its notes and their mark; a remade one clears it.
+    await cards.card_failed(conn, P.id, "the model stopped without submitting")
+    (row,) = (await client.get("/api/settings/quality")).json()["night"]["deep_notes"]
+    assert row["acknowledged_at"] == first
+    await write_card(conn, P, [NOTE])
+    (row,) = (await client.get("/api/settings/quality")).json()["night"]["deep_notes"]
+    assert row["acknowledged_at"] is None
+
+    # A dismissed paper's notes are not listed, nor acknowledged.
+    await conn.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (P.id,))
+    assert (await client.get("/api/settings/quality")).json()["night"]["deep_notes"] == []
+    seen = {"paper_id": P.id, "written_at": row["written_at"]}
+    assert await ack(client, NOTHING | {"cards": [seen]}) == NOTHING

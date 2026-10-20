@@ -147,7 +147,7 @@ Through the repositories in `litwatch.store`. Each function takes the connection
 | `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug` (its class's), `name`, `depth` (`focus`, `area`, `field`) and `grade` |
 | `store.publications.found(conn, [paper_id])` | `{paper_id: core.Publication}` for those with a published record |
 | `store.taxonomy.topics(conn, core.Status.ACTIVE)` | the active `core.Topic`s, in the owner's order; `store.taxonomy.load(conn)` gives the whole `core.Taxonomy`, class names included |
-| `store.integrations.card(conn, paper_id)` | the deep card row (`card`, `model`, `stats`, `error`, `written_at`, and what it was written from: `revision`, `arxiv_version`, `source`) or None |
+| `store.integrations.card(conn, paper_id)` | the deep card row (`card`, `model`, `stats`, `error`, `written_at`, and what it was written from: `revision`, `arxiv_version`, `source`) or None. `card` may hold `process_notes`, which describe Deep's process, not the paper: the built-in exports leave them out |
 
 ## Configuration and loading
 
@@ -278,7 +278,7 @@ Authors, Venue (linked to the published version), arXiv, PDF, Added (the day it 
 Why, one grade column per exported topic, and a hidden arXiv id used to find the row. Status is the
 reader's and never written. The body is a callout pointing to "How to read this", the TL;DR, the
 Abstract and, with a Deep card, a collapsed Deep read with one callout
-per section. A paper that falls below the minimum for a topic says No longer listed there, with a
+per section (its process notes left out). A paper that falls below the minimum for a topic says No longer listed there, with a
 dated Why line from the newest `grade.changed` that took it off (a missing `cause` reads as
 `verdict`). A dismissed paper that has a page is No longer listed for every topic, "set it aside" by
 the owner, from the next write of it (dismissal emits no event, so in practice the next start; a

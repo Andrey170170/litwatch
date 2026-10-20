@@ -120,3 +120,30 @@ test("an arXiv id is a modern or a legacy one, without its version", () => {
     assert.equal(result.ok, false, bad);
   }
 });
+
+test("the model's process notes: up to six, its own, of a known kind, long enough, linking only http(s)", () => {
+  const note = { kind: "access", source: "model", note: "The linked repository answered 404, so code is unverified.", url: "https://github.com/x/y" };
+  const withNotes = (process_notes: unknown[]) => validate({ ...core, process_notes });
+  assert.equal(validate(core).ok, true, "optional");
+  assert.equal(withNotes([]).ok, true, "empty is no notes");
+  for (const kind of ["access", "tool", "budget", "input"]) assert.equal(withNotes([{ ...note, kind }]).ok, true, kind);
+  const { url: _, ...bare } = note;
+  assert.equal(withNotes([bare]).ok, true, "a URL is optional");
+  assert.equal(withNotes(Array(6).fill(note)).ok, true);
+  const refused: [string, unknown, string][] = [
+    ["seven notes", Array(7).fill(note), "/process_notes: "],
+    ["a service note", [{ ...note, source: "service" }], "/process_notes/0/source"],
+    ["no source", [{ ...bare, source: undefined }], "/process_notes/0"],
+    ["an unknown kind", [{ ...note, kind: "paper" }], "/process_notes/0/kind: must be one of: access, tool, budget, input"],
+    ["a short note", [{ ...note, note: "Blocked." }], "/process_notes/0/note"],
+    ["a script URL", [{ ...note, url: "javascript:alert(1)" }], "/process_notes/0/url"],
+    ["a relative URL", [{ ...note, url: "/r/abc" }], "/process_notes/0/url"],
+    ["a broken URL", [{ ...note, url: "https://[nope" }], "/process_notes/0/url: not an absolute http(s) URL"],
+    ["an extra field", [{ ...note, count: 3 }], "/process_notes/0"],
+  ];
+  for (const [what, notes, path] of refused) {
+    const v = withNotes(notes as unknown[]);
+    assert.equal(v.ok, false, what);
+    if (!v.ok) assert.ok(v.errors.some((e) => e.startsWith(path)), `${what}: ${v.errors.join("\n")}`);
+  }
+});

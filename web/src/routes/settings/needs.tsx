@@ -4,8 +4,9 @@
  * mark into the cached quality page (`settleNeeds` in mutations.ts), so the row settles even when the page was left
  * before the write returned, the sidebar's count follows and the next fresh visit fetches afresh. Each red group has
  * Acknowledge, and the page Acknowledge all: what the owner has seen folds into the Acknowledged section at the foot,
- * grouped the same way and keeping its buttons, and stops counting in the run status. Each group folds under its
- * head (`Group`).
+ * grouped the same way and keeping its buttons, and stops counting in the run status. Deep notes, neutral, wait on
+ * nothing and count nowhere, but are acknowledged and fold away like the red groups, for the card shown. Each group
+ * folds under its head (`Group`).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useReducer, useState } from "react";
@@ -15,7 +16,7 @@ import { paperQuery, qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
 import { setShelfOpen, shelfOpen } from "@/lib/remember";
-import { any, type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, RED, type Red, type Split, type Stuck, type TextPassStuck, toAcknowledge, waiting } from "@/lib/settings";
+import { ACKNOWLEDGEABLE, type Acknowledgeable, acknowledgedCount, any, type DeepNotes, type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, type Split, type Stuck, type TextPassStuck, toAcknowledge, waiting } from "@/lib/settings";
 import { Failed, FitSeg, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
 /** The groups: their name, the line under it, and for a stuck step the name of what failed. */
@@ -28,15 +29,17 @@ const KIND = {
   analysis: { name: "Analysis", line: "Analysis failed three runs or every model refused it; the paper has no Gist or Weight and shows its title alone.", step: "Analysis" },
   fulltext: { name: "Full text", line: "A full-text pass failed three runs, every model refused it, or it has waited for its text over a week; the abstract stands in for the Brief." },
   digests: { name: "Digests", line: "A digest could not be written; its papers stay due and the next run writes it again." },
+  deep_notes: { name: "Deep notes", line: "Deep cards whose own process held them back: a page out of reach, a tool that failed, the budget used up. Nothing waits." },
 } as const;
 
 /** A group longer than this starts folded to its head and line. */
 const FOLD_OVER = 10;
 
-/** A group of items with its name, count and line; `acknowledge`, for a red group with something still unseen. Its
- * head folds or opens it, Acknowledge staying beside the head; a group of more than ten starts folded, and the
- * owner's choice is remembered for the session, the Acknowledged section's groups apart from the page's. The head
- * keeps the group's edge, yellow for the owner's word and red for a failure, so a folded group still shows which. */
+/** A group of items with its name, count and line; `acknowledge`, for a red group or Deep notes with something still
+ * unseen. Its head folds or opens it, Acknowledge staying beside the head; a group of more than ten starts folded, and
+ * the owner's choice is remembered for the session, the Acknowledged section's groups apart from the page's. The head
+ * keeps the group's edge, yellow for the owner's word, red for a failure and grey for Deep notes, so a folded group
+ * still shows which. */
 function Group<T>({ kind, items, acknowledge, acknowledged = false, children }: { kind: keyof typeof KIND; items: T[]; acknowledge?: React.ReactNode; acknowledged?: boolean; children: (item: T) => React.ReactNode }) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   if (!items.length) return null;
@@ -48,7 +51,7 @@ function Group<T>({ kind, items, acknowledge, acknowledged = false, children }: 
   };
   const ask = kind === "split" || kind === "one_lab" || kind === "escalated";
   return (
-    <div className={`ngrp ${ask ? "ask" : "fail"}`}>
+    <div className={`ngrp${ask ? " ask" : kind === "deep_notes" ? "" : " fail"}`}>
       <div className="caprow">
         <button className="tpfold" onClick={toggle} aria-expanded={open}>
           <span className={`car${open ? " open" : ""}`} aria-hidden />
@@ -306,6 +309,26 @@ function Analysis({ s }: { s: Stuck }) {
   );
 }
 
+/** A paper whose Deep card carries process notes: its title, then each note on a line of its own with its kind. The
+ * notes' links are on the card. */
+function DeepNote({ c }: { c: DeepNotes }) {
+  return (
+    <div className="need">
+      <div className="nh">
+        <PaperLink id={c.paper_id} className="nt">
+          {c.title}
+        </PaperLink>
+      </div>
+      {c.notes.map((n, i) => (
+        <div key={i} className="nb">
+          <i className="tag">{n.kind}</i>
+          {n.note}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function NeedsPage() {
   const quality = useQuery(qualityQuery("needs"));
   const cards = useTopicCards();
@@ -317,7 +340,7 @@ export function NeedsPage() {
   // A split labelled before this visit no longer waits; one labelled on it stays, settled.
   const { splits, escalations, oneLab } = openSplits(q?.night.splits ?? []);
   const line = (q: Quality) => (q.night.error ? `Last night's run failed: ${q.night.error}` : open > 0 ? `${open} ${open === 1 ? "thing waits" : "things wait"} on the owner. Each also shows on its paper's page.` : "Nothing waits on the owner.");
-  const button = (lists: Red[], label: string) => {
+  const button = (lists: Acknowledgeable[], label: string) => {
     const seen = q && toAcknowledge(q, lists);
     return seen && any(seen) ? (
       <button className="btn" disabled={ack.isPending} onClick={() => ack.mutate(seen)}>
@@ -325,11 +348,11 @@ export function NeedsPage() {
       </button>
     ) : null;
   };
-  /** The red groups' rows acknowledged or not: the page's groups, or the Acknowledged section's. */
-  const reds = (q: Quality, acknowledged: boolean) => {
+  /** The red groups' and Deep notes' rows acknowledged or not: the page's groups, or the Acknowledged section's. */
+  const seenable = (q: Quality, acknowledged: boolean) => {
     const pick = <T extends { acknowledged_at?: string | null }>(xs: T[]) => xs.filter((x) => Boolean(x.acknowledged_at) === acknowledged);
     const n = q.night;
-    const acknowledge = (list: Red) => (acknowledged ? undefined : button([list], "Acknowledge"));
+    const acknowledge = (list: Acknowledgeable) => (acknowledged ? undefined : button([list], "Acknowledge"));
     return (
       <>
         <Group kind="awaiting" acknowledged={acknowledged} items={pick(n.awaiting_classification)} acknowledge={acknowledge("awaiting_classification")}>
@@ -347,14 +370,17 @@ export function NeedsPage() {
         <Group kind="digests" acknowledged={acknowledged} items={pick(n.digests)} acknowledge={acknowledge("digests")}>
           {(d) => <FailedDigest key={d.id} d={d} badge={badge(d.topic)} />}
         </Group>
+        <Group kind="deep_notes" acknowledged={acknowledged} items={pick(n.deep_notes)} acknowledge={acknowledge("deep_notes")}>
+          {(c) => <DeepNote key={`${c.paper_id}:${c.written_at}`} c={c} />}
+        </Group>
       </>
     );
   };
-  const seen = q ? RED.reduce((k, list) => k + q.night[list].filter((x) => x.acknowledged_at).length, 0) : 0;
+  const seen = q ? acknowledgedCount(q) : 0;
   return (
     <>
       <PageHead title="Needs you" sub={q ? line(q) : undefined}>
-        {button(RED, "Acknowledge all")}
+        {button(ACKNOWLEDGEABLE, "Acknowledge all")}
       </PageHead>
       <Load q={quality} />
       {q && (
@@ -364,7 +390,7 @@ export function NeedsPage() {
               {(s) => <SplitItem key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} />}
             </Group>
           ))}
-          {reds(q, false)}
+          {seenable(q, false)}
           {seen > 0 && (
             <section className="nack" aria-label="Acknowledged">
               <button className="tpfold" onClick={() => setFolded(!folded)} aria-expanded={!folded}>
@@ -373,7 +399,7 @@ export function NeedsPage() {
                   Acknowledged · <b>{seen}</b>
                 </span>
               </button>
-              {!folded && reds(q, true)}
+              {!folded && seenable(q, true)}
             </section>
           )}
         </>

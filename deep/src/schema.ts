@@ -41,6 +41,9 @@ export const MONITOR_TARGETS = [
 ] as const;
 export const PRESSURES = ["none", "prompted evasion", "optimization against the monitor", "both"] as const;
 export const RELATIONS = ["agrees", "contradicts", "extends", "supersedes"] as const;
+export const NOTE_KINDS = ["access", "tool", "budget", "input"] as const;
+/** The model's process notes; the service adds its own after validation, which this does not count. */
+export const MAX_MODEL_NOTES = 6;
 // A version-stripped arXiv id, modern (2305.04388) or legacy (cs/9901001, math.AG/0601001), as
 // litwatch stores them.
 const ARXIV_ID = "^(?:\\d{4}\\.\\d{4,5}|[a-z-]+(?:\\.[A-Z]{2})?/\\d{7})$";
@@ -113,6 +116,33 @@ const CORE = {
     maxItems: 8,
     description: "Concrete limitations, the paper's own and ones you see.",
   }),
+  process_notes: Type.Optional(
+    Type.Array(
+      Type.Object(
+        {
+          kind: enumOf(
+            NOTE_KINDS,
+            "What held you back: access (a page or repository you could not reach), tool (a tool that failed " +
+              "or could not do it), budget (cells or fetches ran out), input (the paper's text was cut or unreadable).",
+          ),
+          source: Type.Literal("model"),
+          note: Type.String({
+            minLength: 20,
+            maxLength: 400,
+            description: "One sentence: what you could not do or check, and what the card says because of it.",
+          }),
+          url: Type.Optional(Type.String({ pattern: "^https?://\\S+$", description: "The page concerned, an absolute http(s) URL." })),
+        },
+        { additionalProperties: false },
+      ),
+      {
+        maxItems: MAX_MODEL_NOTES,
+        description:
+          "What you could not do because of your tools, access or budget, not what the paper lacks (that is a " +
+          "limitation). Leave it out when nothing held you back.",
+      },
+    ),
+  ),
 };
 
 export const CoreSchema = Type.Object(CORE, { additionalProperties: false });
@@ -241,7 +271,29 @@ const EXTENSION_RULES: Record<string, (value: unknown) => string[]> = {
   },
 };
 
-export type Result = Static<typeof CoreSchema> & { faithfulness?: Faithfulness; monitoring?: Monitoring };
+/** A process note on the card: the model's, validated with it, or the service's, added after. */
+export interface ProcessNote {
+  kind: (typeof NOTE_KINDS)[number];
+  source: "model" | "service";
+  note: string;
+  url?: string;
+}
+
+export type Result = Omit<Static<typeof CoreSchema>, "process_notes"> & {
+  process_notes?: ProcessNote[];
+  faithfulness?: Faithfulness;
+  monitoring?: Monitoring;
+};
+
+/** Whether a URL is an absolute http(s) one. */
+export const isWebUrl = (url: string): boolean => {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+};
 
 /** The core with each requested extension as a required property. Throws on an unknown name. */
 export function resultSchema(extensions: string[]): TObject {
@@ -278,6 +330,9 @@ export function validate(input: unknown, extensions: string[] = [], found?: Foun
   if (errors.length === 0) {
     const value = input as Result & Record<string, unknown>;
     if (value.code_available && !value.code_url) errors.push("/code_url: required when code_available is true");
+    (value.process_notes ?? []).forEach((n, i) => {
+      if (n.url !== undefined && !isWebUrl(n.url)) errors.push(`/process_notes/${i}/url: not an absolute http(s) URL`);
+    });
     for (const name of extensions) errors.push(...(EXTENSION_RULES[name]?.(value[name]) ?? []));
     if (found) errors.push(...amongErrors(value.among_collection, found));
   }
