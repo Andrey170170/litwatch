@@ -78,7 +78,6 @@ async def put_card(
     card: dict[str, Any],
     model: str,
     stats: dict[str, Any],
-    trace: list[Any],
     *,
     revision: int,
     version: int | None,
@@ -89,17 +88,16 @@ async def put_card(
     written from."""
     await conn.execute(
         """
-        INSERT INTO deep_cards (paper_id, card, model, stats, trace, written_at, paper_revision,
+        INSERT INTO deep_cards (paper_id, card, model, stats, written_at, paper_revision,
                                 arxiv_version, text_source, pass_id)
-        VALUES (%s, %s, %s, %s, %s, now(), %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, now(), %s, %s, %s, %s)
         ON CONFLICT (paper_id) DO UPDATE SET
             card = EXCLUDED.card, model = EXCLUDED.model, stats = EXCLUDED.stats,
-            trace = EXCLUDED.trace, error = NULL, written_at = now(),
+            error = NULL, written_at = now(),
             paper_revision = EXCLUDED.paper_revision, arxiv_version = EXCLUDED.arxiv_version,
             text_source = EXCLUDED.text_source, pass_id = EXCLUDED.pass_id
         """,
-        (paper_id, Jsonb(card), model, Jsonb(stats), Jsonb(trace), revision, version, source,
-         pass_id),
+        (paper_id, Jsonb(card), model, Jsonb(stats), revision, version, source, pass_id),
     )  # fmt: skip
 
 
@@ -108,24 +106,20 @@ async def card_failed(
     paper_id: str,
     error: str,
     stats: dict[str, Any] | None = None,
-    trace: list[Any] | None = None,
 ) -> None:
     """Record why the paper's last attempt made no card. A card written earlier stays, and so
-    do the last job's stats and trace unless new ones are given."""
+    do the last job's stats unless new ones are given."""
     await conn.execute(
         """
-        INSERT INTO deep_cards (paper_id, stats, trace, error)
-        VALUES (%(p)s, coalesce(%(stats)s::jsonb, '{}'), coalesce(%(trace)s::jsonb, '[]'),
-                %(error)s)
+        INSERT INTO deep_cards (paper_id, stats, error)
+        VALUES (%(p)s, coalesce(%(stats)s::jsonb, '{}'), %(error)s)
         ON CONFLICT (paper_id) DO UPDATE SET
             stats = coalesce(%(stats)s::jsonb, deep_cards.stats),
-            trace = coalesce(%(trace)s::jsonb, deep_cards.trace),
             error = EXCLUDED.error
         """,
         {
             "p": paper_id,
             "stats": Jsonb(stats) if stats is not None else None,
-            "trace": Jsonb(trace) if trace is not None else None,
             "error": error[:2000],
         },
     )
@@ -170,17 +164,21 @@ async def attempt_ended(
     usage: dict[str, Any] | None,
     error: str | None,
     failure: Literal["paper", "service"] | None = None,
+    trace: list[Any] | None = None,
 ) -> None:
     """The attempt's job ended, with a card or failed, and whose `failure` it was: its usage,
-    or None when it is unknown (never zero for that)."""
+    or None when it is unknown (never zero for that), and its trace, kept for good, or None
+    when there is none (its job never ran, was lost or never ended)."""
     await conn.execute(
         "UPDATE deep_attempts SET ended_at = now(), usage = %(usage)s, error = %(error)s, "
-        "failure = %(failure)s, service_failed_at = CASE WHEN %(failure)s = 'service' "
-        "THEN now() ELSE service_failed_at END WHERE id = %(id)s AND ended_at IS NULL",
+        "failure = %(failure)s, trace = %(trace)s, service_failed_at = CASE "
+        "WHEN %(failure)s = 'service' THEN now() ELSE service_failed_at END "
+        "WHERE id = %(id)s AND ended_at IS NULL",
         {
             "usage": Jsonb(usage) if usage is not None else None,
             "error": error and error[:2000],
             "failure": failure,
+            "trace": Jsonb(trace) if trace is not None else None,
             "id": attempt_id,
         },
     )
@@ -236,3 +234,51 @@ async def usage_since(conn: psycopg.AsyncConnection, since: datetime) -> dict[st
             (since,),
         )
     ).fetchone()
+
+
+async def attempts(conn: psycopg.AsyncConnection, paper_id: str) -> list[dict[str, Any]]:
+    """The paper's Deep attempts, oldest first, without their traces: when each was submitted
+    and ended, its job, error, whose failure it was and usage, whether it kept a trace
+    (`traced`), and whether it wrote the paper's card (`wrote_card`)."""
+    return await (
+        await conn.execute(
+            """
+            SELECT a.id, a.at, a.ended_at, a.job_id, a.error, a.failure, a.usage, a.automatic,
+                   a.trace IS NOT NULL AS traced,
+                   coalesce(a.ended_at IS NOT NULL AND a.error IS NULL
+                            AND a.pass_id = c.pass_id, false) AS wrote_card
+            FROM deep_attempts a
+            LEFT JOIN deep_cards c ON c.paper_id = a.paper_id AND c.card IS NOT NULL
+            WHERE a.paper_id = %s ORDER BY a.id
+            """,
+            (paper_id,),
+        )
+    ).fetchall()
+
+
+async def attempt_trace(conn: psycopg.AsyncConnection, attempt_id: int) -> list[Any] | None:
+    """The attempt's trace; None when it kept none."""
+    row = await (
+        await conn.execute("SELECT trace FROM deep_attempts WHERE id = %s", (attempt_id,))
+    ).fetchone()
+    return row["trace"] if row else None
+
+
+async def process_notes(
+    conn: psycopg.AsyncConnection, since: datetime | None = None
+) -> list[dict[str, Any]]:
+    """The cards with process notes, newest first, written since `since` if given: the paper,
+    its title, when the card was written and its notes."""
+    return await (
+        await conn.execute(
+            """
+            SELECT c.paper_id, p.title, c.written_at, c.card->'process_notes' AS notes
+            FROM deep_cards c JOIN papers p ON p.id = c.paper_id
+            WHERE jsonb_typeof(c.card->'process_notes') = 'array'
+              AND jsonb_array_length(c.card->'process_notes') > 0
+              AND (%(since)s::timestamptz IS NULL OR c.written_at >= %(since)s)
+            ORDER BY c.written_at DESC, c.paper_id
+            """,
+            {"since": since},
+        )
+    ).fetchall()

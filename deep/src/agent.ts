@@ -7,9 +7,9 @@ import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent
 import type { Models, ThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { PROVIDER, requireSubscription } from "./auth.ts";
-import { buildHosts, type HostConfig, type StoreHit } from "./hosts.ts";
+import { buildHosts, type FetchRecord, type HostConfig, type StoreHit } from "./hosts.ts";
 import { systemPrompt, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
-import { Repl, type HostFn } from "./repl.ts";
+import { Repl, type HostDetail, type HostFn } from "./repl.ts";
 import { validate, type Result } from "./schema.ts";
 
 export interface RunOptions {
@@ -23,8 +23,8 @@ export interface RunOptions {
 
 export type TraceEvent =
   | { t: number; type: "assistant"; text: string; thinking: string; stop: string; usage: TurnUsage }
-  | { t: number; type: "cell"; n: number; code: string; output: string; error?: string; ms: number }
-  | { t: number; type: "host"; name: string; args: string; ms: number; ok: boolean; chars: number }
+  | { t: number; type: "cell"; n: number; code: string; output: string; error?: string; ms: number; timedOut?: true }
+  | { t: number; type: "host"; name: string; args: string; ms: number; ok: boolean; chars: number; error?: string; fetch?: FetchRecord }
   | { t: number; type: "submit"; ok: boolean; errors?: string[] }
   | { t: number; type: "system"; text: string };
 
@@ -69,6 +69,18 @@ export interface CardSpec {
 const NUDGE =
   "No result has been submitted. Call submit(result) with the complete result now; fix any errors it reports.";
 const MAX_NUDGES = 2;
+/** A failed host call's reason, as the trace keeps it. */
+const MAX_ERROR_CHARS = 300;
+
+/**
+ * Asks for the provider's detailed reasoning summaries. pi-ai's simple stream options carry no
+ * summary setting and ask for `auto`; the request it builds is changed here, wherever it asks for one.
+ */
+export function detailedSummaries(payload: unknown): unknown {
+  const reasoning = (payload as { reasoning?: { summary?: unknown } } | null)?.reasoning;
+  if (reasoning && reasoning.summary !== undefined) reasoning.summary = "detailed";
+  return payload;
+}
 
 export async function processPaper(
   paper: PaperInput,
@@ -97,14 +109,17 @@ export async function processPaper(
   let failure: string | undefined;
   let failedBy: Failure = "paper";
 
+  // Each host call is traced with what it did (`detail`), and a failed one with its reason.
   const traced = (name: string, fn: HostFn): HostFn => async (args) => {
     const t0 = Date.now();
+    const detail: HostDetail = {};
     try {
-      const value = await fn(args);
-      record({ t: now(), type: "host", name, args: short(args), ms: Date.now() - t0, ok: true, chars: JSON.stringify(value ?? null).length });
+      const value = await fn(args, detail);
+      record({ t: now(), type: "host", name, args: short(args), ms: Date.now() - t0, ok: true, chars: JSON.stringify(value ?? null).length, ...detail });
       return value;
     } catch (e) {
-      record({ t: now(), type: "host", name, args: short(args), ms: Date.now() - t0, ok: false, chars: 0 });
+      const error = (e instanceof Error ? e.message : String(e)).slice(0, MAX_ERROR_CHARS);
+      record({ t: now(), type: "host", name, args: short(args), ms: Date.now() - t0, ok: false, chars: 0, error, ...detail });
       throw e;
     }
   };
@@ -152,7 +167,7 @@ export async function processPaper(
       if (stats.cells >= opts.maxCells) throw new Error(`the budget of ${opts.maxCells} cells is exhausted`);
       const n = ++stats.cells;
       const cell = await repl.run(params.code);
-      record({ t: now(), type: "cell", n, code: params.code, output: cell.output, error: cell.error, ms: cell.ms });
+      record({ t: now(), type: "cell", n, code: params.code, output: cell.output, error: cell.error, ms: cell.ms, ...(cell.timedOut ? { timedOut: true } : {}) });
       let text = cell.output;
       if (cell.error) text += `${text ? "\n" : ""}Error: ${cell.error}`;
       if (!text) text = "(no output)";
@@ -165,6 +180,7 @@ export async function processPaper(
   const agent = new Agent({
     initialState: { systemPrompt: systemPrompt(opts.maxCells, opts.maxOutputChars, spec.extensions, spec.selections), model, thinkingLevel: opts.effort, tools: [runCode] },
     streamFn: models.streamSimple.bind(models),
+    onPayload: detailedSummaries,
     sessionId: `litwatch-${paper.id}-${started}`,
     toolExecution: "sequential",
     // Error and aborted turns are hard exits; the loop ignores this decision for them.

@@ -198,7 +198,7 @@ async def test_a_must_read_with_a_deep_card_gets_every_column_and_its_deep_read(
     conn, fake = world, FakeNotion(PARENT)
     await texts(conn, A, gist="Probes catch hidden steps.", brief="First.\n\nSecond.")
     await integrations_store.put_card(
-        conn, A.id, CARD, "deep", {}, [], revision=1, version=1, source="latex", pass_id=None
+        conn, A.id, CARD, "deep", {}, revision=1, version=1, source="latex", pass_id=None
     )
     await grade(conn, A, FAITH.slug, "must_read")
     n = notion(fake)
@@ -321,7 +321,7 @@ async def test_new_texts_a_card_and_a_published_record_reach_the_page_as_they_co
     await deliver(conn, n)
     assert fake.value(row, "TL;DR") == "Probes catch hidden steps."
     await integrations_store.put_card(
-        conn, A.id, CARD, "deep", {}, [], revision=1, version=1, source="latex", pass_id=None
+        conn, A.id, CARD, "deep", {}, revision=1, version=1, source="latex", pass_id=None
     )
     await emit(events.CARD_READY)
     await deliver(conn, n)

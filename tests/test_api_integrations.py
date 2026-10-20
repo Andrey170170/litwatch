@@ -163,9 +163,7 @@ async def test_a_card_request_needs_an_integration_that_answers_it(conn, make):
     assert (await marked.get(f"/api/papers/{P.id}")).json()["card_requestable"] is False
 
     # A stored card shows, integration or not.
-    await state.put_card(
-        conn, P.id, {"key_claim": "K."}, "deep-model", {}, [], **LABEL, pass_id=None
-    )
+    await state.put_card(conn, P.id, {"key_claim": "K."}, "deep-model", {}, **LABEL, pass_id=None)
     shown = (await bare.get(f"/api/papers/{P.id}")).json()
     assert shown["card"]["card"] == {"key_claim": "K."} and shown["card"]["model"] == "deep-model"
     assert shown["card_requestable"] is False

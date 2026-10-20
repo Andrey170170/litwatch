@@ -13,6 +13,15 @@ usage limit, the provider) or the job could not start, `paper` when no valid car
 within the budget or the content filter stopped the model. Jobs and keys live in memory: a
 restart forgets them.
 
+A job's `trace` (in `GET /jobs/<id>`) is what the run did, each event with `t`, milliseconds since it
+started: the model's `assistant` turns (text, reasoning summary, stop reason, usage), `cell`s (code,
+output, error, time, and `timedOut` on the one that ran past its limit, which ends the session), `host`
+calls (name, arguments cut to 200 characters, time, `ok`, the characters returned, and a failed call's
+`error`, cut to 300), `submit`s, and the service's `system` nudges. A `fetch` call adds `fetch`: each
+redirect it was answered with (`hops`, URL and status), then the `url` and `status` that answered and the
+`bytes` of body read. The model is asked for detailed reasoning summaries. litwatch keeps every
+attempt's trace and reads it with `litwatch deep trace`.
+
 The card places the paper among litwatch's collection (`among_collection`): papers it agrees with,
 contradicts, extends or supersedes. `submit` takes only ids a `store.search` in the same session
 returned from the collection. `paper` is the archive's LaTeX source, or the PDF's text as markdown.

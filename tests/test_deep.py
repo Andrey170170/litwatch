@@ -5,6 +5,7 @@ daily cap, revisions, and what the API shows."""
 
 import asyncio
 import contextlib
+import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -345,6 +346,110 @@ async def test_a_job_the_service_lost_has_its_usage_unknown_and_counts_against_n
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     month = await cards.usage_since(db, lost["at"])
     assert month == {"attempts": 2, "list_cost": USAGE["list_cost"], "unknown": 1}
+
+
+def trace(text: str) -> list[dict]:
+    """A job's trace of one turn."""
+    return [{"t": 0, "type": "assistant", "text": text, "thinking": "", "stop": "stop"}]
+
+
+async def test_each_attempt_keeps_its_own_trace_and_a_job_without_one_keeps_none(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.vanish = True
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}  # lost: no trace
+    await unpause(db)
+    fake.vanish = False
+    fake.outcome = {"error": "no valid card", "failure": "paper", "stats": USAGE}
+    fake.outcome["trace"] = trace("failed")
+    assert await work(db, with_text(P), d) == {"card_failed": 1}
+    fake.outcome = DONE | {"trace": trace("carded")}
+    await deep_passes.request(db, P.id)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    fake.answer_submits = (422, "no such extension")  # turned down: its job never ran
+    await deep_passes.request(db, P.id)
+    assert await work(db, with_text(P), d) == {"card_failed": 1}
+
+    kept = [a["trace"] for a in await attempts(db)]
+    assert kept == [None, trace("failed"), trace("carded"), None]
+    assert "trace" not in await (await db.execute("SELECT * FROM deep_cards")).fetchone()
+
+
+# What a P2 job's trace holds: a turn, a cell that timed out, a failed fetch that was redirected.
+RICH = [
+    {"t": 900, "type": "assistant", "text": "Reading.", "thinking": "Check the repo.",
+     "stop": "toolUse", "usage": {"input": 4100, "output": 300, "reasoning": 120}},
+    {"t": 1500, "type": "host", "name": "fetch", "args": '["https://anonymous.4open.science/r/x"]',
+     "ms": 40, "ok": False, "chars": 0, "error": "10.0.0.1 is not a public address",
+     "fetch": {"hops": [{"url": "https://anonymous.4open.science/api/repo/x/files/",
+                         "status": 302}]}},
+    {"t": 1600, "type": "host", "name": "fetch", "args": '["https://example.org/"]', "ms": 80,
+     "ok": True, "chars": 812, "fetch": {"hops": [], "url": "https://example.org/",
+                                          "status": 200, "bytes": 1024}},
+    {"t": 92000, "type": "cell", "n": 1, "code": "while (true) {}", "output": "", "ms": 90001,
+     "error": "cell ran longer than 90s", "timedOut": True},
+    {"t": 93000, "type": "submit", "ok": True},
+]  # fmt: skip
+NOTE = {"kind": "access", "source": "model", "note": "The repository could not be listed.",
+        "url": "https://anonymous.4open.science/r/x"}  # fmt: skip
+
+
+async def test_the_deep_commands_read_each_attempts_trace_and_the_cards_notes(
+    db, tmp_path, monkeypatch
+):
+    from typer.testing import CliRunner  # noqa: PLC0415
+
+    from litwatch import cli  # noqa: PLC0415
+
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.vanish = True
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}  # lost: no trace
+    await unpause(db)
+    fake.vanish = False
+    fake.outcome = DONE | {"result": CARD | {"process_notes": [NOTE]}, "trace": RICH}
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+
+    monkeypatch.chdir(tmp_path)  # every command loads ./.env
+    monkeypatch.setenv(
+        "LITWATCH_DATABASE_URL", f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    )
+    config = tmp_path / "litwatch.toml"
+    config.write_text('[schedule]\ntimezone = "UTC"\n')
+
+    async def run(*args: str) -> str:
+        argv = ["deep", *args, "--config", str(config)]
+        result = await asyncio.to_thread(CliRunner().invoke, cli.app, argv)
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    latest = await run("trace", P.id)
+    listed = latest.split("\n\n")[0].splitlines()[2:]
+    assert [line.split()[0] for line in listed] == ["1", "2"]
+    assert "Attempt 2 (id" in latest and "wrote the card" in latest
+    assert "turn 1 · toolUse · in 4100 out 300 reasoning 120" in latest
+    assert "reasoning: Check the repo." in latest
+    assert "· failed: 10.0.0.1 is not a public address" in latest
+    assert "went: 302 https://anonymous.4open.science/api/repo/x/files/ → no page" in latest
+    assert "went: 200 https://example.org/ · 1024 bytes read" in latest
+    assert "cell 1 · 90001 ms · timed out" in latest
+    assert "access (model): The repository could not be listed." in latest
+    first = await run("trace", P.id, "--attempt", "1")
+    assert "No trace was kept" in first and "failed (service)" in first
+    assert "Process notes" not in first  # attempt 2 wrote the card, and its notes
+    whole = json.loads(await run("trace", P.id, "--json"))
+    assert whole["trace"] == RICH and whole["attempt"] == 2 and len(whole["attempts"]) == 2
+    assert whole["process_notes"] == [NOTE]
+    earlier = json.loads(await run("trace", P.id, "--attempt", "1", "--json"))
+    assert (earlier["trace"], earlier["process_notes"]) == (None, [])
+
+    notes = await run("notes")
+    assert P.id in notes and "access (model): The repository could not be listed." in notes
+    assert "<https://anonymous.4open.science/r/x>" in notes
+    tomorrow = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
+    assert await run("notes", "--since", tomorrow) == "No process notes.\n"
 
 
 async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_queue(db):

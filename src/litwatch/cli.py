@@ -39,12 +39,16 @@ library_app = typer.Typer(no_args_is_help=True, help="Effective grades, rarity a
 taxonomy_app = typer.Typer(no_args_is_help=True, help="The class tree and its topics, as YAML.")
 intake_app = typer.Typer(help="Take papers in: from arXiv, or a window from the archive.")
 digests_app = typer.Typer(no_args_is_help=True, help="Daily and weekly digests.")
+deep_app = typer.Typer(
+    no_args_is_help=True, help="What Deep did: attempts, traces and process notes. Read-only."
+)
 app.add_typer(db_app, name="db")
 app.add_typer(eval_app, name="eval")
 app.add_typer(library_app, name="library")
 app.add_typer(taxonomy_app, name="taxonomy")
 app.add_typer(intake_app, name="intake")
 app.add_typer(digests_app, name="digests")
+app.add_typer(deep_app, name="deep")
 console = Console()
 
 
@@ -189,6 +193,72 @@ def digests_write(since: Since, until: Until, config: ConfigPath = None) -> None
     run = _run(lambda conn: runs.get(conn, run_id))
     console.print(f"run {run_id}: cost ${run['cost']}")
     console.print_json(data=run["counts"])
+
+
+# -- deep ------------------------------------------------------------------------------------------
+
+
+@deep_app.command("trace")
+def deep_trace(
+    paper: Annotated[str, typer.Argument(help="The paper's arXiv id.")],
+    attempt: Annotated[
+        int | None, typer.Option(help="The attempt, numbered from 1 as listed; default the latest.")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Everything, uncut, as JSON.")] = False,
+    config: ConfigPath = None,
+) -> None:
+    """The paper's Deep attempts, then one attempt's trace: its turns, cells, host calls with
+    why one failed and where a fetch went, submits, and the card's process notes if it wrote
+    the card. Times are the configured time zone's."""
+    import json  # noqa: PLC0415
+
+    from litwatch.fulltext import deep_trace as text  # noqa: PLC0415
+    from litwatch.store import integrations as cards  # noqa: PLC0415
+
+    zone = configuration.load(config).schedule.zone
+
+    async def work(conn: psycopg.AsyncConnection) -> tuple[Any, ...]:
+        found = await cards.attempts(conn, paper)
+        if not found:
+            raise SystemExit(f"{paper} has no Deep attempts")
+        chosen = len(found) if attempt is None else attempt
+        if not 1 <= chosen <= len(found):
+            raise SystemExit(f"{paper} has attempts 1 to {len(found)}")
+        trace = await cards.attempt_trace(conn, found[chosen - 1]["id"])
+        known = await papers_store.get(conn, paper)
+        notes = []
+        # The card's process notes are this attempt's only when it wrote the card.
+        if found[chosen - 1]["wrote_card"]:
+            card = await cards.card(conn, paper)
+            notes = ((card or {}).get("card") or {}).get("process_notes") or []
+        return found, chosen, trace, known.title if known else None, notes
+
+    found, chosen, trace, title, notes = _run(work, migrate=False)
+    if as_json:
+        out = {"paper": paper, "title": title, "attempts": found, "attempt": chosen}
+        print(json.dumps(out | {"trace": trace, "process_notes": notes}, indent=2, default=str))
+        return
+    # Plain text: a trace holds brackets that rich would read as markup.
+    print(text.trace_text(paper, title, found, chosen, trace, notes, zone), end="")
+
+
+@deep_app.command("notes")
+def deep_notes(
+    since: Annotated[
+        datetime | None,
+        typer.Option(formats=["%Y-%m-%d"], help="Cards written on or after this day."),
+    ] = None,
+    config: ConfigPath = None,
+) -> None:
+    """The cards' process notes, newest card first, each under its paper. A day is the
+    configured time zone's."""
+    from litwatch.fulltext import deep_trace as text  # noqa: PLC0415
+    from litwatch.store import integrations as cards  # noqa: PLC0415
+
+    zone = configuration.load(config).schedule.zone
+    start = since.replace(tzinfo=zone) if since is not None else None
+    found = _run(lambda conn: cards.process_notes(conn, start), migrate=False)
+    print(text.notes_text(found, zone), end="")
 
 
 # -- the taxonomy ----------------------------------------------------------------------------------

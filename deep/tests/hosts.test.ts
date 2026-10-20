@@ -4,7 +4,7 @@ import dns from "node:dns";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
-import { buildHosts, fetchPublic, guardedLookup, htmlToText, isPublic, pacer, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
+import { buildHosts, fetchPublic, type FetchRecord, guardedLookup, htmlToText, isPublic, pacer, makeGuard, rewriteAnonymous, s2Id, storeHits } from "../src/hosts.ts";
 
 test("store.search asks v1's papers table with the read token and keeps the old hit shape", async () => {
   const asked: { url: string; auth: string | null }[] = [];
@@ -152,6 +152,11 @@ before(async () => {
         // exactly the cap, then the connection stays open
         res.writeHead(200, { "content-type": "text/plain" });
         return void res.write("y".repeat(1000));
+      case "/drop":
+        // part of the body, then the connection is gone
+        res.writeHead(200, { "content-type": "text/plain", "content-length": "1000" });
+        res.write("0123456789");
+        return void setTimeout(() => res.destroy(), 50);
       case "/pdf":
         return res.writeHead(200, { "content-type": "Application/PDF" }).end("%PDF-1.7 body");
       case "/self":
@@ -194,6 +199,27 @@ test("a public page is fetched as text through redirects, with the URL it ended 
   assert.equal(page.truncated, false);
   const missing = (await fetchPublic(`http://site.test:${port}/nothing`, local)) as Record<string, unknown>;
   assert.equal(missing.status, 404, "an HTTP status is a value for the agent, not an error");
+});
+
+test("a fetch records its hops, the URL and status that answered, and the bytes read", async () => {
+  const record: FetchRecord = { hops: [] };
+  await fetchPublic(`http://site.test:${port}/hop`, { ...local, record });
+  const page = "<p>Code</p><script>x()</script><p>here</p>";
+  assert.deepEqual(record, {
+    hops: [{ url: `http://site.test:${port}/hop`, status: 302 }],
+    url: `http://site.test:${port}/page`,
+    status: 200,
+    bytes: page.length,
+  });
+  const cut: FetchRecord = { hops: [] };
+  await fetchPublic(`http://site.test:${port}/open-at-cap`, { ...local, maxBytes: 600, record: cut });
+  assert.equal(cut.bytes, 600, "the bytes read, not the body's size");
+  const dropped: FetchRecord = { hops: [] };
+  await assert.rejects(fetchPublic(`http://site.test:${port}/drop`, { ...local, record: dropped }));
+  assert.deepEqual(dropped, { hops: [], url: `http://site.test:${port}/drop`, status: 200, bytes: 10 }, "the bytes that came before the connection went");
+  const refused: FetchRecord = { hops: [] };
+  await assert.rejects(fetchPublic(`http://site.test:${port}/to-private-literal`, { ...local, record: refused }));
+  assert.deepEqual(refused, { hops: [{ url: `http://site.test:${port}/to-private-literal`, status: 302 }] }, "a refused hop keeps the way there");
 });
 
 test("fetch names the operator's contact in the User-Agent only when one is configured", async () => {

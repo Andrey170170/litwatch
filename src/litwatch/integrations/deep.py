@@ -49,14 +49,15 @@ LEASE_MARGIN = timedelta(minutes=15)
 @dataclass
 class Outcome:
     """How a job ended. `usage` is the job's usage as the service reported it (turns, tokens,
-    list cost); None when it never reported (the job was lost, or litwatch gave up waiting).
+    list cost), and `trace` what the job did; each None when it never reported (the job was
+    lost, or litwatch gave up waiting).
     `failure` says whose a failed job's failure was, as the service tagged it, or the service's
     when the job was lost or never ended. `still_running`: litwatch stopped waiting at the
     job's deadline, but the job may yet run: followed again after each pause until it ends,
     or until it has run past the deadline by the service's own clock (`DeepClient.follow`)."""
 
     result: dict[str, Any] | None
-    trace: list[dict[str, Any]]
+    trace: list[dict[str, Any]] | None
     usage: dict[str, Any] | None
     model: str
     error: str | None = None
@@ -134,7 +135,7 @@ class DeepClient:
         job queued behind another, or unreachable, may yet run, so it is never given up on."""
         deadline = since + self.limit
         error = "litwatch stopped waiting for the deep job, to follow it again"
-        kept = Outcome(None, [], None, "", error, "service", still_running=True)
+        kept = Outcome(None, None, None, "", error, "service", still_running=True)
         seen = ""
         while True:
             await asyncio.sleep(self.poll_seconds)
@@ -142,7 +143,7 @@ class DeepClient:
                 resp = await self.http.get(f"{self.base_url}/jobs/{job_id}")
                 if resp.status_code == 404:
                     error = "deep job vanished (service restarted?)"
-                    return Outcome(None, [], None, "", error, "service")
+                    return Outcome(None, None, None, "", error, "service")
                 resp.raise_for_status()
             except httpx.HTTPError:
                 if datetime.now(UTC) > deadline:
@@ -166,7 +167,7 @@ class DeepClient:
             if job["status"] in ("done", "error"):
                 return Outcome(
                     job.get("result"),
-                    job.get("trace") or [],
+                    job.get("trace"),
                     job.get("stats"),
                     job.get("model") or "",
                     job.get("error"),
@@ -178,7 +179,7 @@ class DeepClient:
                 if job["status"] == "running" and running and running > self.limit:
                     # It may go on spending; what it spent was never reported.
                     error = "litwatch gave up on the deep job: running past its deadline"
-                    return Outcome(None, [], None, "", error, "service")
+                    return Outcome(None, None, None, "", error, "service")
                 return kept
 
     @property

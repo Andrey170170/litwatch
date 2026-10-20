@@ -47,6 +47,18 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
 - Stop only what you started: the PID you captured when starting it, or the owner of your port
   (`ss -H -ltnp 'sport = :8766'`) after checking that `/proc/<pid>/cwd` is your checkout. Never kill by a name or
   path pattern: the production container and other worktrees run `litwatch serve` too.
+- What Deep did: `litwatch deep trace <paper>` prints the paper's Deep attempts and the latest one's trace
+  (`--attempt N` another, `--json` everything uncut), and `litwatch deep notes [--since YYYY-MM-DD]` the
+  cards' process notes. Both only read, and never migrate. On production they run inside its container,
+  which has its database and configuration:
+
+  ```sh
+  docker exec litwatch litwatch deep trace 2610.24495
+  docker exec litwatch litwatch deep notes --since 2026-10-20
+  ```
+
+  The container runs the deployed version: the commands are there once P2 of
+  [deep-open-web.md](../plans/deep-open-web.md) is deployed.
 - Zotero: the test account's `LITWATCH_ZOTERO_USER_ID` and `ZOTERO_API_KEY` go in `.env.v1`. `.env` carries the
   owner's real library ID and key file, and fills them in whenever `.env.v1` doesn't. Before any real Zotero run,
   check that `.env.v1` sets both, and stop if it doesn't.

@@ -6,11 +6,18 @@
 
 import { readFileSync } from "node:fs";
 import ivm from "isolated-vm";
+import type { FetchRecord } from "./hosts.ts";
 import { rewriteCell } from "./rewrite.ts";
 
 const PRELUDE = readFileSync(new URL("./prelude.js", import.meta.url), "utf8");
 
-export type HostFn = (args: unknown[]) => Promise<unknown>;
+/** A host function. `detail`, when the caller passes one, collects what the call did beyond its
+ * value, for the trace; the isolate's own calls pass none. */
+export type HostFn = (args: unknown[], detail?: HostDetail) => Promise<unknown>;
+
+export interface HostDetail {
+  fetch?: FetchRecord;
+}
 
 export interface ReplOptions {
   memoryMb: number;
@@ -23,6 +30,8 @@ export interface CellResult {
   error?: string;
   ms: number;
   truncated: boolean;
+  /** This cell ran past its time limit, which ended the session. */
+  timedOut?: true;
 }
 
 export const DEFAULT_REPL_OPTIONS: ReplOptions = {
@@ -39,6 +48,8 @@ export class Repl {
   private onDone: ((error: string) => void) | undefined;
   /** Set once a cell timed out: the isolate is gone and so is every variable. */
   dead = false;
+  /** The cell that timed out, by its number. */
+  private timedOutCell: number | undefined;
 
   private readonly globals: Record<string, string>;
   private readonly hosts: Record<string, HostFn>;
@@ -86,10 +97,13 @@ export class Repl {
 
   async run(code: string): Promise<CellResult> {
     const t0 = performance.now();
-    const done = (output: string, error?: string) => ({
+    let timedOut = false;
+    const done = (output: string, error?: string): CellResult => ({
       ...truncate(output, this.opts.maxOutputChars),
-      error,
+      // A thrown message is bounded as output is: it reaches the model and the trace too.
+      error: error === undefined ? undefined : truncateError(error, this.opts.maxOutputChars),
       ms: Math.round(performance.now() - t0),
+      ...(timedOut ? { timedOut: true } : {}),
     });
     if (this.dead) return done("", "the session was terminated by an earlier timeout; all state is gone");
     this.prints = [];
@@ -119,6 +133,7 @@ export class Repl {
       // contract is the same: the session is gone.
       error = /timed out/i.test(String(e)) ? this.kill() : formatError(e);
     }
+    timedOut = this.timedOutCell === this.cells;
     let last = "";
     if (!this.dead) {
       try {
@@ -134,6 +149,7 @@ export class Repl {
   private kill(): string {
     if (!this.dead) {
       this.dead = true;
+      this.timedOutCell = this.cells;
       this.isolate.dispose();
     }
     return `cell ran longer than ${this.opts.cellTimeoutMs / 1000}s; the session was terminated and all state is lost`;
@@ -165,6 +181,11 @@ function truncate(text: string, max: number): { output: string; truncated: boole
     output: `${head}\n… [output truncated at ${max} characters of ${text.length}; print less or slice it]`,
     truncated: true,
   };
+}
+
+function truncateError(error: string, max: number): string {
+  if (error.length <= max) return error;
+  return `${error.slice(0, max)}… [error truncated at ${max} characters of ${error.length}]`;
 }
 
 function formatError(e: unknown): string {

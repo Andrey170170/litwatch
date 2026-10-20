@@ -90,7 +90,7 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
 
 ### Traces (P2)
 
-- **Migration 0035.**
+- **Migration 0036** (0035 went to updated papers).
   - Adds `deep_attempts.trace jsonb`.
   - Copies each card's non-empty trace onto the attempt whose job wrote it. Only an attempt whose job ran writes a
     trace: `put_card`, or `card_failed` with a trace. A failure before the job ran keeps the older trace and
@@ -98,7 +98,7 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
     error.
   - **Provenance is checked, not assumed.** The candidate's `usage.turns` must equal the trace's count of assistant
     events. A trace with no candidate, or one that fails the check, raises. `migrate` runs each migration in one
-    transaction, so the whole of 0035 rolls back: `deep_attempts.trace` is never added and `deep_cards.trace` stays
+    transaction, so the whole of 0036 rolls back: `deep_attempts.trace` is never added and `deep_cards.trace` stays
     as it was. The serve that ran it does not start, and the case is handled by hand before deploying again. A
     pytest case with a mismatched trace shows the rollback. On the production copy, all 46 cards pass (2026-10-20, read-only
     query). The check runs again on a fresh production copy when P2 is built.
@@ -113,6 +113,8 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
     ends the session: every later cell is refused, as today.
 - **Reasoning.** At `medium` effort the provider's reasoning summaries carry content. If pi-agent-core can pass
   `reasoningSummary`, `detailed` is requested; it costs nothing extra. Otherwise `auto` stays, and P2's PR says so.
+  As built: pi-ai's simple stream options carry no summary setting, so the agent's `onPayload` hook (pi-agent-core
+  passes it to pi-ai) turns the request's `reasoning.summary` from `auto` to `detailed`.
 - **Retention.** All traces are kept, at about 10 kB each.
 - **The agent's CLI.** A Typer group `deep` in `cli.py`, read-only (`_run(..., migrate=False)`):
   - `litwatch deep trace <paper> [--attempt N] [--json]`: the attempts, then the chosen one's turns, cells (code and
@@ -158,7 +160,7 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
     `web/src/lib/settings.ts`, membership in "Acknowledge all" and the Acknowledged section is kept apart from the
     `waiting()` sum. The Acknowledged section shows even when its only items are Deep notes.
   - **The acknowledgement names the card it was given for**, as the other groups name their failure episode
-    (pitfalls P16). It is stored in `deep_cards.notes_acknowledged_at` (migration 0036). The request carries each
+    (pitfalls P16). It is stored in `deep_cards.notes_acknowledged_at` (migration 0037). The request carries each
     paper with the card's `written_at`, and the store only marks a card whose `written_at` still matches. A newer
     card's notes stay unseen even from a stale page. `put_card` clears the mark.
 - **Out of Zotero and Notion.** Their whitelists leave `process_notes` out: the notes describe the process, not the
@@ -226,8 +228,8 @@ The owner settled four more in conversation:
 | Stage | Builds | Shows before the next starts |
 | --- | --- | --- |
 | P1, network | In `deep/`: the guard, hops, budget, byte cap, pacing, the 4open rewrite, prompt and README. Effort `medium` in the stack | Deep tests and typecheck pass. On a dev `deep`, 2610.24495's card finds its repository. Deployed, with the container's fetch refused for 192.168.0.1 |
-| P2, traces | Migration 0035, traces per attempt, host failure reasons, hops, cell timeouts, reasoning summaries, the `litwatch deep` CLI, dev-host.md | The migration on a production-copy sandbox with counts. `litwatch deep trace` prints a real trace. Pytest passes. Deployed; the 5 cards are remade, each with its own trace |
-| P3, process notes | The schema field and prompt, service notes, migration 0036, the card rung, the Needs you group with Acknowledge | Deep tests (fake provider) pass. A real run writes a note. Screenshots of the card and Needs you. Run-status counts unchanged |
+| P2, traces | Migration 0036, traces per attempt, host failure reasons, hops, cell timeouts, reasoning summaries, the `litwatch deep` CLI, dev-host.md | The migration on a production-copy sandbox with counts. `litwatch deep trace` prints a real trace. Pytest passes. Deployed; the 5 cards are remade, each with its own trace |
+| P3, process notes | The schema field and prompt, service notes, migration 0037, the card rung, the Needs you group with Acknowledge | Deep tests (fake provider) pass. A real run writes a note. Screenshots of the card and Needs you. Run-status counts unchanged |
 
 ## Verification
 
