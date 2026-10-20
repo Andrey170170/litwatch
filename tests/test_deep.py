@@ -437,9 +437,13 @@ async def test_the_deep_commands_read_each_attempts_trace_and_the_cards_notes(
     assert "cell 1 · 90001 ms · timed out" in latest
     assert "access (model): The repository could not be listed." in latest
     first = await run("trace", P.id, "--attempt", "1")
-    assert "No trace" in first and "failed (service)" in first
+    assert "No trace was kept" in first and "failed (service)" in first
+    assert "Process notes" not in first  # attempt 2 wrote the card, and its notes
     whole = json.loads(await run("trace", P.id, "--json"))
     assert whole["trace"] == RICH and whole["attempt"] == 2 and len(whole["attempts"]) == 2
+    assert whole["process_notes"] == [NOTE]
+    earlier = json.loads(await run("trace", P.id, "--attempt", "1", "--json"))
+    assert (earlier["trace"], earlier["process_notes"]) == (None, [])
 
     notes = await run("notes")
     assert P.id in notes and "access (model): The repository could not be listed." in notes

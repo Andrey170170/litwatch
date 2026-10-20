@@ -337,8 +337,7 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
           await resp.body?.cancel();
           return { page: { status: resp.status, contentType, url: at.href, text: "", note: "PDF bodies are not fetched; use the arXiv HTML or abstract page" } };
         }
-        const { raw, cut, bytes } = await readCapped(resp.body, opts.maxBytes);
-        record.bytes = bytes;
+        const { raw, cut } = await readCapped(resp.body, opts.maxBytes, record);
         const text = media.includes("html") ? htmlToText(raw) : raw;
         return {
           page: {
@@ -359,9 +358,14 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
 }
 
 /** A body as text, read only up to `maxBytes`: reading stops once that many have come, so a body
- * left open past the cap is never waited on. */
-async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: number): Promise<{ raw: string; cut: boolean; bytes: number }> {
-  if (!body) return { raw: "", cut: false, bytes: 0 };
+ * left open past the cap is never waited on. `counted.bytes` follows each chunk taken, so a read
+ * cut off by the connection or a timeout still says how much came. */
+async function readCapped(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+  counted: { bytes?: number },
+): Promise<{ raw: string; cut: boolean }> {
+  if (!body) return { raw: "", cut: false };
   // A whole number of bytes, or a fractional setting (DEEP_MAX_FETCH_MB=0.1) would never be reached.
   const limit = Math.floor(maxBytes);
   const reader = body.getReader();
@@ -374,13 +378,14 @@ async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: num
     const part = value.subarray(0, limit - size);
     chunks.push(part);
     size += part.byteLength;
+    counted.bytes = size;
     if (size >= limit) {
       cut = true;
       await reader.cancel();
       break;
     }
   }
-  return { raw: new TextDecoder().decode(Buffer.concat(chunks)), cut, bytes: size };
+  return { raw: new TextDecoder().decode(Buffer.concat(chunks)), cut };
 }
 
 /** Readable text from HTML: scripts, styles and comments dropped, block boundaries kept as newlines.

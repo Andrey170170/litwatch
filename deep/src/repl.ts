@@ -100,7 +100,8 @@ export class Repl {
     let timedOut = false;
     const done = (output: string, error?: string): CellResult => ({
       ...truncate(output, this.opts.maxOutputChars),
-      error,
+      // A thrown message is bounded as output is: it reaches the model and the trace too.
+      error: error === undefined ? undefined : truncateError(error, this.opts.maxOutputChars),
       ms: Math.round(performance.now() - t0),
       ...(timedOut ? { timedOut: true } : {}),
     });
@@ -180,6 +181,11 @@ function truncate(text: string, max: number): { output: string; truncated: boole
     output: `${head}\n… [output truncated at ${max} characters of ${text.length}; print less or slice it]`,
     truncated: true,
   };
+}
+
+function truncateError(error: string, max: number): string {
+  if (error.length <= max) return error;
+  return `${error.slice(0, max)}… [error truncated at ${max} characters of ${error.length}]`;
 }
 
 function formatError(e: unknown): string {

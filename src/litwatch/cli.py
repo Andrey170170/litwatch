@@ -226,8 +226,11 @@ def deep_trace(
             raise SystemExit(f"{paper} has attempts 1 to {len(found)}")
         trace = await cards.attempt_trace(conn, found[chosen - 1]["id"])
         known = await papers_store.get(conn, paper)
-        card = await cards.card(conn, paper)
-        notes = ((card or {}).get("card") or {}).get("process_notes") or []
+        notes = []
+        # The card's process notes are this attempt's only when it wrote the card.
+        if found[chosen - 1]["wrote_card"]:
+            card = await cards.card(conn, paper)
+            notes = ((card or {}).get("card") or {}).get("process_notes") or []
         return found, chosen, trace, known.title if known else None, notes
 
     found, chosen, trace, title, notes = _run(work, migrate=False)

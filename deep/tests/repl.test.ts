@@ -118,6 +118,17 @@ test("a runaway cell kills the session and later cells report it", async () => {
   assert.match((await r.run("1")).error ?? "", /earlier timeout/);
 });
 
+test("a huge thrown error is bounded like output", async () => {
+  const r = await repl({}, { maxOutputChars: 64 });
+  try {
+    const out = await r.run('throw new Error("x".repeat(1000000))');
+    assert.ok((out.error ?? "").length < 200, `error of ${out.error?.length} characters`);
+    assert.match(out.error ?? "", /^Error: x+… \[error truncated at 64 characters of 10000\d\d\]$/);
+  } finally {
+    r.dispose();
+  }
+});
+
 test("long output is truncated with a hint", async () => {
   const r = await repl({}, { maxOutputChars: 50 });
   try {

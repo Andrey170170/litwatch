@@ -152,6 +152,11 @@ before(async () => {
         // exactly the cap, then the connection stays open
         res.writeHead(200, { "content-type": "text/plain" });
         return void res.write("y".repeat(1000));
+      case "/drop":
+        // part of the body, then the connection is gone
+        res.writeHead(200, { "content-type": "text/plain", "content-length": "1000" });
+        res.write("0123456789");
+        return void setTimeout(() => res.destroy(), 50);
       case "/pdf":
         return res.writeHead(200, { "content-type": "Application/PDF" }).end("%PDF-1.7 body");
       case "/self":
@@ -209,6 +214,9 @@ test("a fetch records its hops, the URL and status that answered, and the bytes 
   const cut: FetchRecord = { hops: [] };
   await fetchPublic(`http://site.test:${port}/open-at-cap`, { ...local, maxBytes: 600, record: cut });
   assert.equal(cut.bytes, 600, "the bytes read, not the body's size");
+  const dropped: FetchRecord = { hops: [] };
+  await assert.rejects(fetchPublic(`http://site.test:${port}/drop`, { ...local, record: dropped }));
+  assert.deepEqual(dropped, { hops: [], url: `http://site.test:${port}/drop`, status: 200, bytes: 10 }, "the bytes that came before the connection went");
   const refused: FetchRecord = { hops: [] };
   await assert.rejects(fetchPublic(`http://site.test:${port}/to-private-literal`, { ...local, record: refused }));
   assert.deepEqual(refused, { hops: [{ url: `http://site.test:${port}/to-private-literal`, status: 302 }] }, "a refused hop keeps the way there");

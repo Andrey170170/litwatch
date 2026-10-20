@@ -145,20 +145,23 @@ def trace_text(
     notes: list[dict[str, Any]],
     zone: tzinfo,
 ) -> str:
-    """The paper's attempts, then attempt `chosen` (numbered from 1): its trace, and the card's
-    process notes when it wrote the card."""
+    """The paper's attempts, then attempt `chosen` (numbered from 1): its trace, and `notes`,
+    the card's process notes, which the caller gives only when this attempt wrote the card."""
     a = attempts[chosen - 1]
     lines = [f"{paper_id} · {title or '(not in the collection)'}", "Attempts, oldest first:"]
     lines += attempt_lines(attempts, zone)
     lines += ["", f"Attempt {chosen} (id {a['id']}): {_outcome(a)}"]
     lines.append(f"  {_usage(a['usage'])}")
     if trace is None:
-        lines.append("  No trace: its job never ran, was lost or never ended, or is still running.")
+        lines.append(
+            "  No trace was kept: its job never ran, was lost, never ended or is still running, "
+            "or it ran before traces were kept per attempt, when a later job's replaced its own."
+        )
     elif not trace:
         lines.append("  Its trace is empty.")
     else:
         lines += event_lines(trace)
-    if a["wrote_card"] and notes:
+    if notes:
         lines += ["", "Process notes on the card:", *note_lines(notes)]
     return "\n".join(lines) + "\n"
 
