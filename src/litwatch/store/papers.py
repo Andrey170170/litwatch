@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch import events
 from litwatch.core import Paper, rewritten
-from litwatch.core.digests import announced
+from litwatch.core.digests import announced, first_listing
 
 # What `row_to_paper` reads; the stored body of every match would be megabytes nobody looks at.
 COLUMNS = """
@@ -89,7 +89,10 @@ async def upsert(
 
     A paper's listing day (`announced`) comes from its first version's submission time
     (`core.digests.announced`) in canonical metadata; until that arrives, from `listed`, the
-    day a feed announced it as new (Atom carries no submission time).
+    day a feed announced it as new (Atom carries no submission time). A day read from the
+    version history (`announced_known`) is never replaced by one guessed from other metadata:
+    the version list can fail to load, leaving `<created>`, which can be a later version's
+    date, and the stored history is then cleared, so the column keeps what it knew.
     """
     result = Upserted()
     async with conn.transaction():
@@ -109,15 +112,21 @@ async def upsert(
                     INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
                                         published, updated, url, metadata_source,
                                         version, version_history,
-                                        doi, journal_ref, license, announced)
+                                        doi, journal_ref, license, announced, announced_known)
                     VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
                             %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
                             %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s,
-                            %(announced)s)
+                            %(announced)s, %(known)s)
                     ON CONFLICT (id) DO UPDATE SET
                         -- Canonical metadata (Atom never updates) dates the first listing;
-                        -- a feed's date stands only until it does.
-                        announced = coalesce(EXCLUDED.announced, papers.announced),
+                        -- a feed's date stands only until it does. A day read from the
+                        -- version history is never replaced by a guessed one, and corrects
+                        -- any day.
+                        announced = CASE WHEN EXCLUDED.announced_known
+                                              OR NOT papers.announced_known
+                                         THEN coalesce(EXCLUDED.announced, papers.announced)
+                                         ELSE papers.announced END,
+                        announced_known = EXCLUDED.announced_known OR papers.announced_known,
                         -- The owner's correction stands while arXiv sends the text it fixed.
                         title = CASE WHEN {_KEPT}
                                      THEN papers.title ELSE EXCLUDED.title END,
@@ -174,6 +183,7 @@ async def upsert(
                         "authors": Jsonb(p.authors),
                         "version_history": Jsonb(p.version_history),
                         "announced": announced(p) or (listed or {}).get(p.id),
+                        "known": first_listing(p) is not None,
                         "source": source,
                         "by_day": source in _BY_DAY,
                         "by_day_sources": list(_BY_DAY),

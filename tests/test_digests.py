@@ -461,6 +461,54 @@ async def test_a_cross_listing_is_not_dated_by_its_feed_and_canonical_metadata_c
     }
 
 
+def history(*dates: str) -> list[dict]:
+    """A version history, v1 first, from the versions' submission times."""
+    return [{"version": i, "date": d} for i, d in enumerate(dates, 1)]
+
+
+def oai(id: str, created: str, version_history=(), **more):
+    """A record as OAI gives it, dated by day; with no `version_history`, its version list
+    failed to load, so its first version's day is guessed from `<created>`."""
+    at = f"{created}T00:00:00+00:00"
+    found = list(version_history)
+    version = found[-1]["version"] if found else None
+    return paper(id, published=at, updated=at, version=version, version_history=found, **more)
+
+
+async def day_of(conn, p) -> date:
+    row = await (
+        await conn.execute("SELECT announced FROM papers WHERE id = %s", (p.id,))
+    ).fetchone()
+    return row["announced"]
+
+
+async def test_a_failed_version_list_never_moves_a_known_first_day(db):
+    """Read from v1's submission time, a first day stands against a record whose version list
+    failed to load, whose `<created>` is a later version's date; and against a second one,
+    after the first cleared the stored history."""
+    old = oai("2605.00001", "2026-05-04", history("2026-05-04T15:00:00+00:00", "2026-05-08"))
+    await papers_store.upsert(db, [old], source="oai")
+    assert await day_of(db, old) == date(2026, 5, 5)
+    for created in ("2026-10-12", "2026-10-14"):
+        await papers_store.upsert(db, [oai(old.id, created)], source="oai")
+        assert await day_of(db, old) == date(2026, 5, 5)
+
+
+async def test_a_version_history_corrects_a_guessed_first_day_either_way(db):
+    """A Monday `<created>` reads as Tuesday's listing, a Monday-afternoon v1 is Wednesday's;
+    a `<created>` that was a later version's date reads months late."""
+    early = oai("2610.00031", "2026-10-05")
+    late = oai("2610.00032", "2026-10-12")
+    await papers_store.upsert(db, [early, late], source="oai")
+    assert (await day_of(db, early), await day_of(db, late)) == (TUE, date(2026, 10, 13))
+    known = [
+        oai(early.id, "2026-10-05", history("2026-10-05T19:00:00+00:00")),
+        oai(late.id, "2026-10-12", history("2026-05-04T15:00:00+00:00", "2026-10-12")),
+    ]
+    await papers_store.upsert(db, known, source="oai")
+    assert (await day_of(db, early), await day_of(db, late)) == (WED, date(2026, 5, 5))
+
+
 async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
     """P's re-check finishes on Saturday, after Friday's digest: Monday's daily covers it,
     and the weekly of P's week, written after it, has it; the next weekly does not, and the
