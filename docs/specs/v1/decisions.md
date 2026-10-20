@@ -249,7 +249,7 @@ a fixed list of hosts, so 5 of the first 46 production cards called real, public
     that a page can steer a card as the paper's own text already can. The `deep` container reaches the
     LAN, so the guard is the one thing that must hold.
 81. **Every Deep attempt keeps its trace, for the agent, not the owner.** Traces move from the card to the attempt
-    and are kept; a CLI (`litwatch deep trace`, `deep notes`) reads them. The owner reads cards, not traces; when a
+    and are kept (a job lost before reporting has none to keep); a CLI (`litwatch deep trace`, `deep notes`) reads them. The owner reads cards, not traces; when a
     card looks wrong, the agent looks at what Deep did.
 82. **A Deep card says when its own process held it back.** Process notes, apart from the paper's limitations, come
     from the model and from the service, folded on the card and in a quiet Needs you group that counts nowhere. A

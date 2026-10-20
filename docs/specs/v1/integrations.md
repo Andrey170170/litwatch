@@ -64,7 +64,7 @@ The service's agent reads the web through one `fetch`: any public http(s) host, 
 paper and 2 MB per answer, and never an address that is not public unicast, checked where the connection is made and
 on every redirect hop (decision 80). anonymous.4open.science links go to its JSON API, since its pages are built by
 JavaScript. Each attempt keeps the job's trace (its turns, cells, host calls with why one failed, and timings), read
-by the `litwatch deep trace` and `deep notes` commands (decision 81). A card may carry **process notes**: what the
+by `litwatch deep trace`; `litwatch deep notes` lists the cards' process notes (decision 81). A card may carry **process notes**: what the
 agent could not do because of its tools, access or budget, written by the model or added by the service for a fetch
 refused or failed on the network, the fetch budget used up, or a cell timeout (decision 82). They go to neither
 Zotero nor Notion.

@@ -142,8 +142,8 @@ for a selected few.
 _Avoid_: Deep, reading card
 
 **Process note**:
-A line on a Deep card saying what the Deep agent could not do because of its tools, access or budget, as against a
-limitation, which is the paper's own.
+A line on a Deep card saying what the Deep agent could not do because of its tools, access, budget or input (the
+text it was given was cut or unreadable), as against a limitation, which is the paper's own.
 _Avoid_: Process limitation, Deep note (Deep notes is only Needs you's group of them)
 
 ## The Notion export

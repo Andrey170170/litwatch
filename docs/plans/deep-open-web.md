@@ -79,7 +79,8 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
 - **Pacing.** The pacing lanes keep arXiv 3 s and S2 1.1 s, and every other host gets 1 s. Lanes live with the
   paper's `buildHosts`, so they go when the paper ends.
 - **anonymous.4open.science.** `/r/<id>` becomes `/api/repo/<id>/files/`. `/r/<id>/<path>` becomes
-  `/api/repo/<id>/file/<path>`, or `files/?path=<path>` when the path ends in `/`. The rewrite applies on every hop.
+  `/api/repo/<id>/file/<path>` (each segment percent-encoded), or `files/?path=<path>` when the path ends in `/`
+  (the whole path one encoded query component, so `&`, `%` or `#` in a repository path survive; a test pins it). The rewrite applies on every hop.
 - **Prompt.**
   - The allowed-host list (`prompt.ts`) becomes: any public page can be fetched; pages built by JavaScript may come
     back empty, so prefer a site's API or raw files.
@@ -97,8 +98,10 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
     replaces only `error`. So the candidate is the paper's latest ended attempt with a `job_id`, never matched by
     error.
   - **Provenance is checked, not assumed.** The candidate's `usage.turns` must equal the trace's count of assistant
-    events. A trace with no candidate, or one that fails the check, makes the migration fail, leaving the column in
-    place, and that case is handled by hand. On the production copy, all 46 cards pass (2026-10-20, read-only
+    events. A trace with no candidate, or one that fails the check, raises. `migrate` runs each migration in one
+    transaction, so the whole of 0035 rolls back: `deep_attempts.trace` is never added and `deep_cards.trace` stays
+    as it was. The serve that ran it does not start, and the case is handled by hand before deploying again. A
+    pytest case with a mismatched trace shows the rollback. On the production copy, all 46 cards pass (2026-10-20, read-only
     query). P1's remakes come before P2, so the check runs again on a fresh production copy when P2 is built.
   - Drops `deep_cards.trace` only after the copy and the check.
 - **Writes.** `attempt_ended` writes the trace. `put_card` and `card_failed` stop touching it. A lost or stuck job has
@@ -126,7 +129,9 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
   - `kind` is `access`, `tool`, `budget` or `input`.
   - `source` is `model` or `service`.
   - The field is optional; an empty or absent list means no notes.
-- **The model's notes.** The schema takes up to 6, each at least 20 characters, with `source` set to `model`. The
+- **The model's notes.** The schema takes up to 6, each at least 20 characters, with `source` set to `model`, and
+  a `url`, when given, must be an absolute http(s) URL. The web app links only http(s) URLs in any case, so a note
+  can never carry a `javascript:` link. The
   prompt's Standards paragraph says what they are for: what the agent could not do because of its tools, access or
   budget, not what the paper lacks.
 - **The service's notes.** `processPaper` collects them during the run and adds them to the returned card when the
@@ -137,6 +142,9 @@ router (192.168.0.1) and the host's status endpoint both answered from inside it
   - a fetch that failed on the network (DNS, connection, timeout, a cut body), never for an HTTP status;
   - the fetch budget used up;
   - a cell timeout, which ends the session.
+
+  So a card holds at most 10 notes: up to 6 from the model, validated with the card, and up to 4 from the service,
+  one per event kind, which the card schema does not count.
 
   A run that ends without a card is a failure, handled as today: the paper's failure on Needs you, the service's
   pausing the queue.
