@@ -25,5 +25,6 @@ CREATE INDEX inference_calls_responded_idx ON inference_calls (responded_at)
     WHERE responded_at IS NOT NULL;
 
 -- When a full-text pass last failed: a stop is counted in the night it happened, whenever its
--- try was claimed.
+-- try was claimed. One failed before this is known only by when its try was claimed.
 ALTER TABLE fulltext_passes ADD COLUMN failed_at timestamptz;
+UPDATE fulltext_passes SET failed_at = tried_at WHERE state = 'failed';

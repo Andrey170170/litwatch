@@ -314,6 +314,8 @@ class Batcher:
             if status == "gone":
                 await self.journal.gone(batch_id)
             for key, reply in replies.items():
+                if isinstance(reply, ProviderError):  # seen here, whoever waits on it
+                    await self.journal.account_error(self.provider.name, f"account: {reply}")
                 # A call settles its row with the answer, but for a row given up on before: a
                 # reply settles it still, anything else is its call's on a row of its own.
                 if key in batch.waiting and (
@@ -322,7 +324,6 @@ class Batcher:
                     continue
                 if isinstance(reply, ProviderError):
                     await self.journal.answered(batch_id, key, None, f"account: {reply}")
-                    await self.journal.account_error(self.provider.name, f"account: {reply}")
                 else:
                     await self.journal.answered(batch_id, key, reply and reply.usage)
         del self._open[batch_id]

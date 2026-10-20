@@ -350,6 +350,19 @@ async def test_a_batch_given_up_on_is_left_open_on_its_row_for_a_later_run_to_ac
     await later.close()
 
 
+async def test_a_request_a_batch_refused_for_the_account_fails_the_provider(conn):
+    gw, _, _, _ = batching(CallJournal(conn, await runs.start(conn, "nightly")))
+    with pytest.raises(CallError) as found:
+        await gw.ask("brief", ask("account"))  # the batch's only request, awaited
+    assert found.value.kind == "account"
+    seen = (await calls_store.observations(conn))["anthropic"]
+    assert (seen["account_error"], seen["replied_at"]) == (
+        "account: authentication_error in batch",
+        None,
+    )
+    await gw.close()
+
+
 @pytest.mark.parametrize("refused", ["the read", "the request"])
 async def test_a_dead_runs_batch_refused_for_the_account_fails_the_provider_without_a_call(
     conn, monkeypatch, refused
