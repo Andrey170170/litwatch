@@ -798,7 +798,9 @@ def serve(
 ) -> None:
     """Serve the API and the web app, with the integrations the
     configuration enables. Needs LITWATCH_API_TOKEN; LITWATCH_READ_TOKEN, if set, is a
-    second token that may only search and read papers (for the deep service)."""
+    second token that may only search and read papers (for the deep service);
+    LITWATCH_MCP_TOKEN, if set, serves the MCP server at /mcp, for research agents, behind
+    that token alone."""
     from litwatch.api import create_app  # noqa: PLC0415
 
     token = configuration.secret("LITWATCH_API_TOKEN")
@@ -814,14 +816,18 @@ def serve(
     _run(store.migrate, migrate=False)
     from litwatch import fulltext  # noqa: PLC0415
 
-    app_ = create_app(
-        configuration.database_url(),
-        token,
-        cfg,
-        integrations=loaded,
-        read_token=configuration.secret("LITWATCH_READ_TOKEN"),
-        archive=fulltext.archive_for(cfg),
-    )
+    try:
+        app_ = create_app(
+            configuration.database_url(),
+            token,
+            cfg,
+            integrations=loaded,
+            read_token=configuration.secret("LITWATCH_READ_TOKEN"),
+            archive=fulltext.archive_for(cfg),
+            mcp_token=configuration.secret("LITWATCH_MCP_TOKEN"),
+        )
+    except ValueError as exc:  # the MCP token reuses another
+        raise SystemExit(str(exc)) from exc
     logs.setup()
     asyncio.run(_serve(app_, host, port, metrics_port))
 

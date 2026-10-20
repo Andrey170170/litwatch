@@ -700,14 +700,20 @@ CARD_PAPERS = 3
 
 
 async def digests_on(
-    conn: psycopg.AsyncConnection, period: DigestPeriod, first: date, last: date
+    conn: psycopg.AsyncConnection,
+    period: DigestPeriod,
+    first: date,
+    last: date,
+    topic: str | None = None,
 ) -> list[dict[str, Any]]:
-    """The digests of `period` from `first` to `last`, newest first."""
+    """The digests of `period` from `first` to `last`, of `topic` alone when given, newest
+    first."""
     return await (
         await conn.execute(
             "SELECT id, topic, period, day, state, gist, counts, best_rarity FROM digests "
-            "WHERE period = %s AND day BETWEEN %s AND %s ORDER BY day DESC, topic",
-            (period.value, first, last),
+            "WHERE period = %(period)s AND day BETWEEN %(first)s AND %(last)s "
+            "AND (%(topic)s::text IS NULL OR topic = %(topic)s) ORDER BY day DESC, topic",
+            {"period": period.value, "first": first, "last": last, "topic": topic},
         )
     ).fetchall()
 

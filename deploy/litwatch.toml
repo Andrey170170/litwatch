@@ -19,6 +19,11 @@ deadline = "07:30"
 # serves texts, PDFs and search. Its URL and token come from the compose file.
 [integrations.archive]
 
+# The MCP server (LITWATCH_MCP_TOKEN in `.env`) answers only these Host headers; behind a proxy,
+# add the name it is reached by. `name:*` allows any port.
+# [mcp]
+# allowed_hosts = ["litwatch.example.org", "127.0.0.1:*", "localhost:*"]
+
 # Deep cards: start the stack with `--profile deep` and uncomment.
 # [integrations.deep]
 # url = "http://deep:8081"

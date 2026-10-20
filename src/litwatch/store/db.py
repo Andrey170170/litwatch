@@ -22,12 +22,17 @@ class LegacyDatabaseError(RuntimeError):
     """The database belongs to litwatch 0.x, which v1 never uses (decision 48)."""
 
 
-async def connect(dsn: str, schema: str | None = None) -> psycopg.AsyncConnection[dict[str, Any]]:
+async def connect(
+    dsn: str, schema: str | None = None, *, read_only: bool = False
+) -> psycopg.AsyncConnection[dict[str, Any]]:
     """An autocommit connection returning rows as dicts. Group writes with `conn.transaction()`.
+    `read_only` makes every transaction on it read-only, so a write through it fails.
 
     One connection serves one coroutine at a time; concurrent work takes its own.
     """
     conn = await psycopg.AsyncConnection.connect(dsn, row_factory=dict_row, autocommit=True)
+    if read_only:
+        await conn.execute("SET default_transaction_read_only = on")
     if schema:
         await conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
     return conn

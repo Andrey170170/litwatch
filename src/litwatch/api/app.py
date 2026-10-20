@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from litwatch import fulltext
-from litwatch.api import digests, reading, settings, summary
+from litwatch.api import digests, mcp, reading, settings, summary
 from litwatch.api import integrations as integrations_api
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
@@ -36,7 +36,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start the scheduler with the service when the configuration enables it, with the
     full-text worker when an archive is configured too (it calls models and has the archive
     fetch, so, like the schedule, it waits for cutover) and the Deep card worker when a card
-    provider is loaded as well, and the integrations' dispatcher when any is loaded."""
+    provider is loaded as well, the integrations' dispatcher when any is loaded, and the MCP
+    server's session manager while `/mcp` is served."""
     tasks = []
     enabled = app.state.config.schedule.enabled
     archive = app.state.archive if enabled else None
@@ -70,8 +71,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(
             asyncio.create_task(dispatch.run_forever(app.state.dsn, app.state.integrations))
         )
+    mcp = app.state.mcp
     try:
-        yield
+        async with mcp.session_manager.run() if mcp else contextlib.nullcontext():
+            yield
     finally:
         for task in tasks:
             # Wait for the job in progress to record how it ended.
@@ -92,13 +95,17 @@ def create_app(
     integrations: list[Integration] | None = None,
     read_token: str | None = None,
     archive: ArchiveClient | None = None,
+    mcp_token: str | None = None,
 ) -> FastAPI:
     """The app over one database. Every request but the health check and signing in needs
     the shared token, as a bearer header or the cookie set by `/api/session`; `read_token`,
     when given, may only read papers (`deps.READABLE`). `integrations` are the loaded ones:
     the dispatcher delivers to them and search asks those that are search providers.
     `archive` serves the PDFs the owner opens, and the full-text queue's texts; the app
-    closes it when it stops."""
+    closes it when it stops. `mcp_token`, when given, serves the MCP server at `/mcp`
+    (`api.mcp`), which takes that token alone, as `/api` never does."""
+    if mcp_token is not None and mcp_token in (token, read_token):
+        raise ValueError("the MCP token must differ from the API token and the read token")
     app = FastAPI(title="litwatch", docs_url=None, redoc_url=None, lifespan=_lifespan)
     app.state.dsn, app.state.token, app.state.read_token = dsn, token, read_token
     app.state.config, app.state.gateway = config or Config(), gateway
@@ -117,6 +124,10 @@ def create_app(
     app.include_router(integrations_api.router)
     app.include_router(summary.router)
     app.include_router(reading.session)
+    # Before the web app's catch-all, which would shadow it.
+    app.state.mcp = app.state.mcp_calls = None
+    if mcp_token:
+        app.state.mcp = mcp.mount(app, mcp_token, app.state.config.mcp.allowed_hosts)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:

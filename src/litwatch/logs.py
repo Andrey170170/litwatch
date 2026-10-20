@@ -1,6 +1,7 @@
 """Logging for the CLI and the service: plain lines by default, or one JSON object per line with
 `LITWATCH_LOG_FORMAT=json`, as the image sets (the homelab's telemetry convention: `ts`, `level`,
-`msg`, and `component`, the logger's name)."""
+`msg`, and `component`, the logger's name; a record's `fields`, given as `extra={"fields": ...}`,
+join the object as context fields)."""
 
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ class JsonFormatter(logging.Formatter):
             "msg": record.getMessage(),
             "component": record.name,
         }
+        line |= getattr(record, "fields", {})
         if record.exc_info:
             line["error"] = self.formatException(record.exc_info)
         return json.dumps(line, ensure_ascii=False)
@@ -37,3 +39,5 @@ def setup(level: int = logging.INFO) -> None:
     root.handlers = [handler]
     root.setLevel(level)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # The MCP SDK logs every stateless request at info; /mcp logs its own line per call.
+    logging.getLogger("mcp").setLevel(logging.WARNING)
