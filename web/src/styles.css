@@ -722,6 +722,14 @@ html[data-theme="light"] .tprow .vd b.askt { color: var(--fg); }
 /* Needs you's foot: what the owner acknowledged, folded under one line */
 .nack { margin-top: 28px; }
 .nack > .tpfold { border-top: 0; }
+/* a Needs you group's head folds it, the Acknowledged section's fold with the group's edge, so a folded group keeps
+   its colour; Acknowledge sits beside it */
+.ngrp { margin-top: 18px; }
+.ngrp > .caprow { align-items: center; }
+.ngrp > .caprow > .tpfold { flex: 1; width: auto; min-width: 0; }
+.ngrp.ask > .caprow > .tpfold { border-left-color: var(--acc); }
+.ngrp.fail > .caprow > .tpfold { border-left-color: var(--sig); }
+.setpg .ngrp > .nsub { margin: 4px 0 8px; }
 .nact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .nact .sp { flex: 1; }
 .warnt { color: var(--warn); } .badt { color: var(--sig); }
@@ -945,6 +953,7 @@ button.car:hover { color: var(--fg); background: var(--line2); }
   :is(.row.dpr, .row.drow) { min-height: 40px; align-content: center; }
   .sws button { width: 40px; height: 40px; }
   .trow .grip, .crow .car { width: 40px; }
+  .ngrp > .caprow > .tpfold { min-height: 40px; }
   .tin.sm { min-height: 40px; }
   .rseg { min-width: 40px; }
   /* the Brief rung's switch sits in its name's line: a 40px hit area drawn around it, the line unmoved */

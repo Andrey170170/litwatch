@@ -37,6 +37,11 @@ const quality = {
   collected: {},
   reactions: [],
 };
+/** Groups' lines on Needs you, as shown under their heads. */
+const KIND_LINE = {
+  split: "Judge and check disagree. The more inclusive Fit stands until it is labelled.",
+  analysis: "Analysis failed three runs or every model refused it; the paper has no Gist or Weight and shows its title alone.",
+};
 const badge = { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" };
 /** The shell's summary with `waiting` things on Needs you. */
 const summaryOf = (waiting: number) => ({ status, topics: [badge], settings: { waiting, last_session: null, misses: 0, topics: 1, classes: 1, spent: 1.5, budget: 20, failing: [] } });
@@ -172,7 +177,7 @@ describe("Settings", () => {
     const written = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "day", day: "2026-10-08", state: "written", counts: {}, gist: "g", text: "t", error: null, written_at: "2026-10-15T10:00:00Z", papers: [] };
     const calls = scriptFetch({ ...common, "POST /api/digests/3/write": written });
     renderApp("/settings/needs");
-    expect(await screen.findByText("Digests · 1")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Digests · 1" })).toBeInTheDocument();
     const item = screen.getByText("Daily digest · 8 Oct").closest(".need")!;
     expect(item).toHaveTextContent("Could not be written: the writer timed out twice");
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Write it again" }));
@@ -425,7 +430,7 @@ describe("Settings", () => {
     });
     renderApp("/settings/needs");
     expect(await screen.findByRole("link", { name: "3 failed" })).toBeInTheDocument();
-    const textGroup = screen.getByText("Full text · 1").closest(".ngrp") as HTMLElement;
+    const textGroup = screen.getByRole("button", { name: "Full text · 1" }).closest(".ngrp") as HTMLElement;
     await userEvent.click(within(textGroup).getByRole("button", { name: "Acknowledge" }));
     await waitFor(() => expect(acks().map((c) => c.body)).toEqual([{ steps: [], passes: [{ id: 7, since: "2026-10-14T03:00:00Z" }], digests: [] }]));
     // The pass folds away; what remains keeps its order, and the run status counts one fewer.
@@ -444,11 +449,77 @@ describe("Settings", () => {
     // Open, the section is grouped as above, and its rows keep their buttons.
     await userEvent.click(screen.getByRole("button", { name: "Acknowledged · 3" }));
     const folded = screen.getByRole("region", { name: "Acknowledged" });
-    expect(within(folded).getAllByText(/ · 1$/).map((c) => c.textContent)).toEqual(["Analysis · 1", "Full text · 1", "Digests · 1"]);
+    expect(within(folded).getAllByRole("button", { name: / · 1$/ }).map((c) => c.textContent)).toEqual(["Analysis · 1", "Full text · 1", "Digests · 1"]);
     expect(within(folded).queryByRole("button", { name: "Acknowledge" })).toBeNull();
     const row = within(folded).getByRole("link", { name: "A textless paper" }).closest(".need") as HTMLElement;
     await userEvent.click(within(row).getByRole("button", { name: "Run it now" }));
     await waitFor(() => expect(row).toHaveClass("settled"));
+  });
+
+  it("folds a group of more than ten under its head and opens a smaller one, keeping the owner's choice for the session", async () => {
+    viewport(true);
+    const splits = Array.from({ length: 11 }, (_, i) => ({ ...split, paper_id: `2610.001${String(i).padStart(2, "0")}`, title: `Split paper ${i}` }));
+    const stuckOnes = Array.from({ length: 10 }, (_, i) => ({ ...stuck, paper_id: `2610.002${String(i).padStart(2, "0")}`, title: `Stuck paper ${i}` }));
+    scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night: { ...quality.night, splits, analysis_failed: stuckOnes } }, "GET /api/settings/config": {} });
+    const { router } = renderApp("/settings/needs");
+    const splitHead = await screen.findByRole("button", { name: "Focus splits · 11" });
+    const titles = (name: RegExp) => screen.queryAllByRole("link", { name }).length;
+    // Eleven start folded to the head and its line; ten start open.
+    expect(splitHead).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(KIND_LINE.split)).toBeInTheDocument();
+    expect(titles(/^Split paper/)).toBe(0);
+    const stuckHead = screen.getByRole("button", { name: "Analysis · 10" });
+    expect(stuckHead).toHaveAttribute("aria-expanded", "true");
+    expect(titles(/^Stuck paper/)).toBe(10);
+    // The head opens or folds its group.
+    await userEvent.click(splitHead);
+    expect(splitHead).toHaveAttribute("aria-expanded", "true");
+    expect(titles(/^Split paper/)).toBe(11);
+    await userEvent.click(stuckHead);
+    expect(stuckHead).toHaveAttribute("aria-expanded", "false");
+    expect(titles(/^Stuck paper/)).toBe(0);
+    expect(screen.getByText(KIND_LINE.analysis)).toBeInTheDocument();
+    // To another page and back: each group as the owner left it.
+    await userEvent.click(screen.getByRole("link", { name: /Configuration/ }));
+    await waitFor(() => expect(document.querySelector("main .h1")).toHaveTextContent("Configuration"));
+    router.history.back();
+    expect(await screen.findByRole("button", { name: "Focus splits · 11" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Analysis · 10" })).toHaveAttribute("aria-expanded", "false");
+    expect(titles(/^Split paper/)).toBe(11);
+    expect(titles(/^Stuck paper/)).toBe(0);
+  });
+
+  it("acknowledges a folded group from its head, and its group in the Acknowledged section folds the same way", async () => {
+    viewport(true);
+    const ungraded = Array.from({ length: 11 }, (_, i) => ({ ...stuck, paper_id: `2610.003${String(i).padStart(2, "0")}`, title: `Ungraded paper ${i}`, topic: "mi" }));
+    const calls = scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night: { ...quality.night, ungraded } }, "POST /api/settings/acknowledge": (c) => c.body });
+    renderApp("/settings/needs");
+    const head = await screen.findByRole("button", { name: "Ungraded · 11" });
+    expect(head).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(within(head.closest(".ngrp") as HTMLElement).getByRole("button", { name: "Acknowledge" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ steps: ungraded.map((s) => ({ step: "grading", paper_id: s.paper_id, revision: 1, topic: "mi", failed_at: s.failed_at })), passes: [], digests: [] }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Ungraded · 11" })).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Acknowledged · 11" }));
+    const section = screen.getByRole("region", { name: "Acknowledged" });
+    const inside = within(section).getByRole("button", { name: "Ungraded · 11" });
+    expect(inside).toHaveAttribute("aria-expanded", "false");
+    expect(within(section).queryAllByRole("link", { name: /^Ungraded paper/ })).toHaveLength(0);
+    await userEvent.click(inside);
+    expect(within(section).getAllByRole("link", { name: /^Ungraded paper/ })).toHaveLength(11);
+  });
+
+  it("keeps a row's open form through a fold of its group", async () => {
+    viewport(true);
+    const awaiting = { ...stuck, paper_id: "2610.00004", title: "An unclassified paper" };
+    scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night: { ...quality.night, awaiting_classification: [awaiting] } } });
+    renderApp("/settings/needs");
+    const head = await screen.findByRole("button", { name: "Awaiting classification · 1" });
+    await userEvent.click(screen.getByRole("button", { name: "Classify by hand" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Mech interp" }));
+    await userEvent.click(head);
+    expect(screen.queryByRole("button", { name: "Mech interp" })).toBeNull();
+    await userEvent.click(head);
+    expect(screen.getByRole("button", { name: "Mech interp" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("folds the rows the API says were acknowledged, and counts only the others", async () => {
@@ -479,8 +550,8 @@ describe("Settings", () => {
     const night = { ...quality.night, splits: [split, oneLab], ungraded: [refused, halfRefused], fulltext: [{ ...pass, refused: true }] };
     const calls = scriptFetch({ ...common, "GET /api/settings/quality": { ...quality, night }, "PUT /api/labels/mi/2610.00009": { saved: true } });
     renderApp("/settings/needs");
-    expect(await screen.findByText("Graded by one lab · 1")).toBeInTheDocument();
-    expect(screen.getByText("Focus splits · 1")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Graded by one lab · 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Focus splits · 1" })).toBeInTheDocument();
     const item = screen.getByText("A one-lab paper").closest(".need") as HTMLElement;
     expect(item).toHaveTextContent("judge refused · check central · central stands");
     const ungraded = screen.getByText("Refused by every check and judge model.").closest(".need") as HTMLElement;
@@ -497,7 +568,7 @@ describe("Settings", () => {
     viewport(true);
     const calls = scriptFetch({ ...common, "POST /api/settings/fulltext/7/now": () => new Response(null, { status: 204 }) });
     renderApp("/settings/needs");
-    expect(await screen.findByText("Full text · 1")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Full text · 1" })).toBeInTheDocument();
     const item = screen.getByRole("link", { name: "A textless paper" }).closest(".need")!;
     expect(item).toHaveTextContent("Brief failed 3 runs: the LaTeX did not build");
     await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Run it now" }));
@@ -511,7 +582,7 @@ describe("Settings", () => {
     viewport(true);
     const calls = scriptFetch({ ...common, "POST /api/settings/fulltext/7/pdf": () => new Response(null, { status: 204 }) });
     renderApp("/settings/needs");
-    expect(await screen.findByText("Full text · 1")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Full text · 1" })).toBeInTheDocument();
     const item = screen.getByRole("link", { name: "A textless paper" }).closest(".need")! as HTMLElement;
     await userEvent.click(within(item).getByRole("button", { name: "Use the PDF" }));
     await waitFor(() => expect(item).toHaveClass("settled"));

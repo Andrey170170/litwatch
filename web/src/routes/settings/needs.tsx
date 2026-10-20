@@ -4,15 +4,17 @@
  * mark into the cached quality page (`settleNeeds` in mutations.ts), so the row settles even when the page was left
  * before the write returned, the sidebar's count follows and the next fresh visit fetches afresh. Each red group has
  * Acknowledge, and the page Acknowledge all: what the owner has seen folds into the Acknowledged section at the foot,
- * grouped the same way and keeping its buttons, and stops counting in the run status.
+ * grouped the same way and keeping its buttons, and stops counting in the run status. Each group folds under its
+ * head (`Group`).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useReducer, useState } from "react";
 import { useAcknowledge, useClassifyByHand, useDismiss, useFixText, useGradeNow, useLabel, useRetryAnalysis, useRunPassNow, useUnlabel, useWriteAgain } from "@/api/mutations";
 import type { Schemas } from "@/api/client";
 import { paperQuery, qualityQuery, taxonomyQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { rowDate } from "@/lib/format";
+import { setShelfOpen, shelfOpen } from "@/lib/remember";
 import { any, type FailedDigest as FailedDigestRow, type LabelValue, openSplits, type Quality, RED, type Red, type Split, type Stuck, type TextPassStuck, toAcknowledge, waiting } from "@/lib/settings";
 import { Failed, FitSeg, Load, PageHead, PaperLink, useTopicCards } from "./parts";
 
@@ -28,19 +30,37 @@ const KIND = {
   digests: { name: "Digests", line: "A digest could not be written; its papers stay due and the next run writes it again." },
 } as const;
 
-/** A group of items with its name, count and line; `acknowledge`, for a red group with something still unseen. */
-function Group<T>({ kind, items, acknowledge, children }: { kind: keyof typeof KIND; items: T[]; acknowledge?: React.ReactNode; children: (item: T) => React.ReactNode }) {
+/** A group longer than this starts folded to its head and line. */
+const FOLD_OVER = 10;
+
+/** A group of items with its name, count and line; `acknowledge`, for a red group with something still unseen. Its
+ * head folds or opens it, Acknowledge staying beside the head; a group of more than ten starts folded, and the
+ * owner's choice is remembered for the session, the Acknowledged section's groups apart from the page's. The head
+ * keeps the group's edge, yellow for the owner's word and red for a failure, so a folded group still shows which. */
+function Group<T>({ kind, items, acknowledge, acknowledged = false, children }: { kind: keyof typeof KIND; items: T[]; acknowledge?: React.ReactNode; acknowledged?: boolean; children: (item: T) => React.ReactNode }) {
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
   if (!items.length) return null;
+  const key = `needs:${acknowledged ? "acknowledged:" : ""}${kind}`;
+  const open = shelfOpen(key, items.length <= FOLD_OVER);
+  const toggle = () => {
+    setShelfOpen(key, !open);
+    rerender();
+  };
+  const ask = kind === "split" || kind === "one_lab" || kind === "escalated";
   return (
-    <div className="ngrp">
+    <div className={`ngrp ${ask ? "ask" : "fail"}`}>
       <div className="caprow">
-        <div className="cap">
-          {KIND[kind].name} · {items.length}
-        </div>
+        <button className="tpfold" onClick={toggle} aria-expanded={open}>
+          <span className={`car${open ? " open" : ""}`} aria-hidden />
+          <span className="ct">
+            {KIND[kind].name} · <b>{items.length}</b>
+          </span>
+        </button>
         {acknowledge}
       </div>
       <div className="nsub">{KIND[kind].line}</div>
-      {items.map(children)}
+      {/* Folded rows stay mounted, hidden, so a draft or a pending action in one survives the fold. */}
+      <div hidden={!open}>{items.map(children)}</div>
     </div>
   );
 }
@@ -312,19 +332,19 @@ export function NeedsPage() {
     const acknowledge = (list: Red) => (acknowledged ? undefined : button([list], "Acknowledge"));
     return (
       <>
-        <Group kind="awaiting" items={pick(n.awaiting_classification)} acknowledge={acknowledge("awaiting_classification")}>
+        <Group kind="awaiting" acknowledged={acknowledged} items={pick(n.awaiting_classification)} acknowledge={acknowledge("awaiting_classification")}>
           {(s) => <Awaiting key={s.paper_id} s={s} />}
         </Group>
-        <Group kind="ungraded" items={pick(n.ungraded)} acknowledge={acknowledge("ungraded")}>
+        <Group kind="ungraded" acknowledged={acknowledged} items={pick(n.ungraded)} acknowledge={acknowledge("ungraded")}>
           {(s) => <Ungraded key={`${s.paper_id}:${s.topic}`} s={s} badge={badge(s.topic)} />}
         </Group>
-        <Group kind="analysis" items={pick(n.analysis_failed)} acknowledge={acknowledge("analysis_failed")}>
+        <Group kind="analysis" acknowledged={acknowledged} items={pick(n.analysis_failed)} acknowledge={acknowledge("analysis_failed")}>
           {(s) => <Analysis key={s.paper_id} s={s} />}
         </Group>
-        <Group kind="fulltext" items={pick(n.fulltext)} acknowledge={acknowledge("fulltext")}>
+        <Group kind="fulltext" acknowledged={acknowledged} items={pick(n.fulltext)} acknowledge={acknowledge("fulltext")}>
           {(s) => <TextPass key={s.id} s={s} />}
         </Group>
-        <Group kind="digests" items={pick(n.digests)} acknowledge={acknowledge("digests")}>
+        <Group kind="digests" acknowledged={acknowledged} items={pick(n.digests)} acknowledge={acknowledge("digests")}>
           {(d) => <FailedDigest key={d.id} d={d} badge={badge(d.topic)} />}
         </Group>
       </>
