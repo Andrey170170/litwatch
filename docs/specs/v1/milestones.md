@@ -44,8 +44,10 @@ the nightly under the owner's caps before the switch (#74, #75). N8, the switch
 ([`docs/plans/v1-deploy.md`](../../plans/v1-deploy.md)): the telemetry (#77), and v1 in place of 0.14 on the night of
 2026-10-16, accepted by the owner on 10-17 ([`evals/2026-10-17-switch.md`](../../../evals/2026-10-17-switch.md)), when
 `v1` merged into `main`. Next: N8's P4, Zotero and WebDAV after a few stable nights and the removal of 0.14. The failure-handling plan
-([`docs/plans/failure-handling.md`](../../plans/failure-handling.md), decisions 68–72) is next beside it: fallback
-models per role, what reaches Vergil, Deep cards without a cap, Acknowledge.
+([`docs/plans/failure-handling.md`](../../plans/failure-handling.md), decisions 68–72) is built, on 2026-10-20, and
+goes live with the next deployment: Acknowledge (#91), fallback models per role chosen by replay (#94, #97), service
+failures that don't count against a paper and Deep cards without a cap (#98), and a status document that says only
+when litwatch can't do its job (#102). The `deep` image and litwatch deploy together from #98 on.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).
