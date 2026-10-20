@@ -65,3 +65,7 @@ TEST_DATABASE_URL=postgresql://…/disposable uv run pytest
 
 Tests that need PostgreSQL create and drop their own schema and are skipped without the
 variable. Never point it at a database you care about.
+
+## License
+
+Apache License 2.0; see `LICENSE`.

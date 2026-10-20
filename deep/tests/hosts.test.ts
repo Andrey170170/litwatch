@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildHosts, s2Id, storeHits } from "../src/hosts.ts";
+import { buildHosts, fetchAllowed, s2Id, storeHits } from "../src/hosts.ts";
 
 test("store.search asks v1's papers table with the read token and keeps the old hit shape", async () => {
   const asked: { url: string; auth: string | null }[] = [];
@@ -52,4 +52,21 @@ test("Semantic Scholar is asked by arXiv id for a modern or a legacy id, any ver
   assert.equal(s2Id("arXiv:cs/9901001"), "arXiv:cs/9901001");
   assert.equal(s2Id("math.AG/0601001v3"), "arXiv:math.AG/0601001");
   assert.equal(s2Id("cs/990100"), null);
+});
+
+test("fetch names the operator's contact in the User-Agent only when one is configured", async () => {
+  const agents: (string | null)[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    agents.push(new Headers(init?.headers).get("user-agent"));
+    return new Response("ok", { headers: { "content-type": "text/plain" } });
+  }) as typeof fetch;
+  try {
+    // Unpaced hosts, so the test does not wait out arXiv's spacing.
+    await fetchAllowed("https://openreview.net/x", 100, "ops@example.org");
+    await fetchAllowed("https://huggingface.co/x", 100);
+    assert.deepEqual(agents, ["litwatch-deep (mailto:ops@example.org)", "litwatch-deep"]);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

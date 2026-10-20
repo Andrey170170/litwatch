@@ -36,13 +36,15 @@ LABEL org.opencontainers.image.title="litwatch-archive" \
       org.opencontainers.image.description="arxiv-archive: the paper store litwatch ships with" \
       org.opencontainers.image.source="${SOURCE}" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.revision="${REVISION}"
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 COPY --from=builder --chown=0:0 /app/.venv /app/.venv
+COPY --chown=0:0 LICENSE /app/LICENSE
 
 # Fixed 1000:1000, as litwatch's image.
 RUN groupadd --gid 1000 archive && \

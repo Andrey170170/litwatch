@@ -4876,7 +4876,7 @@ papers:
     cot-faithfulness: 4
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.25379'
   title: Adaptive Triggering for Bias Correction in LLM Reasoning
   abstract: 'Chain-of-thought prompting can expose and amplify demographic stereotypes within an LLM''s
@@ -4904,7 +4904,7 @@ papers:
     cot-faithfulness: 4
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.24231'
   title: 'RecurSE: Bounded Recursive Self-Evaluation for LLM Rubric Judges'
   abstract: 'LLM-as-judge is essential for evaluating open-ended text and steering post-training, yet
@@ -5017,7 +5017,7 @@ papers:
     cot-faithfulness: 3
     mech-interp: 2
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.29464'
   title: Chain-of-Thought Faithfulness of Reasoning Models Varies with Where and How Preference Cues Are
     Delivered
@@ -5047,7 +5047,7 @@ papers:
     cot-faithfulness: 1
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2609.00652'
   title: 'Self-Reports Are Not Verification: Environment-Grounded Auditing of LLM Operators in Evolutionary
     Search'
@@ -5075,7 +5075,7 @@ papers:
     cot-faithfulness: 4
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2609.00264'
   title: The Answer Is Not the Argument
   abstract: 'Chain-of-thought monitoring is proposed for AI oversight, yet evaluations often provide monitors
@@ -5104,7 +5104,7 @@ papers:
     cot-faithfulness: 3
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.26036'
   title: 'Trace Integrity for LLM Data Agents: A Vision for Auditable Structured Reasoning in Real-World
     Systems'
@@ -5133,7 +5133,7 @@ papers:
     cot-faithfulness: 4
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.30679'
   title: 'LCoT-GV: Graph Attention Networks for Verifying Long Reasoning Chains in Large Language Models'
   abstract: Large Reasoning Models produce Long Chains-of-Thought (LCoTs) which involve breaking down
@@ -5154,7 +5154,7 @@ papers:
     cot-faithfulness: 4
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.24232'
   title: 'TRACE: An Evidence-Grounded Benchmark for Safety Evaluation of Large Reasoning Models'
   abstract: 'Large Reasoning Models (LRMs) generate intermediate reasoning traces that may contain unsafe
@@ -5179,7 +5179,7 @@ papers:
     cot-faithfulness: 3
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.29956'
   title: Detecting Hidden Chain-of-Thought in Large Language Models with Linguistic, Behavioral, and Mechanistic
     Indicators
@@ -5205,7 +5205,7 @@ papers:
     cot-faithfulness: 3
     mech-interp: 2
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.29286'
   title: 'MMPCBench: Benchmarking Multimodal Large Language Models on Proactive Critique of Flawed Inputs'
   abstract: 'As Multimodal Large Language Models (MLLMs) evolve into sophisticated interactive assistants,
@@ -5230,7 +5230,7 @@ papers:
     cot-faithfulness: 3
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.29070'
   title: 'Selective Disclosure of Hidden Directives in Reasoning Models: Behavioral Asymmetry and Steering'
   abstract: 'Chain-of-thought (CoT) reasoning traces are increasingly proposed as a mechanism for AI oversight:
@@ -5258,7 +5258,7 @@ papers:
     cot-faithfulness: 1
     mech-interp: 3
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.28725'
   title: 'Beyond the Answer Key: Robustness Evaluation of Large Language Models for Step-Level Mathematical
     Verification'
@@ -5315,7 +5315,7 @@ papers:
     cot-faithfulness: 2
     mech-interp: 3
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana) | tier reviewed by hand against the confirmed v3 verdict 2026-09-07'
+    pending Andrei/the PI) | tier reviewed by hand against the confirmed v3 verdict 2026-09-07'
 - id: '2608.27348'
   title: INTENT-AS-A-TOOL Makes it Easy to Track Agentic Misalignment
   abstract: 'As large language models (LLMs) are deployed as autonomous agents, safety failures increasingly
@@ -5337,7 +5337,7 @@ papers:
     cot-faithfulness: 3
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.27265'
   title: 'SCIT: Testing Causal Cache Carriers in Latent Chain-of-Thought Models'
   abstract: 'Latent chain-of-thought models move intermediate reasoning from emitted text into continuous
@@ -5410,7 +5410,7 @@ papers:
     cot-faithfulness: 2
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.24958'
   title: Can We Read the Mind of an Audio LLM? A Verbalizable, Multilingual Middle-Layer Workspace
   abstract: 'An audio language model is a black box in a specific way: we see what it says, never what
@@ -5442,7 +5442,7 @@ papers:
     cot-faithfulness: 4
     mech-interp: 2
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.24037'
   title: 'Curved Inference II: Sleeper Agent Geometry - Extending Interpretability Beyond Probes'
   abstract: This paper extends Anthropic's Sleeper Agents research [1], which showed artificial backdoors
@@ -5534,7 +5534,7 @@ papers:
     cot-faithfulness: 4
     mech-interp: 4
   note: 'silver: backfill 2026-09-03, Luna/Sol and Terra agree on tier | hand pass 2026-09-07 (Claude,
-    pending Andrei/Ana)'
+    pending Andrei/the PI)'
 - id: '2608.27340'
   title: 'Not All Eval-Awareness Is Equal: Capabilities Framing Predicts Compliance'
   abstract: 'Steering interventions targeting eval-awareness, a model''s recognition that it is being
@@ -5560,7 +5560,7 @@ papers:
     cot-faithfulness: 3
     mech-interp: 4
     cot-monitoring: 2
-  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/Ana)
+  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/the PI)
 - id: '2609.02754'
   title: Untangling the Mechanisms of Misleading Context in Medical Question Answering
   abstract: Large language models now answer medical questions with expert-level performance. However,
@@ -5592,7 +5592,7 @@ papers:
   expected:
     cot-faithfulness: 2
     mech-interp: 4
-  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/Ana)
+  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/the PI)
 - id: '2609.03366'
   title: 'Accountable AI with Grounded, Faithful, Consistent, Actionable Rationales: A Case Study in Clinical
     Trial Matching with VERDICT'
@@ -5628,7 +5628,7 @@ papers:
   expected:
     cot-faithfulness: 3
     mech-interp: 4
-  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/Ana)
+  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/the PI)
 - id: '2609.04194'
   title: 'Legibility is Not Interpretability: Comparing Judged and Actual Importance in Chain-Of-Thought
     Reasoning'
@@ -5660,7 +5660,7 @@ papers:
   expected:
     cot-faithfulness: 2
     mech-interp: 4
-  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/Ana)
+  note: live feed positive; hand pass 2026-09-07 (Claude, pending Andrei/the PI)
 - id: '2605.25052'
   title: 'Faithfulness Metrics Don''t Measure Faithfulness: A Meta-Evaluation with Ground Truth'
   abstract: Chains of thought (CoTs) have become central in interpreting and auditing behaviors of large
@@ -5749,4 +5749,4 @@ papers:
     mech-interp: 4
     cot-monitoring: 3
   note: 'gold: intervention-based faithfulness tests, the method class BonaFide meta-evaluates; hand pass
-    2026-09-07 (Claude, pending Andrei/Ana)'
+    2026-09-07 (Claude, pending Andrei/the PI)'

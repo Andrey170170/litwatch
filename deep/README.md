@@ -39,6 +39,7 @@ node src/main.ts serve
 | `LITWATCH_URL` | `http://litwatch:8080` | litwatch v1, for the agent's `store.search` (`GET /api/papers`) |
 | `LITWATCH_TOKEN` | | litwatch's read token (`LITWATCH_READ_TOKEN` there), which may only search and read papers |
 | `S2_API_KEY` | | Semantic Scholar key; without one `s2.lookup` is rate-limited |
+| `DEEP_CONTACT` | | An address the fetched sites can write to, sent in the User-Agent (arXiv asks for one) |
 
 A secret may also be given as a file: `LITWATCH_TOKEN_FILE`, `S2_API_KEY_FILE`.
 

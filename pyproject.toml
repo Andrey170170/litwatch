@@ -7,6 +7,7 @@ name = "litwatch"
 version = "1.0.0.dev0"
 description = "Insurance against missing a paper on a watched research question"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.13"
 dependencies = [
     "arxiv-archive==0.2.0",

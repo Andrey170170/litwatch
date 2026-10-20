@@ -10,6 +10,8 @@ export interface HostConfig {
   /** litwatch's read token, which may only search and read papers. */
   litwatchToken?: string;
   s2ApiKey?: string;
+  /** An address the fetched sites can write to, sent in the User-Agent; arXiv asks for one. */
+  contact?: string;
   maxFetchChars: number;
 }
 
@@ -151,7 +153,7 @@ export function buildHosts(cfg: HostConfig): Record<string, HostFn> {
       const found = (await getJson(`${S2}/paper/search?${params}`, s2Headers)) as { data?: unknown[] };
       return found.data ?? [];
     },
-    fetch: async ([url]) => fetchAllowed(String(url), cfg.maxFetchChars),
+    fetch: async ([url]) => fetchAllowed(String(url), cfg.maxFetchChars, cfg.contact),
   };
 }
 
@@ -164,7 +166,7 @@ export function s2Id(text: string): string | null {
   return null;
 }
 
-export async function fetchAllowed(url: string, maxChars: number): Promise<unknown> {
+export async function fetchAllowed(url: string, maxChars: number, contact?: string): Promise<unknown> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -177,7 +179,7 @@ export async function fetchAllowed(url: string, maxChars: number): Promise<unkno
     throw new Error(`${parsed.hostname} is not on the allowlist (${ALLOWED_HOSTS.join(", ")})`);
   return paced(parsed.hostname, async () => {
     const resp = await fetch(url, {
-      headers: { "user-agent": "litwatch-deep (mailto:andrey24122004@gmail.com)" },
+      headers: { "user-agent": contact ? `litwatch-deep (mailto:${contact})` : "litwatch-deep" },
       redirect: "follow",
       signal: AbortSignal.timeout(30_000),
     });

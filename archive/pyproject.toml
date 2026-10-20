@@ -7,6 +7,7 @@ name = "arxiv-archive"
 version = "0.5.1"
 description = "Internal paper catalog, PDF and LaTeX store, and priority acquisition service"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = ["requests>=2.34,<3", "pyarrow>=25,<26", "zstandard>=0.25,<0.26"]
 
