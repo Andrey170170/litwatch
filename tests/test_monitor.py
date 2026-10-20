@@ -396,13 +396,21 @@ async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(c
     assert openrouter["reason"] == (
         f"2 calls in nightly {run} failed and none had a reply; expected a reply"
     )
+    # An evaluation's reply in the night is not the provider's to the night.
+    evaluation = await runs.start(conn, "eval")
+    await conn.execute(
+        "INSERT INTO inference_calls (run_id, operation, request_key, usage, responded_at) "
+        "SELECT %s, 'brief', 'eval', %s, finished_at FROM runs WHERE id = %s",
+        (evaluation, '{"model": "lab/b", "via": "openrouter"}', run),
+    )
+    assert provider((await monitor.get("/status")).json(), "openrouter")["status"] == "degraded"
     # A reply in the night that settled an older run's call (a dead run's batch) is the night's.
     (_,) = await (
         await conn.execute(
             "UPDATE inference_calls SET responded_at = r.finished_at "
-            "FROM runs r WHERE r.id = %s AND inference_calls.run_id <> r.id "
+            "FROM runs r WHERE r.id = %s AND inference_calls.run_id NOT IN (r.id, %s) "
             "AND usage->>'via' = 'openrouter' RETURNING inference_calls.id",
-            (run,),
+            (run, evaluation),
         )
     ).fetchall()
     assert provider((await monitor.get("/status")).json(), "openrouter")["status"] == "healthy"

@@ -231,7 +231,8 @@ known end, and `nightly` already reads it failed).
 - `provider-<name>`, one per model provider, is degraded from an `account` error (models.md, the gateway) until the
   provider's next reply; and when, in that run, the provider had failed calls (provider errors, timeouts) and not one
   reply. A reply is any answer the provider sent, a refusal or an invalid answer included; an answer reused from the
-  journal is not one.
+  journal is not one. Evaluation runs write their own tables only, so an account error or a reply only an evaluation
+  saw does not reach it.
 - `deep` is degraded while the service's health check reports a sign-in other than ok or does not answer, and from
   any service failure litwatch sees (a job the service tagged `service`, an error submitting or following a job) until
   the next card is made, whenever either happened.

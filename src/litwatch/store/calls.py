@@ -14,6 +14,7 @@ from litwatch.llm.types import Usage
 
 RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and accounted for
 RETALLY_LOCK = 7213912  # advisory lock namespace, beside jobs.lock.RUN_LOCK
+EVAL = "eval"  # an evaluation run's kind: its calls say nothing to the status document
 
 # What a provider said, kept in `provider_observations` by the same statement as the call row it
 # came with (`c`, returning `responded_at`), so the two never part and the reply's time is its
@@ -34,17 +35,15 @@ _ACCOUNT_ERROR = (
 )
 
 
-def _reply(usage: Usage) -> dict[str, Any]:
-    """`_REPLIED`'s parameters: a reply shared from another call is not one of the provider's."""
-    return {"via": usage.via, "own": usage.via is not None and not usage.reused}
-
-
 class CallJournal:
     """One run's calls. Give it a connection of its own: concurrent calls write here while
-    the job's connection is inside a transaction."""
+    the job's connection is inside a transaction. Without `observes` (an evaluation run, which
+    writes its own tables only) it keeps no provider observations."""
 
-    def __init__(self, conn: psycopg.AsyncConnection, run_id: int) -> None:
-        self.conn, self.run_id = conn, run_id
+    def __init__(
+        self, conn: psycopg.AsyncConnection, run_id: int, *, observes: bool = True
+    ) -> None:
+        self.conn, self.run_id, self.observes = conn, run_id, observes
         self._retallying = asyncio.Lock()  # the connection holds one retally's lock at a time
 
     async def cached(self, key: str) -> dict[str, Any] | None:
@@ -142,7 +141,7 @@ class CallJournal:
             "WHERE batch_id = %(batch)s AND request_key = %(key)s AND usage->>'cost' IS NULL) "
             f"RETURNING run_id, responded_at), {_REPLIED} SELECT run_id FROM c",
             {"usage": Jsonb(usage.model_dump(mode="json")), "batch": batch_id, "key": key}
-            | _reply(usage),
+            | self._reply(usage),
         )
         await self._retally(await cur.fetchone())
 
@@ -153,14 +152,21 @@ class CallJournal:
             "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
             "responded_at = clock_timestamp() WHERE id = %(id)s RETURNING run_id, responded_at), "
             f"{_REPLIED} SELECT run_id FROM c",
-            {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id} | _reply(usage),
+            {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id} | self._reply(usage),
         )
         await self._retally(await cur.fetchone())
+
+    def _reply(self, usage: Usage) -> dict[str, Any]:
+        """`_REPLIED`'s parameters: a reply shared from another call is not the provider's."""
+        own = self.observes and usage.via is not None and not usage.reused
+        return {"via": usage.via, "own": own}
 
     async def account_error(self, provider: str, error: str) -> None:
         """The provider refused a batch, or a request in one, for the account (models.md, the
         gateway), seen by its batcher whether or not a call waits on it. A normal call's is its
         `reject`."""
+        if not self.observes:
+            return
         await self.conn.execute(
             _ACCOUNT_ERROR.format(source=""), {"provider": provider, "error": error[:2000]}
         )
@@ -201,7 +207,8 @@ class CallJournal:
         self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
     ) -> None:
         """The call got no usable answer; with `account`, that provider refused it for the
-        account, which is observed with it."""
+        account, which is observed with it (`observes`)."""
+        account = account if self.observes else None
         update = "UPDATE inference_calls SET error = %(error)s, reply = %(reply)s WHERE id = %(id)s"
         observed = _ACCOUNT_ERROR.format(source="FROM c")
         await self.conn.execute(
@@ -291,7 +298,8 @@ async def observations(conn: psycopg.AsyncConnection) -> dict[str, dict[str, Any
 async def outcomes(conn: psycopg.AsyncConnection, run: dict[str, Any]) -> dict[str, dict[str, int]]:
     """Per provider, the run's calls that failed without an answer (provider errors and
     timeouts), and the replies it sent while the run went on, whichever run's calls they
-    settled (a dead run's batch, read in this one; reused replies left out)."""
+    settled (a dead run's batch, read in this one; reused replies and evaluation runs' calls
+    left out)."""
     rows = await (
         await conn.execute(
             "SELECT provider, sum(failed)::int AS failed, sum(replied)::int AS replied FROM ("
@@ -299,9 +307,15 @@ async def outcomes(conn: psycopg.AsyncConnection, run: dict[str, Any]) -> dict[s
             "WHERE run_id = %(run)s AND (error LIKE 'provider%%' OR error LIKE 'timeout%%') "
             "UNION ALL SELECT usage->>'via', 0, 1 FROM inference_calls "
             "WHERE responded_at BETWEEN %(since)s AND %(until)s "
-            "AND NOT coalesce((usage->>'reused')::boolean, false)) seen "
+            "AND NOT coalesce((usage->>'reused')::boolean, false) "
+            "AND run_id NOT IN (SELECT id FROM runs WHERE kind = %(eval)s)) seen "
             "WHERE provider IS NOT NULL GROUP BY provider",
-            {"run": run["id"], "since": run["started_at"], "until": run["finished_at"]},
+            {
+                "run": run["id"],
+                "since": run["started_at"],
+                "until": run["finished_at"],
+                "eval": EVAL,
+            },
         )
     ).fetchall()
     return {r["provider"]: {"failed": r["failed"], "replied": r["replied"]} for r in rows}

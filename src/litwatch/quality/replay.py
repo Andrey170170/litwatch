@@ -334,7 +334,7 @@ async def run(
     for p, t in r.pairs:
         topics_of.setdefault(p, []).append(t)
     by_slug = {t.slug: t for t in tree.topics}
-    async with model_run(conn, config, "eval", gateway=gateway) as mr:
+    async with model_run(conn, config, calls.EVAL, gateway=gateway) as mr:
         await store.ran_under(conn, eval_run_id, mr.run_id)
         if r.stale:
             await store.forget(conn, eval_run_id, sorted(r.stale))

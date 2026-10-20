@@ -12,12 +12,14 @@ CREATE TABLE provider_observations (
     replied_at        timestamptz  -- any answer it sent, refused or invalid; never a reused one
 );
 
--- From the journal so far: an account error is known only by when its call started.
+-- From the journal so far, evaluation runs' calls left out (they write their own tables only):
+-- an account error is known only by when its call started.
 INSERT INTO provider_observations (provider, account_error, account_error_at, replied_at)
 SELECT via, (array_agg(error ORDER BY started_at DESC) FILTER (WHERE error LIKE 'account%'))[1],
        max(started_at) FILTER (WHERE error LIKE 'account%'),
        max(responded_at) FILTER (WHERE NOT coalesce((usage->>'reused')::boolean, false))
-FROM (SELECT usage->>'via' AS via, * FROM inference_calls) calls
+FROM (SELECT usage->>'via' AS via, c.* FROM inference_calls c
+      WHERE c.run_id NOT IN (SELECT id FROM runs WHERE kind = 'eval')) calls
 WHERE via IS NOT NULL GROUP BY via;
 
 -- The replies a night had, whichever run's calls they settled (a dead run's batch, read later).
