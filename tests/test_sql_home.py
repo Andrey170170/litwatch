@@ -1,5 +1,5 @@
-"""`store` is the only package with SQL: no `execute` call outside it beyond the ones this
-list names. The list only shrinks; a call moved into `store` comes off it."""
+"""`store` is the only package with SQL: no `execute` or `copy` call outside it beyond the
+ones this list names. The list only shrinks; a call moved into `store` comes off it."""
 
 import ast
 from pathlib import Path
@@ -26,10 +26,14 @@ def test_sql_stays_in_store():
         name = path.relative_to(SRC).as_posix()
         if name.startswith("store/"):
             continue
+        # `copy` with a statement is COPY; without one it is a dict's or a model's copy.
         calls = sum(
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"execute", "executemany"}
+            and (
+                node.func.attr in {"execute", "executemany"}
+                or (node.func.attr == "copy" and bool(node.args))
+            )
             for node in ast.walk(ast.parse(path.read_text()))
         )
         if calls:
