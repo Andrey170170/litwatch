@@ -37,6 +37,7 @@ class DigestRole(StrEnum):
     PICK = "pick"  # put forward by name
     LISTED = "listed"  # in its list (a Focus digest's papers, an Area's "also due")
     MENTIONED = "mentioned"  # named in its text, not a pick
+    UPDATED = "updated"  # an old paper back with a new version, in its folded list, not new
 
 
 # The depths with a daily digest; every depth has a weekly one.

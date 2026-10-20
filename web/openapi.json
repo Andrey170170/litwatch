@@ -4041,11 +4041,16 @@
             "type": "integer",
             "title": "Must Read",
             "default": 0
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated",
+            "default": 0
           }
         },
         "type": "object",
         "title": "DigestCounts",
-        "description": "What a digest's Mark counts: the papers it covered, its picks, and of them those central,\nrelated, and graded must read."
+        "description": "What a digest's Mark counts: the papers it covered, its picks, and of them those central,\nrelated, and graded must read; apart from them, its updated papers."
       },
       "DigestMark": {
         "properties": {
@@ -4118,6 +4123,17 @@
           "role": {
             "$ref": "#/components/schemas/DigestRole"
           },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
           "why": {
             "anyOf": [
               {
@@ -4182,7 +4198,7 @@
           "rarity"
         ],
         "title": "DigestPaper",
-        "description": "A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set\nit below relevant where it was graded."
+        "description": "A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set\nit below relevant where it was graded. An updated paper has the arXiv `version` it came\nback with; its `announced` is when it first came out."
       },
       "DigestPeriod": {
         "type": "string",
@@ -4197,7 +4213,8 @@
         "enum": [
           "pick",
           "listed",
-          "mentioned"
+          "mentioned",
+          "updated"
         ],
         "title": "DigestRole",
         "description": "How a digest shows one of its papers."

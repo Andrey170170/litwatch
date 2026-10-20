@@ -532,6 +532,260 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
     assert {p for p, _ in (await shown(db, INTERP.slug, "week", mon2))[1]} == {R.id}
 
 
+# -- updated papers --------------------------------------------------------------------------------
+
+MAY = "2026-05-04T15:00:00+00:00"  # first out on Tue 5 May
+FOR_TUE = "2026-10-05T15:00:00+00:00"  # Monday 11:00 in New York: Tuesday's listing
+
+
+def updated(id: str, *later: str, title: str = "Back with a new version", **more):
+    """An old paper first out on 5 May, back with versions submitted at `later` (by default
+    one in Tuesday's listing); a later time of None is a version without one."""
+    found = history(MAY, *(later or (FOR_TUE,)))
+    found = [{k: v for k, v in e.items() if v is not None} for e in found]
+    return paper(id, title=title, version=len(found), version_history=found, **more)
+
+
+U = updated("2605.00011")
+
+
+async def field(conn, p, fit: str) -> None:
+    """A member of the Field topic's class, graded there at `fit`, grading finished."""
+    await classify(conn, p, AGENTS.slug)
+    await analyse(conn, p)
+    await grade(conn, p, fit, AGENTS)
+    await verdicts.passed(conn, [(p.id, await papers_store.revision(conn, p.id))])
+
+
+async def digest_row(conn, topic: str, period: str, on: date) -> dict:
+    return await (
+        await conn.execute(
+            "SELECT * FROM digests WHERE topic = %s AND period = %s AND day = %s",
+            (topic, period, on),
+        )
+    ).fetchone()
+
+
+async def test_an_old_papers_new_version_is_listed_once_in_its_daily_and_its_weekly(db):
+    """U, first out in May, is back with v2 in Tuesday's listing: Tuesday's daily lists it as
+    updated, after the papers; its v3 on Thursday brings it back in no later daily, and the
+    week's weekly lists it once, at the version it stands at; the next weekly does not."""
+    w = Writer()
+    await papers_store.upsert(db, [U])
+    await focus(db, U, "central")
+    await focus(db, S, "related")
+    await listed(db, TUE, S)
+    await day(db, w, TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == (
+        "written",
+        [(S.id, "listed"), (U.id, "updated")],
+    )
+    tuesday = await digest_row(db, FAITH.slug, "day", TUE)
+    assert [p["version"] for p in await store_.papers_of(db, tuesday["id"])] == [None, 2]
+    await papers_store.upsert(db, [updated(U.id, FOR_TUE, "2026-10-07T15:00:00+00:00")])
+    await focus(db, Q, "related")
+    await listed(db, THU, Q)
+    await day(db, w, THU)
+    assert await shown(db, FAITH.slug, "day", THU) == ("written", [(Q.id, "listed")])
+    await week(db, w, MON)
+    assert await shown(db, FAITH.slug, "week", MON) == (
+        "written",
+        [(S.id, "listed"), (Q.id, "listed"), (U.id, "updated")],
+    )
+    weekly = await digest_row(db, FAITH.slug, "week", MON)
+    assert [p["version"] for p in await store_.papers_of(db, weekly["id"])][-1] == 3
+    await listed(db, date(2026, 10, 13), R)
+    await week(db, w, date(2026, 10, 12))
+    assert await shown(db, FAITH.slug, "week", date(2026, 10, 12)) == ("nothing_new", [])
+
+
+async def test_updated_papers_add_no_call_and_stay_out_of_the_text_counts_and_rarity(db):
+    """U is a must read, rarer than the day's one related paper: the writer is not given it,
+    and the digest's counts, best rarity, evaluation input and voice-check titles leave it out."""
+    w = Writer()
+    await papers_store.upsert(db, [U])
+    await focus(db, U, "central")
+    await focus(db, S, "related")
+    await listed(db, TUE, S)
+    await day(db, w, TUE)
+    assert len(w.asked) == 1 and U.title not in w.asked[0] and S.title in w.asked[0]
+    row = await digest_row(db, FAITH.slug, "day", TUE)
+    papers = {p["paper_id"]: p for p in await store_.papers_of(db, row["id"])}
+    assert row["counts"] == {
+        "papers": 1,
+        "picks": 0,
+        "central": 0,
+        "related": 1,
+        "must_read": 0,
+        "updated": 1,
+    }
+    assert row["best_rarity"] == papers[S.id]["rarity"] != papers[U.id]["rarity"]
+    assert [d.paper_id for d in await store_.as_shown(db, row["id"], True)] == [S.id]
+    assert [r["titles"] for r in await store_.written(db, TUE, TUE)] == [[S.title]]
+
+
+async def test_a_day_with_only_updated_papers_is_nothing_new_and_its_weekly_recaps_them(db):
+    """U's v2 is in Friday's listing the week before, graded late: Tuesday's daily, with
+    nothing new, lists it without a call, and Tuesday's weekly, though its version is not of
+    the week, recaps it."""
+    w = Writer()
+    u = updated(U.id, "2026-10-01T15:00:00+00:00")
+    await papers_store.upsert(db, [u])
+    await focus(db, u, "central")
+    await listed(db, TUE, S)  # released, nothing due
+    await day(db, w, TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [(U.id, "updated")])
+    assert w.asked == []
+    await week(db, w, MON)
+    assert await shown(db, FAITH.slug, "week", MON) == ("nothing_new", [(U.id, "updated")])
+    assert (await digest_row(db, FAITH.slug, "week", MON))["counts"]["updated"] == 1
+
+
+async def test_no_updated_row_for_a_recent_paper_one_shown_as_new_or_adjacent_or_undated(db):
+    w = Writer()
+    shown_new = updated("2605.00012", title="Shown in May")
+    recent = paper(
+        "2609.00013", version=2, version_history=history("2026-09-28T15:00:00Z", FOR_TUE)
+    )
+    adjacent = updated("2605.00014", title="Only adjacent")
+    undated = updated("2605.00015", None, title="Its v2 has no time")
+    await papers_store.upsert(db, [shown_new, recent, adjacent, undated])
+    await focus(db, shown_new, "central")
+    await day(db, w, date(2026, 5, 5))  # shown as new on its own day
+    await focus(db, recent, "central")
+    await day(db, w, date(2026, 9, 29))
+    assert await shown(db, FAITH.slug, "day", date(2026, 9, 29)) == (
+        "written",
+        [(recent.id, "listed")],
+    )
+    await focus(db, adjacent, "adjacent")
+    await focus(db, undated, "central")
+    await focus(db, S, "related")
+    await listed(db, TUE, S)
+    await day(db, w, TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(S.id, "listed")])
+
+
+async def test_the_three_weeks_of_an_update_are_exact_on_both_sides(db):
+    """A v2 in Monday 14 Sep's listing is more than three weeks before Tuesday's daily. A paper
+    first out on Tue 15 Sep, exactly three weeks before its v2 in Tuesday's listing, is not old:
+    graded after Tuesday's daily, it is in Wednesday's neither as new nor as updated."""
+    w = Writer()
+    stale = updated(U.id, "2026-09-11T15:00:00+00:00")
+    young = paper(
+        "2609.00016", version=2, version_history=history("2026-09-14T15:00:00+00:00", FOR_TUE)
+    )
+    await papers_store.upsert(db, [stale, young])
+    await focus(db, stale, "central")
+    await listed(db, TUE, S)
+    await day(db, w, TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
+    await focus(db, young, "central")
+    await listed(db, WED, Q)
+    await day(db, w, WED)
+    assert await shown(db, FAITH.slug, "day", WED) == ("nothing_new", [])
+
+
+async def test_a_rewritten_version_waits_for_its_grade(db):
+    first = paper(U.id, title=U.title, version=1, version_history=history(MAY))
+    await papers_store.upsert(db, [first])
+    await focus(db, first, "central")
+    rewritten = U.model_copy(update={"abstract": "An entirely different abstract about robots."})
+    await papers_store.upsert(db, [rewritten])
+    await listed(db, TUE, S)
+    await day(db, Writer(), TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
+    await grade(db, rewritten, "central")
+    await listed(db, WED, Q)
+    await day(db, Writer(), WED)
+    assert await shown(db, FAITH.slug, "day", WED) == ("nothing_new", [(U.id, "updated")])
+
+
+async def test_an_area_lists_an_updated_must_read_once_rechecked_and_no_lesser_one(db):
+    w = Writer()
+    relevant = updated("2605.00012", title="Only relevant")
+    await papers_store.upsert(db, [U, relevant])
+    await area(db, U, "central")  # must read: waits for its re-check
+    await area(db, relevant, "related")
+    await area(db, S, "related")
+    await listed(db, TUE, S)
+    await day(db, w, TUE)
+    assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(S.id, "listed")])
+    await db.execute("UPDATE fulltext_passes SET state = 'done' WHERE paper_id = %s", (U.id,))
+    await area(db, Q, "related")
+    await listed(db, WED, Q)
+    await day(db, w, WED)
+    assert await shown(db, INTERP.slug, "day", WED) == (
+        "written",
+        [(Q.id, "listed"), (U.id, "updated")],
+    )
+    assert U.title not in w.asked[-1]  # no pick candidate, nor in the text
+
+
+async def test_a_field_weekly_lists_updated_must_reads_and_one_graded_late_in_the_next(db):
+    """Both back with versions in Friday's listing: U, graded in time, is in that week's
+    weekly; V, graded after it, in the next. A relevant one never is, nor one a weekly showed
+    as new in May."""
+    w = Writer()
+    friday = "2026-10-08T15:00:00+00:00"
+    late = updated("2605.00012", friday, title="Graded late")
+    relevant = updated("2605.00013", friday, title="Only relevant")
+    shown_new = updated("2605.00014", friday, title="Shown in May")
+    await papers_store.upsert(db, [updated(U.id, friday), late, relevant, shown_new])
+    await field(db, shown_new, "central")
+    await week(db, w, date(2026, 5, 4))
+    assert (await shown(db, AGENTS.slug, "week", date(2026, 5, 4)))[1] == [(shown_new.id, "pick")]
+    await field(db, U, "central")
+    await field(db, relevant, "related")
+    await week(db, w, MON)
+    assert await shown(db, AGENTS.slug, "week", MON) == ("nothing_new", [(U.id, "updated")])
+    await field(db, late, "central")
+    await week(db, w, date(2026, 10, 12))
+    assert await shown(db, AGENTS.slug, "week", date(2026, 10, 12)) == (
+        "nothing_new",
+        [(late.id, "updated")],
+    )
+
+
+async def test_an_updated_paper_is_not_a_focus_weeklys_earlier_paper(db):
+    """Listed as updated at Fit central the week before, U is not one the next weekly may
+    bring back; P, listed there as new, is."""
+    w = Writer()
+    u = updated(U.id, "2026-09-28T15:00:00+00:00")  # in Tuesday 29 Sep's listing
+    await papers_store.upsert(db, [u])
+    await focus(db, u, "central")
+    await focus(db, P, "central")
+    await listed(db, date(2026, 9, 29), P)
+    await day(db, w, date(2026, 9, 29))
+    await week(db, w, date(2026, 9, 28))
+    assert (await shown(db, FAITH.slug, "week", date(2026, 9, 28)))[1] == [
+        (P.id, "listed"),
+        (U.id, "updated"),
+    ]
+    await focus(db, Q, "central")
+    await listed(db, TUE, Q)
+    await day(db, w, TUE)
+    await week(db, w, MON)
+    assert P.title in w.asked[-1] and U.title not in w.asked[-1]
+
+
+async def test_an_updated_row_is_no_cover_for_a_paper_due_as_new(db):
+    """Should U's first day move into the window (a guessed day corrected), its updated row on
+    Tuesday neither puts it in the weekly as one of the week's new papers nor keeps it from a
+    later daily as new."""
+    w = Writer()
+    await papers_store.upsert(db, [U])
+    await focus(db, U, "central")
+    await focus(db, S, "related")
+    await listed(db, TUE, S)
+    await day(db, w, TUE)
+    await listed(db, THU, U)
+    await week(db, w, MON)
+    assert await shown(db, FAITH.slug, "week", MON) == ("written", [(S.id, "listed")])
+    await day(db, w, THU)
+    assert await shown(db, FAITH.slug, "day", THU) == ("written", [(U.id, "listed")])
+
+
 # -- quiet days and records ------------------------------------------------------------------------
 
 
@@ -985,6 +1239,30 @@ async def test_the_digest_tab_reads_days_weeks_history_and_a_digest(db):
         topics = (await http.get("/api/topics")).json()
         assert [len(t["strip"]) for g in topics for t in g["topics"]] == [1, 1, 1]
         assert (await http.get("/api/digests/999999")).status_code == 404
+
+
+async def test_the_tab_counts_updated_papers_apart_and_gives_each_its_version(db):
+    """A day whose only paper is U, updated at Fit central: its card shows none of its papers
+    (they are picks or central papers listed as new) and counts it apart; the digest gives
+    its version and when it first came out."""
+    w = Writer()
+    await papers_store.upsert(db, [U])
+    await focus(db, U, "central")
+    await listed(db, TUE, S)
+    await day(db, w, TUE)
+    async with client(db, w) as http:
+        [card, _] = (await http.get(f"/api/digests/days/{TUE}")).json()["digests"]
+        assert (card["state"], card["papers"], card["more"]) == ("nothing_new", [], 0)
+        assert (card["counts"]["papers"], card["counts"]["updated"]) == (0, 1)
+        history = (await http.get("/api/digests", params={"since": TUE, "until": TUE})).json()
+        assert history["days"][0]["marks"][0]["counts"]["updated"] == 1
+        [row] = (await http.get(f"/api/digests/{card['id']}")).json()["papers"]
+    assert (row["id"], row["role"], row["version"], row["announced"]) == (
+        U.id,
+        "updated",
+        2,
+        "2026-05-05",
+    )
 
 
 async def test_the_tab_steps_only_through_the_digests_it_shows(db):

@@ -3,7 +3,7 @@ import { calendarMonths, isIsoDay, listRows, markLine, mondayOf, nextSpan, secti
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" } as const;
 const area = { slug: "interp", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" } as const;
-const counts = { papers: 0, picks: 0, central: 0, related: 0, must_read: 0 };
+const counts = { papers: 0, picks: 0, central: 0, related: 0, must_read: 0, updated: 0 };
 const mark = (over: Partial<Mark>): Mark => ({ id: 1, topic: focus, period: "day", day: "2026-10-13", state: "written", counts, best_rarity: "rare", ...over });
 
 describe("a Mark's count line", () => {

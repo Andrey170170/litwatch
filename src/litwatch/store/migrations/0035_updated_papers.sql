@@ -12,3 +12,11 @@ WHERE EXISTS (
                                             THEN p.version_history ELSE '[]' END) e
     WHERE e->>'version' = '1' AND e->>'date' IS NOT NULL);
 
+-- An old paper back with a new arXiv version is listed once more as `updated`, apart from the
+-- digest's papers, frozen with the version it came back with (digests.md, updated papers).
+ALTER TABLE digest_papers DROP CONSTRAINT digest_papers_role_check;
+ALTER TABLE digest_papers
+    ADD CONSTRAINT digest_papers_role_check
+        CHECK (role IN ('pick', 'listed', 'mentioned', 'updated')),
+    ADD COLUMN version integer,
+    ADD CONSTRAINT digest_papers_version_check CHECK ((role = 'updated') = (version IS NOT NULL));
