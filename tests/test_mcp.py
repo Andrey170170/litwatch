@@ -545,6 +545,38 @@ async def test_a_date_out_of_range_is_an_argument_error_not_a_server_error(conn)
         await ok(http, "list_digests", since="1991-01-01", until="2100-12-31")
 
 
+async def test_arguments_no_query_can_take_are_refused_and_not_counted_as_failures(conn):
+    """An offset past bigint, U+0000 (which PostgreSQL cannot hold) and a range ending before
+    it starts are the caller's mistakes: errors before any query, never server failures."""
+    await taxonomy_store.save(conn, TREE)
+    weekly = await _digest(conn, AGENTS, DigestPeriod.WEEK, date(2026, 10, 12))
+    app = _app(conn)
+    transport = httpx.ASGITransport(create_monitor(app))
+    async with (
+        serving(app) as http,
+        httpx.AsyncClient(transport=transport, base_url="http://m") as m,
+    ):
+        for tool, arguments in [
+            ("search_papers", {"query": "x", "offset": 9223372036854775808}),
+            ("search_papers", {"query": "x", "offset": 10001}),
+            ("search_papers", {"query": "\u0000"}),
+            ("search_papers", {"topic": "a\u0000b"}),
+            ("get_paper", {"paper_id": "2610.00001\u0000"}),
+            ("list_digests", {"topic": "\u0000"}),
+            ("list_digests", {"since": "2026-10-15", "until": "2026-10-14"}),
+            ("search_papers", {"since": "2026-10-15", "until": "2026-10-14"}),
+        ]:
+            text, failed = await call(http, tool, **arguments)
+            assert failed and f"digest {weekly}" not in text, (tool, arguments, text)
+        component = [c for c in (await m.get("/status")).json()["components"] if c["id"] == "mcp"]
+        assert component[0]["status"] == "healthy"
+        assert re.search(r'outcome="error"} [1-9]', (await m.get("/metrics")).text) is None
+        await ok(http, "search_papers", query="x", offset=10000)
+        assert f"digest {weekly} " in await ok(
+            http, "list_digests", since="2026-10-12", until="2026-10-12"
+        )
+
+
 async def test_an_mcp_without_its_token_has_no_component_or_metrics(conn):
     app = create_app(_dsn(conn), TOKEN)
     transport = httpx.ASGITransport(create_monitor(app))

@@ -25,7 +25,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import ToolAnnotations
-from pydantic import Field
+from pydantic import AfterValidator, Field
 from starlette.datastructures import State
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -73,10 +73,27 @@ DIGEST_DAYS = 14  # the range when none is given, ending today
 # A day a tool takes: arXiv's years, with room ahead. Outside them it is an argument error,
 # refused before any date arithmetic can overflow.
 Day = Annotated[date, Field(ge=date(1991, 1, 1), le=date(2100, 12, 31))]
+# How far into the collection a search may page.
+MAX_OFFSET = 10_000
+
+
+def _no_nul(value: str) -> str:
+    if "\x00" in value:
+        raise ValueError("must not contain U+0000")
+    return value
+
+
+# Text a tool takes: PostgreSQL holds no U+0000, so it is refused with the other arguments.
+Text = Annotated[str, AfterValidator(_no_nul)]
 
 
 class NotFoundError(LookupError):
     """An answer that nothing was found: the call's outcome is `not_found`, not a failure."""
+
+
+class ArgumentError(ToolError):
+    """Arguments the tool refuses that the SDK's checks of each one let through (a range that
+    ends before it starts): the caller's mistake, not counted as a call."""
 
 
 class Partial(str):
@@ -142,7 +159,7 @@ def mount(app: FastAPI, token: str, allowed_hosts: tuple[str, ...]) -> MCPServer
 def _counted(calls: McpCalls, tool: Callable[..., Awaitable[str]]) -> Callable[..., Any]:
     """`tool`, counted and logged per call; a `NotFoundError` is its answer, a `Partial` one is
     counted apart. A call cancelled (the client went away) is not counted, nor are arguments
-    the SDK refused before calling it."""
+    refused, by the SDK before calling it or by the tool (`ArgumentError`)."""
 
     @functools.wraps(tool)
     async def call(*args: Any, **kwargs: Any) -> str:
@@ -152,6 +169,8 @@ def _counted(calls: McpCalls, tool: Callable[..., Awaitable[str]]) -> Callable[.
         except NotFoundError as exc:
             _record(calls, tool.__name__, "not_found", started)
             return str(exc)
+        except ArgumentError:
+            raise
         except Exception:
             _record(calls, tool.__name__, "error", started)
             raise
@@ -166,6 +185,12 @@ def _record(calls: McpCalls, tool: str, outcome: str, started: float) -> None:
     calls.record(tool, outcome, spent)
     fields = {"event": "mcp.call", "tool": tool, "outcome": outcome, "duration_seconds": spent}
     log.info("%s %s in %.3f s", tool, outcome, spent, extra={"fields": fields})
+
+
+def _in_order(since: date | None, until: date | None) -> None:
+    """A range ends on or after its start, as given, before a week rounds it."""
+    if since is not None and until is not None and since > until:
+        raise ArgumentError(f"since ({since}) is after until ({until})")
 
 
 def _shown(tree: Taxonomy | None, topic: str | None) -> None:
@@ -186,14 +211,14 @@ def build(state: State) -> MCPServer:
 
     async def search_papers(
         query: Annotated[
-            str | None,
+            Text | None,
             Field(
                 description='Words in the title, abstract or authors; "a phrase", -word and OR '
                 "work as in a web search. Without it, the filters alone list papers."
             ),
         ] = None,
         topic: Annotated[
-            str | None,
+            Text | None,
             Field(description="A followed topic's slug: its papers, with its subtopics'."),
         ] = None,
         min_grade: Annotated[
@@ -215,11 +240,14 @@ def build(state: State) -> MCPServer:
             Field(description="Omitted: best match while a query is given, else rarest first."),
         ] = None,
         limit: Annotated[int, Field(ge=1, le=50)] = 20,
-        offset: Annotated[int, Field(ge=0, description="Skip this many collection papers.")] = 0,
+        offset: Annotated[
+            int, Field(ge=0, le=MAX_OFFSET, description="Skip this many collection papers.")
+        ] = 0,
     ) -> str:
         """Search arXiv papers as litwatch's web app does: its collection first, each paper with
         its Gist, Weight and grade per topic, then papers only the archive holds. Any litwatch
         filter (topic, grade, Weight, thumb, processed) searches the collection alone."""
+        _in_order(since, until)
         params = s.PapersIn(
             q=query,
             topic=[topic] if topic else [],
@@ -254,7 +282,7 @@ def build(state: State) -> MCPServer:
         return Partial(answer) if left_out else answer
 
     async def get_paper(
-        paper_id: Annotated[str, Field(description="An arXiv id or link, e.g. 2610.01234.")],
+        paper_id: Annotated[Text, Field(description="An arXiv id or link, e.g. 2610.01234.")],
     ) -> str:
         """Everything litwatch has on one arXiv paper: its metadata and abstract; where litwatch
         processed it, its Gist, Brief, Deep card, Weight, grade and Fit per topic, the owner's
@@ -285,7 +313,7 @@ def build(state: State) -> MCPServer:
 
     async def list_digests(
         topic: Annotated[
-            str | None, Field(description="A followed topic's slug; omitted, every topic.")
+            Text | None, Field(description="A followed topic's slug; omitted, every topic.")
         ] = None,
         since: Annotated[Day | None, Field(description="From this day.")] = None,
         until: Annotated[Day | None, Field(description="To this day; omitted, today.")] = None,
@@ -294,6 +322,7 @@ def build(state: State) -> MCPServer:
         with its id, topic, day, how many papers it covered and its Gist. A weekly digest is
         dated by its Monday. Read one with read_digest."""
         last = until or datetime.now(state.config.schedule.zone).date()
+        _in_order(since, last)
         first = since or last - timedelta(days=DIGEST_DAYS - 1)
         clipped = last - first > DIGEST_SPAN
         first = last - DIGEST_SPAN if clipped else first
