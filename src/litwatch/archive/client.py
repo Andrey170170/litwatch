@@ -39,11 +39,13 @@ class ArchiveVersionUnknown(ArchiveError):  # noqa: N818 - public resolution sig
 @dataclass(frozen=True)
 class PaperText:
     """A paper's full text as read: the arXiv version it is of (None when the archive cannot
-    say, as for its historical LaTeX) and where it came from."""
+    say, as for its historical LaTeX), where it came from and, for a PDF's, where each of its
+    pages lies in `body` (`text.PdfText.pages`)."""
 
     body: str
     version: int | None
     source: Literal["latex", "pdf"]
+    pages: tuple[tuple[int, int], ...] | None = None
 
     @property
     def sha256(self) -> str:

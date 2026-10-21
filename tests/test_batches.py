@@ -14,6 +14,7 @@ import pytest
 from pydantic import BaseModel
 
 from litwatch import digests, fulltext, store
+from litwatch.archive import PdfText
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import FAILED_RUNS
 from litwatch.core.fulltext import LEASE
@@ -1120,7 +1121,8 @@ async def test_during_a_nightly_the_owners_pass_is_the_workers_at_once(
     """V8: "run it now" and "Use the PDF" make the pass the owner's: the nightly leaves it,
     batching or not (`late`: past its deadline), and the service's worker runs it with a normal
     call while the nightly holds the lock."""
-    monkeypatch.setattr("litwatch.archive.text.pdf_to_markdown", lambda pdf: "From the PDF. " * 40)
+    read = PdfText("From the PDF. " * 40, ((0, 560),))
+    monkeypatch.setattr("litwatch.archive.text.read_pdf", lambda pdf: read)
     await passing(conn)
     writer = ft.Writer()
     await ft.work(conn, FakeArchive(status="failed"), writer)

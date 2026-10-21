@@ -37,7 +37,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     full-text worker when an archive is configured too (it calls models and has the archive
     fetch, so, like the schedule, it waits for cutover) and the Deep card worker when a card
     provider is loaded as well, the integrations' dispatcher when any is loaded, and the MCP
-    server's session manager while `/mcp` is served."""
+    server (its session manager and PDF executor) while `/mcp` is served."""
     tasks = []
     enabled = app.state.config.schedule.enabled
     archive = app.state.archive if enabled else None
@@ -71,9 +71,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(
             asyncio.create_task(dispatch.run_forever(app.state.dsn, app.state.integrations))
         )
-    mcp = app.state.mcp
     try:
-        async with mcp.session_manager.run() if mcp else contextlib.nullcontext():
+        async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield
     finally:
         for task in tasks:

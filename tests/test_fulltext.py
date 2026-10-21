@@ -10,7 +10,7 @@ import pytest
 
 from litwatch import fulltext, store
 from litwatch.api import create_app
-from litwatch.archive import URGENT, ArchiveClient, PaperText
+from litwatch.archive import URGENT, ArchiveClient, PaperText, PdfText
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import (
     FAILED_RUNS,
@@ -496,7 +496,8 @@ async def test_only_an_unusable_answer_starts_the_next_try_further_down_the_list
 
 async def test_use_the_pdf_runs_a_pass_waiting_for_the_owner_on_the_papers_pdf(db, monkeypatch):
     # DESIGN.md, Needs you: "Try again, Use the PDF" on a full-text failure.
-    monkeypatch.setattr("litwatch.archive.text.pdf_to_markdown", lambda pdf: "From the PDF. " * 40)
+    read = PdfText("From the PDF. " * 40, ((0, 560),))
+    monkeypatch.setattr("litwatch.archive.text.read_pdf", lambda pdf: read)
     await graded(db, "central")
     fake, writer = FakeArchive(status="failed"), Writer()
     await work(db, fake, writer)

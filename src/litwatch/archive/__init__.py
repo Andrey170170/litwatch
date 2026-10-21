@@ -1,6 +1,7 @@
 """The archive client: arxiv-archive's API, which registers papers, fetches their files at a
 priority, serves PDFs and LaTeX text and lists the papers of a date window; and a paper's full
-text read from it (`text`). Knows `core` and nothing else of litwatch."""
+text read from it (`text`), and a PDF page as an image (`pages`). Knows `core` and nothing else
+of litwatch."""
 
 from litwatch.archive.client import (
     BACKGROUND,
@@ -15,8 +16,9 @@ from litwatch.archive.client import (
     metadata,
 )
 from litwatch.archive.text import (
+    PdfText,
     TextUnavailable,
-    pdf_to_markdown,
+    read_pdf,
     read_text,
     retry_downloads,
     stored_text,
@@ -34,7 +36,8 @@ __all__ = [
     "TextUnavailable",
     "listed",
     "metadata",
-    "pdf_to_markdown",
+    "PdfText",
+    "read_pdf",
     "read_text",
     "retry_downloads",
     "stored_text",
