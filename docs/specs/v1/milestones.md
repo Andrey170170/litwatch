@@ -59,7 +59,12 @@ while: today they stay in the Acknowledged section until the card is remade with
 ([`docs/plans/notion-export.md`](../../plans/notion-export.md)) is on since 2026-10-20: `cause` on `grade.changed`
 (#95) and the `notion` integration (#96, #101). On the owner's instance it built the PI's database of 83 papers, its
 grades per topic matching production's, and 0.14's Notion databases are trashed. Pages show the abstract until Briefs
-are written well enough (decision 70). Next there: the owner's views, and the PI's week.
+are written well enough (decision 70). Next there: the owner's views, and the PI's week. The MCP server
+([`docs/plans/mcp-server.md`](../../plans/mcp-server.md), decisions 83–87) is built and live since 2026-10-20 at
+`/mcp` on litwatch's host: finding (#120) and reading (#123), its calls and failures in Vergil. On production a Claude
+Code session given only a vague memory found the paper, read the sections asked for and showed the figure. Next there:
+the milestone's check from another machine, with Claude Code and with Codex, through the dotfiles' client
+configuration.
 
 On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
 restart (decision 56).
