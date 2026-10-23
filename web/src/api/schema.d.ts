@@ -1045,9 +1045,10 @@ export interface paths {
          * @description Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks
          *     it, with no transaction open, then store it and queue its Process job in one. Asked again,
          *     it answers with the job already queued or running, and puts a failed one back in the
-         *     queue. Without a taxonomy there is nothing to sort the paper into: 409, nothing kept. With
-         *     the schedule off no worker runs jobs: the paper is fetched only, for the next run, and the
-         *     answer is null.
+         *     queue, unless a step of the paper waits on the owner (409: it would find nothing due, and
+         *     the owner's action on Needs you settles the job). Without a taxonomy there is nothing to sort
+         *     the paper into: 409, nothing kept. With the schedule off no worker runs jobs: the paper is
+         *     fetched only, for the next run, and the answer is null.
          */
         post: operations["process_api_jobs_process_post"];
         delete?: never;
@@ -1089,9 +1090,10 @@ export interface paths {
         /**
          * Rerun
          * @description Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are
-         *     those of its scopes as they stand now; it grades them under the topic's version when it
-         *     runs (D3). Run needs the schedule on, whose worker runs jobs. Answers with the Jobs page's
-         *     groups.
+         *     those of its scopes as they stand now; it grades them under the topic's version now (D3),
+         *     and fails should the topic be edited before its grading is done. The same re-run not ended
+         *     yet is not made again. Run needs the schedule on, whose worker runs jobs. Answers with the
+         *     Jobs page's groups.
          */
         post: operations["rerun_api_jobs_reruns_post"];
         delete?: never;
@@ -1111,10 +1113,12 @@ export interface paths {
         put?: never;
         /**
          * Act
-         * @description Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one.
-         *     Run now and With tonight's run take a re-run's new ceiling, which a job its ceiling stopped
-         *     needs above what it spent. A discarded re-run lets go of its text passes. Answers with the
-         *     page's groups as they stand after it.
+         * @description Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
+         *     a Process job only while no step of its paper waits on the owner, checked under the paper's
+         *     settle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its
+         *     ceiling stopped needs above what it spent; a re-run runs only with the schedule on, as in
+         *     `rerun`. A discarded re-run lets go of its text passes. Answers with the page's groups as
+         *     they stand after it.
          */
         post: operations["act_api_jobs__job_id___action__post"];
         delete?: never;
@@ -2437,7 +2441,8 @@ export interface components {
         /**
          * ProcessJob
          * @description A paper's Process job (DESIGN.md, the paper page): its button reads "Processing" while
-         *     the job is queued or running.
+         *     the job is queued or running. `again`: failed, and Process would put it back in the queue,
+         *     since no step of its paper waits on the owner (then the owner's action there settles it).
          */
         ProcessJob: {
             /** Id */
@@ -2449,6 +2454,11 @@ export interface components {
             state: "offered" | "stopped" | "tonight" | "queued" | "running" | "failed" | "done";
             /** Error */
             error?: string | null;
+            /**
+             * Again
+             * @default false
+             */
+            again: boolean;
         };
         /**
          * Publication
@@ -5892,7 +5902,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The paper is in the collection already or dismissed, or no taxonomy */
+            /** @description The paper is in the collection already, dismissed or waits on the owner, or no taxonomy */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6086,7 +6096,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The job's state does not allow it */
+            /** @description The job's state does not allow it, or its paper waits on the owner */
             409: {
                 headers: {
                     [name: string]: unknown;

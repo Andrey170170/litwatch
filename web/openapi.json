@@ -3023,7 +3023,7 @@
     "/api/jobs/process": {
       "post": {
         "summary": "Process",
-        "description": "Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks\nit, with no transaction open, then store it and queue its Process job in one. Asked again,\nit answers with the job already queued or running, and puts a failed one back in the\nqueue. Without a taxonomy there is nothing to sort the paper into: 409, nothing kept. With\nthe schedule off no worker runs jobs: the paper is fetched only, for the next run, and the\nanswer is null.",
+        "description": "Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks\nit, with no transaction open, then store it and queue its Process job in one. Asked again,\nit answers with the job already queued or running, and puts a failed one back in the\nqueue, unless a step of the paper waits on the owner (409: it would find nothing due, and\nthe owner's action on Needs you settles the job). Without a taxonomy there is nothing to sort\nthe paper into: 409, nothing kept. With the schedule off no worker runs jobs: the paper is\nfetched only, for the next run, and the answer is null.",
         "operationId": "process_api_jobs_process_post",
         "requestBody": {
           "content": {
@@ -3064,7 +3064,7 @@
             "description": "No such paper"
           },
           "409": {
-            "description": "The paper is in the collection already or dismissed, or no taxonomy"
+            "description": "The paper is in the collection already, dismissed or waits on the owner, or no taxonomy"
           },
           "503": {
             "description": "arXiv did not answer in time; nothing was stored"
@@ -3190,7 +3190,7 @@
     "/api/jobs/reruns": {
       "post": {
         "summary": "Rerun",
-        "description": "Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are\nthose of its scopes as they stand now; it grades them under the topic's version when it\nruns (D3). Run needs the schedule on, whose worker runs jobs. Answers with the Jobs page's\ngroups.",
+        "description": "Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are\nthose of its scopes as they stand now; it grades them under the topic's version now (D3),\nand fails should the topic be edited before its grading is done. The same re-run not ended\nyet is not made again. Run needs the schedule on, whose worker runs jobs. Answers with the\nJobs page's groups.",
         "operationId": "rerun_api_jobs_reruns_post",
         "requestBody": {
           "content": {
@@ -3241,7 +3241,7 @@
     "/api/jobs/{job_id}/{action}": {
       "post": {
         "summary": "Act",
-        "description": "Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one.\nRun now and With tonight's run take a re-run's new ceiling, which a job its ceiling stopped\nneeds above what it spent. A discarded re-run lets go of its text passes. Answers with the\npage's groups as they stand after it.",
+        "description": "Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,\na Process job only while no step of its paper waits on the owner, checked under the paper's\nsettle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its\nceiling stopped needs above what it spent; a re-run runs only with the schedule on, as in\n`rerun`. A discarded re-run lets go of its text passes. Answers with the page's groups as\nthey stand after it.",
         "operationId": "act_api_jobs__job_id___action__post",
         "parameters": [
           {
@@ -3307,7 +3307,7 @@
             "description": "No such job"
           },
           "409": {
-            "description": "The job's state does not allow it"
+            "description": "The job's state does not allow it, or its paper waits on the owner"
           },
           "422": {
             "description": "Validation Error",
@@ -6684,6 +6684,11 @@
               }
             ],
             "title": "Error"
+          },
+          "again": {
+            "type": "boolean",
+            "title": "Again",
+            "default": false
           }
         },
         "type": "object",
@@ -6692,7 +6697,7 @@
           "state"
         ],
         "title": "ProcessJob",
-        "description": "A paper's Process job (DESIGN.md, the paper page): its button reads \"Processing\" while\nthe job is queued or running."
+        "description": "A paper's Process job (DESIGN.md, the paper page): its button reads \"Processing\" while\nthe job is queued or running. `again`: failed, and Process would put it back in the queue,\nsince no step of its paper waits on the owner (then the owner's action there settles it)."
       },
       "Publication": {
         "properties": {
