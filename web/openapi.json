@@ -3190,7 +3190,7 @@
     "/api/jobs/reruns": {
       "post": {
         "summary": "Rerun",
-        "description": "Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are\nthose of its scopes as they stand now; it grades them under the topic's version when it\nruns (D3). Run needs the schedule on, whose worker runs jobs. Answers with the Jobs page's\ngroups.",
+        "description": "Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are\nthose of its scopes as they stand now; it grades them under the topic's version now (D3),\nand fails should the topic be edited before its grading is done. The same re-run not ended\nyet is not made again. Run needs the schedule on, whose worker runs jobs. Answers with the\nJobs page's groups.",
         "operationId": "rerun_api_jobs_reruns_post",
         "requestBody": {
           "content": {
@@ -3241,7 +3241,7 @@
     "/api/jobs/{job_id}/{action}": {
       "post": {
         "summary": "Act",
-        "description": "Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,\na Process job only while no step of its paper waits on the owner, checked under the paper's\nsettle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its\nceiling stopped needs above what it spent. A discarded re-run lets go of its text passes.\nAnswers with the page's groups as they stand after it.",
+        "description": "Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,\na Process job only while no step of its paper waits on the owner, checked under the paper's\nsettle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its\nceiling stopped needs above what it spent; a re-run runs only with the schedule on, as in\n`rerun`. A discarded re-run lets go of its text passes. Answers with the page's groups as\nthey stand after it.",
         "operationId": "act_api_jobs__job_id___action__post",
         "parameters": [
           {

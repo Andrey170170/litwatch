@@ -1091,9 +1091,10 @@ export interface paths {
         /**
          * Rerun
          * @description Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are
-         *     those of its scopes as they stand now; it grades them under the topic's version when it
-         *     runs (D3). Run needs the schedule on, whose worker runs jobs. Answers with the Jobs page's
-         *     groups.
+         *     those of its scopes as they stand now; it grades them under the topic's version now (D3),
+         *     and fails should the topic be edited before its grading is done. The same re-run not ended
+         *     yet is not made again. Run needs the schedule on, whose worker runs jobs. Answers with the
+         *     Jobs page's groups.
          */
         post: operations["rerun_api_jobs_reruns_post"];
         delete?: never;
@@ -1116,8 +1117,9 @@ export interface paths {
          * @description Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
          *     a Process job only while no step of its paper waits on the owner, checked under the paper's
          *     settle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its
-         *     ceiling stopped needs above what it spent. A discarded re-run lets go of its text passes.
-         *     Answers with the page's groups as they stand after it.
+         *     ceiling stopped needs above what it spent; a re-run runs only with the schedule on, as in
+         *     `rerun`. A discarded re-run lets go of its text passes. Answers with the page's groups as
+         *     they stand after it.
          */
         post: operations["act_api_jobs__job_id___action__post"];
         delete?: never;

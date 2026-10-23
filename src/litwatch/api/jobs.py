@@ -17,11 +17,10 @@ from litwatch.core import FAILED_RUNS, Cause, Topic
 from litwatch.feedback import misses, word
 from litwatch.intake.search import NoAnswerError
 from litwatch.jobs import reruns
-from litwatch.store import failures
+from litwatch.store import failures, quality
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
-from litwatch.store import quality
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 
