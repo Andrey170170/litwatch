@@ -123,7 +123,8 @@ class Worker:
 
     async def _end(self, job: dict[str, Any], error: str | None = None) -> None:
         """End the job: failed with `error`, or failed while a paper has a step left failed (one
-        tried again with nothing due, since it waits for the owner, fails again), else done; a
+        tried again with nothing due, since it waits for the owner, fails again), else done, or
+        queued again when the owner acted on its paper while it ran (`store.jobs.finish`); a
         Process job whose paper the owner dismissed meanwhile is discarded. Under the papers'
         settle locks, so an owner's action on them meanwhile settles the job after this."""
         papers = job["scope"]["papers"]

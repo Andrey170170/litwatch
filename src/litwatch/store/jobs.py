@@ -80,11 +80,21 @@ async def processing(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
     return row is not None
 
 
-async def settle_process(conn: psycopg.AsyncConnection, paper_id: str) -> None:
+async def settle_process(
+    conn: psycopg.AsyncConnection, paper_id: str, *, owner: bool = False
+) -> None:
     """A failed Process job settles with its paper's failures (DESIGN.md, Jobs): once none is
     left (a later run did the step, the owner acted on Needs you), it goes back in the queue to
-    do what is left, or, the paper dismissed, it is discarded. Call it under the paper's settle
+    do what is left, or, the paper dismissed, it is discarded. A running one the `owner` acted
+    on meanwhile (a Try again on Needs you, say, which its steps may have passed already) is
+    asked again: queued since it started, which `finish` reads. Call it under the paper's settle
     lock."""
+    if owner:
+        await conn.execute(
+            "UPDATE jobs SET queued_at = clock_timestamp() WHERE kind = 'process' "
+            "AND state = 'running' AND scope -> 'papers' = %s",
+            (Jsonb([paper_id]),),
+        )
     await conn.execute(
         f"""
         UPDATE jobs j SET changed_at = now(), queued_at = now(), done = 0, counts = '{{}}',
@@ -182,14 +192,20 @@ async def progress(
 async def finish(
     conn: psycopg.AsyncConnection, job_id: int, state: str, error: str | None = None
 ) -> None:
-    """End this session's run of the job as done or failed."""
+    """End this session's run of the job as done, failed or discarded. One done that the owner
+    asked again while it ran (`settle_process`) goes back in the queue from its first paper
+    instead, so its steps take what the owner's action left due."""
     await conn.execute(
         f"""
-        UPDATE jobs SET state = %s, error = %s, changed_at = now(),
-               backend_pid = NULL, backend_start = NULL
-        WHERE id = %s AND state = 'running' AND (backend_pid, backend_start) = ({_ME})
+        UPDATE jobs SET error = %(error)s, changed_at = now(),
+               backend_pid = NULL, backend_start = NULL,
+               state = CASE WHEN %(state)s::text = 'done' AND queued_at > changed_at
+                            THEN 'queued' ELSE %(state)s::text END,
+               done = CASE WHEN %(state)s::text = 'done' AND queued_at > changed_at
+                           THEN 0 ELSE done END
+        WHERE id = %(id)s AND state = 'running' AND (backend_pid, backend_start) = ({_ME})
         """,
-        (state, error, job_id),
+        {"state": state, "error": error, "id": job_id},
     )
 
 

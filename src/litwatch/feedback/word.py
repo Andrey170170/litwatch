@@ -225,7 +225,7 @@ async def settle(
         await _deep_pass(conn, paper_id, topics, after, hand == Hand.UNSAVE, claimed)
         # A paper the owner had processed: its passes go as their requests do, whoever ran its
         # steps (the job, or a nightly run before it), its failed job put back first.
-        await jobs_store.settle_process(conn, paper_id)
+        await jobs_store.settle_process(conn, paper_id, owner=cause == Cause.OWNER)
         if await jobs_store.processing(conn, paper_id):
             await fulltext_store.owners_first(conn, [paper_id])
     return result

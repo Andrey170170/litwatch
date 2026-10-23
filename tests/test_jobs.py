@@ -179,6 +179,31 @@ async def test_a_failure_the_owner_clears_while_the_job_ends_still_settles_it(
     assert (await jobs_store.get(conn, job))["state"] == "queued"  # failed, then settled
 
 
+async def test_a_failure_the_owner_clears_before_the_job_ends_runs_the_step_again(
+    conn, models, monkeypatch
+):
+    """Analysis fails; while the job grades, the owner's Try again clears the failure. The job
+    does not end done with the analysis left: it goes back in the queue and does it."""
+    models.analyses[A.title] = {"broken": True}
+    grade = nightly.grade
+
+    async def owner_retries(*args, **kwargs):
+        async with await store.sibling(conn) as owner, word.change(owner, A.id, cause=Cause.OWNER):
+            await failures.succeeded(owner, A.id, "analysis")  # as Needs you's Try again
+        del models.analyses[A.title]
+        return await grade(*args, **kwargs)
+
+    monkeypatch.setattr(nightly, "grade", owner_retries)
+    job = await queued(conn, A.id)
+    w = worker.Worker(conn, CONFIG, models.gateway)
+    assert await w.step(AFTERNOON)
+    assert (await jobs_store.get(conn, job))["state"] == "queued"
+    monkeypatch.setattr(nightly, "grade", grade)
+    await work_out(w)
+    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert asked(models, "analyse", A.title) == 2
+
+
 async def test_a_failed_job_put_back_by_a_settle_gives_its_passes_the_owners_priorities(
     conn, models
 ):
