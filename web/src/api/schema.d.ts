@@ -1047,9 +1047,8 @@ export interface paths {
          *     it answers with the job already queued or running, and puts a failed one back in the
          *     queue, unless a step of the paper waits on the owner (409: it would find nothing due, and
          *     the owner's action on Needs you settles the job). Without a taxonomy there is nothing to sort
-         *     the paper into: 409, nothing kept. With
-         *     the schedule off no worker runs jobs: the paper is fetched only, for the next run, and the
-         *     answer is null.
+         *     the paper into: 409, nothing kept. With the schedule off no worker runs jobs: the paper is
+         *     fetched only, for the next run, and the answer is null.
          */
         post: operations["process_api_jobs_process_post"];
         delete?: never;
