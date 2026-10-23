@@ -33,16 +33,20 @@ log = logging.getLogger(__name__)
 
 
 async def classify(
-    conn: psycopg.AsyncConnection, config: Config, run: ModelRun, limit: int | None = None
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    run: ModelRun,
+    limit: int | None = None,
+    ids: list[str] | None = None,
 ) -> None:
-    """Classify every paper whose current text has no classification, up to `limit`. A paper
-    whose answers were unusable `FAILED_RUNS` runs in a row is left for the owner (awaiting
-    classification)."""
+    """Classify every paper whose current text has no classification, up to `limit`, of `ids`
+    when given (a job's papers). A paper whose answers were unusable `FAILED_RUNS` runs in a row
+    is left for the owner (awaiting classification)."""
     tree = await taxonomy_store.load(conn)
     if tree is None:
         log.warning("no taxonomy: nothing is classified until one is imported")
         return
-    papers = await classifications_store.due(conn, FAILED_RUNS, limit)
+    papers = await classifications_store.due(conn, FAILED_RUNS, limit, ids)
     thresholds = config.classification.thresholds
     async with classification.classify(papers, tree, run.gateway, thresholds) as found:
         async for c in found:
@@ -50,11 +54,16 @@ async def classify(
                 run.add("classified" if c.error is None else "classification_failed")
 
 
-async def analyse(conn: psycopg.AsyncConnection, run: ModelRun, limit: int | None = None) -> None:
-    """Analyse every paper whose current text is classified and not analysed, up to `limit`.
-    A paper whose answers were unusable `FAILED_RUNS` runs in a row is left for the owner, who
-    can have it tried again."""
-    papers = await analyses_store.due(conn, FAILED_RUNS, limit)
+async def analyse(
+    conn: psycopg.AsyncConnection,
+    run: ModelRun,
+    limit: int | None = None,
+    ids: list[str] | None = None,
+) -> None:
+    """Analyse every paper whose current text is classified and not analysed, up to `limit`, of
+    `ids` when given. A paper whose answers were unusable `FAILED_RUNS` runs in a row is left for
+    the owner, who can have it tried again."""
+    papers = await analyses_store.due(conn, FAILED_RUNS, limit, ids)
     async with analysis.analyse(papers, run.gateway) as found:
         async for a in found:
             if await analysis.record(conn, a):
@@ -62,15 +71,19 @@ async def analyse(conn: psycopg.AsyncConnection, run: ModelRun, limit: int | Non
 
 
 async def grade(
-    conn: psycopg.AsyncConnection, config: Config, run: ModelRun, limit: int | None = None
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    run: ModelRun,
+    limit: int | None = None,
+    ids: list[str] | None = None,
 ) -> None:
-    """Grade every paper whose current text is due a grading for some topic, up to `limit`
-    papers (`grading.due`). A grading whose answers were unusable `FAILED_RUNS` runs in a row is
-    left for the owner, who can have it graded now."""
+    """Grade every paper whose current text is due a grading for some topic, up to `limit` papers,
+    of `ids` when given (`grading.due`). A grading whose answers were unusable `FAILED_RUNS` runs in
+    a row is left for the owner, who can have it graded now."""
     tree = await taxonomy_store.load(conn)
     if tree is None:
         return
-    due, passes = await grading.due(conn, tree, FAILED_RUNS, limit)
+    due, passes = await grading.due(conn, tree, FAILED_RUNS, limit, ids)
     async with grading.grade(due, run.gateway, config.grading) as found:
         async for g in found:
             if await grading.record(conn, g):

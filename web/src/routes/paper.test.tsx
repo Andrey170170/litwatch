@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
+import { freshClient, json, renderApp, scriptFetch, viewport } from "@/test/harness";
 import type { Paper } from "@/components/paper/Actions";
 import { pollEvery } from "./paper";
 
@@ -103,6 +103,8 @@ describe("a paper's page", () => {
     const row = (id: number, state: string) => ({ id, paper_id: "2610.00002", revision: 1, title: "Epic one", kind: "brief", state, failed_runs: 0, last_error: null, queued_at: "2026-10-08T03:00:00Z" });
     client.setQueryData(["settings", "needs", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")], digests: [], deep_notes: [] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
     const settledRows = () => (client.getQueryData(["settings", "needs", "quality"]) as { night: { fulltext: { id: number; settled?: string }[] } }).night.fulltext.map((r) => r.settled);
+    // Jobs read before lists the paper's card asked for: it is read again after the write.
+    client.setQueryData(["settings", "runs/jobs", "jobs"], { not_run: [], running: [], failed: [], done: [] });
     renderApp("/paper/2610.00002", client);
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.getByText(/Full text failed three runs in a row/)).toBeInTheDocument();
@@ -116,6 +118,7 @@ describe("a paper's page", () => {
     // settles from the write itself, with what happened, as it would have from that page.
     await waitFor(() => expect(screen.queryByText(/Full text failed three runs in a row/)).toBeNull());
     expect(settledRows()).toEqual(["Running now, first in line, with three more runs.", undefined]);
+    expect(client.getQueryState(["settings", "runs/jobs", "jobs"])?.isInvalidated).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "Run it now" }));
     expect(await screen.findByText("the pass is not waiting for the owner")).toBeInTheDocument();
     // The 409 settles the row on Needs you with its reason, and the refetch finds the pass gone from the page too.
@@ -240,47 +243,136 @@ describe("a paper's page", () => {
     expect(await screen.findByRole("heading", { name: "Epic one" })).toBeInTheDocument();
   });
 
-  it("fetches a paper it does not hold from its own page, then shows it", async () => {
+  it("fetches a paper it does not hold from its own page and starts its job, then shows it processing", async () => {
     viewport(true);
     let held = true;
+    const job = { id: 4, state: "queued", error: null };
     const calls = scriptFetch({
       "GET /api/status": status,
       "GET /api/topics": [],
-      "GET /api/papers/2409.01234": () => (held ? json({ detail: "no such paper" }, 404) : { ...paper, id: "2409.01234", title: "Fetched one", in_collection: false, topics: [], badges: [], rarity: null, gist: null }),
-      "POST /api/lookup": () => {
+      "GET /api/papers/2409.01234": () => (held ? json({ detail: "no such paper" }, 404) : { ...paper, id: "2409.01234", title: "Fetched one", in_collection: false, topics: [], badges: [], rarity: null, gist: null, process: job }),
+      "POST /api/jobs/process": () => {
         held = false;
-        return { fetched: true };
+        return json(job, 202);
       },
     });
     renderApp("/paper/2409.01234");
     await screen.findByText("2409.01234 is not in the collection.");
     await userEvent.click(screen.getByRole("button", { name: "Process" }));
     expect(await screen.findByRole("heading", { name: "Fetched one" })).toBeInTheDocument();
-    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ q: "2409.01234" });
+    expect(screen.getByRole("button", { name: "Processing" })).toBeDisabled();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ paper_id: "2409.01234" });
   });
 
-  it("shows an archive paper litwatch has not fetched, and the paper fetched once Process brings it in", async () => {
+  it("shows an archive paper litwatch has not fetched, processing once Process starts its job, then processed", async () => {
     viewport(true);
-    let stored = false;
+    let job: { id: number; state: string; error: null } | null = null;
     const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
     const calls = scriptFetch({
       "GET /api/status": status,
       "GET /api/topics": [],
-      "GET /api/papers/2409.01234": () => ({ ...outside, stored, next_run: stored }),
-      "POST /api/lookup": () => {
-        stored = true;
-        return { fetched: true };
+      "GET /api/papers/2409.01234": () => (job?.state === "done" ? paper : { ...outside, stored: !!job, next_run: !!job, process: job }),
+      "POST /api/jobs/process": () => {
+        job = { id: 4, state: "queued", error: null };
+        return json(job, 202);
       },
     });
-    renderApp("/paper/2409.01234");
+    const client = freshClient();
+    renderApp("/paper/2409.01234", client);
     expect(await screen.findByRole("heading", { name: "Archive one" })).toBeInTheDocument();
     expect(screen.getByText("We study things.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Paste a DOI" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Process" }));
-    expect(await screen.findByRole("button", { name: "Fetched · next run" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Paste a DOI" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Process" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Processing" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /next run/ })).toBeNull();
+    expect(await screen.findByText(/Processing it now; Settings › Runs and cost › Jobs/)).toBeInTheDocument();
+    // the page polls while the job is under way; done, the paper is in the collection
+    expect(pollEvery(client.getQueryData<Paper>(["paper", "2409.01234"]), false)).toBe(15_000);
+    job = { id: 4, state: "done", error: null };
+    await client.refetchQueries({ queryKey: ["paper", "2409.01234"] });
+    expect(await screen.findByRole("heading", { name: "Epic one" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Processing" })).toBeNull();
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("offers Process again once a paper's job failed, with why", async () => {
+    viewport(true);
+    const failed = { ...paper, id: "2409.01234", title: "Failed one", in_collection: false, stored: true, next_run: true, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, process: { id: 4, state: "failed", error: "classification failed on 1", again: true } };
+    const calls = scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": failed, "POST /api/jobs/process": json({ id: 4, state: "queued", error: null }, 202) });
+    renderApp("/paper/2409.01234");
+    const again = await screen.findByRole("button", { name: "Process again" });
+    expect(again).toHaveAttribute("title", "Processing failed: classification failed on 1");
+    await userEvent.click(again);
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+  });
+
+  it("offers no Process again while the failed job's paper waits on the owner: the note above does", async () => {
+    viewport(true);
+    const waits = { kind: "awaiting_classification", revision: 1, error: "no usable answer", refused: false };
+    const stuck = { ...paper, id: "2409.01234", title: "Stuck one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, states: [waits], process: { id: 4, state: "failed", error: "classification failed on 1 (waits on Needs you)", again: false } };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": stuck });
+    renderApp("/paper/2409.01234");
+    const failed = await screen.findByRole("button", { name: "Failed" });
+    expect(failed).toBeDisabled();
+    expect(failed).toHaveAttribute("title", "Processing failed and waits on you: classification failed on 1 (waits on Needs you)");
+    expect(screen.queryByRole("button", { name: "Process again" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Classify by hand" })).toBeInTheDocument();
+  });
+
+  it("keeps saying Processing once the classified paper is in the collection, until its job is done", async () => {
+    viewport(false);
+    let state = "running";
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": () => ({ ...paper, id: "2409.01234", title: "Classified one", process: { id: 4, state, error: null } }) });
+    const qc = freshClient();
+    renderApp("/paper/2409.01234", qc);
+    await screen.findByRole("heading", { name: "Classified one" });
+    expect(screen.getByText("Processing.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Jobs" })).toHaveAttribute("href", "/settings/runs/jobs");
+    state = "done";
+    await qc.invalidateQueries();
+    await waitFor(() => expect(screen.queryByText("Processing.")).toBeNull());
+  });
+
+  it("offers Try again on a Process job that failed after classifying the paper, and then says Processing", async () => {
+    viewport(true);
+    let job: { id: number; state: string; error: string | null; again: boolean } = { id: 4, state: "failed", error: "analysis failed on 1", again: true };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": () => ({ ...paper, id: "2409.01234", title: "Half done", states: [], process: job }),
+      "POST /api/jobs/4/again": () => {
+        job = { id: 4, state: "queued", error: null, again: false };
+        return json({ not_run: [], running: [], failed: [], done: [] });
+      },
+    });
+    renderApp("/paper/2409.01234");
+    const note = (await screen.findByText("Processing failed.")).closest(".note") as HTMLElement;
+    expect(within(note).getByText("analysis failed on 1")).toBeInTheDocument();
+    await userEvent.click(within(note).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Processing.")).toBeInTheDocument();
+    expect(screen.queryByText("Processing failed.")).toBeNull();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("offers Process on a fetched paper never processed while the API says it would run now, else the next run", async () => {
+    viewport(true);
+    const fetched = { ...paper, id: "2409.01234", title: "Fetched one", in_collection: false, stored: true, next_run: true, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": { ...fetched, process_now: true },
+      "GET /api/papers/2409.01235": { ...fetched, id: "2409.01235", title: "Waiting one", process_now: false },
+      "POST /api/jobs/process": json({ id: 4, state: "queued", error: null }, 202),
+    });
+    renderApp("/paper/2409.01234");
+    await screen.findByRole("heading", { name: "Fetched one" });
+    expect(screen.queryByRole("button", { name: /next run/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Process" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ paper_id: "2409.01234" }));
+
+    renderApp("/paper/2409.01235");
+    await screen.findByRole("heading", { name: "Waiting one" });
+    expect(screen.getByRole("button", { name: "Fetched · next run" })).toBeDisabled();
   });
 
   it("says a fetched paper no run will process is fetched, without promising the next run", async () => {

@@ -14,9 +14,13 @@ from litwatch.store.taxonomy import row_to_class
 
 
 async def due(
-    conn: psycopg.AsyncConnection, runs: int, limit: int | None = None
+    conn: psycopg.AsyncConnection,
+    runs: int,
+    limit: int | None = None,
+    ids: list[str] | None = None,
 ) -> list[tuple[Paper, TaxonomyClass, int]]:
-    """Papers whose current text is classified but not analysed, oldest first, each with the
+    """Papers whose current text is classified but not analysed, oldest first, among `ids` when
+    given, each with the
     primary class of its newest classification (retired since or not) and its failed runs so
     far. One that failed is tried again after the new ones, and after `runs` failed runs it is
     not tried at all: it waits for the owner. A dismissed paper is never analysed."""
@@ -33,12 +37,13 @@ async def due(
             LEFT JOIN step_failures f ON f.paper_id = p.id AND f.step = 'analysis'
                  AND f.paper_revision = p.revision
             WHERE p.dismissed_at IS NULL AND coalesce(f.failed_runs, 0) < %s
+              AND (%s::text[] IS NULL OR p.id = ANY(%s))
               AND NOT EXISTS (SELECT 1 FROM analyses a
                               WHERE a.paper_id = p.id AND a.paper_revision = p.revision)
             ORDER BY f.paper_id IS NOT NULL, coalesce(f.failed_runs, 0), p.fetched_at, p.id
             LIMIT %s
             """,
-            (runs, limit),
+            (runs, ids, ids, limit),
         )
     ).fetchall()
     return [(row_to_paper(r), row_to_class(r), r["failed_runs"]) for r in rows]

@@ -6,7 +6,8 @@
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
-import { digestQuery, patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
+import { digestQuery, JOBS_PAGES, jobsQuery, patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
+import type { Job, JobAction } from "@/lib/jobs";
 import { rememberCard } from "@/lib/remember";
 import { acknowledged, labelled, noted, type Quality, type Seen, type Session, type SessionRow, sessionRow, settle, type Settled, settleFromPaper, type Waiting } from "@/lib/settings";
 import { plural } from "@/lib/format";
@@ -48,11 +49,12 @@ async function digestsStale(qc: QueryClient) {
 /** After a write on a paper: refetch its page and patch its star in lists; the lists change no further until the
  * reader goes to one afresh. The write counts as pending until the page is refetched, so the controls show the new
  * state before they re-enable. An open state the refetched page no longer carries is marked settled, in place, on
- * the cached Needs you page (DESIGN.md: settling one settles it there too). */
+ * the cached Needs you page (DESIGN.md: settling one settles it there too). The jobs are read again: a write may
+ * queue a Process job, put a failed one back, or run a Deep card asked for. */
 export async function settled(qc: QueryClient, paperId: string, ack?: Ack) {
   if (ack) patchSaved(qc, paperId, ack.saved);
   refreshSummary(qc);
-  await digestsStale(qc);
+  await Promise.all([digestsStale(qc), jobsChanged(qc)]);
   // A paper read before is refetched whether or not its page is open: the reconciliation reads fresh states or
   // none (not the retained ones when the refetch fails). A paper never read has nothing cached to reconcile from;
   // the write that settles a Needs you row settles it by name (`stepped`, `useLabel`).
@@ -158,16 +160,72 @@ export function useMiss(paperId: string) {
   );
 }
 
-/** Process: fetch a paper the collection lacks, by arXiv id. */
+/** Process (D1): fetch a paper the collection lacks and queue the job that processes it now. The paper's page reads
+ * the job back ("Processing"), and Jobs lists it; a 409 (in the collection meanwhile) refreshes the page. With the
+ * schedule off the API only fetches it, for the next run. */
 export function useProcess() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => ok(await api.POST("/api/lookup", { body: { q: id } })),
-    onSuccess: (r, id) => {
-      toast(r.fetched ? "Fetched into the collection; it is processed on the next run" : "Already in the collection");
-      return qc.invalidateQueries({ queryKey: ["paper", id] });
+    mutationFn: async (id: string) => ok(await api.POST("/api/jobs/process", { body: { paper_id: id } })),
+    onSuccess: (job, id) => {
+      // no job with the schedule off: the paper is fetched for the next run, as the page then says
+      toast(job ? "Processing it now; Settings › Runs and cost › Jobs shows how it goes" : "Fetched into the collection; it is processed on the next run");
+      return Promise.all([jobsChanged(qc), qc.invalidateQueries({ queryKey: ["paper", id] })]);
     },
-    onError: (e) => toast(said(e, "Could not fetch it"), "error"),
+    onError: (e, id) => {
+      toast(said(e, "Could not process it"), "error");
+      if (e instanceof ApiError && e.status === 409) return qc.invalidateQueries({ queryKey: ["paper", id] });
+    },
+  });
+}
+
+/** Try again on the paper's failed Process job from its page, as Jobs' Try again: the job goes back in the queue and
+ * the page reads it running. A 409 (the job moved meanwhile, or a step of the paper now waits on the owner) reads the
+ * page again too. */
+export function useProcessAgain(paperId: string) {
+  return usePaperMutation(
+    paperId,
+    async (_, job: number) => ok(await api.POST("/api/jobs/{job_id}/{action}", { params: { path: { job_id: job, action: "again" } } })),
+    (qc, id) => {
+      toast("Processing it again");
+      return settled(qc, id);
+    },
+    (qc, id) => settled(qc, id),
+  );
+}
+
+/** The jobs pages' reads after a write that changed the jobs: read again, never patched from an answer, which may
+ * arrive after a later action's and would undo it. */
+function jobsChanged(qc: QueryClient) {
+  return Promise.all(JOBS_PAGES.map((page) => qc.invalidateQueries({ queryKey: jobsQuery(page).queryKey, exact: true })));
+}
+
+/** An action on a row of Jobs: Run now, With tonight's run, Discard or Try again on a job; Try again on a Deep card
+ * asked for runs its pass now, as Needs you's Run it now does: its row there settles the same way, and the paper is
+ * settled as after any write. */
+export function useJobAction() {
+  const qc = useQueryClient();
+  const card = settling<{ id: number }>("fulltext", (v) => v);
+  return useMutation({
+    mutationFn: async ({ job, action }: { job: Job; action: JobAction }) => {
+      if (job.pass_id == null) ok(await api.POST("/api/jobs/{job_id}/{action}", { params: { path: { job_id: job.id!, action } } }));
+      else ok(await api.POST("/api/settings/fulltext/{pass_id}/now", { params: { path: { pass_id: job.pass_id } } }));
+    },
+    onSuccess: (_, { job }) => {
+      // a Process job's paper reads its job: "Processing" once it is queued again
+      if (job.pass_id == null) return Promise.all([jobsChanged(qc), job.paper && qc.invalidateQueries({ queryKey: ["paper", job.paper.id] })]);
+      if (!job.paper) return jobsChanged(qc);
+      return Promise.all([card.done(qc, job.paper.id, { id: job.pass_id! }, "Running now, first in line, with three more runs."), settled(qc, job.paper.id)]);
+    },
+    onError: (e, { job }) => {
+      toast(said(e), "error");
+      // a 409: the row moved meanwhile, and its paper with it; a card's row on Needs you no longer waits either
+      return Promise.all([
+        jobsChanged(qc),
+        job.paper && qc.invalidateQueries({ queryKey: ["paper", job.paper.id] }),
+        job.pass_id != null && job.paper && card.failed(qc, job.paper.id, { id: job.pass_id }, e),
+      ]);
+    },
   });
 }
 
@@ -191,7 +249,9 @@ export function useDeepRead(paperId: string) {
     (qc, id, r) => {
       rememberCard(id, r.over);
       toast("Deep card requested");
-      return settled(qc, id); // a paper litwatch lacked is fetched first: the page shows it fetched
+      // a paper litwatch lacked is fetched first, and one outside the collection processed: the page shows it,
+      // and Jobs lists the card and the job (`settled` reads them again)
+      return settled(qc, id);
     },
   );
 }
@@ -438,6 +498,7 @@ export function useSaveTopic() {
         digestsStale(qc),
         qc.invalidateQueries(settingsReads("topics")),
         qc.invalidateQueries(settingsReads("taxonomy")),
+        jobsChanged(qc), // a paused topic may settle a failed Process job
       ]),
     onError: (e) => toast(said(e, "Could not save it"), "error"),
   });

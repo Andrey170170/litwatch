@@ -25,7 +25,6 @@ BEFORE_THE_RULE = {
     "jobs/lock.py:held_elsewhere": 1,
     "jobs/lock.py:job_lock": 2,
     "jobs/lock.py:run_lock": 2,
-    "jobs/scheduler.py:_last_run": 1,
     "jobs/scheduler.py:tick": 2,
 }
 

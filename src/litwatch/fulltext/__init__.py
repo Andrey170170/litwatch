@@ -21,7 +21,7 @@ import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import psycopg
 
@@ -43,13 +43,12 @@ from litwatch.feedback import word
 from litwatch.fulltext import brief
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
-from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
+from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
 from litwatch.jobs.lock import held_elsewhere
 from litwatch.llm import CallError, Gateway
 from litwatch.llm.batches import DRAIN
 from litwatch.store import fulltext as store_
 from litwatch.store import papers as papers_store
-from litwatch.store.calls import CallJournal
 from litwatch.store.fulltext import Claimed
 
 log = logging.getLogger(__name__)
@@ -132,20 +131,6 @@ def _write(
         return a
 
     return bounded(attempts, one, gateway.width(CONCURRENCY))
-
-
-def _attaching(factory: GatewayFactory) -> GatewayFactory:
-    """`factory`'s gateways, sending no batch but answering a call a dead run left in a batch
-    that has ended from that batch rather than paying for it again. A batch still running is
-    past that run's deadline: it is cancelled and given up at once (no drain), so a pass never
-    waits on it beyond its lease."""
-
-    def gateway(config: Config, journal: CallJournal) -> Gateway:
-        found = factory(config, journal)
-        found.batch_until(datetime.now(UTC), drain=timedelta(0))
-        return found
-
-    return gateway
 
 
 def _read_of(text: PaperText | None) -> TextRead | None:
@@ -328,7 +313,7 @@ async def work(
         if not texts:
             continue
         # With no nightly running, a key in an open batch is a dead run's (models.md, batches).
-        factory = _attaching(gateway) if owners is None else gateway
+        factory = attaching(gateway) if owners is None else gateway
         opened = (
             contextlib.nullcontext(run)
             if run

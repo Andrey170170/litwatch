@@ -18,15 +18,16 @@ async def start(
     kind: str,
     window_from: datetime | None = None,
     window_to: datetime | None = None,
+    job_id: int | None = None,
 ) -> int:
     """Open a run on `conn`, the connection its job keeps for as long as it runs: the run records
-    that session, and is alive while it lasts (`ALIVE`)."""
+    that session, and is alive while it lasts (`ALIVE`). A run of kind `job` names its job."""
     row = await (
         await conn.execute(
-            "INSERT INTO runs (kind, window_from, window_to, backend_pid, backend_start) "
-            "SELECT %s, %s, %s, pid, backend_start FROM pg_stat_activity "
+            "INSERT INTO runs (kind, window_from, window_to, job_id, backend_pid, backend_start) "
+            "SELECT %s, %s, %s, %s, pid, backend_start FROM pg_stat_activity "
             "WHERE pid = pg_backend_pid() RETURNING id",
-            (kind, window_from, window_to),
+            (kind, window_from, window_to, job_id),
         )
     ).fetchone()
     return row["id"]
@@ -71,6 +72,14 @@ async def last_success(conn: psycopg.AsyncConnection, kind: str) -> dict[str, An
             (kind,),
         )
     ).fetchone()
+
+
+async def last_started(conn: psycopg.AsyncConnection, kind: str) -> datetime | None:
+    """When the newest run of `kind` started."""
+    row = await (
+        await conn.execute("SELECT max(started_at) AS at FROM runs WHERE kind = %s", (kind,))
+    ).fetchone()
+    return row["at"]
 
 
 async def first_since(conn: psycopg.AsyncConnection, kind: str, since: datetime) -> datetime | None:

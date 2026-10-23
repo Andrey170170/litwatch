@@ -194,6 +194,12 @@ export const runsQuery = (page: "overview" | "runs") => settingsRead(page, "runs
 
 export const scheduleQuery = settingsRead("runs", "schedule", async () => ok(await api.GET("/api/settings/schedule")));
 
+/** The jobs in their groups, for Runs and cost (`page` "runs") and the Jobs page ("runs/jobs"). */
+export const jobsQuery = (page: "runs" | "runs/jobs") => settingsRead(page, "jobs", async () => ok(await api.GET("/api/jobs")));
+
+/** Both pages' reads of the jobs, for a write that changes them. */
+export const JOBS_PAGES = ["runs", "runs/jobs"] as const;
+
 export const configQuery = settingsRead("configuration", "config", async () => ok(await api.GET("/api/settings/config")) as Record<string, unknown>);
 
 /** `page` is "integrations" or an integration's events page, `integrations/<name>`. */

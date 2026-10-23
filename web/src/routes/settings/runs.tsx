@@ -1,12 +1,14 @@
 /** Runs and cost (DESIGN.md, "Runs and cost"): spend per provider against its budget, the schedule, the nights
- * as a table, and Jobs, which waits on the jobs API. */
+ * as a table and the latest jobs; and Jobs, the work outside the nightly run in its four groups. */
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { qualityQuery, runsQuery, scheduleQuery } from "@/api/queries";
+import { useJobAction } from "@/api/mutations";
+import { jobsQuery, qualityQuery, runsQuery, scheduleQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { dateTime, plural, rowDate } from "@/lib/format";
+import { ACTIONS, anyActive, GROUPS, type Job, jobKind, jobMeta, jobStatus, jobTone, latestJobs } from "@/lib/jobs";
 import { digests, type Quality, runFailed, spendBar, type Spend, took, usd } from "@/lib/settings";
-import { Failed, Later, Load, PageHead } from "./parts";
+import { Failed, Load, PageHead, PaperLink } from "./parts";
 
 function SpendRow({ s }: { s: Spend }) {
   const bar = spendBar(s);
@@ -47,6 +49,7 @@ export function RunsPage() {
   const quality = useQuery(qualityQuery("runs"));
   const runs = useQuery(runsQuery("runs"));
   const schedule = useQuery(scheduleQuery);
+  const jobs = useQuery({ ...jobsQuery("runs"), refetchInterval: (q) => (anyActive(q.state.data) ? 10_000 : false) });
   const desktop = useDesktop();
   const cost = quality.data?.cost ?? [];
   const next = schedule.data?.jobs.find((j) => j.kind === "nightly") ?? schedule.data?.jobs[0];
@@ -82,10 +85,7 @@ export function RunsPage() {
             const bad = runFailed(r);
             return (
               <div className={`mr${bad ? " bad" : ""}`} key={r.id}>
-                <span title={dateTime(r.started_at)}>
-                  {rowDate(r.started_at)}
-                  {r.kind !== "nightly" && <span className="faint">· {r.kind}</span>}
-                </span>
+                <span title={dateTime(r.started_at)}>{rowDate(r.started_at)}</span>
                 <span className="mono">{r.counts?.classified ?? 0}</span>
                 {desktop && <span className="mono">{r.counts?.graded ?? 0}</span>}
                 {desktop && (digests(r) === null ? <span className="mono faint">–</span> : <span className="mono">{digests(r)}</span>)}
@@ -104,16 +104,67 @@ export function RunsPage() {
           All jobs ›
         </Link>
       </div>
-      <Later>Re-runs, replays, Deep cards asked for and digests written again come with the jobs API; nothing runs by itself.</Later>
+      <Load q={jobs} />
+      {jobs.data && latestJobs(jobs.data).map((j) => <JobRow key={j.key} job={j} zone={schedule.data?.zone} />)}
+      {jobs.data && !latestJobs(jobs.data).length && <div className="empty">No job yet.</div>}
     </>
   );
 }
 
+/** A job, or a Deep card asked for: its kind and paper, where it stands, the line under it, a running one's bar,
+ * and on the Jobs page (`full`) the actions its state allows. */
+function JobRow({ job, zone, full }: { job: Job; zone?: string; full?: boolean }) {
+  const act = useJobAction();
+  const bar = job.state === "running" && job.papers > 1;
+  return (
+    <div className={`job ${jobTone(job.state)}`}>
+      <div className="jh">
+        <span className="jk">{jobKind(job)}</span>
+        <span className="jw">{job.paper ? <PaperLink id={job.paper.id}>{job.paper.title}</PaperLink> : plural(job.papers, "paper")}</span>
+        <span className="jst">{jobStatus(job.state)}</span>
+      </div>
+      <div className="nb">
+        {jobMeta(job, zone)}
+        {job.error && (job.state === "failed" || job.state === "stopped") && <span className="badt"> · {job.error}</span>}
+      </div>
+      {bar && (
+        <span className="jbar" aria-hidden>
+          <i style={{ width: `${(job.done / job.papers) * 100}%` }} />
+        </span>
+      )}
+      {full && job.actions.length > 0 && (
+        <div className="nact">
+          {job.actions.map((a) => (
+            <button key={a} className={`btn${a === "run" ? " pri" : ""}`} disabled={act.isPending} onClick={() => act.mutate({ job, action: a })}>
+              {ACTIONS[a]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function JobsPage() {
+  const schedule = useQuery(scheduleQuery);
+  // Polled while a job runs or waits its turn, so each moves on as the worker takes it.
+  const jobs = useQuery({ ...jobsQuery("runs/jobs"), refetchInterval: (q) => (anyActive(q.state.data) ? 10_000 : false) });
+  const shown = jobs.data ? GROUPS.filter(([g]) => jobs.data[g].length) : [];
   return (
     <div className="setpg">
-      <PageHead title="Jobs" sub="Work outside the nightly run: re-runs after an edit, replays, Deep cards asked for, digests written again. Each stops at its ceiling." deeper />
-      <Later>The four groups (Not run, Running and queued, Failed, Done) come with the jobs API.</Later>
+      <PageHead title="Jobs" sub="Work outside the nightly run: papers processed now and Deep cards asked for." deeper />
+      <Load q={jobs} />
+      {shown.map(([g, label]) => (
+        <div key={g}>
+          <div className="cap">
+            {label} · {jobs.data![g].length}
+          </div>
+          {jobs.data![g].map((j) => (
+            <JobRow key={j.key} job={j} zone={schedule.data?.zone} full />
+          ))}
+        </div>
+      ))}
+      {jobs.data && !shown.length && <div className="empty">No job yet. Process on a paper outside the collection starts one.</div>}
     </div>
   );
 }

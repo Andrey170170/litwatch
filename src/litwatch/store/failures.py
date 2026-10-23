@@ -99,6 +99,32 @@ ACTIONABLE = (
 )
 
 
+async def open_on(
+    conn: psycopg.AsyncConnection, paper_ids: Sequence[str], runs: int
+) -> dict[Step, tuple[int, int]]:
+    """Per step, the distinct papers of `paper_ids` it failed on and has not done since
+    (`ACTIONABLE`, whatever the count), and how many of those wait for the owner after at least
+    `runs` runs in a row."""
+    rows = await (
+        await conn.execute(
+            "SELECT f.step, count(DISTINCT f.paper_id) AS n, "
+            "count(DISTINCT f.paper_id) FILTER (WHERE f.failed_runs >= %s) AS stuck "
+            "FROM step_failures f JOIN papers p ON p.id = f.paper_id "
+            f"WHERE f.paper_id = ANY(%s) AND {ACTIONABLE} GROUP BY f.step",
+            (runs, list(paper_ids)),
+        )
+    ).fetchall()
+    return {r["step"]: (r["n"], r["stuck"]) for r in rows}
+
+
+async def waits_on_owner(
+    conn: psycopg.AsyncConnection, paper_ids: Sequence[str], runs: int
+) -> bool:
+    """Whether a step of one of the papers waits for the owner after at least `runs` runs in a
+    row: no run tries it again until the owner acts on Needs you."""
+    return any(stuck for _, stuck in (await open_on(conn, paper_ids, runs)).values())
+
+
 async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[dict[str, Any]]:
     """The failures of `step` that wait for the owner (`ACTIONABLE`) after at least `runs` runs
     in a row, with the last error (and the topic, for grading), the roles whose every model

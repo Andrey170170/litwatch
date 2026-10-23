@@ -94,7 +94,7 @@ categories = ["cs.CL", "cs.AI", "cs.LG"]   # the arXiv categories intake reads
 # window_days = 3                           # how many days each nightly run looks back
 
 [schedule]
-enabled = true            # false: nothing runs on its own; run the nightly by hand
+enabled = true            # false: nothing runs on its own, Process's jobs included; run the nightly by hand
 nightly = "0 2 * * *"     # cron, read in `timezone`
 timezone = "Europe/Berlin" # an IANA zone; left out, the container's zone, which is UTC
 deadline = "07:30"        # the nightly's Anthropic batches (half price) end here; the rest goes as normal calls

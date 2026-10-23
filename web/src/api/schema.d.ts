@@ -964,7 +964,8 @@ export interface paths {
          *     when it has one: the request goes through the full-text queue, first in line, and the card
          *     shows on the paper once it is written. Asking again while one is queued or being written
          *     changes nothing. A paper litwatch lacks is fetched first, as Process fetches it, with no
-         *     transaction open, and stored in the request's own.
+         *     transaction open, and stored in the request's own; a paper outside the collection gets its
+         *     Process job too, queued in the same transaction.
          */
         post: operations["request_card_api_papers__paper_id__card_post"];
         delete?: never;
@@ -1004,6 +1005,75 @@ export interface paths {
         get: operations["summary_api_summary_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Jobs
+         * @description The jobs and the Deep cards asked for, in the Jobs page's groups.
+         */
+        get: operations["jobs_api_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/process": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Process
+         * @description Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks
+         *     it, with no transaction open, then store it and queue its Process job in one. Asked again,
+         *     it answers with the job already queued or running, changing nothing (its paper classified
+         *     meanwhile included), and puts a failed one back in the queue, unless a step of the paper
+         *     waits on the owner (409: it would find nothing due, and the owner's action on Needs you
+         *     settles the job). Without a taxonomy there is nothing to sort the paper into: 409, nothing
+         *     kept. With the schedule off no worker runs jobs: the paper is fetched only, for the next run,
+         *     and the answer is null.
+         */
+        post: operations["process_api_jobs_process_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Act
+         * @description Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
+         *     a Process job only while no step of its paper waits on the owner, checked under the paper's
+         *     settle lock. Answers with the page's groups as they stand after it.
+         */
+        post: operations["act_api_jobs__job_id___action__post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1837,6 +1907,74 @@ export interface components {
             answers_card_requests: boolean;
             search?: components["schemas"]["SearchStats"] | null;
         };
+        /**
+         * Job
+         * @description One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked
+         *     for (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready
+         *     is queued). `papers` and `done` say how far it got; `cost` is what its runs spent, None
+         *     before any and for a card, which runs on the subscription. `at` is when it last changed
+         *     state. `actions` are those its state allows: Run now, With tonight's run and Discard while
+         *     it is not run; Try again once it failed, for a card only once it waits for the owner (a
+         *     card that failed fewer runs is tried again by the next nightly run).
+         */
+        Job: {
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "process" | "deep";
+            /** Id */
+            id?: number | null;
+            /** Pass Id */
+            pass_id?: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "offered" | "stopped" | "tonight" | "queued" | "running" | "failed" | "done";
+            paper?: components["schemas"]["JobPaper"] | null;
+            /** Papers */
+            papers: number;
+            /** Done */
+            done: number;
+            /** Cost */
+            cost?: number | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Actions
+             * @default []
+             */
+            actions: ("run" | "tonight" | "discard" | "again")[];
+        };
+        /** JobPaper */
+        JobPaper: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * Jobs
+         * @description The Jobs page's four groups: Not run, Running and queued, Failed, and the newest Done.
+         */
+        Jobs: {
+            /** Not Run */
+            not_run: components["schemas"]["Job"][];
+            /** Running */
+            running: components["schemas"]["Job"][];
+            /** Failed */
+            failed: components["schemas"]["Job"][];
+            /** Done */
+            done: components["schemas"]["Job"][];
+        };
         /** LabelIn */
         LabelIn: {
             value: components["schemas"]["LabelValue"];
@@ -2099,6 +2237,12 @@ export interface components {
              * @default false
              */
             card_requestable: boolean;
+            process?: components["schemas"]["ProcessJob"] | null;
+            /**
+             * Process Now
+             * @default false
+             */
+            process_now: boolean;
         };
         /**
          * PaperClass
@@ -2211,6 +2355,33 @@ export interface components {
              * Format: date-time
              */
             since: string;
+        };
+        /** ProcessIn */
+        ProcessIn: {
+            /** Paper Id */
+            paper_id: string;
+        };
+        /**
+         * ProcessJob
+         * @description A paper's Process job (DESIGN.md, the paper page): its button reads "Processing" while
+         *     the job is queued or running. `again`: failed, and Process would put it back in the queue,
+         *     since no step of its paper waits on the owner (then the owner's action there settles it).
+         */
+        ProcessJob: {
+            /** Id */
+            id: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "offered" | "stopped" | "tonight" | "queued" | "running" | "failed" | "done";
+            /** Error */
+            error?: string | null;
+            /**
+             * Again
+             * @default false
+             */
+            again: boolean;
         };
         /**
          * Publication
@@ -5510,6 +5681,168 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    jobs_api_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Jobs"];
+                };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    process_api_jobs_process_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProcessIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessJob"] | null;
+                };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such paper */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The paper is in the collection already, dismissed or waits on the owner, or no taxonomy */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description arXiv did not answer in time; nothing was stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    act_api_jobs__job_id___action__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+                action: "run" | "tonight" | "discard" | "again";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Jobs"];
+                };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such job */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The job's state does not allow it, or its paper waits on the owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

@@ -7,7 +7,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -27,6 +27,20 @@ def default_gateway(config: Config, journal: CallJournal) -> llm.Gateway:
     return llm.build(config.models, journal, debug=config.debug)
 
 
+def attaching(factory: GatewayFactory) -> GatewayFactory:
+    """`factory`'s gateways, sending no batch but answering a call a dead run left in a batch
+    that has ended from that batch rather than paying for it again: the service's workers, which
+    run outside the nightly's batch window. A batch still running is past that run's deadline:
+    it is cancelled and given up at once (no drain), so a worker never waits on it."""
+
+    def gateway(config: Config, journal: CallJournal) -> llm.Gateway:
+        found = factory(config, journal)
+        found.batch_until(datetime.now(UTC), drain=timedelta(0))
+        return found
+
+    return gateway
+
+
 @dataclass
 class RunRecord:
     """A run as a job records it, to be closed with: its counts, and its other fields as
@@ -43,11 +57,15 @@ class RunRecord:
 
 @asynccontextmanager
 async def run_record(
-    conn: psycopg.AsyncConnection, kind: str, *, window: tuple[datetime, datetime] | None = None
+    conn: psycopg.AsyncConnection,
+    kind: str,
+    *,
+    window: tuple[datetime, datetime] | None = None,
+    job_id: int | None = None,
 ) -> AsyncIterator[RunRecord]:
     """Open a run and close it with what the job recorded on it and the error that ended it,
     whatever happens inside, a cancelled job included."""
-    record = RunRecord(await runs.start(conn, kind, *(window or (None, None))))
+    record = RunRecord(await runs.start(conn, kind, *(window or (None, None)), job_id=job_id))
     failed = True
     try:
         yield record
@@ -98,13 +116,17 @@ async def model_run(
     *,
     window: tuple[datetime, datetime] | None = None,
     gateway: GatewayFactory = default_gateway,
+    job_id: int | None = None,
 ) -> AsyncIterator[ModelRun]:
     """A run record (`run_record`) that also closes with the calls' cost and counts by role.
 
     The journal writes on a connection of its own, since calls finish while the job's
     connection is inside a transaction.
     """
-    async with run_record(conn, kind, window=window) as record, await store.sibling(conn) as side:
+    async with (
+        run_record(conn, kind, window=window, job_id=job_id) as record,
+        await store.sibling(conn) as side,
+    ):
         # An evaluation run writes its own tables only (AGENTS.md): no provider observations.
         journal = CallJournal(side, record.run_id, observes=kind != EVAL)
         failed = True

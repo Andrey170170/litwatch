@@ -25,6 +25,7 @@ from litwatch.jobs import nightly, publications
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.jobs.lock import SCHEDULE_LOCK, BusyError
 from litwatch.publications import Dblp, PublicationSource
+from litwatch.store import runs
 
 log = logging.getLogger(__name__)
 
@@ -80,13 +81,6 @@ def jobs(
     ]
 
 
-async def _last_run(conn: psycopg.AsyncConnection, kind: str) -> datetime | None:
-    row = await (
-        await conn.execute("SELECT max(started_at) AS at FROM runs WHERE kind = %s", (kind,))
-    ).fetchone()
-    return row["at"]
-
-
 async def tick(conn: psycopg.AsyncConnection, todo: list[Job], now: datetime) -> list[str]:
     """Run every job that is due at `now`, in order. Returns the kinds that ran."""
     ran = []
@@ -98,7 +92,7 @@ async def tick(conn: psycopg.AsyncConnection, todo: list[Job], now: datetime) ->
         if not row["locked"]:
             continue  # another scheduler is deciding or running it
         try:
-            if not is_due(job.cron, now, await _last_run(conn, job.kind)):
+            if not is_due(job.cron, now, await runs.last_started(conn, job.kind)):
                 continue
             log.info("scheduler: %s is due", job.kind)
             try:

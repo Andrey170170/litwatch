@@ -59,6 +59,7 @@ from litwatch.core.fulltext import (
 from litwatch.store import analyses as analyses_store
 from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
+from litwatch.store import jobs as jobs_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
@@ -144,8 +145,9 @@ async def settle(
     conn: psycopg.AsyncConnection, paper_id: str, *, cause: Cause, claimed: int | None = None
 ) -> Settled:
     """Recompute and store the paper's effective Fits and grades, its rarity and its library
-    state, with their events, and its text pass. `cause` is what changed them, for
-    `grade.changed`; a `verdict` that left the Fit where it was is reported as `weight`.
+    state, with their events, its text pass, and its Process job's. `cause` is what
+    changed them, for `grade.changed`; a `verdict` that left the Fit where it was is reported as
+    `weight`.
     `claimed` is a pass the caller holds and has not worked yet: it is judged as one not
     started, so it may be dropped or relabelled.
 
@@ -221,6 +223,11 @@ async def settle(
             )
         await _text_pass(conn, paper_id, topics, after, claimed)
         await _deep_pass(conn, paper_id, topics, after, hand == Hand.UNSAVE, claimed)
+        # A paper the owner had processed: its passes go as their requests do, whoever ran its
+        # steps (the job, or a nightly run before it), its failed job put back first.
+        await jobs_store.settle_process(conn, paper_id, owner=cause == Cause.OWNER)
+        if await jobs_store.processing(conn, paper_id):
+            await fulltext_store.owners_first(conn, [paper_id])
     return result
 
 
@@ -391,8 +398,8 @@ async def settle_all(conn: psycopg.AsyncConnection, paper_ids: list[str], *, cau
 
 
 async def settle_topic(conn: psycopg.AsyncConnection, slug: str) -> int:
-    """Settle every paper the topic has a grade, verdict or word for, in id order
-    (`word.topic_papers`). Call it in the transaction that changed the topic, after
+    """Settle every paper the topic has a grade, verdict, word or grading failure for, in id
+    order (`word.topic_papers`). Call it in the transaction that changed the topic, after
     `taxonomy.lock`."""
     papers = await word_store.topic_papers(conn, slug)
     for paper_id in papers:

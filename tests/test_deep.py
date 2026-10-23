@@ -14,7 +14,7 @@ import pytest
 from litwatch import events, store
 from litwatch.api import create_app, monitor
 from litwatch.archive import ArchiveClient
-from litwatch.config import Config
+from litwatch.config import Config, Schedule
 from litwatch.core import (
     FAILED_RUNS,
     Cause,
@@ -47,6 +47,7 @@ from litwatch.jobs.context import model_run
 from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as cards
+from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
@@ -1015,9 +1016,9 @@ async def test_a_pick_whose_settle_was_missed_is_swept_up_whatever_the_limit(db)
 # -- what the owner sees ---------------------------------------------------------------------------
 
 
-def client(conn, integrations) -> tuple:
+def client(conn, integrations, config: Config | None = None) -> tuple:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, TOKEN, Config(), integrations=integrations)
+    app = create_app(dsn, TOKEN, config or Config(), integrations=integrations)
     http = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
@@ -1041,7 +1042,8 @@ async def test_the_owner_may_ask_for_a_card_an_automatic_pass_waits_for(db):
 
 async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypatch):
     """Deep read outside the collection: an archive paper not fetched yet is fetched as
-    Process fetches it, then its card is asked for; arXiv lacking it is a 404."""
+    Process fetches it, then its card is asked for and its Process job queued; arXiv lacking it
+    is a 404."""
     fetched = []
     found = {"2610.09999": paper("2610.09999", title="Elsewhere")}
     monkeypatch.setattr(
@@ -1049,7 +1051,8 @@ async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypa
         "fetch_by_ids",
         answering(lambda ids: fetched.append(ids) or [found[i] for i in ids if i in found]),
     )
-    _, http = client(db, [make(FakeDeep(DONE))])
+    scheduled = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
+    _, http = client(db, [make(FakeDeep(DONE))], scheduled)
     async with http:
         asked = await http.post("/api/papers/2610.09999v2/card")
         page = (await http.get("/api/papers/2610.09999")).json()
@@ -1066,7 +1069,22 @@ async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypa
     assert asked.status_code == 202 and fetched[:2] == [["2610.09999"], ["2601.99999"]]
     assert (page["stored"], page["in_collection"]) == (True, False)
     assert page["card_pass"]["reason"] == "request" and missing.status_code == 404
+    assert page["process"]["state"] == "queued"  # outside the collection, processed now too
     assert await papers_store.get(db, "2610.08888") is None
+
+
+async def test_deep_read_asked_again_while_its_process_job_runs_changes_nothing(db):
+    """A retry of Deep read while the Process job it started runs: the same pass answers, and
+    the job is not asked again, so it ends done, not queued."""
+    scheduled = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
+    _, http = client(db, [make(FakeDeep(DONE))], scheduled)
+    async with http:
+        asked = await http.post(f"/api/papers/{P.id}/card")
+        job = (await jobs_store.claim(db))["id"]
+        again = await http.post(f"/api/papers/{P.id}/card")
+    assert again.status_code == 202 and again.json() == asked.json()
+    await jobs_store.finish(db, job, "done")
+    assert (await jobs_store.get(db, job))["state"] == "done"
 
 
 async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_again(
