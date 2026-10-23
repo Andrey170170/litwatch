@@ -917,7 +917,7 @@ class RerunIn(BaseModel):
     scopes: list[RerunScope] = Field(min_length=1)
     since: date | None = None
     until: date | None = None
-    ceiling: float = Field(gt=0)
+    ceiling: float = Field(gt=0, allow_inf_nan=False)
     run: bool
 
 
@@ -925,4 +925,4 @@ class JobRun(BaseModel):
     """Run now or With tonight's run: a re-run's new ceiling in USD, which a stopped one needs
     above what it spent."""
 
-    ceiling: float | None = Field(default=None, gt=0)
+    ceiling: float | None = Field(default=None, gt=0, allow_inf_nan=False)

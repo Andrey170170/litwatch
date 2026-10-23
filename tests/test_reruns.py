@@ -232,6 +232,14 @@ async def test_a_rerun_grades_its_scope_under_the_topics_new_version_and_no_othe
     assert (done["state"], done["done"], done["counts"]["graded"]) == ("done", 1, 1)
 
 
+async def test_a_paper_dismissed_before_its_rerun_is_not_counted_as_graded(conn, models):
+    job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
+    await conn.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (B.id,))
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    done = await jobs_store.get(conn, job)
+    assert (done["state"], done["counts"]["graded"]) == ("done", 1)
+
+
 async def test_a_paper_graded_under_the_current_version_is_not_graded_again(conn, models):
     """Taken back, or continued, a re-run grades only what has no verdict under the version."""
     await graded_before(conn, A, AGENTS.slug, AGENTS.version)
@@ -687,11 +695,12 @@ async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_r
             (p.id, AGENTS.slug),
         )
     await edited(conn, AGENTS, keywords=["tool use", "probes"])
-    query = {"topic": AGENTS.slug, "scopes": ["labels", "members", "range"]}
+    query = {"topic": AGENTS.slug, "scopes": ["labels", "members"]}
     since = (now - timedelta(days=12)).date().isoformat()
     async with api(conn) as http:
         offer = (await http.get("/api/jobs/reruns/offer", params=query)).json()
-        dated = query | {"since": since, "until": now.date().isoformat()}
+        dated = query | {"scopes": [*query["scopes"], "range"], "since": since}
+        dated |= {"until": now.date().isoformat()}
         offer_dated = (await http.get("/api/jobs/reruns/offer", params=dated)).json()
 
         rows_ = {r["scope"]: r["papers"] for r in offer["rows"]}
@@ -731,7 +740,13 @@ async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_r
         on = (await http.post("/api/jobs/reruns", json=body | {"run": True, "ceiling": 3.0})).json()
         (resumed,) = [r for r in on["running"] if r["key"] == f"job:{stopped_id}"]
         assert (resumed["state"], resumed["ceiling"]) == ("queued", 3.0)
-        empty = body | {"scopes": ["range"]}
+        # A ceiling must be a finite amount; a date range needs both days, in order, and in range.
+        endless = body | {"ceiling": float("inf")}
+        assert (await http.post("/api/jobs/reruns", content=json.dumps(endless))).status_code == 422
+        for days in ({}, {"since": "2026-10-20", "until": "2026-10-01"}, {"until": "9999-12-31"}):
+            ranged = query | {"scopes": ["range"], "since": "2026-10-01"} | days
+            assert (await http.get("/api/jobs/reruns/offer", params=ranged)).status_code == 422
+        empty = body | {"scopes": ["range"], "since": "2000-01-01", "until": "2000-01-02"}
         assert (await http.post("/api/jobs/reruns", json=empty)).status_code == 409
         kept = (await http.post("/api/jobs/reruns", json=body | {"scopes": ["labels"]})).json()
     (later,) = kept["not_run"]
