@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
+import { freshClient, json, renderApp, scriptFetch, viewport } from "@/test/harness";
 import type { Paper } from "@/components/paper/Actions";
 import { pollEvery } from "./paper";
 
@@ -240,47 +240,67 @@ describe("a paper's page", () => {
     expect(await screen.findByRole("heading", { name: "Epic one" })).toBeInTheDocument();
   });
 
-  it("fetches a paper it does not hold from its own page, then shows it", async () => {
+  it("fetches a paper it does not hold from its own page and starts its job, then shows it processing", async () => {
     viewport(true);
     let held = true;
+    const job = { id: 4, state: "queued", error: null };
     const calls = scriptFetch({
       "GET /api/status": status,
       "GET /api/topics": [],
-      "GET /api/papers/2409.01234": () => (held ? json({ detail: "no such paper" }, 404) : { ...paper, id: "2409.01234", title: "Fetched one", in_collection: false, topics: [], badges: [], rarity: null, gist: null }),
-      "POST /api/lookup": () => {
+      "GET /api/papers/2409.01234": () => (held ? json({ detail: "no such paper" }, 404) : { ...paper, id: "2409.01234", title: "Fetched one", in_collection: false, topics: [], badges: [], rarity: null, gist: null, process: job }),
+      "POST /api/jobs/process": () => {
         held = false;
-        return { fetched: true };
+        return json(job, 202);
       },
     });
     renderApp("/paper/2409.01234");
     await screen.findByText("2409.01234 is not in the collection.");
     await userEvent.click(screen.getByRole("button", { name: "Process" }));
     expect(await screen.findByRole("heading", { name: "Fetched one" })).toBeInTheDocument();
-    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ q: "2409.01234" });
+    expect(screen.getByRole("button", { name: "Processing" })).toBeDisabled();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ paper_id: "2409.01234" });
   });
 
-  it("shows an archive paper litwatch has not fetched, and the paper fetched once Process brings it in", async () => {
+  it("shows an archive paper litwatch has not fetched, processing once Process starts its job, then processed", async () => {
     viewport(true);
-    let stored = false;
+    let job: { id: number; state: string; error: null } | null = null;
     const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
     const calls = scriptFetch({
       "GET /api/status": status,
       "GET /api/topics": [],
-      "GET /api/papers/2409.01234": () => ({ ...outside, stored, next_run: stored }),
-      "POST /api/lookup": () => {
-        stored = true;
-        return { fetched: true };
+      "GET /api/papers/2409.01234": () => (job?.state === "done" ? paper : { ...outside, stored: !!job, next_run: !!job, process: job }),
+      "POST /api/jobs/process": () => {
+        job = { id: 4, state: "queued", error: null };
+        return json(job, 202);
       },
     });
-    renderApp("/paper/2409.01234");
+    const client = freshClient();
+    renderApp("/paper/2409.01234", client);
     expect(await screen.findByRole("heading", { name: "Archive one" })).toBeInTheDocument();
     expect(screen.getByText("We study things.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Paste a DOI" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Process" }));
-    expect(await screen.findByRole("button", { name: "Fetched · next run" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Paste a DOI" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Process" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Processing" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /next run/ })).toBeNull();
+    expect(await screen.findByText(/Processing it now; Settings › Runs and cost › Jobs/)).toBeInTheDocument();
+    // the page polls while the job is under way; done, the paper is in the collection
+    expect(pollEvery(client.getQueryData<Paper>(["paper", "2409.01234"]), false)).toBe(15_000);
+    job = { id: 4, state: "done", error: null };
+    await client.refetchQueries({ queryKey: ["paper", "2409.01234"] });
+    expect(await screen.findByRole("heading", { name: "Epic one" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Processing" })).toBeNull();
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("offers Process again once a paper's job failed, with why", async () => {
+    viewport(true);
+    const failed = { ...paper, id: "2409.01234", title: "Failed one", in_collection: false, stored: true, next_run: true, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, process: { id: 4, state: "failed", error: "classification failed on 1" } };
+    const calls = scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": failed, "POST /api/jobs/process": json({ id: 4, state: "queued", error: null }, 202) });
+    renderApp("/paper/2409.01234");
+    const again = await screen.findByRole("button", { name: "Process again" });
+    expect(again).toHaveAttribute("title", "Processing failed: classification failed on 1");
+    await userEvent.click(again);
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
   });
 
   it("says a fetched paper no run will process is fetched, without promising the next run", async () => {

@@ -1186,3 +1186,72 @@ describe("Settings", () => {
     expect(screen.queryByText(/at least/)).toBeNull();
   });
 });
+
+describe("Jobs", () => {
+  const at = (h: number) => `2026-10-22T${String(h).padStart(2, "0")}:00:00Z`;
+  const base = { kind: "process", pass_id: null, papers: 1, done: 0, cost: null, error: null, actions: [] };
+  const offered = { ...base, key: "job:5", id: 5, state: "offered", paper: { id: "2610.00005", title: "An offered paper" }, at: at(8), actions: ["run", "tonight", "discard"] };
+  const running = { ...base, key: "job:6", id: 6, state: "running", paper: { id: "2610.00006", title: "A running paper" }, at: at(11) };
+  const card = { ...base, key: "card:9", id: null, pass_id: 9, kind: "deep", state: "failed", paper: { id: "2610.00009", title: "A card that failed" }, error: "no valid card", at: at(10), actions: ["again"] };
+  const done = { ...base, key: "job:3", id: 3, state: "done", done: 1, cost: 0.04, paper: { id: "2610.00003", title: "A processed paper" }, at: at(9) };
+  const jobs = { not_run: [offered], running: [running], failed: [card], done: [done] };
+  const schedule = { enabled: true, zone: "UTC", jobs: [] };
+
+  it("shows the four groups, each row's state and its actions", async () => {
+    viewport(true);
+    scriptFetch({ ...common, "GET /api/jobs": jobs, "GET /api/settings/schedule": schedule });
+    renderApp("/settings/runs/jobs");
+    expect(await screen.findByText("Not run · 1")).toBeInTheDocument();
+    for (const cap of ["Running and queued · 1", "Failed · 1", "Done · 1"]) expect(screen.getByText(cap)).toBeInTheDocument();
+    const row = (title: string) => screen.getByRole("link", { name: title }).closest(".job") as HTMLElement;
+    expect(row("An offered paper")).toHaveClass("ask");
+    expect(within(row("An offered paper")).getAllByRole("button").map((b) => b.textContent)).toEqual(["Run now", "With tonight's run", "Discard"]);
+    expect(row("A running paper")).toHaveClass("run");
+    expect(within(row("A running paper")).queryByRole("button")).toBeNull();
+    expect(row("A card that failed")).toHaveClass("fail");
+    expect(within(row("A card that failed")).getByText("Deep card")).toBeInTheDocument();
+    expect(row("A card that failed")).toHaveTextContent("no valid card");
+    expect(row("A processed paper")).toHaveTextContent("1 paper · $0.04 · 22 Oct, 09:00");
+  });
+
+  it("moves a job as the action answers: Run now puts it in Running and queued", async () => {
+    viewport(true);
+    const queued = { ...offered, state: "queued", actions: [] };
+    const calls = scriptFetch({ ...common, "GET /api/jobs": jobs, "GET /api/settings/schedule": schedule, "POST /api/jobs/5/run": { ...jobs, not_run: [], running: [running, queued] } });
+    renderApp("/settings/runs/jobs");
+    await userEvent.click(await screen.findByRole("button", { name: "Run now" }));
+    expect(await screen.findByText("Running and queued · 2")).toBeInTheDocument();
+    expect(screen.queryByText(/Not run/)).toBeNull();
+    expect(screen.getByRole("link", { name: "An offered paper" }).closest(".job")).toHaveTextContent("queued");
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/jobs/5/run"]);
+  });
+
+  it("runs a failed card's pass now on Try again, and reads the jobs again", async () => {
+    viewport(true);
+    let tried = false;
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/jobs": () => (tried ? { ...jobs, failed: [], running: [running, { ...card, state: "queued", actions: [] }] } : jobs),
+      "GET /api/settings/schedule": schedule,
+      "POST /api/settings/fulltext/9/now": () => {
+        tried = true;
+        return json(undefined, 204);
+      },
+    });
+    renderApp("/settings/runs/jobs");
+    await userEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Running and queued · 2")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/settings/fulltext/9/now"]);
+  });
+
+  it("shows the latest three jobs on Runs and cost, with All jobs", async () => {
+    viewport(true);
+    scriptFetch({ ...common, "GET /api/jobs": jobs, "GET /api/settings/schedule": schedule, "GET /api/settings/runs": [] });
+    renderApp("/settings/runs");
+    expect(await screen.findByRole("link", { name: "A running paper" })).toBeInTheDocument();
+    const shown = [...document.querySelectorAll(".job .jw")].map((e) => e.textContent);
+    expect(shown).toEqual(["A running paper", "A card that failed", "A processed paper"]);
+    expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
+    expect(screen.getByRole("link", { name: "All jobs ›" })).toHaveAttribute("href", "/settings/runs/jobs");
+  });
+});

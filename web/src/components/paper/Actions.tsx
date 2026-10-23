@@ -6,6 +6,7 @@ import type { Schemas } from "@/api/client";
 import { bibtexFor, copyText, useDeepRead, useMiss, useProcess, usePublication, useSave } from "@/api/mutations";
 import { topicsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
+import { processing } from "@/lib/jobs";
 import { toast } from "@/lib/toast";
 
 export type Paper = Schemas["Paper"];
@@ -48,19 +49,23 @@ export function DeepReadCell({ paper, asked, wide }: { paper: Paper; asked: bool
   );
 }
 
-/** Process, for a paper litwatch has not fetched. Once fetched it says so, and that the next run processes it only
- * while one will (`next_run`): a dismissed paper, say, is fetched and never processed. */
+/** Process, for a paper outside the collection: it fetches the paper and starts the job that processes it now
+ * (Jobs), and reads "Processing" while the job runs; a failed job can be asked again. A paper fetched otherwise (a
+ * miss report, a lookup) says so, and that the next run processes it only while one will (`next_run`): a
+ * dismissed paper, say, is fetched and never processed. */
 export function ProcessCell({ paper, phone }: { paper: Paper; phone?: boolean }) {
   const process = useProcess();
-  const fetched = paper.stored !== false;
+  const busy = processing(paper.process);
+  const failed = paper.process?.state === "failed";
+  const fetched = paper.stored !== false && !busy && !failed;
   const waits = fetched && paper.next_run;
-  const label = fetched ? (waits && !phone ? "Fetched · next run" : "Fetched") : "Process";
+  const label = busy ? "Processing" : failed ? "Process again" : fetched ? (waits && !phone ? "Fetched · next run" : "Fetched") : "Process";
   return (
     <button
-      className={phone ? (fetched ? "" : "on") : "pri"}
+      className={phone ? (fetched || busy ? "" : "on") : "pri"}
       onClick={() => process.mutate(paper.id)}
-      disabled={fetched || process.isPending}
-      title={waits ? "Fetched; the next run processes it" : undefined}
+      disabled={fetched || busy || process.isPending}
+      title={failed ? `Processing failed: ${paper.process?.error ?? "no reason given"}` : waits ? "Fetched; the next run processes it" : undefined}
     >
       {phone ? <small>{label}</small> : label}
     </button>

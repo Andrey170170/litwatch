@@ -2894,7 +2894,7 @@
     "/api/papers/{paper_id}/card": {
       "post": {
         "summary": "Request Card",
-        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing. A paper litwatch lacks is fetched first, as Process fetches it, with no\ntransaction open, and stored in the request's own.",
+        "description": "Ask for a Deep card on this paper, whatever its grade, or for a new one (\"Write again\")\nwhen it has one: the request goes through the full-text queue, first in line, and the card\nshows on the paper once it is written. Asking again while one is queued or being written\nchanges nothing. A paper litwatch lacks is fetched first, as Process fetches it, with no\ntransaction open, and stored in the request's own; a paper outside the collection gets its\nProcess job too, queued in the same transaction.",
         "operationId": "request_card_api_papers__paper_id__card_post",
         "parameters": [
           {
@@ -2991,6 +2991,152 @@
           },
           "403": {
             "description": "The read token, outside reading papers"
+          }
+        }
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "summary": "Jobs",
+        "description": "The jobs and the Deep cards asked for, in the Jobs page's groups.",
+        "operationId": "jobs_api_jobs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Jobs"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          }
+        }
+      }
+    },
+    "/api/jobs/process": {
+      "post": {
+        "summary": "Process",
+        "description": "Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks\nit, with no transaction open, then store it and queue its Process job in one. Asked again,\nit answers with the job already queued or running, and puts a failed one back in the\nqueue.",
+        "operationId": "process_api_jobs_process_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "The paper is in the collection already, or dismissed"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{job_id}/{action}": {
+      "post": {
+        "summary": "Act",
+        "description": "Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one.\nAnswers with the page's groups as they stand after it.",
+        "operationId": "act_api_jobs__job_id___action__post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "run",
+                "tonight",
+                "discard",
+                "again"
+              ],
+              "type": "string",
+              "title": "Action"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Jobs"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "404": {
+            "description": "No such job"
+          },
+          "409": {
+            "description": "The job's state does not allow it"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
         }
       }
@@ -4943,6 +5089,186 @@
         "title": "IntegrationCard",
         "description": "One integration under Settings \u2192 Integrations."
       },
+      "Job": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "process",
+              "deep"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "pass_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "offered",
+              "stopped",
+              "tonight",
+              "queued",
+              "running",
+              "failed",
+              "done"
+            ],
+            "title": "State"
+          },
+          "paper": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobPaper"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "papers": {
+            "type": "integer",
+            "title": "Papers"
+          },
+          "done": {
+            "type": "integer",
+            "title": "Done"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "run",
+                "tonight",
+                "discard",
+                "again"
+              ]
+            },
+            "type": "array",
+            "title": "Actions",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "kind",
+          "state",
+          "papers",
+          "done",
+          "at"
+        ],
+        "title": "Job",
+        "description": "One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked\nfor (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready\nis queued). `papers` and `done` say how far it got; `cost` is what its runs spent, None\nbefore any and for a card, which runs on the subscription. `at` is when it last changed\nstate. `actions` are those its state allows: Run now, With tonight's run and Discard while\nit is not run; Try again once it failed, for a card only once it waits for the owner (a\ncard that failed fewer runs is tried again by the next nightly run)."
+      },
+      "JobPaper": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "JobPaper"
+      },
+      "Jobs": {
+        "properties": {
+          "not_run": {
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            },
+            "type": "array",
+            "title": "Not Run"
+          },
+          "running": {
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            },
+            "type": "array",
+            "title": "Running"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            },
+            "type": "array",
+            "title": "Failed"
+          },
+          "done": {
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            },
+            "type": "array",
+            "title": "Done"
+          }
+        },
+        "type": "object",
+        "required": [
+          "not_run",
+          "running",
+          "failed",
+          "done"
+        ],
+        "title": "Jobs",
+        "description": "The Jobs page's four groups: Not run, Running and queued, Failed, and the newest Done."
+      },
       "LabelIn": {
         "properties": {
           "value": {
@@ -5646,6 +5972,16 @@
             "type": "boolean",
             "title": "Card Requestable",
             "default": false
+          },
+          "process": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessJob"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -6017,6 +6353,58 @@
         ],
         "title": "PassSeen",
         "description": "A full-text pass as Needs you showed it, and since when it waited, which names this\nfailure."
+      },
+      "ProcessIn": {
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paper_id"
+        ],
+        "title": "ProcessIn"
+      },
+      "ProcessJob": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "offered",
+              "stopped",
+              "tonight",
+              "queued",
+              "running",
+              "failed",
+              "done"
+            ],
+            "title": "State"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "state"
+        ],
+        "title": "ProcessJob",
+        "description": "A paper's Process job (DESIGN.md, the paper page): its button reads \"Processing\" while\nthe job is queued or running."
       },
       "Publication": {
         "properties": {

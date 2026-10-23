@@ -809,6 +809,17 @@ a.nt:hover { text-decoration: underline; }
 .spend.past .sp2 { background: color-mix(in srgb, var(--warn) 35%, transparent); }
 .spend.past .sp1 { background: var(--warn); }
 .spend .bud { width: 2px; margin-left: -2px; top: -3px !important; bottom: -3px !important; background: var(--fg); z-index: 2; }
+/* Jobs: yellow when not run (it waits on the owner), cyan while running or queued, red when failed, faded when done */
+.job { background: var(--surface); border: 1px solid var(--line2); border-left: 3px solid var(--line); padding: 8px 12px 10px; margin-bottom: 6px; }
+.job.ask { border-left-color: var(--acc); } .job.run { border-left-color: var(--cy); } .job.fail { border-left-color: var(--sig); }
+.job.settled { opacity: 0.65; }
+.job .jh { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13.5px; }
+.job .jk { font: 700 12px var(--font-name); letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg2); white-space: nowrap; }
+.job .jw { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.job .jst { font: 500 11.5px var(--font-mono); white-space: nowrap; color: var(--fg3); }
+.job.ask .jst { color: var(--sel-fg); } .job.run .jst { color: var(--cy); } .job.fail .jst { color: var(--sig); }
+.jbar { display: block; height: 4px; background: var(--line2); margin-top: 8px; }
+.jbar i { display: block; height: 100%; background: var(--cy); }
 /* Overview's tiles, each opening its page; the colour says whether it wants anything */
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 4px 0 8px; }
 @container (max-width: 600px) { .tiles { grid-template-columns: 1fr 1fr; } }

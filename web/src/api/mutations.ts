@@ -6,7 +6,8 @@
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
-import { digestQuery, patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
+import { digestQuery, JOBS_PAGES, jobsQuery, patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
+import type { Job, JobAction, Jobs } from "@/lib/jobs";
 import { rememberCard } from "@/lib/remember";
 import { acknowledged, labelled, noted, type Quality, type Seen, type Session, type SessionRow, sessionRow, settle, type Settled, settleFromPaper, type Waiting } from "@/lib/settings";
 import { plural } from "@/lib/format";
@@ -158,16 +159,53 @@ export function useMiss(paperId: string) {
   );
 }
 
-/** Process: fetch a paper the collection lacks, by arXiv id. */
+/** Process (D1): fetch a paper the collection lacks and queue the job that processes it now. The paper's page reads
+ * the job back ("Processing"), and Jobs lists it; a 409 (in the collection meanwhile) refreshes the page. */
 export function useProcess() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => ok(await api.POST("/api/lookup", { body: { q: id } })),
-    onSuccess: (r, id) => {
-      toast(r.fetched ? "Fetched into the collection; it is processed on the next run" : "Already in the collection");
-      return qc.invalidateQueries({ queryKey: ["paper", id] });
+    mutationFn: async (id: string) => ok(await api.POST("/api/jobs/process", { body: { paper_id: id } })),
+    onSuccess: (_r, id) => {
+      toast("Processing it now; Settings › Runs and cost › Jobs shows how it goes");
+      return Promise.all([jobsChanged(qc), qc.invalidateQueries({ queryKey: ["paper", id] })]);
     },
-    onError: (e) => toast(said(e, "Could not fetch it"), "error"),
+    onError: (e, id) => {
+      toast(said(e, "Could not process it"), "error");
+      if (e instanceof ApiError && e.status === 409) return qc.invalidateQueries({ queryKey: ["paper", id] });
+    },
+  });
+}
+
+/** The jobs pages' reads after a write that changed the jobs: replaced by the groups the write answered with, or read
+ * again. */
+function jobsChanged(qc: QueryClient, jobs?: Jobs) {
+  return Promise.all(
+    JOBS_PAGES.map((page) => {
+      const key = jobsQuery(page).queryKey;
+      return jobs ? patchRead<Jobs>(qc, key, () => jobs) : qc.invalidateQueries({ queryKey: key, exact: true });
+    }),
+  );
+}
+
+/** An action on a row of Jobs: Run now, With tonight's run, Discard or Try again on a job; Try again on a Deep card
+ * asked for runs its pass now, as Needs you does, so that page and the paper's are read again too. */
+export function useJobAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ job, action }: { job: Job; action: JobAction }) => {
+      if (job.pass_id == null) return ok(await api.POST("/api/jobs/{job_id}/{action}", { params: { path: { job_id: job.id!, action } } }));
+      await ok(await api.POST("/api/settings/fulltext/{pass_id}/now", { params: { path: { pass_id: job.pass_id } } }));
+      return undefined;
+    },
+    onSuccess: (jobs, { job }) => {
+      if (jobs) return jobsChanged(qc, jobs);
+      refreshSummary(qc);
+      return Promise.all([jobsChanged(qc), qc.invalidateQueries(settingsReads("needs")), job.paper && qc.invalidateQueries({ queryKey: ["paper", job.paper.id] })]);
+    },
+    onError: (e) => {
+      toast(said(e), "error");
+      return jobsChanged(qc); // a 409: the row moved meanwhile
+    },
   });
 }
 
@@ -191,7 +229,9 @@ export function useDeepRead(paperId: string) {
     (qc, id, r) => {
       rememberCard(id, r.over);
       toast("Deep card requested");
-      return settled(qc, id); // a paper litwatch lacked is fetched first: the page shows it fetched
+      // a paper litwatch lacked is fetched first, and one outside the collection processed: the page shows it,
+      // and Jobs lists the card and the job
+      return Promise.all([settled(qc, id), jobsChanged(qc)]);
     },
   );
 }
