@@ -7,7 +7,7 @@ plan's notes or a `Later` placeholder in the web app.
 
 ## Now
 
-Nothing: Jobs ([`plans/jobs.md`](plans/jobs.md)) is built (#127, #129, P3's PR) and left this list. The next is the
+Nothing: Jobs ([`plans/jobs.md`](plans/jobs.md)) is built (#127, #129, #130) and left this list. The next is the
 first of v1's unbuilt parts below.
 
 ## v1's unbuilt parts
