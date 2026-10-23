@@ -203,7 +203,8 @@ export function useJobAction() {
       return undefined;
     },
     onSuccess: (jobs, { job }) => {
-      if (jobs) return jobsChanged(qc, jobs);
+      // a Process job's paper reads its job: "Processing" once it is queued again
+      if (jobs) return Promise.all([jobsChanged(qc, jobs), job.paper && qc.invalidateQueries({ queryKey: ["paper", job.paper.id] })]);
       if (!job.paper) return jobsChanged(qc);
       return Promise.all([card.done(qc, job.paper.id, { id: job.pass_id! }, "Running now, first in line, with three more runs."), settled(qc, job.paper.id)]);
     },

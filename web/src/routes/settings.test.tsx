@@ -1218,12 +1218,16 @@ describe("Jobs", () => {
     viewport(true);
     const queued = { ...offered, state: "queued", actions: [] };
     const calls = scriptFetch({ ...common, "GET /api/jobs": jobs, "GET /api/settings/schedule": schedule, "POST /api/jobs/5/run": { ...jobs, not_run: [], running: [running, queued] } });
-    renderApp("/settings/runs/jobs");
+    // the paper's page, read before, shows the job
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["paper", "2610.00005"], { id: "2610.00005", process: { id: 5, state: "offered", error: null } });
+    renderApp("/settings/runs/jobs", client);
     await userEvent.click(await screen.findByRole("button", { name: "Run now" }));
     expect(await screen.findByText("Running and queued · 2")).toBeInTheDocument();
     expect(screen.queryByText(/Not run/)).toBeNull();
     expect(screen.getByRole("link", { name: "An offered paper" }).closest(".job")).toHaveTextContent("queued");
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/jobs/5/run"]);
+    expect(client.getQueryState(["paper", "2610.00005"])?.isInvalidated).toBe(true); // its page reads the job again
   });
 
   it("runs a failed card's pass now on Try again, and reads the jobs again", async () => {

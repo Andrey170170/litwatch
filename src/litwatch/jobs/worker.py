@@ -31,6 +31,7 @@ import psycopg
 from litwatch import store
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
+from litwatch.feedback import word
 from litwatch.jobs import nightly, scheduler
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.jobs.lock import BusyError, run_lock
@@ -117,9 +118,13 @@ class Worker:
             await self._close(job["id"])
         elif after["done"] >= after["papers"]:
             # Done only if no paper has a step left failed: one tried again with nothing due,
-            # since it waits for the owner, fails again.
-            why = failure(await failures.open_on(self.conn, job["scope"]["papers"], FAILED_RUNS))
-            await jobs_store.finish(self.conn, job["id"], "failed" if why else "done", why)
+            # since it waits for the owner, fails again. Under the papers' settle locks, so an
+            # owner's action that clears a failure meanwhile settles the job after this.
+            papers = job["scope"]["papers"]
+            async with self.conn.transaction():
+                await word.lock_many(self.conn, papers)
+                why = failure(await failures.open_on(self.conn, papers, FAILED_RUNS))
+                await jobs_store.finish(self.conn, job["id"], "failed" if why else "done", why)
             await self._close(job["id"])
         return True
 

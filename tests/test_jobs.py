@@ -149,6 +149,31 @@ async def test_a_job_tried_again_on_a_step_waiting_for_the_owner_fails_again(con
     assert asked(models, "classify", A.title) == 4
 
 
+async def test_a_failure_the_owner_clears_while_the_job_ends_still_settles_it(
+    conn, models, monkeypatch
+):
+    models.decisions[A.title] = {"broken": True}
+    job = await queued(conn, A.id)
+    read, owner = failures.open_on, None
+    async with await store.sibling(conn) as other:
+
+        async def clear():  # Needs you's retry, from another request
+            async with word.change(other, A.id, cause=Cause.OWNER):
+                await failures.succeeded(other, A.id, "classification")
+
+        async def raced(*args):
+            nonlocal owner
+            found = await read(*args)
+            owner = asyncio.create_task(clear())
+            await asyncio.sleep(0.3)
+            return found
+
+        monkeypatch.setattr(failures, "open_on", raced)
+        assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)
+        await owner
+    assert (await jobs_store.get(conn, job))["state"] == "queued"  # failed, then settled
+
+
 async def test_a_failed_job_whose_paper_the_owner_dismisses_is_discarded(conn, models):
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
