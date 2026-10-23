@@ -1172,7 +1172,8 @@ export interface paths {
          *     a Process job only while no step of its paper waits on the owner, checked under the paper's
          *     settle lock. Run now and With tonight's run take a re-run's or a replay's new ceiling,
          *     which a job its ceiling stopped needs above what it spent; a job other than Process runs
-         *     only with the schedule on, as in `rerun`. A discarded re-run lets go of its text passes.
+         *     only with the schedule on, as in `rerun`, and a replay only while no other is under way. A
+         *     discarded re-run lets go of its text passes.
          *     Answers with the page's groups as they stand after it.
          */
         post: operations["act_api_jobs__job_id___action__post"];
