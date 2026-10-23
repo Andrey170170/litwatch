@@ -47,6 +47,7 @@ from litwatch.jobs.context import model_run
 from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as cards
+from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
@@ -1070,6 +1071,20 @@ async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypa
     assert page["card_pass"]["reason"] == "request" and missing.status_code == 404
     assert page["process"]["state"] == "queued"  # outside the collection, processed now too
     assert await papers_store.get(db, "2610.08888") is None
+
+
+async def test_deep_read_asked_again_while_its_process_job_runs_changes_nothing(db):
+    """A retry of Deep read while the Process job it started runs: the same pass answers, and
+    the job is not asked again, so it ends done, not queued."""
+    scheduled = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
+    _, http = client(db, [make(FakeDeep(DONE))], scheduled)
+    async with http:
+        asked = await http.post(f"/api/papers/{P.id}/card")
+        job = (await jobs_store.claim(db))["id"]
+        again = await http.post(f"/api/papers/{P.id}/card")
+    assert again.status_code == 202 and again.json() == asked.json()
+    await jobs_store.finish(db, job, "done")
+    assert (await jobs_store.get(db, job))["state"] == "done"
 
 
 async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_again(

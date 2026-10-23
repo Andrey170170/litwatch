@@ -806,3 +806,11 @@ async def test_process_on_a_dismissed_paper_is_refused_and_keeps_nothing(conn, m
     async with api(conn) as http:
         refused = await http.post("/api/jobs/process", json={"paper_id": A.id})
     assert refused.status_code == 409 and await rows(conn, "SELECT 1 FROM jobs") == []
+
+
+async def test_process_on_a_paper_dismissed_while_its_job_waits_is_refused(conn, models):
+    await queued(conn, A.id)
+    await papers_store.dismiss(conn, A.id)
+    async with api(conn) as http:
+        refused = await http.post("/api/jobs/process", json={"paper_id": A.id})
+    assert (refused.status_code, refused.json()["detail"]) == (409, "the paper is dismissed")

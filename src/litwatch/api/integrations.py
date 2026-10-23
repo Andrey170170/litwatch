@@ -209,22 +209,37 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    async with word.change(c, paper_id, cause=Cause.OWNER):
-        await misses.keep(c, paper_id, fetched)
-        pass_id = await deep_passes.request(c, paper_id)
-        if pass_id is None:
-            raise HTTPException(status_code=409, detail="the paper is dismissed")
-        # Outside the collection, the paper is processed now too, as Process does: with the
-        # schedule on, which runs the jobs worker, a taxonomy to sort it into, and no step of
-        # the paper waiting on the owner.
-        processing = (
-            request.app.state.config.schedule.enabled
-            and not await word_store.in_collection(c, paper_id)
-            and await taxonomy_store.load(c) is not None
-            and not await failures.waits_on_owner(c, [paper_id], FAILED_RUNS)
-        )
-        if processing:
-            await jobs_store.process(c, paper_id)
+    async with c.transaction():
+        # Asked again while the request is open and its Process job under way: answered as it
+        # stands, before any change, whose settle would ask a running job again
+        # (`settle_process`) and run it once more for nothing. Under the paper's locks, so a
+        # request in flight has either committed or not started.
+        await word.lock_many(c, [paper_id])
+        open_pass = await fulltext_store.open_deep(c, paper_id)
+        if (
+            open_pass is not None
+            and open_pass["reason"] == REQUESTED
+            and open_pass["state"] != "failed"
+            and await jobs_store.processing(c, paper_id)
+            and await papers_store.dismissed_at(c, paper_id) is None
+        ):
+            return s.CardRequested(pass_id=open_pass["id"])
+        async with word.change(c, paper_id, cause=Cause.OWNER):
+            await misses.keep(c, paper_id, fetched)
+            pass_id = await deep_passes.request(c, paper_id)
+            if pass_id is None:
+                raise HTTPException(status_code=409, detail="the paper is dismissed")
+            # Outside the collection, the paper is processed now too, as Process does: with the
+            # schedule on, which runs the jobs worker, a taxonomy to sort it into, and no step of
+            # the paper waiting on the owner.
+            processing = (
+                request.app.state.config.schedule.enabled
+                and not await word_store.in_collection(c, paper_id)
+                and await taxonomy_store.load(c) is not None
+                and not await failures.waits_on_owner(c, [paper_id], FAILED_RUNS)
+            )
+            if processing:
+                await jobs_store.process(c, paper_id)
     request.app.state.deep_wake.set()
     if processing:
         request.app.state.jobs_wake.set()

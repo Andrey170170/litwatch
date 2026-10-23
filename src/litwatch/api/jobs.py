@@ -127,7 +127,11 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
         # its job or not started.
         await word.lock_many(c, [paper_id])
         found = await jobs_store.process_of(c, paper_id, lock=True)
-        if found is not None and found["state"] in jobs_store.ACTIVE:
+        if (
+            found is not None
+            and found["state"] in jobs_store.ACTIVE
+            and await papers_store.dismissed_at(c, paper_id) is None
+        ):
             return s.ProcessJob(id=found["id"], state=found["state"], error=found["error"])
         async with word.change(c, paper_id, cause=Cause.OWNER):
             if await taxonomy_store.load(c) is None:  # nothing to sort the paper into
