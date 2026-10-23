@@ -28,8 +28,10 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
 
 - **A job is a row in a new `jobs` table:** its kind, its scope (paper ids, a topic and its version, cohorts, a
   digest), its state, the paper count and estimate when it was offered, its ceiling, what it has spent, how far it
-  got, its error, and the run records it made. Each chunk of work is an ordinary `runs` row, so cost, Quality and the
-  status line need no change.
+  got, its error, and the run records it made. Each time the worker runs a job (from claim to stop, done or failure)
+  is one `runs` row of kind `job`, however many chunks it takes, so its cost reaches the month's spend as every
+  run's does. The Nights table and Overview's latest night read nightly runs only (`store.quality.runs` filtered by
+  kind; today it takes the newest 30 of any kind), so jobs never push nights out of it.
 - **States:** `offered` and `stopped` (Not run); `tonight`, `queued` and `running` (Running and queued); `failed`;
   `done`; `discarded` (hidden). Each of the page's four groups is one set of states. `stopped` is a job its ceiling
   stopped: it waits under Not run with what is left, and Run now continues it under a new ceiling.
