@@ -13,7 +13,7 @@ import { Failed } from "./parts";
 export function RunReplay({ offer }: { offer: UseQueryResult<ReplayOffer> }) {
   const run = useRunReplay();
   const [open, setOpen] = useState(false);
-  const [typed, setTyped] = useState("$5.00");
+  const [typed, setTyped] = useState<string | null>(null);
   const o = offer.data;
   if (o?.running)
     return (
@@ -33,7 +33,9 @@ export function RunReplay({ offer }: { offer: UseQueryResult<ReplayOffer> }) {
         <Failed q={offer} what="what a replay would do" />
       </div>
     );
-  const ceiling = ceilingOf(typed);
+  // the offer's ceiling until the owner types another; a stopped replay's above what it spent, as Jobs offers it
+  const shown = typed ?? usd((o?.continues != null ? o.spent : 0) + (o?.ceiling ?? 5));
+  const ceiling = ceilingOf(shown);
   // a stopped replay goes on only under a ceiling above what it spent
   const above = ceiling != null && ceiling > (o?.spent ?? 0);
   const ready = !!o && offer.fetchStatus === "idle" && above && o.papers + o.pairs > 0 && !run.isPending;
@@ -46,7 +48,7 @@ export function RunReplay({ offer }: { offer: UseQueryResult<ReplayOffer> }) {
       <div className="nact">
         <label className="faint ofc">
           Stop at
-          <input className="tin sm mono" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Stop at" aria-invalid={!above} />
+          <input className="tin sm mono" value={shown} onChange={(e) => setTyped(e.target.value)} aria-label="Stop at" aria-invalid={!above} />
         </label>
         <span className="sp" />
         <button className="btn" onClick={() => setOpen(false)}>

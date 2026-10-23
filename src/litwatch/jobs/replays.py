@@ -19,13 +19,11 @@ import psycopg
 from litwatch.config import Config
 from litwatch.jobs import reruns
 from litwatch.jobs.context import ModelRun
-from litwatch.llm.ceiling import Ceiling
 from litwatch.quality import replay
 from litwatch.store import evaluation
 from litwatch.store import jobs as jobs_store
 from litwatch.store import taxonomy as taxonomy_store
 
-ROLES = replay.ROLES
 CEILING = 5.0  # the offer's ceiling, until the owner changes it
 
 
@@ -36,10 +34,11 @@ class Offer:
     start a new replay, setting aside `stale`, one not run that no longer resumes (the
     configuration or taxonomy changed). `replay` is what that leaves to do (None while one
     runs), `estimate` what it would cost, `unpriced` the models with no price bound, whose calls
-    a job does not send."""
+    a job does not send, and `spent` what the stopped one has spent."""
 
     replay: replay.Replay | None
     estimate: float = 0.0
+    spent: float = 0.0
     unpriced: list[str] = field(default_factory=list)
     running: dict[str, Any] | None = None
     job: dict[str, Any] | None = None
@@ -69,7 +68,9 @@ async def offer(conn: psycopg.AsyncConnection, config: Config) -> Offer:
     o = Offer(r, job=found) if r is not None else Offer(await new(conn), stale=found)
     assert o.replay is not None
     o.estimate = sum((await replay.estimate(conn, config, o.replay)).values())
-    o.unpriced = await reruns.unpriced(conn, config, ROLES)
+    o.unpriced = await reruns.unpriced(conn, config, replay.ROLES)
+    if o.job is not None:
+        o.spent = await jobs_store.spent(conn, o.job["id"])
     return o
 
 
@@ -101,10 +102,6 @@ async def make(
     return made
 
 
-async def ceiling(conn: psycopg.AsyncConnection, config: Config, job: dict[str, Any]) -> Ceiling:
-    return await reruns.ceiling(conn, config, job, ROLES)
-
-
 @dataclass
 class Chunk:
     """How one chunk of a replay ended: `more` to do, `stopped` by its ceiling (`where`),
@@ -130,15 +127,12 @@ async def work(
     eval_run = job["scope"]["eval_run"]
     r = await replay.resume(conn, config, eval_run)
     ids = [p for p in r.left if p not in tried][:size]
-    before = Counter({k: v for k, v in run.counts.items() if isinstance(v, int)})
+    before = run.tally()
     await replay.work(conn, config, r, run, ids)
     cut = run.gateway.ceiling is not None and run.gateway.ceiling.reached
     if not cut:
         tried.update(ids)
-    counts = Counter(job["counts"])
-    for k, v in run.counts.items():
-        if isinstance(v, int):
-            counts[k] += v - before[k]
+    counts = Counter(job["counts"]) + (run.tally() - before)
     concluded = len(r.papers) - len(r.left)
     if await jobs_store.progress(conn, job["id"], concluded, dict(counts)) is None:
         return Chunk("gone")

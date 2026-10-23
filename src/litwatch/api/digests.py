@@ -210,7 +210,7 @@ async def _with_job(c: psycopg.AsyncConnection, digest_id: int) -> s.Digest:
     job = await jobs_store.digest_job(c, digest_id)
     found = await _digest(c, digest_id)
     if job is not None:
-        found.job = s.JobRef(id=job["id"], state=job["state"], error=job["error"])
+        found.job = s.JobRef.model_validate(job)
     return found
 
 
@@ -237,9 +237,12 @@ async def write_again(digest_id: int, request: Request, c: Conn) -> s.Digest:
         row = await store_.get(c, digest_id, lock=True)
         tree = await taxonomy_store.load(c)
         topic = tree.topic(row["topic"]) if tree and row else None
-        if row is None or row["state"] != DigestState.FAILED or topic is None:
-            raise HTTPException(status_code=409, detail="the digest is not one to write again")
-        if topic.status != Status.ACTIVE:
+        if (
+            row is None
+            or row["state"] != DigestState.FAILED
+            or not topic
+            or topic.status != Status.ACTIVE
+        ):
             raise HTTPException(status_code=409, detail="the digest is not one to write again")
         await jobs_store.write_digest(c, digest_id)
     request.app.state.jobs_wake.set()

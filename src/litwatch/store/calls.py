@@ -335,7 +335,7 @@ async def observations(conn: psycopg.AsyncConnection) -> dict[str, dict[str, Any
 async def outcomes(conn: psycopg.AsyncConnection, run: dict[str, Any]) -> dict[str, dict[str, int]]:
     """Per provider, the run's calls that failed without an answer (provider errors and
     timeouts), and the replies it sent while the run went on, whichever run's calls they
-    settled (a dead run's batch, read in this one; reused replies and evaluations' calls, a
+    settled (a dead run's batch, read in this one; reused replies and evaluation runs' calls, a
     replay job's included, left out)."""
     rows = await (
         await conn.execute(
@@ -345,8 +345,7 @@ async def outcomes(conn: psycopg.AsyncConnection, run: dict[str, Any]) -> dict[s
             "UNION ALL SELECT usage->>'via', 0, 1 FROM inference_calls "
             "WHERE responded_at BETWEEN %(since)s AND %(until)s "
             "AND NOT coalesce((usage->>'reused')::boolean, false) "
-            "AND run_id NOT IN (SELECT r.id FROM runs r LEFT JOIN jobs j ON j.id = r.job_id "
-            "WHERE r.kind = %(eval)s OR j.kind = 'replay')) seen "
+            "AND run_id NOT IN (SELECT id FROM runs WHERE kind = %(eval)s)) seen "
             "WHERE provider IS NOT NULL GROUP BY provider",
             {
                 "run": run["id"],

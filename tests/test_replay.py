@@ -477,7 +477,7 @@ async def test_a_replay_job_from_overview_writes_only_to_the_evaluation_tables(c
     owner = next(x for x in shown["recall"] if x.cohort == "owner")
     assert (owner.positives, owner.grading.n) == (2, 2)
     (run,) = await rows(conn, "SELECT kind FROM runs WHERE job_id = %s", job["id"])
-    assert run["kind"] == "job"  # its cost reaches the month's spend
+    assert run["kind"] == "eval"  # an evaluation's run, carried by the job: its cost is the job's
 
 
 async def test_a_replay_job_taken_back_goes_on_without_redoing_what_it_concluded(

@@ -78,8 +78,11 @@ export function latestJobs(jobs: Jobs, n = 3): Job[] {
 /** Whether a job is running or waits its turn: the page polls while one does. */
 export const anyActive = (jobs: Jobs | undefined) => !!jobs?.running.length;
 
-/** A paper's Process job is under way: queued, running or put on tonight's run. */
-export const processing = (job: Schemas["ProcessJob"] | null | undefined) => !!job && ["queued", "running", "tonight"].includes(job.state);
+/** A job is under way: queued, running or put on tonight's run (a paper's Process job, a digest's write). */
+export const underWay = (job: { state: JobState } | null | undefined) => !!job && ["queued", "running", "tonight"].includes(job.state);
+
+/** A paper's Process job is under way. */
+export const processing = (job: Schemas["ProcessJob"] | null | undefined) => underWay(job);
 
 // -- the re-run offer (DESIGN.md, "The re-run offer") ----------------------------------------------------------------
 

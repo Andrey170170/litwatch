@@ -4,6 +4,7 @@ gateway."""
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -107,6 +108,11 @@ class ModelRun:
     def add(self, name: str, n: int = 1) -> None:
         self.record.add(name, n)
 
+    def tally(self) -> Counter[str]:
+        """What the run has counted so far, its numbers alone: a job adds what a chunk counted
+        (`tally()` after it less before) to its own counts."""
+        return Counter({k: v for k, v in self.counts.items() if isinstance(v, int)})
+
 
 @asynccontextmanager
 async def model_run(
@@ -117,20 +123,18 @@ async def model_run(
     window: tuple[datetime, datetime] | None = None,
     gateway: GatewayFactory = default_gateway,
     job_id: int | None = None,
-    evaluation: bool = False,
 ) -> AsyncIterator[ModelRun]:
     """A run record (`run_record`) that also closes with the calls' cost and counts by role.
 
     The journal writes on a connection of its own, since calls finish while the job's
-    connection is inside a transaction. An evaluation's (a run of kind `eval`, or an
-    `evaluation` job's: a replay) observes nothing of the providers.
+    connection is inside a transaction.
     """
     async with (
         run_record(conn, kind, window=window, job_id=job_id) as record,
         await store.sibling(conn) as side,
     ):
         # An evaluation run writes its own tables only (AGENTS.md): no provider observations.
-        journal = CallJournal(side, record.run_id, observes=kind != EVAL and not evaluation)
+        journal = CallJournal(side, record.run_id, observes=kind != EVAL)
         failed = True
         try:
             yield ModelRun(record, gateway(config, journal), journal)

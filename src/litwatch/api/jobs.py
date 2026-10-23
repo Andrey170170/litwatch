@@ -324,17 +324,13 @@ REPLAY_REFUSED = {
 }
 
 
-def _replay_offer(o: replays.Offer, spent: float) -> s.ReplayOffer:
+def _replay_offer(o: replays.Offer) -> s.ReplayOffer:
     if o.running is not None:
-        r = o.running
-        return s.ReplayOffer(
-            running=s.JobRef(id=r["id"], state=r["state"], error=r["error"]),
-            ceiling=replays.CEILING,
-        )
+        return s.ReplayOffer(running=s.JobRef.model_validate(o.running), ceiling=replays.CEILING)
     assert o.replay is not None
     return s.ReplayOffer(
         continues=o.job["id"] if o.job else None,
-        spent=spent,
+        spent=o.spent,
         labels=dict(Counter(x.cohort for x in o.replay.labels)),
         papers=len(o.replay.to_classify),
         pairs=len(o.replay.to_grade),
@@ -345,13 +341,11 @@ def _replay_offer(o: replays.Offer, spent: float) -> s.ReplayOffer:
     )
 
 
-async def _offer(c: Conn, config: Config) -> tuple[replays.Offer, float]:
+async def _offer(c: Conn, config: Config) -> replays.Offer:
     try:
-        o = await replays.offer(c, config)
+        return await replays.offer(c, config)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    spent = await jobs_store.spent(c, o.job["id"]) if o.job else 0.0
-    return o, spent
 
 
 @router.get("/replays/offer", responses=REPLAY_REFUSED)
@@ -360,8 +354,8 @@ async def replay_offer(request: Request, c: Conn) -> s.ReplayOffer:
     one its ceiling stopped, or start a new one of every cohort's labels, with what it would
     cost."""
     async with c.transaction():
-        o, spent = await _offer(c, request.app.state.config)
-    return _replay_offer(o, spent)
+        o = await _offer(c, request.app.state.config)
+    return _replay_offer(o)
 
 
 @router.post("/replays", status_code=201, responses=REPLAY_REFUSED)
@@ -376,11 +370,12 @@ async def run_replay(body: s.ReplayIn, request: Request, c: Conn) -> s.Jobs:
     if not config.schedule.enabled:
         raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
     async with c.transaction():
-        o, spent = await _offer(c, config)
+        o = await _offer(c, config)
         if o.running is None:
-            if o.job is not None and body.ceiling <= spent:
+            if o.job is not None and body.ceiling <= o.spent:
                 raise HTTPException(
-                    status_code=409, detail=f"the ceiling must be above what it spent, ${spent:.2f}"
+                    status_code=409,
+                    detail=f"the ceiling must be above what it spent, ${o.spent:.2f}",
                 )
             assert o.replay is not None
             if not o.replay.papers:

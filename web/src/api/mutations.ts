@@ -7,7 +7,7 @@
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
 import { digestQuery, JOBS_PAGES, jobsQuery, patchRead, qualityQuery, refreshSummary, replayOfferQuery, sessionQuery, sessionsQuery, settingsReads } from "./queries";
-import type { Job, JobAction } from "@/lib/jobs";
+import { type Job, type JobAction, underWay } from "@/lib/jobs";
 import { rememberCard } from "@/lib/remember";
 import { acknowledged, labelled, noted, type Quality, type Seen, type Session, type SessionRow, sessionRow, settle, type Settled, settleFromPaper, type Waiting } from "@/lib/settings";
 import { plural } from "@/lib/format";
@@ -424,14 +424,14 @@ export function useWriteAgain() {
     mutationFn: async (digestId: number) => {
       const key = ["digest", String(digestId)];
       let d = ok(await api.POST("/api/digests/{digest_id}/write", { params: { path: { digest_id: digestId } } }));
-      for (;;) {
+      for (let wait = WRITE_POLL; ; wait = Math.min(wait * 1.5, WRITE_POLL_MOST)) {
         // each read lands as the digest's; one begun before it is dropped, so it cannot land over it
         await qc.cancelQueries({ queryKey: key, exact: true });
         qc.setQueryData(key, d);
-        if (!writing(d)) return d;
+        if (!underWay(d.job)) return d;
         const where = d.job!.state === "running" ? "Being written now; it shows in Jobs." : "Queued: it is written once the run lock is free; it shows in Jobs.";
         await settleNeeds(qc, (q) => noted(q, digestId, where));
-        await new Promise((r) => setTimeout(r, WRITE_POLL));
+        await new Promise((r) => setTimeout(r, wait));
         d = ok(await api.GET("/api/digests/{digest_id}", { params: { path: { digest_id: digestId } } }));
       }
     },
@@ -461,11 +461,10 @@ export function useWriteAgain() {
   });
 }
 
-/** How often a digest written again is read while its job is queued or running. */
-const WRITE_POLL = 2_000;
-
-/** Whether a digest's job writing it again is still to end: queued or running. */
-export const writing = (d: Pick<Schemas["Digest"], "job">) => !!d.job && ["queued", "running", "tonight"].includes(d.job.state);
+/** How often a digest written again is read while its job is under way: soon at first, then less often, as a job
+ * queued behind a nightly run may wait an hour. A digest opened while its job is under way is read at the slowest. */
+export const WRITE_POLL = 2_000;
+export const WRITE_POLL_MOST = 15_000;
 
 /** Overview's Run replay: a replay of every cohort's labels, or the stopped one going on, under the ceiling given.
  * Overview shows it in place (the offer reads it running), so there is no toast; the jobs are reread. */
