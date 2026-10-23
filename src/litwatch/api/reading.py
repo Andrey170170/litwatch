@@ -417,7 +417,15 @@ async def paper_page(
         card=card,
         card_pass=card_pass,
         card_requestable=card_requestable,
-        process=s.ProcessJob(id=job["id"], state=job["state"], error=job["error"]) if job else None,
+        process=s.ProcessJob(
+            id=job["id"],
+            state=job["state"],
+            error=job["error"],
+            again=job["state"] == "failed"
+            and not any(f["failed_runs"] >= FAILED_RUNS for f in found["failures"]),
+        )
+        if job
+        else None,
     )
 
 

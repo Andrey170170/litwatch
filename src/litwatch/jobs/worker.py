@@ -106,9 +106,8 @@ class Worker:
         job = await jobs_store.claim(self.conn)
         if job is None:
             return False
-        run = await self._run_of(job)
         try:
-            after = await self._chunk(job, run)
+            after = await self._chunk(job, await self._run_of(job))
         except Exception as exc:
             log.exception("jobs: job %s failed", job["id"])
             await self._end(job, f"{type(exc).__name__}: {exc}")

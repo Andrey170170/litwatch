@@ -297,7 +297,7 @@ describe("a paper's page", () => {
 
   it("offers Process again once a paper's job failed, with why", async () => {
     viewport(true);
-    const failed = { ...paper, id: "2409.01234", title: "Failed one", in_collection: false, stored: true, next_run: true, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, process: { id: 4, state: "failed", error: "classification failed on 1" } };
+    const failed = { ...paper, id: "2409.01234", title: "Failed one", in_collection: false, stored: true, next_run: true, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, process: { id: 4, state: "failed", error: "classification failed on 1", again: true } };
     const calls = scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": failed, "POST /api/jobs/process": json({ id: 4, state: "queued", error: null }, 202) });
     renderApp("/paper/2409.01234");
     const again = await screen.findByRole("button", { name: "Process again" });
@@ -309,7 +309,7 @@ describe("a paper's page", () => {
   it("offers no Process again while the failed job's paper waits on the owner: the note above does", async () => {
     viewport(true);
     const waits = { kind: "awaiting_classification", revision: 1, error: "no usable answer", refused: false };
-    const stuck = { ...paper, id: "2409.01234", title: "Stuck one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, states: [waits], process: { id: 4, state: "failed", error: "classification failed on 1 (waits on Needs you)" } };
+    const stuck = { ...paper, id: "2409.01234", title: "Stuck one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, states: [waits], process: { id: 4, state: "failed", error: "classification failed on 1 (waits on Needs you)", again: false } };
     scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": stuck });
     renderApp("/paper/2409.01234");
     const failed = await screen.findByRole("button", { name: "Failed" });

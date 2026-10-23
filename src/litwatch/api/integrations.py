@@ -19,17 +19,17 @@ from litwatch import events
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, protected
 from litwatch.archive import ArchiveError
-from litwatch.core import Cause, SearchFilters, SearchHit, SearchProvider
+from litwatch.core import FAILED_RUNS, Cause, SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.intake.search import NoAnswerError
 from litwatch.integrations.archive import Archive
 from litwatch.integrations.deep import Deep
+from litwatch.store import failures, outbox
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import jobs as jobs_store
-from litwatch.store import outbox
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
@@ -215,11 +215,13 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
         if pass_id is None:
             raise HTTPException(status_code=409, detail="the paper is dismissed")
         # Outside the collection, the paper is processed now too, as Process does: with the
-        # schedule on, which runs the jobs worker, and a taxonomy to sort it into.
+        # schedule on, which runs the jobs worker, a taxonomy to sort it into, and no step of
+        # the paper waiting on the owner.
         processing = (
             request.app.state.config.schedule.enabled
             and not await word_store.in_collection(c, paper_id)
             and await taxonomy_store.load(c) is not None
+            and not await failures.waits_on_owner(c, [paper_id], FAILED_RUNS)
         )
         if processing:
             await jobs_store.process(c, paper_id)

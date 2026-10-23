@@ -117,6 +117,14 @@ async def open_on(
     return {r["step"]: (r["n"], r["stuck"]) for r in rows}
 
 
+async def waits_on_owner(
+    conn: psycopg.AsyncConnection, paper_ids: Sequence[str], runs: int
+) -> bool:
+    """Whether a step of one of the papers waits for the owner after at least `runs` runs in a
+    row: no run tries it again until the owner acts on Needs you."""
+    return any(stuck for _, stuck in (await open_on(conn, paper_ids, runs)).values())
+
+
 async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[dict[str, Any]]:
     """The failures of `step` that wait for the owner (`ACTIONABLE`) after at least `runs` runs
     in a row, with the last error (and the topic, for grading), the roles whose every model

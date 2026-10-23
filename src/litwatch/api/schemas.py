@@ -491,11 +491,13 @@ JobState = Literal["offered", "stopped", "tonight", "queued", "running", "failed
 
 class ProcessJob(BaseModel):
     """A paper's Process job (DESIGN.md, the paper page): its button reads "Processing" while
-    the job is queued or running."""
+    the job is queued or running. `again`: failed, and Process would put it back in the queue,
+    since no step of its paper waits on the owner (then the owner's action there settles it)."""
 
     id: int
     state: JobState
     error: str | None = None
+    again: bool = False
 
 
 class Paper(BaseModel):

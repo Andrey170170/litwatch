@@ -13,6 +13,7 @@ import pytest
 
 from litwatch import store
 from litwatch.api import create_app
+from litwatch.api import jobs as jobs_api
 from litwatch.api import reading as api_reading
 from litwatch.config import Schedule
 from litwatch.core import Cause, Depth, Status
@@ -212,6 +213,20 @@ async def test_a_failed_job_settles_when_the_topic_it_failed_grading_on_is_pause
     ]
     await word.save_taxonomy(conn, TREE.model_copy(update={"topics": paused}))
     assert (await jobs_store.get(conn, job))["state"] == "queued"  # nothing waits on it now
+
+
+async def test_a_job_whose_run_cannot_start_fails_and_says_why(conn, models, monkeypatch):
+    """Its gateway cannot be built (an unreadable key file, say): the job fails with the error,
+    rather than the worker failing, taking it back and trying it again forever."""
+
+    def unreadable(*_, **__):
+        raise OSError("the key file is unreadable")
+
+    monkeypatch.setattr(worker, "model_run", unreadable)
+    job = await queued(conn, A.id)
+    assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)
+    failed = await jobs_store.get(conn, job)
+    assert (failed["state"], failed["error"]) == ("failed", "OSError: the key file is unreadable")
 
 
 async def test_a_job_whose_paper_is_dismissed_while_it_runs_is_discarded_however_it_ends(
@@ -514,6 +529,35 @@ async def test_a_failed_job_is_tried_again(conn, models):
     assert keys(acted.json()["running"]) == [f"job:{job}"]
 
 
+async def test_a_process_job_whose_paper_waits_on_the_owner_is_not_tried_again(conn, models):
+    """Its classification failed three runs in a row: Try again and Process would find nothing
+    due, so neither is offered and both are refused; the owner's action on Needs you settles
+    it. One failed run fewer, both put it back in the queue."""
+    job = await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "failed")
+    await conn.execute(
+        "INSERT INTO step_failures (paper_id, step, topic, paper_revision, failed_runs, last_error)"
+        " VALUES (%s, 'classification', '', 1, 3, 'unusable')",
+        (A.id,),
+    )
+    async with api(conn) as http:
+        listed = (await http.get("/api/jobs")).json()
+        page = (await http.get(f"/api/papers/{A.id}")).json()
+        tried = await http.post(f"/api/jobs/{job}/again")
+        processed = await http.post("/api/jobs/process", json={"paper_id": A.id})
+    assert listed["failed"][0]["actions"] == [] and page["process"]["again"] is False
+    for refused in (tried, processed):
+        assert (refused.status_code, refused.json()["detail"]) == (409, jobs_api.WAITS)
+    assert (await jobs_store.get(conn, job))["state"] == "failed"
+
+    await conn.execute("UPDATE step_failures SET failed_runs = 2")
+    async with api(conn) as http:
+        listed = (await http.get("/api/jobs")).json()
+        page = (await http.get(f"/api/papers/{A.id}")).json()
+        processed = await http.post("/api/jobs/process", json={"paper_id": A.id})
+    assert listed["failed"][0]["actions"] == ["again"] and page["process"]["again"] is True
+    assert (processed.status_code, processed.json()["state"]) == (202, "queued")
+
+
 async def test_process_fetches_the_paper_and_queues_its_job_once(conn, models, monkeypatch):
     elsewhere = paper("2610.09999", title="Elsewhere")
     monkeypatch.setattr(
@@ -528,7 +572,12 @@ async def test_process_fetches_the_paper_and_queues_its_job_once(conn, models, m
     assert first.status_code == 202 and first.json()["state"] == "queued"
     assert again.json()["id"] == first.json()["id"]  # asked again, the same job
     assert (page["stored"], page["in_collection"]) == (True, False)
-    assert page["process"] == {"id": first.json()["id"], "state": "queued", "error": None}
+    assert page["process"] == {
+        "id": first.json()["id"],
+        "state": "queued",
+        "error": None,
+        "again": False,
+    }
     assert missing.status_code == 404
 
     await work_out(worker.Worker(conn, CONFIG, models.gateway))

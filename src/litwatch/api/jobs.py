@@ -13,6 +13,7 @@ from litwatch.api.deps import Conn, protected
 from litwatch.core import FAILED_RUNS, Cause
 from litwatch.feedback import misses, word
 from litwatch.intake.search import NoAnswerError
+from litwatch.store import failures
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -41,10 +42,19 @@ MOVES: dict[s.JobAction, tuple[tuple[str, ...], str]] = {
 }
 
 
+# Why Process and Try again refuse a Process job whose paper waits on the owner: it would find
+# nothing due and fail at once, and the owner's action on Needs you settles it (DESIGN.md, Jobs).
+WAITS = "the paper waits on you on Needs you"
+
+
 def _actions(row: dict[str, Any]) -> list[s.JobAction]:
     if row["source"] == "card":  # Try again only once it waits on the owner, as on Needs you
         return ["again"] if row["stuck"] else []
-    return [a for a, (sources, _) in MOVES.items() if row["state"] in sources]
+    return [
+        a
+        for a, (sources, _) in MOVES.items()
+        if row["state"] in sources and not (a == "again" and row["stuck"])
+    ]
 
 
 def _job(row: dict[str, Any]) -> s.Job:
@@ -86,7 +96,10 @@ async def jobs(c: Conn) -> s.Jobs:
 
 PROCESS_REFUSED = {
     404: {"description": "No such paper"},
-    409: {"description": "The paper is in the collection already or dismissed, or no taxonomy"},
+    409: {
+        "description": "The paper is in the collection already, dismissed or waits on the owner, "
+        "or no taxonomy"
+    },
     503: {"description": "arXiv did not answer in time; nothing was stored"},
 }
 
@@ -96,9 +109,10 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
     """Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks
     it, with no transaction open, then store it and queue its Process job in one. Asked again,
     it answers with the job already queued or running, and puts a failed one back in the
-    queue. Without a taxonomy there is nothing to sort the paper into: 409, nothing kept. With
-    the schedule off no worker runs jobs: the paper is fetched only, for the next run, and the
-    answer is null."""
+    queue, unless a step of the paper waits on the owner (409: it would find nothing due, and
+    the owner's action on Needs you settles the job). Without a taxonomy there is nothing to sort
+    the paper into: 409, nothing kept. With the schedule off no worker runs jobs: the paper is
+    fetched only, for the next run, and the answer is null."""
     try:
         paper_id, fetched = await misses.resolve(c, body.paper_id)
     except misses.NotFoundError as exc:
@@ -113,6 +127,8 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
             raise HTTPException(status_code=409, detail="already in the collection")
         if await papers_store.dismissed_at(c, paper_id) is not None:
             raise HTTPException(status_code=409, detail="the paper is dismissed")
+        if await failures.waits_on_owner(c, [paper_id], FAILED_RUNS):
+            raise HTTPException(status_code=409, detail=WAITS)
         if not request.app.state.config.schedule.enabled:
             return None
         job = await jobs_store.process(c, paper_id)
@@ -122,16 +138,24 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
 
 JOB_REFUSED = {
     404: {"description": "No such job"},
-    409: {"description": "The job's state does not allow it"},
+    409: {"description": "The job's state does not allow it, or its paper waits on the owner"},
 }
 
 
 @router.post("/{job_id}/{action}", responses=JOB_REFUSED)
 async def act(job_id: int, action: s.JobAction, request: Request, c: Conn) -> s.Jobs:
-    """Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one.
-    Answers with the page's groups as they stand after it."""
+    """Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
+    a Process job only while no step of its paper waits on the owner, checked under the paper's
+    settle lock. Answers with the page's groups as they stand after it."""
     sources, to = MOVES[action]
-    if await jobs_store.move(c, job_id, sources, to) is None:
+    async with c.transaction():
+        job = await jobs_store.get(c, job_id)
+        if job is not None and action == "again" and job["kind"] == "process":
+            await word.lock_many(c, job["scope"]["papers"])
+            if await failures.waits_on_owner(c, job["scope"]["papers"], FAILED_RUNS):
+                raise HTTPException(status_code=409, detail=WAITS)
+        moved = await jobs_store.move(c, job_id, sources, to)
+    if moved is None:
         job = await jobs_store.get(c, job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="no such job")

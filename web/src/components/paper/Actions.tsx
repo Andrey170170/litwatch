@@ -50,16 +50,15 @@ export function DeepReadCell({ paper, asked, wide }: { paper: Paper; asked: bool
 }
 
 /** Process, for a paper outside the collection: it fetches the paper and starts the job that processes it now
- * (Jobs), and reads "Processing" while the job runs. A failed job can be asked again, unless its classification
- * waits on the owner (the open state above, whose actions put the job back, `store.jobs.settle_process`): asked
- * again, it would find nothing due and fail at once. Outside the collection no other step can have run. A paper
- * fetched otherwise (a miss report, a lookup) says so, and that the next run processes it only while one will
- * (`next_run`): a dismissed paper, say, is fetched and never processed. */
+ * (Jobs), and reads "Processing" while the job runs. A failed job can be asked again while the API says it would run
+ * (`again`); while a step waits on the owner it reads "Failed": the open state above has the actions, and they put
+ * the job back. A paper fetched otherwise (a miss report, a lookup) says so, and that the next run processes it only
+ * while one will (`next_run`): a dismissed paper, say, is fetched and never processed. */
 export function ProcessCell({ paper, phone }: { paper: Paper; phone?: boolean }) {
   const process = useProcess();
   const busy = processing(paper.process);
   const failed = paper.process?.state === "failed";
-  const stuck = failed && !!paper.states?.some((s) => s.kind === "awaiting_classification");
+  const stuck = failed && !paper.process?.again;
   const fetched = paper.stored !== false && !busy && !failed;
   const waits = fetched && paper.next_run;
   const why = paper.process?.error ?? "no reason given";

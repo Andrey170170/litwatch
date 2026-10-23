@@ -197,8 +197,9 @@ async def listing(
     conn: psycopg.AsyncConnection, done_limit: int, runs: int
 ) -> list[dict[str, Any]]:
     """Every job not discarded and every Deep card the owner asked for, as the Jobs page shows
-    them: a job with its paper (a Process job's) and what its runs' calls cost, a run whose
-    process died included (a call of unknown cost counts nothing, as in the month's spend); a
+    them: a job with its paper (a Process job's), whether a step of that paper waits on the owner
+    (`stuck`, after `runs` failed runs), and what its runs' calls cost, a run whose process died
+    included (a call of unknown cost counts nothing, as in the month's spend); a
     card with its pass's state, mapped onto a job's, failed once it waits on the owner (`stuck`,
     as Needs you lists it, after `runs` failed runs or a long wait for its text). A dismissed
     paper's card is left out unless done or its attempt is open: nothing else runs it. Only the
@@ -209,7 +210,11 @@ async def listing(
             WITH found AS (
                 SELECT 'job' AS source, j.id, j.kind, j.state, j.papers, j.done, j.counts,
                        j.error, j.changed_at AS at, j.queued_at,
-                       j.scope -> 'papers' ->> 0 AS paper_id, NULL::bool AS stuck,
+                       j.scope -> 'papers' ->> 0 AS paper_id,
+                       j.kind = 'process' AND EXISTS (
+                           SELECT 1 FROM step_failures f JOIN papers p ON p.id = f.paper_id
+                           WHERE f.paper_id = j.scope -> 'papers' ->> 0
+                             AND f.failed_runs >= %(runs)s AND {ACTIONABLE}) AS stuck,
                        (SELECT sum((c.usage ->> 'cost')::numeric) FROM inference_calls c
                         JOIN runs r ON r.id = c.run_id WHERE r.job_id = j.id) AS cost
                 FROM jobs j WHERE j.state <> 'discarded'

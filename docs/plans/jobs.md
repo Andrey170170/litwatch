@@ -88,9 +88,10 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
 - **Built in P1 beyond the bullets above:** with the schedule off, Process only fetches the paper (no worker runs
   it); without a taxonomy, Process answers 409 and keeps nothing; a failed Process job is queued again once its
   paper's failures are cleared, and discarded if the paper is dismissed; a card asked for shows as Failed by the
-  rule Needs you uses. On the paper's page a failed Process job reads "Process again" and queues the job again;
-  while its classification waits on the owner, the button reads "Failed" and is off, since the job would find
-  nothing due: the open state's own actions (Classify by hand, Fix the text, Dismiss) settle the job.
+  rule Needs you uses. A failed Process job is tried again (Jobs' Try again, the paper's "Process again") only while
+  no step of its paper waits on the owner; then it would find nothing due, so neither is offered and the API
+  answers 409 (Deep read queues no job either): the owner's action on Needs you settles it, and on the paper's page
+  the button reads "Failed".
 
 ## Decisions
 
@@ -160,7 +161,7 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 
 Found while building P1: the Processing note says "in a minute or two" even for a `tonight` job (nothing creates an
 offered or `tonight` Process job before P2); the Jobs page's sub-line leaves out "Each stops at its ceiling" until
-ceilings exist; a running job shows $0.00 until its run closes.
+ceilings exist.
 
 ## Scope
 
