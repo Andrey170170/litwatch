@@ -4,9 +4,9 @@
 -- `ceiling` is the most the job may spend over its life, in USD (none for a Process job), and
 -- `estimate` what its offer estimated; `wake_at` keeps a job whose passes all await their text
 -- from being claimed again before then; `ladder` how far down its graders' lists each paper's
--- grading starts on its next try ({paper: {"runs": n, "refused": [role]}}, models.md, D4), kept
--- across Try again. A re-run's scope: {"topic", "revision", "scopes", "since", "until",
--- "papers": [id]}.
+-- grading starts on its next try on the same text ({paper: {"revision": n, "runs": n,
+-- "refused": [role]}}, models.md, D4), kept across Try again. A re-run's scope: {"topic",
+-- "revision", "scopes", "since", "until", "papers": [id]}.
 ALTER TABLE jobs DROP CONSTRAINT jobs_kind_check;
 ALTER TABLE jobs ADD CONSTRAINT jobs_kind_check CHECK (kind IN ('process', 'rerun'));
 ALTER TABLE jobs ADD COLUMN ceiling numeric;

@@ -111,8 +111,9 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
     200 verdicts that escalated). The Briefs a re-run's verdicts bring are paid under its ceiling but not estimated.
   - *A grading that fails in a re-run is the job's, not the paper's:* no `step_failures` row, so no nightly takes it
     up; the job ends `failed` ("grading failed on 3"), Try again redoes what has no verdict under the version,
-    each grading as far down its graders' lists as its earlier tries reached (D4, kept on the job). A grading
-    whose paper's text changed meanwhile counts as failed too. A re-run's progress is counted from the verdicts. A
+    each grading as far down its graders' lists as its earlier tries on the same text reached (D4, kept on the
+    job; both Focus sides refused asks both again). A grading whose paper's text changed meanwhile counts as
+    failed too. A re-run's progress is counted from the verdicts. A
     re-run whose topic was paused or unfollowed fails, saying so; Run is refused (409) with the schedule off.
   - *The worst case of a call:* its input bounded by the request's UTF-8 bytes plus 1,024 tokens of framing (a token
     is at least a byte), its output by its cap. An OpenRouter route's bound is, per token type, the tightest charge
