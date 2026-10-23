@@ -13,6 +13,7 @@ import pytest
 
 from litwatch import store
 from litwatch.api import create_app
+from litwatch.config import Schedule
 from litwatch.feedback import misses
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
@@ -23,6 +24,8 @@ from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from tests.conftest import TREE, answering, paper
 from tests.test_steps import CONFIG, Scripted
+
+SCHEDULED = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})  # the worker runs
 
 A = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes on activations.")
 B = paper("2610.00002", title="Is the chain of thought faithful?", abstract="We test traces.")
@@ -184,6 +187,13 @@ async def test_a_job_whose_session_died_is_taken_back_and_finishes_without_redoi
     assert asked(models, "analyse", A.title) == 1
     executions = await rows(conn, "SELECT * FROM runs WHERE job_id = %s ORDER BY id", job)
     assert len(executions) == 2 and executions[1]["finished_at"] is not None
+    # What the dead run's calls cost counts in the job's cost, though its run never closed.
+    calls = await rows(
+        conn, "SELECT run_id, (usage->>'cost')::numeric AS cost FROM inference_calls"
+    )
+    assert {c["run_id"] for c in calls} == {e["id"] for e in executions}
+    (listed,) = [r for r in await jobs_store.listing(conn, 20) if r["source"] == "job"]
+    assert executions[0]["finished_at"] is None and listed["cost"] == sum(c["cost"] for c in calls)
 
 
 async def test_a_job_taken_back_mid_chunk_skips_the_steps_it_had_done(conn, models):
@@ -273,9 +283,9 @@ async def test_a_job_with_tonights_run_waits_for_a_nightly_to_finish(conn, model
 
 
 @asynccontextmanager
-async def api(conn, integrations=None):
+async def api(conn, config=SCHEDULED):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, TOKEN, CONFIG, integrations=integrations)
+    app = create_app(dsn, TOKEN, config)
     transport = httpx.ASGITransport(app=app)
     headers = {"authorization": f"Bearer {TOKEN}"}
     async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
@@ -368,6 +378,19 @@ async def test_process_fetches_the_paper_and_queues_its_job_once(conn, models, m
     assert processed.status_code == 409
     assert keys(listed["done"]) == [f"job:{first.json()['id']}"]
     assert listed["done"][0]["cost"] > 0
+
+
+async def test_with_the_schedule_off_process_only_fetches_the_paper_for_the_next_run(
+    conn, models, monkeypatch
+):
+    elsewhere = paper("2610.09999", title="Elsewhere")
+    monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: [elsewhere]))
+    async with api(conn, CONFIG) as http:
+        fetched = await http.post("/api/jobs/process", json={"paper_id": elsewhere.id})
+        page = (await http.get(f"/api/papers/{elsewhere.id}")).json()
+    assert (fetched.status_code, fetched.json()) == (202, None)
+    assert (page["stored"], page["next_run"], page["process"]) == (True, True, None)
+    assert await rows(conn, "SELECT 1 FROM jobs") == []
 
 
 async def test_process_on_a_dismissed_paper_is_refused_and_keeps_nothing(conn, models):

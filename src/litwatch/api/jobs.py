@@ -55,7 +55,9 @@ def _job(row: dict[str, Any]) -> s.Job:
         id=None if card else row["id"],
         pass_id=row["id"] if card else None,
         state=row["state"],
-        paper=s.JobPaper(id=row["paper_id"], title=row["title"]) if row["title"] else None,
+        paper=s.JobPaper(id=row["paper_id"], title=row["title"])
+        if row["title"] is not None
+        else None,
         papers=row["papers"],
         done=row["done"],
         cost=float(row["cost"]) if row["cost"] is not None else None,
@@ -90,11 +92,12 @@ PROCESS_REFUSED = {
 
 
 @router.post("/process", status_code=202, responses=PROCESS_REFUSED)
-async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob:
+async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob | None:
     """Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks
     it, with no transaction open, then store it and queue its Process job in one. Asked again,
     it answers with the job already queued or running, and puts a failed one back in the
-    queue."""
+    queue. With the schedule off no worker runs jobs: the paper is fetched only, for the next
+    run, and the answer is null."""
     try:
         paper_id, fetched = await misses.resolve(c, body.paper_id)
     except misses.NotFoundError as exc:
@@ -107,6 +110,8 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob:
             raise HTTPException(status_code=409, detail="already in the collection")
         if await papers_store.dismissed_at(c, paper_id) is not None:
             raise HTTPException(status_code=409, detail="the paper is dismissed")
+        if not request.app.state.config.schedule.enabled:
+            return None
         job = await jobs_store.process(c, paper_id)
     request.app.state.jobs_wake.set()
     return s.ProcessJob(id=job["id"], state=job["state"], error=job["error"])

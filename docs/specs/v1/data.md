@@ -80,6 +80,11 @@ evaluation calls the same functions and writes only to evaluation tables.
   badly), last error, refused throughout, acknowledged at, as for `step_failures`): one Brief or Weight re-check open per paper revision, and one
   Deep pass open per paper (reason request | focus | pick; its revision is the one it read); a worker takes the least recently
   tried first. `weights` and `gists` name the pass a full-text row came from.
+- `jobs` (kind process, scope (a Process job's: its paper), state offered | stopped | tonight | queued | running |
+  failed | done | discarded, papers, done (how many of them its chunks worked), counts, error, created at, queued at,
+  changed at, backend pid and start (the session running it, as a run's)): the owner's queue outside the nightly run
+  ([`docs/plans/jobs.md`](../../plans/jobs.md)); one Process job not done per paper. `runs.job_id` names the job a run
+  of kind `job` worked; each time the worker runs a job, from claim to stop, is one run.
 - What a digest still has to cover is not stored: a paper is due for a topic while it is eligible there, was announced
   within three weeks of the digest's day, and is in no published digest of the topic that clears it (a daily one for
   Focus and Area, a weekly one for Field), found from the database when a digest is written

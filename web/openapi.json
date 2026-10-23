@@ -3023,7 +3023,7 @@
     "/api/jobs/process": {
       "post": {
         "summary": "Process",
-        "description": "Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks\nit, with no transaction open, then store it and queue its Process job in one. Asked again,\nit answers with the job already queued or running, and puts a failed one back in the\nqueue.",
+        "description": "Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks\nit, with no transaction open, then store it and queue its Process job in one. Asked again,\nit answers with the job already queued or running, and puts a failed one back in the\nqueue. With the schedule off no worker runs jobs: the paper is fetched only, for the next\nrun, and the answer is null.",
         "operationId": "process_api_jobs_process_post",
         "requestBody": {
           "content": {
@@ -3041,7 +3041,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProcessJob"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ProcessJob"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Process Api Jobs Process Post"
                 }
               }
             }

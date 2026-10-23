@@ -14,7 +14,7 @@ import pytest
 from litwatch import events, store
 from litwatch.api import create_app, monitor
 from litwatch.archive import ArchiveClient
-from litwatch.config import Config
+from litwatch.config import Config, Schedule
 from litwatch.core import (
     FAILED_RUNS,
     Cause,
@@ -1015,9 +1015,9 @@ async def test_a_pick_whose_settle_was_missed_is_swept_up_whatever_the_limit(db)
 # -- what the owner sees ---------------------------------------------------------------------------
 
 
-def client(conn, integrations) -> tuple:
+def client(conn, integrations, config: Config | None = None) -> tuple:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, TOKEN, Config(), integrations=integrations)
+    app = create_app(dsn, TOKEN, config or Config(), integrations=integrations)
     http = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
@@ -1050,7 +1050,8 @@ async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypa
         "fetch_by_ids",
         answering(lambda ids: fetched.append(ids) or [found[i] for i in ids if i in found]),
     )
-    _, http = client(db, [make(FakeDeep(DONE))])
+    scheduled = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
+    _, http = client(db, [make(FakeDeep(DONE))], scheduled)
     async with http:
         asked = await http.post("/api/papers/2610.09999v2/card")
         page = (await http.get("/api/papers/2610.09999")).json()

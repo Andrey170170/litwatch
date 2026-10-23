@@ -159,8 +159,9 @@ async def finish(
 
 async def listing(conn: psycopg.AsyncConnection, done_limit: int) -> list[dict[str, Any]]:
     """Every job not discarded and every Deep card the owner asked for, as the Jobs page shows
-    them: a job with its paper (a Process job's) and what its runs spent; a card with its
-    pass's state, mapped onto a job's. Only the newest `done_limit` of those done."""
+    them: a job with its paper (a Process job's) and what its runs' calls cost, a run whose
+    process died included (a call of unknown cost counts nothing, as in the month's spend); a
+    card with its pass's state, mapped onto a job's. Only the newest `done_limit` of those done."""
     return await (
         await conn.execute(
             """
@@ -168,7 +169,8 @@ async def listing(conn: psycopg.AsyncConnection, done_limit: int) -> list[dict[s
                 SELECT 'job' AS source, j.id, j.kind, j.state, j.papers, j.done, j.counts,
                        j.error, j.changed_at AS at, j.queued_at,
                        j.scope -> 'papers' ->> 0 AS paper_id, NULL::int AS failed_runs,
-                       (SELECT sum(r.cost) FROM runs r WHERE r.job_id = j.id) AS cost
+                       (SELECT sum((c.usage ->> 'cost')::numeric) FROM inference_calls c
+                        JOIN runs r ON r.id = c.run_id WHERE r.job_id = j.id) AS cost
                 FROM jobs j WHERE j.state <> 'discarded'
                 UNION ALL
                 SELECT 'card', f.id, 'deep',

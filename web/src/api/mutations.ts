@@ -160,13 +160,15 @@ export function useMiss(paperId: string) {
 }
 
 /** Process (D1): fetch a paper the collection lacks and queue the job that processes it now. The paper's page reads
- * the job back ("Processing"), and Jobs lists it; a 409 (in the collection meanwhile) refreshes the page. */
+ * the job back ("Processing"), and Jobs lists it; a 409 (in the collection meanwhile) refreshes the page. With the
+ * schedule off the API only fetches it, for the next run. */
 export function useProcess() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => ok(await api.POST("/api/jobs/process", { body: { paper_id: id } })),
-    onSuccess: (_r, id) => {
-      toast("Processing it now; Settings › Runs and cost › Jobs shows how it goes");
+    onSuccess: (job, id) => {
+      // no job with the schedule off: the paper is fetched for the next run, as the page then says
+      toast(job ? "Processing it now; Settings › Runs and cost › Jobs shows how it goes" : "Fetched into the collection; it is processed on the next run");
       return Promise.all([jobsChanged(qc), qc.invalidateQueries({ queryKey: ["paper", id] })]);
     },
     onError: (e, id) => {
