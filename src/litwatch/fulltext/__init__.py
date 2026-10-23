@@ -75,6 +75,7 @@ class Attempt:
     refused: bool = False  # every model of `brief` refused: the pass stops at once
     waiting: bool = False  # no text yet: the archive is fetching it, or cannot be reached
     retry_asked: bool = False  # the archive was asked to retry the downloads it gave up on
+    stopped: bool = False  # a re-run's ceiling kept the call from being sent: given back
 
 
 def archive_for(config: Config) -> ArchiveClient | None:
@@ -125,7 +126,7 @@ def _write(
             )
         except CallError as exc:
             a.error, a.counts, a.refused = str(exc), exc.unusable, exc.kind == "refused"
-            a.unusable = exc.unusable
+            a.unusable, a.stopped = exc.unusable, exc.kind == "ceiling"
             return a
         a.output, a.model = answer.value, answer.model
         return a
@@ -143,8 +144,9 @@ async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
     that revision is still the paper's, `gist.written`. Without: the pass fails or waits for its
     text, as one for a dismissed paper does whatever it got. Then settle the paper: its grades
     follow the Weight, its next pass may be queued (section 8), and a pass back in the queue
-    that is no longer wanted (a topic paused while it ran) is dropped. Returns False when the
-    worker no longer held the pass."""
+    that is no longer wanted (a topic paused while it ran) is dropped. A pass a re-run's
+    ceiling stopped goes back unworked. Returns False when the worker no longer held the
+    pass."""
     c = a.claimed
     async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
         if not await store_.held(conn, c):
@@ -155,6 +157,8 @@ async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
         if a.waiting or await store_.dismissed(conn, c.paper.id):
             a.waiting = True  # a dismissed paper's pass writes nothing; `claim` leaves it alone
             await store_.awaiting(conn, c, a.error)
+        elif a.stopped:
+            await store_.wait_again(conn, c, a.error or "stopped at the ceiling")
         elif a.output is None or a.model is None or read is None:
             error = a.error or "no answer"
             await store_.failed(
@@ -242,6 +246,8 @@ async def judged(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
 def _outcome(a: Attempt) -> str:
     if a.waiting:
         return "awaiting_text"
+    if a.stopped:
+        return "fulltext_stopped"
     return "briefs_written" if a.output is not None else "fulltext_failed"
 
 
@@ -259,6 +265,7 @@ async def work(
     gateway: GatewayFactory = default_gateway,
     limit: int | None = None,
     deadline: float | None = None,
+    job: int | None = None,
 ) -> Counter[str]:
     """Try every pass that is due once, up to `limit`, `BATCH` at a time: read its text, and
     write from it. No batch starts after `deadline` (`time.monotonic()`); those left are the
@@ -267,10 +274,11 @@ async def work(
 
     A `run` (a nightly) leaves the owner's passes to the service's worker; batching, it claims
     all the automatic ones due at once, held until its gateway's deadline. Without a run, while
-    another job holds the run lock, only the owner's are worked (models.md, batches)."""
+    another job holds the run lock, only the owner's are worked (models.md, batches). A re-run's
+    passes are worked only by its `job`, on its run, until its ceiling is reached."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
-    lease, wide, owners = LEASE, False, False if run else None
+    lease, wide, owners = LEASE, False, False if run and job is None else None
     if run and (until := run.gateway.batching_until()):
         lease, wide = until - datetime.now(UTC) + DRAIN + LEASE, True
     reads = asyncio.Semaphore(CONCURRENCY)
@@ -279,8 +287,10 @@ async def work(
         async with reads:
             return await read(archive, c)
 
-    while (limit is None or len(tried) < limit) and (
-        deadline is None or time.monotonic() < deadline
+    while (
+        (limit is None or len(tried) < limit)
+        and (deadline is None or time.monotonic() < deadline)
+        and not (run and run.gateway.ceiling and run.gateway.ceiling.reached)
     ):
         if run is None:  # asked at each claim: a nightly may have started meanwhile
             owners = True if await held_elsewhere(conn) else None
@@ -289,7 +299,7 @@ async def work(
             size = None if limit is None else limit - len(tried)
         claimed = [
             c
-            for c in await store_.claim(conn, lease, size, tried, owners=owners)
+            for c in await store_.claim(conn, lease, size, tried, owners=owners, job=job)
             if c.id not in tried
         ]
         if not claimed:

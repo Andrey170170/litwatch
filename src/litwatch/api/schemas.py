@@ -834,24 +834,42 @@ class JobPaper(BaseModel):
     title: str
 
 
+RerunScope = Literal["labels", "members", "keywords", "range"]
+
+
+class JobTopic(BaseModel):
+    """A re-run's topic, and the revision of it the re-run was offered for."""
+
+    slug: str
+    name: str
+    revision: int | None = None
+
+
 class Job(BaseModel):
     """One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked
     for (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready
-    is queued). `papers` and `done` say how far it got; `cost` is what its runs spent, None
-    before any and for a card, which runs on the subscription. `at` is when it last changed
-    state. `actions` are those its state allows: Run now, With tonight's run and Discard while
-    it is not run; Try again once it failed, for a card only once it waits for the owner (a
-    card that failed fewer runs is tried again by the next nightly run)."""
+    is queued). `papers` and `done` say how far it got (a re-run's `graded` how many it graded);
+    `cost` is what its runs spent so far, None before any and for a card, which runs on the
+    subscription. `at` is when it last changed state. A re-run has its topic, `scopes`, the
+    `estimate` it was offered with and its `ceiling`; stopped by the ceiling, `error` says where.
+    `actions` are those its state allows: Run now, With tonight's run and Discard while it is
+    not run; Try again once it failed, for a card only once it waits for the owner (a card that
+    failed fewer runs is tried again by the next nightly run)."""
 
     key: str  # unique across jobs and cards
-    kind: Literal["process", "deep"]
+    kind: Literal["process", "rerun", "deep"]
     id: int | None = None
     pass_id: int | None = None
     state: JobState
     paper: JobPaper | None = None
+    topic: JobTopic | None = None
+    scopes: list[RerunScope] = []
     papers: int
     done: int
+    graded: int | None = None
     cost: float | None = None
+    estimate: float | None = None
+    ceiling: float | None = None
     error: str | None = None
     at: datetime
     actions: list[JobAction] = []
@@ -868,3 +886,47 @@ class Jobs(BaseModel):
 
 class ProcessIn(BaseModel):
     paper_id: str  # an arXiv id
+
+
+class RerunScopeRow(BaseModel):
+    """One scope of the re-run offer: its papers and what grading them is estimated to cost
+    (None when a role has no calls to estimate by)."""
+
+    scope: RerunScope
+    papers: int
+    estimate: float | None = None
+
+
+class RerunOffer(BaseModel):
+    """The re-run offer after a topic edit (DESIGN.md, the re-run offer): each scope with its
+    paper count and estimate; `papers` and `estimate` for the scopes chosen, a paper in two of
+    them counted once. `missing` are the roles with no calls to estimate by; `unpriced` the
+    models (`role: model`) with no price bound, whose calls a re-run does not send. `ceiling`
+    is the one offered, in USD."""
+
+    topic: JobTopic
+    rows: list[RerunScopeRow]
+    papers: int
+    estimate: float | None = None
+    missing: list[str] = []
+    unpriced: list[str] = []
+    ceiling: float
+
+
+class RerunIn(BaseModel):
+    """A re-run to start (`run`) or to keep under Not run: its topic, its scopes (the date
+    range's days in the schedule's zone, both included) and its ceiling in USD."""
+
+    topic: str
+    scopes: list[RerunScope] = Field(min_length=1)
+    since: date | None = None
+    until: date | None = None
+    ceiling: float = Field(gt=0)
+    run: bool
+
+
+class JobRun(BaseModel):
+    """Run now or With tonight's run: a re-run's new ceiling in USD, which a stopped one needs
+    above what it spent."""
+
+    ceiling: float | None = Field(default=None, gt=0)

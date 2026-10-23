@@ -10,6 +10,10 @@ from pydantic import BaseModel
 
 from litwatch.config import RoleConfig
 
+# Anthropic's output cap for a request that sets none: non-streaming requests stay under the
+# SDK's timeout at it.
+DEFAULT_MAX_TOKENS = 16000
+
 
 @dataclass(frozen=True)
 class Request:
@@ -121,7 +125,10 @@ class Provider(Protocol):
 
     name: str
 
-    async def complete(self, role: RoleConfig, request: Request) -> Reply: ...
+    async def complete(self, role: RoleConfig, request: Request) -> Reply:
+        """The reply. Under a job's ceiling an OpenRouter call is also given `max_price`, the
+        per-million prices no provider serving it may exceed (`llm.ceiling.Bound`)."""
+        ...
 
     def routing(self, role: RoleConfig) -> tuple[str, ...]:
         """What else decides who serves the request; part of the reuse key."""

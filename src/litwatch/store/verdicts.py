@@ -158,3 +158,37 @@ async def passed(conn: psycopg.AsyncConnection, passes: list[tuple[str, int]]) -
             "ON CONFLICT DO NOTHING",
             (paper_id, revision),
         )
+
+
+async def ungraded_under(
+    conn: psycopg.AsyncConnection, topic: str, version: str, ids: list[str]
+) -> list[str]:
+    """Those of `ids`, in their order, not dismissed and with no verdict for the topic under its
+    `version` on their current text: what a re-run of the topic still has to grade."""
+    rows = await (
+        await conn.execute(
+            """
+            SELECT p.id FROM unnest(%(ids)s::text[]) WITH ORDINALITY AS x (id, n)
+            JOIN papers p ON p.id = x.id AND p.dismissed_at IS NULL
+            WHERE NOT EXISTS (SELECT 1 FROM verdicts v WHERE v.paper_id = p.id
+                              AND v.topic = %(topic)s AND v.topic_version = %(version)s
+                              AND v.paper_revision = p.revision)
+            ORDER BY x.n
+            """,
+            {"ids": ids, "topic": topic, "version": version},
+        )
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
+async def escalated_share(conn: psycopg.AsyncConnection, topic: str, last: int = 200) -> float:
+    """The share of the topic's latest `last` Area verdicts that escalated to `check`: what an
+    estimate expects of an Area re-run. 1 with none yet."""
+    row = await (
+        await conn.execute(
+            "SELECT avg(escalated::int) AS share FROM (SELECT escalated FROM verdicts "
+            "WHERE topic = %s AND opinions ? 'area_check' ORDER BY id DESC LIMIT %s) recent",
+            (topic, last),
+        )
+    ).fetchone()
+    return 1.0 if row["share"] is None else float(row["share"])

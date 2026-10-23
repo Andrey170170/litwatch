@@ -41,6 +41,7 @@ import psycopg
 
 from litwatch import events, store
 from litwatch.archive import ArchiveClient
+from litwatch.config import Config
 from litwatch.core import Cause
 from litwatch.core.fulltext import REQUESTED, TextRead
 from litwatch.feedback import word
@@ -75,27 +76,44 @@ async def request(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
 
 
 async def work(
-    conn: psycopg.AsyncConnection, archive: ArchiveClient, deep: Deep, *, limit: int | None = None
+    conn: psycopg.AsyncConnection,
+    archive: ArchiveClient,
+    deep: Deep,
+    *,
+    limit: int | None = None,
+    config: Config | None = None,
 ) -> Counter[str]:
     """Work the Deep passes that are due, one at a time, up to `limit` claimed, unless another
-    worker is working them. Returns how the tries ended."""
+    worker is working them. With the `config`'s schedule, a re-run's (background) passes wait
+    while a nightly run is running or due (pipeline.md, section 10). Returns how the tries
+    ended."""
     async with store_.deep_worker(conn) as mine:
         if not mine:
             log.info("another worker is working the Deep passes")
             return Counter()
-        return await _work(conn, archive, deep, limit)
+        return await _work(conn, archive, deep, limit, config)
 
 
 async def _work(
-    conn: psycopg.AsyncConnection, archive: ArchiveClient, deep: Deep, limit: int | None
+    conn: psycopg.AsyncConnection,
+    archive: ArchiveClient,
+    deep: Deep,
+    limit: int | None,
+    config: Config | None,
 ) -> Counter[str]:
+    from litwatch.jobs.worker import nightly_waits  # noqa: PLC0415 (the jobs import this module)
+
     counts: Counter[str] = Counter()
     tried: set[int] = set()
     while limit is None or len(tried) < limit:
         if until := await cards.paused_until(conn, PAUSE):
             log.debug("the deep queue waits after a service failure, until %s", until)
             break
-        claimed = await store_.claim(conn, deep.lease, 1, tried, deep=True)
+        # Asked at each claim: a nightly may have come due meanwhile.
+        background = config is None or not await nightly_waits(
+            conn, config, datetime.now(config.schedule.zone)
+        )
+        claimed = await store_.claim(conn, deep.lease, 1, tried, deep=True, background=background)
         if not claimed:
             break
         (c,) = claimed
@@ -263,7 +281,11 @@ async def _service_failed(
 
 
 async def run_forever(
-    dsn: str, archive: ArchiveClient, deep: Deep, wake: asyncio.Event | None = None
+    dsn: str,
+    archive: ArchiveClient,
+    deep: Deep,
+    wake: asyncio.Event | None = None,
+    config: Config | None = None,
 ) -> None:
     """The service's Deep worker: work the Deep passes every `TICK_SECONDS`, or as soon as
     `wake` is set (the owner asked for a card), until cancelled. Each tick opens its own
@@ -273,7 +295,7 @@ async def run_forever(
     while True:
         try:
             async with await store.connect(dsn) as conn:
-                if done := await work(conn, archive, deep):
+                if done := await work(conn, archive, deep, config=config):
                     log.info("deep cards: %s", dict(done))
         except asyncio.CancelledError:
             raise

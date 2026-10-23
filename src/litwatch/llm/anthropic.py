@@ -12,10 +12,16 @@ from anthropic import AsyncAnthropic, transform_schema
 
 from litwatch.config import RoleConfig
 from litwatch.llm.prices import anthropic_cost
-from litwatch.llm.types import ACCOUNT_STATUSES, ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm.types import (
+    ACCOUNT_STATUSES,
+    DEFAULT_MAX_TOKENS,
+    ProviderError,
+    Reply,
+    Request,
+    Stop,
+    Usage,
+)
 
-# Non-streaming requests stay under the SDK's timeout at this ceiling.
-DEFAULT_MAX_TOKENS = 16000
 # A batch's request errors that are the account's (401, 402, 403), by their error type.
 BATCH_ACCOUNT = frozenset({"authentication_error", "billing_error", "permission_error"})
 
