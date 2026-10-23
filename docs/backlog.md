@@ -54,8 +54,7 @@ a short plan before it is built.
     typos). Outline: [`notes/archive-fold-and-search.md`](notes/archive-fold-and-search.md); the search engine check:
     [`notes/pg-search-spike.md`](notes/pg-search-spike.md).
 12. **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
-    `evals/` and homelab specifics out of the repository. The milestone's "MIT licence" is stale: the repository is
-    Apache-2.0 since it went public on 2026-10-20.
+    `evals/` and homelab specifics out of the repository.
 13. **Backfill** of the archive's older papers, after v1 (milestones.md): a local decision-style model over several
     nights, then the stronger graders on what it surfaces. It builds on Jobs' scoped work and ceilings.
 

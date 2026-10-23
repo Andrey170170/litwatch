@@ -20,7 +20,8 @@ their own queue and are shown beside the jobs.
 ```
 Process · re-run offer · Run replay · digest Write again
   → POST /api/jobs → jobs → worker in serve (chunks, run lock, gives way to the nightly)
-  → classify / analyse / grade / replay / digests → runs rows, outbox
+  → classify / analyse / grade / digests → runs rows, outbox
+  → replay → evaluation tables only (a dry run)
 card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Runs and cost
 ```
 
