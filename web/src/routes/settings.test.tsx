@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
@@ -1183,6 +1183,30 @@ describe("Settings", () => {
     expect(calls.filter((c) => c.url === "/api/settings/quality").length).toBe(2);
   });
 
+  it("reads recall after the offer once a replay is run, so one that ended before the offer read is shown ended", async () => {
+    viewport(true);
+    const offer = { running: null, continues: null, spent: 0, labels: { owner: 1 }, papers: 1, pairs: 1, left_out: 0, estimate: 0.01, unpriced: [], ceiling: 5 };
+    let offers = 0;
+    let finished = false;
+    let finish: (() => void) | undefined;
+    const recall = () => ({ ...quality, recall: { eval_run: 7, started_at: "2026-10-23T12:00:00Z", finished_at: finished ? "2026-10-23T12:00:01Z" : null, recall: [] } });
+    scriptFetch({
+      ...common,
+      "GET /api/settings/quality": recall,
+      // the offer read after Run is held, and the replay ends while it is
+      "GET /api/jobs/replays/offer": () => (++offers === 1 ? offer : new Promise((resolve) => (finish = () => ((finished = true), resolve(offer))))),
+      "POST /api/jobs/replays": { not_run: [], running: [], failed: [], done: [] },
+    });
+    const qc = freshClient();
+    renderApp("/settings/overview", qc);
+    await userEvent.click(await screen.findByRole("button", { name: "Run replay" }));
+    await userEvent.click(screen.getByRole("button", { name: "Run · ≈ $0.01" }));
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    await act(async () => finish!());
+    await waitFor(() => expect(qc.isMutating()).toBe(0));
+    expect((qc.getQueryData(["settings", "overview", "quality"]) as { recall: { finished_at: string | null } }).recall.finished_at).not.toBeNull();
+  });
+
   it("goes on with a replay its ceiling stopped only above what it spent", async () => {
     viewport(true);
     const offer = { running: null, continues: 7, spent: 1.2, labels: { owner: 3 }, papers: 1, pairs: 2, left_out: 0, estimate: 0.1, unpriced: ["judge: test-judge"], ceiling: 5 };
@@ -1436,6 +1460,25 @@ describe("Jobs", () => {
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/digests/3/write"]);
     await waitFor(() => expect(calls.filter((c) => c.url === "/api/jobs").length).toBe(3), { timeout: 4000 }); // once ended
   }, 10_000);
+
+  it("reads the jobs again when Try again on a digest finds it written meanwhile", async () => {
+    viewport(true);
+    const failedJob = { ...base, key: "job:13", id: 13, kind: "digest", state: "failed", paper: null, topic: { slug: "mi", name: "Mech interp" }, digest: { id: 3, period: "day", day: "2026-10-08" }, error: "the writer failed again: timed out", at: at(11), actions: ["again"] };
+    const written = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "day", day: "2026-10-08", counts: {}, papers: [], written_at: "2026-10-23T12:00:00Z", state: "written", gist: "g", text: "t", error: null, job: { id: 13, state: "done" } };
+    let reads = 0;
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/jobs": () => (++reads === 1 ? { not_run: [], running: [], failed: [failedJob], done: [] } : { not_run: [], running: [], failed: [], done: [{ ...failedJob, state: "done", error: null, actions: [] }] }),
+      "GET /api/settings/schedule": schedule,
+      "POST /api/digests/3/write": () => json({ detail: "the digest is not one to write again" }, 409),
+      "GET /api/digests/3": written,
+    });
+    renderApp("/settings/runs/jobs");
+    await userEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/jobs").length).toBe(2));
+    expect(await screen.findByText("Done · 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
 
   it("reads Overview's offer and recall again when a stopped replay runs on from Jobs", async () => {
     viewport(true);

@@ -200,10 +200,11 @@ function jobsChanged(qc: QueryClient) {
   return Promise.all(JOBS_PAGES.map((page) => qc.invalidateQueries({ queryKey: jobsQuery(page).queryKey, exact: true })));
 }
 
-/** A replay started, gone on or ended: Overview's offer and its recall are reread (a replay may end before the offer
- * is read running, so recall is not left to Overview's poll). */
-function replayChanged(qc: QueryClient) {
-  return Promise.all([replayOfferQuery, qualityQuery("overview")].map((q) => qc.invalidateQueries({ queryKey: q.queryKey, exact: true })));
+/** A replay started, gone on or ended: Overview's offer and then its recall are reread. A replay may end before the
+ * offer is read running, so recall is not left to Overview's poll: read after the offer, it is the ended replay's. */
+async function replayChanged(qc: QueryClient) {
+  await qc.invalidateQueries({ queryKey: replayOfferQuery.queryKey, exact: true });
+  await qc.invalidateQueries({ queryKey: qualityQuery("overview").queryKey, exact: true });
 }
 
 /** The re-run offer's Run and Not now (DESIGN.md, "The re-run offer"): Run starts it, Not now keeps it under Not run;
@@ -475,6 +476,7 @@ export function useWriteAgain() {
       if (d) await restripe(qc, d);
       digestViewsStale(qc);
       refreshSummary(qc);
+      await jobsChanged(qc); // its job may have ended meanwhile (a run wrote it)
       return settleNeeds(qc, (q) => (digestGone(e) ? settle(q, "digests", { id: digestId }, `No longer to be written: ${said(e)}.`) : noted(q, digestId, `Not written now: ${said(e)}.`)));
     },
   });
