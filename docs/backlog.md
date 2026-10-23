@@ -50,6 +50,10 @@ a short plan before it is built.
      month's spend and a re-run's spend over its runs miss it (docs/plans/jobs.md, P2's known limit).
    - Estimates for roles whose history is all batched (`field_grade`, `brief` today): `store.calls.mean_cost`
      leaves batch calls out, so a Field topic's re-run offer has no estimate. Twice the batch mean would do.
+   - A first Deep read (or taking over an automatic Deep pass) while the paper's Process job runs marks the job as
+     asked again by the owner, so it runs once more over what is due when it ends: harmless (nothing due, nothing
+     spent) but the paper shows Processing longer. Narrow the trigger to owner changes that affect the job's steps
+     (Codex on #127).
 
 ## After v1's plan ends
 
