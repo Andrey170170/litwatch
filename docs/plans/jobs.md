@@ -56,9 +56,16 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   replaces the reservation. The job may stop a little below its ceiling, never above it.
 - **A re-run's full-text and Deep passes are background work** (pipeline.md, section 10). They carry the job that
   queued them and a background priority, numerically larger (later) than `TEXT_PRIORITY` and `AUTOMATIC_PRIORITY`
-  in `core.fulltext`, since lower runs sooner. The full-text and Deep claimers skip them while a nightly is running
-  or due, by the same check the jobs worker uses, so none of their calls lands in the nightly's time or its
-  batches. A Process job's passes are the owner's request and keep the request priorities.
+  in `core.fulltext`, since lower runs sooner.
+- **A re-run works its own full-text passes, under its ceiling** (the owner's call on the PR's review, 2026-10-22).
+  After its grading, the job works the Brief and Weight re-check passes it queued through its own gateway, so their
+  calls reserve against the same budget and count in the job's run. The full-text worker never claims a pass that
+  belongs to a job. The job stays `running` until those passes are done, failed or stopped by the ceiling; a pass
+  still waiting for its text when the job's chunk ends is worked by its next chunk. Its Deep passes go to the Deep
+  worker, behind the automatic ones, and stay outside the ceiling: Deep runs on the subscription, not on API spend
+  (models.md). Neither the job's passes nor its Deep passes run while a nightly is running or due, by the same check
+  the jobs worker uses. A Process job's passes are the owner's request: they keep the request priorities and the
+  regular workers, and a Process job has no ceiling.
 - **Deep cards asked for are not `jobs` rows.** Their queue is the card passes the deep integration already runs.
   `/api/jobs` reads the passes with reason `request` and puts them in the same groups, so no state is stored twice.
 - **The per-paper actions stay as they are:** Grade it now and a full-text pass's Now answer within seconds on the
@@ -115,7 +122,7 @@ Each stage is its own PR, by `drive`.
 | Stage | Builds | Shows before the next starts |
 | --- | --- | --- |
 | P1 | **Core and Process.** The `jobs` migration; its store; the worker (claim, chunks, run lock, giving way to the nightly, take-back); the step functions narrowed to a paper set (`due(…, ids=)`); `/api/jobs`; Process and Deep read starting a Process job (D1); the Jobs page's four groups with Run now, With tonight's run, Discard and Try again; Deep cards asked for read alongside; the latest three on Runs and cost. | An archive paper processed from the app on the sandbox, with Jobs showing it queued, then running, then done. A nightly due mid-job runs first. |
-| P2 | **Topic re-runs.** The four scopes (labelled papers and reported misses, the topic's members, papers matching its keywords, a date range), each with its paper count and estimate; the ceiling; Run and Not now in the topic editor in place of its `Later`; a regrade per (paper, topic) under the new version (D3), chosen by the scope rather than by `grading.due`, which skips a paper with a current verdict whatever the topic's version; the background passes. | A rubric edit on the sandbox, re-run on the topic's members with a low ceiling: it stops at the ceiling, Run now continues it, and the verdicts carry the new version. |
+| P2 | **Topic re-runs.** The four scopes (labelled papers and reported misses, the topic's members, papers matching its keywords, a date range), each with its paper count and estimate; the ceiling; Run and Not now in the topic editor in place of its `Later`; a regrade per (paper, topic) under the new version (D3), chosen by the scope rather than by `grading.due`, which skips a paper with a current verdict whatever the topic's version; the job working its own passes under its ceiling. | A rubric edit on the sandbox, re-run on the topic's members with a low ceiling: it stops at the ceiling, Run now continues it, and the verdicts carry the new version. |
 | P3 | **Replay and digests as jobs.** Overview's Run replay with its estimate and ceiling, and the stale note on recall per cohort, which is already shown, removed. A failed digest's Write again goes through a job: when the run lock is busy it queues instead of answering 409, and it settles its Needs you item. | A replay from Overview writes only the evaluation tables. A digest written again while a job holds the lock waits, then is written. |
 
 ## Verification
@@ -128,7 +135,7 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | V2. Two workers never run one job; a job whose session died is taken back and finishes without redoing work | pytest: two claimers; a job left `running` by a closed session |
 | V3. No chunk starts while a nightly is due or running | pytest with the scheduler's `is_due` and a held run lock |
 | V4. The ceiling is never passed: a call that does not fit is not sent, the job stops as `stopped` and records where; Run now continues it | pytest with a fake provider whose costs are known |
-| V4b. A re-run's passes are not claimed while a nightly is running or due, and run after it | pytest (P2) |
+| V4b. A re-run's full-text passes run in the job under its ceiling and never in the full-text worker; none of its passes runs while a nightly is running or due | pytest (P2) |
 | V5. A topic re-run records verdicts under the new version for its scope only, and settles each paper | pytest (P2) |
 | V6. A replay job writes only evaluation tables | pytest asserting that verdicts and the outbox are untouched (P3) |
 | V7. The Jobs page shows the four groups and their actions; Process, the re-run offer and Run replay start jobs | vitest; a browser walk on `serve` over a fresh `--production` sandbox, with screenshots per stage |
