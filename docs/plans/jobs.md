@@ -43,6 +43,9 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
 - **It gives way to the nightly run** (pipeline.md, section 10). It works in chunks of about 50 papers and takes the
   run lock for each chunk. It starts no chunk while a nightly run is running or due, so the nightly waits at most one
   chunk.
+- **It chooses again between chunks.** After each chunk the worker takes the next chunk from the most urgent
+  runnable job, not from the job it just worked: Process jobs first (the owner waits on them, D1), then the others
+  oldest first. A large re-run therefore delays a Process job by at most one chunk; both stay `running` meanwhile.
 - **A dead job is taken back,** like a dead run. The job records its backend pid and start time. The worker puts a
   `running` job whose session is gone back in the queue. Steps choose their papers by what is still due, so a job
   taken back skips what it already did.
@@ -54,6 +57,12 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   tokens at the output price) against what is left. A call that does not fit is not sent, and the job stops as
   `stopped`, recording where ("stopped at the ceiling after 212 of 476"). When the call returns, its actual cost
   replaces the reservation. The job may stop a little below its ceiling, never above it.
+- **Each route's price bound, before the call.** Anthropic: `llm/prices.py`'s table at its worst case (every input
+  token at the cache-write price, with the long-prompt factor when the prompt passes its threshold). OpenRouter,
+  which reports a call's charge only in its answer: the highest per-token price the model's last 200 calls were
+  charged, sent with the call as OpenRouter's `provider.max_price`, so no provider dearer than that bound serves it.
+  A route with no price bound (no listed price, no history) cannot run under a ceiling: the offer says so, and that
+  role's calls are not sent by the job.
 - **A re-run's full-text and Deep passes are background work** (pipeline.md, section 10). They carry the job that
   queued them and a background priority, numerically larger (later) than `TEXT_PRIORITY` and `AUTOMATIC_PRIORITY`
   in `core.fulltext`, since lower runs sooner.
@@ -133,8 +142,8 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | --- | --- |
 | V1. A job runs its paper set through classification, analysis and grading, and only that set | pytest on real Postgres with fake providers |
 | V2. Two workers never run one job; a job whose session died is taken back and finishes without redoing work | pytest: two claimers; a job left `running` by a closed session |
-| V3. No chunk starts while a nightly is due or running | pytest with the scheduler's `is_due` and a held run lock |
-| V4. The ceiling is never passed: a call that does not fit is not sent, the job stops as `stopped` and records where; Run now continues it | pytest with a fake provider whose costs are known |
+| V3. No chunk starts while a nightly is due or running; a Process job queued during a re-run runs at its next chunk | pytest with the scheduler's `is_due` and a held run lock; a re-run and a Process job queued together |
+| V4. The ceiling is never passed: a call that does not fit is not sent, the job stops as `stopped` and records where; Run now continues it; an OpenRouter call carries its `max_price` | pytest with a fake provider whose costs are known; the OpenRouter request body |
 | V4b. A re-run's full-text passes run in the job under its ceiling and never in the full-text worker; none of its passes runs while a nightly is running or due | pytest (P2) |
 | V5. A topic re-run records verdicts under the new version for its scope only, and settles each paper | pytest (P2) |
 | V6. A replay job writes only evaluation tables | pytest asserting that verdicts and the outbox are untouched (P3) |
