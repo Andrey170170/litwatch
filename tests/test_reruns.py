@@ -650,6 +650,18 @@ async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn, m
     assert (await jobs_store.get(conn, job))["state"] == "running"  # its text pass still waits
 
 
+async def test_with_the_schedule_off_a_due_nightly_holds_no_reruns_deep_pass(conn, models):
+    """`litwatch fulltext --deep` with the schedule off: no scheduler starts the nightly its
+    cron says is due, so the re-run's card is made."""
+    every_minute = Schedule(enabled=False, nightly="* * * * *")  # always due, never started
+    off = CONFIG.model_copy(update={"schedule": every_minute})
+    await focus_rerun(conn, models, ceiling=1.0)
+    assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)  # its Deep pass queued
+    service = FakeDeep(DONE)
+    done = await deep_passes.work(conn, archive(with_text(A)), make(service), config=off)
+    assert done == {"cards_written": 1} and len(service.requests) == 1
+
+
 async def test_a_nightly_digest_does_not_wait_for_a_reruns_passes(conn, models):
     from litwatch.store import digests  # noqa: PLC0415
 

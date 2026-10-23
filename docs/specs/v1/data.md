@@ -80,11 +80,14 @@ evaluation calls the same functions and writes only to evaluation tables.
   badly), last error, refused throughout, acknowledged at, as for `step_failures`, job): one Brief or Weight re-check open per paper revision, and one
   Deep pass open per paper (reason request | focus | pick; its revision is the one it read); a worker takes the least recently
   tried first. A text pass a topic re-run queued names that job, which alone works it until it ends. `weights` and `gists` name the pass a full-text row came from.
-- `jobs` (kind process | rerun, scope (a Process job's: its paper; a re-run's: its topic, the topic's revision, its
-  scopes, date range and papers), state offered | stopped | tonight | queued | running | failed | done | discarded,
-  papers, done (how many of them its chunks worked), counts, error (a stopped one's: where its ceiling stopped it),
-  ceiling and estimate in USD (a re-run's), wake at (not claimed before), created at, queued at, changed at, backend
-  pid and start (the session running it, as a run's)): the owner's queue outside the nightly run
+- `jobs` (kind process | rerun, scope (a Process job's: its paper; a re-run's: its topic, the topic's version it
+  grades under and revision, its scopes, date range and papers; topic, version, scopes and date range are the re-run's
+  identity, by which one asked for again is found), state offered | stopped | tonight | queued | running | failed |
+  done | discarded, papers, done (how many of them its chunks worked), counts, error (a stopped one's: where its
+  ceiling stopped it), ceiling and estimate in USD (a re-run's), wake at (not claimed before), ladder (a re-run's: per
+  paper, how far down its graders' lists the next try on the same text starts, written with each chunk and kept
+  across Try again), created at, queued at, changed at, backend pid and start (the session running it, as a run's)):
+  the owner's queue outside the nightly run
   ([`docs/plans/jobs.md`](../../plans/jobs.md)); one Process job not done per paper. `runs.job_id` names the job a run
   of kind `job` worked; each time the worker runs a job, from claim to stop, is one run.
 - What a digest still has to cover is not stored: a paper is due for a topic while it is eligible there, was announced

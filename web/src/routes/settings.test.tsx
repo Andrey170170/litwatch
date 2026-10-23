@@ -1415,6 +1415,15 @@ describe("Jobs", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "POST")).toMatchObject({ url: "/api/jobs/7/run", body: { ceiling: 3 } }));
   });
 
+  it("offers twice its ceiling to a re-run its first call stopped before it spent anything", async () => {
+    viewport(true);
+    const stopped = { ...base, key: "job:8", id: 8, kind: "rerun", state: "stopped", paper: null, topic: { slug: "mi", name: "Mech interp", revision: 4 }, scopes: ["members"], papers: 12, done: 0, graded: 0, cost: null, ceiling: 0.25, estimate: 0.2, error: "stopped at the ceiling after 0 of 12", at: at(12), actions: ["run", "tonight", "discard"] };
+    scriptFetch({ ...common, "GET /api/jobs": { ...jobs, not_run: [stopped] }, "GET /api/settings/schedule": schedule });
+    renderApp("/settings/runs/jobs");
+    const row = (await screen.findByText(/Mech interp · version 4 · members/)).closest(".job") as HTMLElement;
+    expect(within(row).getByRole("textbox", { name: "Stop at" })).toHaveValue("$0.50");
+  });
+
   it("shows the latest three jobs on Runs and cost, with All jobs", async () => {
     viewport(true);
     scriptFetch({ ...common, "GET /api/jobs": jobs, "GET /api/settings/schedule": schedule, "GET /api/settings/runs": [] });

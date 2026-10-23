@@ -54,9 +54,13 @@ function jobSpend(j: Job): string | null {
   return j.ceiling != null ? `${usd(j.cost)} of ${usd(j.ceiling)}` : usd(j.cost);
 }
 
-/** A stopped re-run's Run now continues it under a new ceiling: what it spent plus its first ceiling again, as the
- * box's first value. */
-export const nextCeiling = (j: Job) => (j.cost ?? 0) + (j.ceiling ?? 5);
+/** A stopped re-run's Run now continues it under a new ceiling, the box's first value: what it spent plus its last
+ * ceiling again. One stopped before spending anything had that ceiling whole and its first call did not fit, so it
+ * gets twice the ceiling. */
+export function nextCeiling(j: Job): number {
+  const last = j.ceiling ?? 5;
+  return j.cost != null && j.cost > 0 ? j.cost + last : 2 * last;
+}
 
 /** The latest jobs of any group, by when they last changed: Runs and cost shows three. */
 export function latestJobs(jobs: Jobs, n = 3): Job[] {

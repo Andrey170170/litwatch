@@ -459,7 +459,7 @@ async def test_a_job_taken_back_mid_chunk_skips_the_steps_it_had_done(conn, mode
 
 async def test_no_chunk_starts_while_a_nightly_is_due_or_running(conn, models):
     job = await queued(conn, A.id)
-    w = worker.Worker(conn, CONFIG, models.gateway)
+    w = worker.Worker(conn, SCHEDULED, models.gateway)
     assert not await w.step(NIGHT)  # due at 02:00, not started
     async with await store.sibling(conn) as nightly_session:
         night = await runs.start(nightly_session, "nightly")
@@ -473,7 +473,7 @@ async def test_no_chunk_starts_while_a_nightly_is_due_or_running(conn, models):
 async def test_a_nightly_due_mid_job_runs_before_its_next_chunk(conn, models, monkeypatch):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await queued(conn, A.id, B.id)
-    w = worker.Worker(conn, CONFIG, models.gateway)
+    w = worker.Worker(conn, SCHEDULED, models.gateway)
     assert await w.step(NIGHT - timedelta(minutes=10))  # A's chunk, before the nightly is due
     assert not await w.step(NIGHT)  # due now: the job waits
     assert (await jobs_store.get(conn, job))["done"] == 1

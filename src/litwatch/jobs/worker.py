@@ -53,9 +53,12 @@ TICK_SECONDS = 30
 
 
 async def nightly_waits(conn: psycopg.AsyncConnection, config: Config, now: datetime) -> bool:
-    """Whether a nightly run is due at `now` (`scheduler.is_due`) or running: no chunk starts
-    then."""
-    if scheduler.is_due(config.schedule.nightly, now, await runs.last_started(conn, "nightly")):
+    """Whether a nightly run is running, or due at `now` (`scheduler.is_due`) with the schedule
+    on, which alone starts it: no chunk, and no pass of a re-run, starts then."""
+    nightly = config.schedule.nightly
+    if config.schedule.enabled and scheduler.is_due(
+        nightly, now, await runs.last_started(conn, "nightly")
+    ):
         return True
     latest = await runs.latest(conn, "nightly")
     return bool(latest and latest["finished_at"] is None and latest["alive"])

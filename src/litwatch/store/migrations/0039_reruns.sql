@@ -6,7 +6,8 @@
 -- from being claimed again before then; `ladder` how far down its graders' lists each paper's
 -- grading starts on its next try on the same text ({paper: {"revision": n, "runs": n,
 -- "refused": [role]}}, models.md, D4), kept across Try again. A re-run's scope: {"topic",
--- "revision", "scopes", "since", "until", "papers": [id]}.
+-- "version" (the topic's, which it grades under), "revision", "scopes", "since", "until",
+-- "papers": [id]}; topic, version, scopes and dates are its identity (`store.jobs.open_rerun`).
 ALTER TABLE jobs DROP CONSTRAINT jobs_kind_check;
 ALTER TABLE jobs ADD CONSTRAINT jobs_kind_check CHECK (kind IN ('process', 'rerun'));
 ALTER TABLE jobs ADD COLUMN ceiling numeric;

@@ -73,7 +73,7 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   still waiting for its text when the job's chunk ends is worked by its next chunk. Its Deep passes go to the Deep
   worker, behind the automatic ones, and stay outside the ceiling: Deep runs on the subscription, not on API spend
   (models.md). Neither the job's passes nor its Deep passes run while a nightly is running or due, by the same check
-  the jobs worker uses. A Process job's passes are the owner's request: they keep the request priorities and the
+  the jobs worker uses (due only with the schedule on, which alone starts it). A Process job's passes are the owner's request: they keep the request priorities and the
   regular workers, and a Process job has no ceiling.
 - **Deep cards asked for are not `jobs` rows.** Their queue is the card passes the deep integration already runs.
   `/api/jobs` reads the passes with reason `request` and puts them in the same groups, so no state is stored twice.
