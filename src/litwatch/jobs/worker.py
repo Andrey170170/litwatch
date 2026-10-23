@@ -91,7 +91,7 @@ class Worker:
     ) -> None:
         self.conn, self.config, self.gateway = conn, config, gateway
         self.worked = worked  # after each chunk: have the full-text and Deep workers look
-        self.archive = archive  # a re-run's text passes read from it; without, they are let go
+        self.archive = archive  # a re-run's text passes read from it; without, the re-run stops
         self.open: dict[int, _Open] = {}  # the jobs this worker runs, each with its run
 
     async def step(self, now: datetime) -> bool:

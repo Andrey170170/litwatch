@@ -260,6 +260,19 @@ async def test_the_members_scope_is_the_topics_page_graded_papers_included(conn,
     assert await jobs_store.members(conn, [AGENTS.slug]) == [A.id, B.id]
 
 
+async def test_a_rerun_is_adopted_only_for_the_version_it_grades_under(conn, models):
+    """Two versions read as the same revision (an edit between the reads): not the same re-run."""
+    scope = {"topic": AGENTS.slug, "revision": 5, "version": "a", "scopes": ["members"]}
+    async with conn.transaction():
+        assert await jobs_store.open_rerun(conn, scope) is None
+        await jobs_store.create(
+            conn, "rerun", scope | {"papers": [A.id]}, 1, "offered", ceiling=1.0
+        )
+    async with conn.transaction():
+        assert await jobs_store.open_rerun(conn, scope | {"version": "b"}) is None
+        assert (await jobs_store.open_rerun(conn, scope))["state"] == "offered"
+
+
 async def test_a_rerun_whose_topic_was_paused_fails_and_says_why(conn, models):
     job = await rerun(conn, AGENTS.slug, [A.id], ceiling=1.0)
     await edited(conn, AGENTS, status=Status.PAUSED)
