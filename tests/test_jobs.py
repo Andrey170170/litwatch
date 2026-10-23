@@ -14,16 +14,18 @@ import pytest
 from litwatch import store
 from litwatch.api import create_app
 from litwatch.config import Schedule
-from litwatch.feedback import misses
+from litwatch.core import Cause
+from litwatch.core.fulltext import REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY
+from litwatch.feedback import misses, word
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import run_lock
+from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
-from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from tests.conftest import TREE, answering, paper
-from tests.test_steps import CONFIG, Scripted
+from tests.test_steps import CONFIG, Scripted, decision
 
 SCHEDULED = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})  # the worker runs
 
@@ -121,6 +123,51 @@ async def test_a_job_whose_paper_failed_a_step_fails_and_says_where(conn, models
     await work_out(worker.Worker(conn, CONFIG, models.gateway))
     again = await jobs_store.get(conn, job)
     assert (again["state"], again["counts"]["classified"]) == ("done", 1)
+
+
+async def test_a_job_tried_again_on_a_step_waiting_for_the_owner_fails_again(conn, models):
+    """Three runs in a row failed, the step waits for the owner on Needs you: Try again has
+    nothing due and fails again, saying so, until the owner acts there; then the job goes back
+    in the queue by itself and does what is left."""
+    models.decisions[A.title] = {"broken": True}
+    job = await queued(conn, A.id)
+    for _ in range(3):
+        await work_out(worker.Worker(conn, CONFIG, models.gateway))
+        await jobs_store.move(conn, job, ("failed",), "queued")
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    stuck = await jobs_store.get(conn, job)
+    assert stuck["state"] == "failed"
+    assert stuck["error"] == "classification failed on 1 (waits on Needs you)"
+    assert asked(models, "classify", A.title) == 3
+
+    del models.decisions[A.title]
+    async with word.change(conn, A.id, cause=Cause.OWNER):  # as Needs you's own retry does
+        await failures.succeeded(conn, A.id, "classification")
+    assert (await jobs_store.get(conn, job))["state"] == "queued"
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert asked(models, "classify", A.title) == 4
+
+
+async def test_a_failed_job_whose_paper_the_owner_dismisses_is_discarded(conn, models):
+    models.decisions[A.title] = {"broken": True}
+    job = await queued(conn, A.id)
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    async with word.change(conn, A.id, cause=Cause.OWNER):
+        await papers_store.dismiss(conn, A.id)
+    assert (await jobs_store.get(conn, job))["state"] == "discarded"
+
+
+async def test_a_process_jobs_passes_go_as_the_owners_requests(conn, models):
+    models.decisions[A.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
+    models.fits = {(r, A.title): {"reason": "Core.", "fit": "central"} for r in ("judge", "check")}
+    await queued(conn, A.id)
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    passes = await rows(conn, "SELECT * FROM fulltext_passes WHERE paper_id = %s", A.id)
+    assert {p["kind"] for p in passes} == {"brief", "deep"}
+    for p in passes:
+        first = REQUEST_PRIORITY if p["kind"] == "deep" else TEXT_REQUEST_PRIORITY
+        assert p["priority"] == first, p
 
 
 async def test_a_job_that_raises_fails_with_its_error_and_its_run_records_it(
@@ -245,7 +292,8 @@ async def test_a_held_run_lock_holds_every_chunk(conn, models):
     w = worker.Worker(conn, CONFIG, models.gateway)
     async with await store.sibling(conn) as other, run_lock(other):
         assert not await w.step(AFTERNOON)
-    assert not await classified(conn)
+    # Not claimed either: a job is chosen under the lock, so the oldest is never passed over.
+    assert (await jobs_store.get(conn, job))["state"] == "queued" and not await classified(conn)
     assert await w.step(AFTERNOON)
     assert (await jobs_store.get(conn, job))["state"] == "done"
 
@@ -378,6 +426,26 @@ async def test_process_fetches_the_paper_and_queues_its_job_once(conn, models, m
     assert processed.status_code == 409
     assert keys(listed["done"]) == [f"job:{first.json()['id']}"]
     assert listed["done"][0]["cost"] > 0
+
+
+async def test_process_holds_its_job_so_a_try_again_meanwhile_waits_and_is_refused(
+    conn, models, monkeypatch
+):
+    job = await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "failed")
+    move, page = jobs_store.move, None
+    async with await store.sibling(conn) as other:
+
+        async def raced(c, *args):
+            nonlocal page  # the Jobs page's Try again comes in while Process decides
+            page = asyncio.create_task(move(other, job, ("failed",), "queued"))
+            await asyncio.sleep(0.3)
+            return await move(c, *args)
+
+        monkeypatch.setattr(jobs_store, "move", raced)
+        async with conn.transaction():
+            processed = await jobs_store.process(conn, A.id)
+        assert await page is None  # it waited, then found the job queued
+    assert processed["id"] == job and processed["state"] == "queued"
 
 
 async def test_with_the_schedule_off_process_only_fetches_the_paper_for_the_next_run(

@@ -3,15 +3,16 @@
 
 It works a chunk of papers at a time under the run lock, and starts no chunk while a nightly run
 is running or due, so the nightly waits at most one chunk (pipeline.md, section 10). After every
-chunk it takes the most urgent runnable job again (`store.jobs.claim`), so a Process job queued
-meanwhile goes next. A job is claimed in the name of the worker's database session; one whose
-session is gone is put back in the queue, and its steps then pick only what is still due. Each
-time it runs a job, from claim to stop, is one run of kind `job`, however many chunks that
-takes.
+chunk it takes the most urgent runnable job again (`store.jobs.claim`), choosing under the lock,
+so a Process job queued meanwhile goes next and no worker passes over an older job. A job is
+claimed in the name of the worker's database session; one whose session is gone is put back in
+the queue, and its steps then pick only what is still due. Each time it runs a job, from claim
+to stop, is one run of kind `job`, however many chunks that takes.
 
 A Process job runs the nightly's own steps (classification, analysis, grading) on its papers
 only; each recorded result settles its paper as in the nightly, and the full-text and Deep
-workers then take the passes it queued.
+workers then take the passes it queued, as the owner's requests. A job is done once its papers
+have no step left failed; else it fails, and settles when they do (`store.jobs.settle_process`).
 """
 
 from __future__ import annotations
@@ -29,23 +30,18 @@ import psycopg
 
 from litwatch import store
 from litwatch.config import Config
+from litwatch.core import FAILED_RUNS
 from litwatch.jobs import nightly, scheduler
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.jobs.lock import BusyError, run_lock
+from litwatch.store import failures, runs
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
-from litwatch.store import runs
 
 log = logging.getLogger(__name__)
 
 CHUNK = 50  # papers a chunk takes: the most the nightly waits behind a job
 TICK_SECONDS = 30
-
-# The counts the steps record for a paper whose step failed (`nightly.classify` and the rest).
-FAILED = {
-    "classification_failed": "classification",
-    "analysis_failed": "analysis",
-    "grading_failed": "grading",
-}
 
 
 async def nightly_waits(conn: psycopg.AsyncConnection, config: Config, now: datetime) -> bool:
@@ -57,11 +53,15 @@ async def nightly_waits(conn: psycopg.AsyncConnection, config: Config, now: date
     return bool(latest and latest["finished_at"] is None and latest["alive"])
 
 
-def failure(counts: dict[str, int]) -> str | None:
-    """Why a job whose steps recorded these counts failed, or None: some paper's step failed,
-    and the paper waits for the next nightly run or the owner."""
-    failed = [f"{step} failed on {counts[k]}" for k, step in FAILED.items() if counts.get(k)]
-    return "; ".join(failed) or None
+def failure(open_: dict[str, tuple[int, int]]) -> str | None:
+    """Why a job whose papers have these failures left (`store.failures.open_on`) failed, or
+    None: some paper's step failed, and the paper waits for the next run or, after three runs in
+    a row, the owner."""
+    failed = [
+        f"{step} failed on {n}" + (" (waits on Needs you)" if stuck == n else "")
+        for step, (n, stuck) in open_.items()
+    ]
+    return "; ".join(sorted(failed)) or None
 
 
 @dataclass
@@ -92,15 +92,21 @@ class Worker:
             log.info("jobs: took back %s, whose session is gone", taken)
         if await nightly_waits(self.conn, self.config, now):
             return False
+        try:
+            # The choice is made under the lock, so another worker's chunk never runs between
+            # choosing a job and working it.
+            async with run_lock(self.conn):
+                return await self._next()
+        except BusyError:
+            return False
+
+    async def _next(self) -> bool:
         job = await jobs_store.claim(self.conn)
         if job is None:
             return False
         run = await self._run_of(job)
         try:
-            async with run_lock(self.conn):
-                after = await self._chunk(job, run)
-        except BusyError:
-            return False
+            after = await self._chunk(job, run)
         except Exception as exc:
             log.exception("jobs: job %s failed", job["id"])
             await jobs_store.finish(self.conn, job["id"], "failed", f"{type(exc).__name__}: {exc}")
@@ -110,7 +116,9 @@ class Worker:
         if after is None:  # no longer this session's
             await self._close(job["id"])
         elif after["done"] >= after["papers"]:
-            why = failure(after["counts"])
+            # Done only if no paper has a step left failed: one tried again with nothing due,
+            # since it waits for the owner, fails again.
+            why = failure(await failures.open_on(self.conn, job["scope"]["papers"], FAILED_RUNS))
             await jobs_store.finish(self.conn, job["id"], "failed" if why else "done", why)
             await self._close(job["id"])
         return True
@@ -123,6 +131,8 @@ class Worker:
         await nightly.classify(self.conn, self.config, run, ids=ids)
         await nightly.analyse(self.conn, run, ids=ids)
         await nightly.grade(self.conn, self.config, run, ids=ids)
+        if job["kind"] == "process":  # the owner's: its passes go as their requests do
+            await fulltext_store.owners_first(self.conn, ids)
         counts = dict(job["counts"])
         for k, v in run.counts.items():
             if isinstance(v, int) and v != before.get(k, 0):

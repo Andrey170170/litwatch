@@ -3,7 +3,7 @@ full-text rows of `weights` and `gists`)."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -143,6 +143,18 @@ async def queue_deep(
     conn: psycopg.AsyncConnection, paper_id: str, revision: int, reason: str
 ) -> int:
     return await queue(conn, paper_id, revision, PassKind.DEEP, reason, AUTOMATIC_PRIORITY)
+
+
+async def owners_first(conn: psycopg.AsyncConnection, paper_ids: Sequence[str]) -> None:
+    """The papers' open passes go as the owner's requests do: a text pass ahead of the others,
+    a Deep pass ahead of the automatic ones (a paper the owner had processed, docs/plans/jobs.md).
+    The reason stays: a settle may still drop or relabel the pass."""
+    await conn.execute(
+        "UPDATE fulltext_passes SET priority = least(priority, "
+        "CASE WHEN kind = 'deep' THEN %s ELSE %s END) "
+        "WHERE paper_id = ANY(%s) AND state <> 'done'",
+        (REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY, list(paper_ids)),
+    )
 
 
 async def open_deep(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:

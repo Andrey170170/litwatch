@@ -547,6 +547,7 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 /* the open-state note under the header: yellow asks for a word, red reports a failure */
 .note { border-left: 3px solid var(--acc); background: color-mix(in srgb, var(--acc) 8%, transparent); padding: 8px 12px; margin: 0 0 12px; font-size: 13px; display: flex; flex-direction: column; gap: 8px; }
 .note.fail { border-color: var(--sig); background: color-mix(in srgb, var(--sig) 8%, transparent); }
+.note.run { border-color: var(--cy); background: color-mix(in srgb, var(--cy) 8%, transparent); }
 .note b { font-weight: 600; }
 .note .acts { display: flex; gap: 6px; flex-wrap: wrap; }
 .note .err { font: 11.5px var(--font-mono); color: var(--fg2); }

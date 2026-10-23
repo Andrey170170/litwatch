@@ -1238,10 +1238,16 @@ describe("Jobs", () => {
         return json(undefined, 204);
       },
     });
-    renderApp("/settings/runs/jobs");
+    // Needs you, read before, lists the card's pass: its row settles as Run it now there settles it.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const row = { id: 9, paper_id: "2610.00009", revision: 1, title: "A card that failed", kind: "deep", state: "failed", failed_runs: 3, last_error: "no valid card", queued_at: at(3) };
+    client.setQueryData(["settings", "needs", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row], digests: [], deep_notes: [] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
+    renderApp("/settings/runs/jobs", client);
     await userEvent.click(await screen.findByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Running and queued · 2")).toBeInTheDocument();
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/settings/fulltext/9/now"]);
+    const needs = client.getQueryData(["settings", "needs", "quality"]) as { night: { fulltext: { settled?: string }[] } };
+    expect(needs.night.fulltext.map((r) => r.settled)).toEqual(["Running now, first in line, with three more runs."]);
   });
 
   it("shows the latest three jobs on Runs and cost, with All jobs", async () => {

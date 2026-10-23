@@ -103,6 +103,8 @@ describe("a paper's page", () => {
     const row = (id: number, state: string) => ({ id, paper_id: "2610.00002", revision: 1, title: "Epic one", kind: "brief", state, failed_runs: 0, last_error: null, queued_at: "2026-10-08T03:00:00Z" });
     client.setQueryData(["settings", "needs", "quality"], { night: { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [row(7, "failed"), row(8, "awaiting_text")], digests: [], deep_notes: [] }, cost: [], recall: null, calibration: [], matters_no_topic: [], collected: {}, reactions: [] });
     const settledRows = () => (client.getQueryData(["settings", "needs", "quality"]) as { night: { fulltext: { id: number; settled?: string }[] } }).night.fulltext.map((r) => r.settled);
+    // Jobs read before lists the paper's card asked for: it is read again after the write.
+    client.setQueryData(["settings", "runs/jobs", "jobs"], { not_run: [], running: [], failed: [], done: [] });
     renderApp("/paper/2610.00002", client);
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.getByText(/Full text failed three runs in a row/)).toBeInTheDocument();
@@ -116,6 +118,7 @@ describe("a paper's page", () => {
     // settles from the write itself, with what happened, as it would have from that page.
     await waitFor(() => expect(screen.queryByText(/Full text failed three runs in a row/)).toBeNull());
     expect(settledRows()).toEqual(["Running now, first in line, with three more runs.", undefined]);
+    expect(client.getQueryState(["settings", "runs/jobs", "jobs"])?.isInvalidated).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "Run it now" }));
     expect(await screen.findByText("the pass is not waiting for the owner")).toBeInTheDocument();
     // The 409 settles the row on Needs you with its reason, and the refetch finds the pass gone from the page too.
@@ -301,6 +304,20 @@ describe("a paper's page", () => {
     expect(again).toHaveAttribute("title", "Processing failed: classification failed on 1");
     await userEvent.click(again);
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
+  });
+
+  it("keeps saying Processing once the classified paper is in the collection, until its job is done", async () => {
+    viewport(false);
+    let state = "running";
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": () => ({ ...paper, id: "2409.01234", title: "Classified one", process: { id: 4, state, error: null } }) });
+    const qc = freshClient();
+    renderApp("/paper/2409.01234", qc);
+    await screen.findByRole("heading", { name: "Classified one" });
+    expect(screen.getByText("Processing.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Jobs" })).toHaveAttribute("href", "/settings/runs/jobs");
+    state = "done";
+    await qc.invalidateQueries();
+    await waitFor(() => expect(screen.queryByText("Processing.")).toBeNull());
   });
 
   it("says a fetched paper no run will process is fetched, without promising the next run", async () => {

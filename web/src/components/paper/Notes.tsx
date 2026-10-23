@@ -1,13 +1,15 @@
 /**
  * The open states under the header (DESIGN.md, "Open states"): yellow for a split or escalation, red for ungraded,
  * a failed analysis, a full-text pass waiting on the owner or awaiting classification, each with its buttons.
- * Settling one settles it on Needs you too.
+ * Settling one settles it on Needs you too. Cyan while the paper's Process job runs on in the collection.
  */
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { Schemas } from "@/api/client";
 import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useRetryAnalysis, useRunPassNow } from "@/api/mutations";
 import { taxonomyQuery } from "@/api/queries";
+import { processing } from "@/lib/jobs";
 import type { Paper } from "./Actions";
 import { ASKING, graders } from "./TopicRow";
 
@@ -182,6 +184,18 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
 export function Notes({ paper, onLabel }: { paper: Paper; onLabel: (topic: string) => void }) {
   return (
     <>
+      {/* Outside the collection Process itself reads "Processing"; classified, the paper is in it and the job goes on. */}
+      {paper.in_collection && processing(paper.process) && (
+        <div className="note run">
+          <div>
+            <b>Processing.</b> Its analysis and grading follow in a minute or two;{" "}
+            <Link to="/settings/runs/jobs" className="inl">
+              Jobs
+            </Link>{" "}
+            shows how it goes.
+          </div>
+        </div>
+      )}
       {paper.states?.map((s) => (
         // One state per kind and topic or pass: a refetch that drops one keeps the others' open forms.
         <Note key={`${s.kind}:${s.topic ?? ""}:${s.pass_id ?? ""}`} paper={paper} state={s} onLabel={onLabel} />

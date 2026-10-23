@@ -9,6 +9,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core.fulltext import REQUESTED
+from litwatch.store.failures import ACTIONABLE
 from litwatch.store.runs import ALIVE
 
 # The states each of the Jobs page's groups shows (DESIGN.md, Jobs); `discarded` is hidden.
@@ -35,31 +36,53 @@ async def get(conn: psycopg.AsyncConnection, job_id: int) -> dict[str, Any] | No
     return await (await conn.execute("SELECT * FROM jobs WHERE id = %s", (job_id,))).fetchone()
 
 
-async def process_of(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
-    """The paper's newest Process job not discarded."""
+async def process_of(
+    conn: psycopg.AsyncConnection, paper_id: str, *, lock: bool = False
+) -> dict[str, Any] | None:
+    """The paper's newest Process job not discarded; with `lock`, its row locked to the end of
+    the transaction."""
     return await (
         await conn.execute(
             "SELECT * FROM jobs WHERE kind = 'process' AND scope -> 'papers' = %s "
-            "AND state <> 'discarded' ORDER BY id DESC LIMIT 1",
+            "AND state <> 'discarded' ORDER BY id DESC LIMIT 1" + (" FOR UPDATE" if lock else ""),
             (Jsonb([paper_id]),),
         )
     ).fetchone()
 
 
 async def process(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any]:
-    """Queue the paper's Process job (D1): the one already queued or running, the one that
-    failed put back in the queue, or a new one. Asked again after a lost reply, it finds the
-    job the first asking queued."""
-    found = await process_of(conn, paper_id)
+    """Queue the paper's Process job (D1): the one already queued or running, the one not run or
+    failed put back in the queue, or a new one. Asked again after a lost reply, it finds the job
+    the first asking queued. Call it in a change of the paper: the job's row stays locked to its
+    end, so the Jobs page's actions wait and then see what this did."""
+    found = await process_of(conn, paper_id, lock=True)
     if found is not None and found["state"] in ACTIVE:
         return found
     if found is not None and found["state"] != "done":
         moved = await move(conn, found["id"], (*NOT_RUN, "failed"), "queued")
-        assert moved is not None  # the paper's lock is held: nothing moved it meanwhile
+        assert moved is not None  # its row is locked: nothing moved it meanwhile
         return moved
     job = await get(conn, await create(conn, "process", {"papers": [paper_id]}, 1, "queued"))
     assert job is not None
     return job
+
+
+async def settle_process(conn: psycopg.AsyncConnection, paper_id: str) -> None:
+    """A failed Process job settles with its paper's failures (DESIGN.md, Jobs): once none is
+    left (a later run did the step, the owner acted on Needs you), it goes back in the queue to
+    do what is left, or, the paper dismissed, it is discarded. Call it under the paper's settle
+    lock."""
+    await conn.execute(
+        f"""
+        UPDATE jobs j SET changed_at = now(), queued_at = now(), done = 0, counts = '{{}}',
+               error = NULL,
+               state = CASE WHEN p.dismissed_at IS NULL THEN 'queued' ELSE 'discarded' END
+        FROM papers p
+        WHERE p.id = %s AND j.kind = 'process' AND j.state = 'failed' AND j.scope -> 'papers' = %s
+          AND NOT EXISTS (SELECT 1 FROM step_failures f WHERE f.paper_id = p.id AND {ACTIONABLE})
+        """,
+        (paper_id, Jsonb([paper_id])),
+    )
 
 
 async def move(

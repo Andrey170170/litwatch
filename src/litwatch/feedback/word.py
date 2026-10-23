@@ -59,6 +59,7 @@ from litwatch.core.fulltext import (
 from litwatch.store import analyses as analyses_store
 from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
+from litwatch.store import jobs as jobs_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
@@ -144,8 +145,9 @@ async def settle(
     conn: psycopg.AsyncConnection, paper_id: str, *, cause: Cause, claimed: int | None = None
 ) -> Settled:
     """Recompute and store the paper's effective Fits and grades, its rarity and its library
-    state, with their events, and its text pass. `cause` is what changed them, for
-    `grade.changed`; a `verdict` that left the Fit where it was is reported as `weight`.
+    state, with their events, its text pass, and its failed Process job. `cause` is what
+    changed them, for `grade.changed`; a `verdict` that left the Fit where it was is reported as
+    `weight`.
     `claimed` is a pass the caller holds and has not worked yet: it is judged as one not
     started, so it may be dropped or relabelled.
 
@@ -221,6 +223,7 @@ async def settle(
             )
         await _text_pass(conn, paper_id, topics, after, claimed)
         await _deep_pass(conn, paper_id, topics, after, hand == Hand.UNSAVE, claimed)
+        await jobs_store.settle_process(conn, paper_id)
     return result
 
 
