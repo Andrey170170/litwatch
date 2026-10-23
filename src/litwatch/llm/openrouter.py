@@ -246,11 +246,12 @@ class OpenRouterProvider:
             raise ProviderError(type(exc).__name__, timeout=True) from exc
         # OpenRouter answers 404 when a model's only provider has no endpoint up, which the
         # SDK never retries.
+        except openai.APIConnectionError as exc:  # it may have been sent: billed or not
+            raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
         except (
             openai.NotFoundError,
             openai.InternalServerError,
             openai.RateLimitError,
-            openai.APIConnectionError,
         ) as exc:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except openai.PermissionDeniedError as exc:

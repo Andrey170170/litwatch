@@ -163,16 +163,18 @@ async def passed(conn: psycopg.AsyncConnection, passes: list[tuple[str, int]]) -
 async def ungraded_under(
     conn: psycopg.AsyncConnection, topic: str, version: str, ids: list[str]
 ) -> list[str]:
-    """Those of `ids`, in their order, not dismissed and with no verdict for the topic under its
-    `version` on their current text: what a re-run of the topic still has to grade."""
+    """Those of `ids`, in their order, not dismissed and whose verdict for the topic on their
+    current text, the latest, is not under its `version`: what a re-run of the topic still has
+    to grade. A topic edited back to an earlier version grades again what a version between
+    them decided (its calls reused from the journal)."""
     rows = await (
         await conn.execute(
             """
             SELECT p.id FROM unnest(%(ids)s::text[]) WITH ORDINALITY AS x (id, n)
             JOIN papers p ON p.id = x.id AND p.dismissed_at IS NULL
-            WHERE NOT EXISTS (SELECT 1 FROM verdicts v WHERE v.paper_id = p.id
-                              AND v.topic = %(topic)s AND v.topic_version = %(version)s
-                              AND v.paper_revision = p.revision)
+            WHERE (SELECT v.topic_version FROM verdicts v WHERE v.paper_id = p.id
+                   AND v.topic = %(topic)s AND v.paper_revision = p.revision
+                   ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) IS DISTINCT FROM %(version)s
             ORDER BY x.n
             """,
             {"ids": ids, "topic": topic, "version": version},

@@ -316,11 +316,19 @@ async def listing(
     ).fetchall()
 
 
+# The class of advisory locks one per topic serializes making its re-runs in (`open_rerun`).
+RERUN_LOCK = 7213916
+
+
 async def open_rerun(conn: psycopg.AsyncConnection, scope: dict[str, Any]) -> dict[str, Any] | None:
     """The newest re-run not ended (not run, on tonight's run, queued or running) with the
     same topic, revision, scopes and date range as `scope`, its row locked: one asked for again
-    after a lost reply."""
+    after a lost reply. The topic's re-run lock is held to the transaction's end, so two asking
+    at once make one."""
     same = {k: scope.get(k) for k in ("topic", "revision", "scopes", "since", "until")}
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (RERUN_LOCK, scope["topic"])
+    )
     return await (
         await conn.execute(
             "SELECT * FROM jobs WHERE kind = 'rerun' AND state = ANY(%s) "

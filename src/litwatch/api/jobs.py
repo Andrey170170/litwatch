@@ -263,7 +263,7 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
     scope = {
         "topic": topic.slug,
         "revision": offer.topic.revision,
-        "scopes": body.scopes,
+        "scopes": [k for k in reruns.SCOPES if k in body.scopes],  # one order, so one identity
         "since": body.since.isoformat() if body.since else None,
         "until": body.until.isoformat() if body.until else None,
         "papers": chosen,
@@ -291,10 +291,12 @@ async def act(
     """Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
     a Process job only while no step of its paper waits on the owner, checked under the paper's
     settle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its
-    ceiling stopped needs above what it spent. A discarded re-run lets go of its text passes.
-    Answers with the page's groups as they stand after it."""
+    ceiling stopped needs above what it spent; a re-run runs only with the schedule on, as in
+    `rerun`. A discarded re-run lets go of its text passes. Answers with the page's groups as
+    they stand after it."""
     sources, to = MOVES[action]
     ceiling = body.ceiling if body else None
+    schedule_on = request.app.state.config.schedule.enabled
     async with c.transaction():
         job = await jobs_store.get(c, job_id)
         if job is not None and action == "again" and job["kind"] == "process":
@@ -307,6 +309,8 @@ async def act(
             raise HTTPException(status_code=404, detail="no such job")
         if job["state"] not in sources:
             raise HTTPException(status_code=409, detail=f"the job is {job['state']} now")
+        if job["kind"] == "rerun" and to in ("queued", "tonight") and not schedule_on:
+            raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
         if job["state"] == "stopped" and to in ("queued", "tonight"):
             spent = await jobs_store.spent(c, job_id)
             if (ceiling or float(job["ceiling"])) <= spent:

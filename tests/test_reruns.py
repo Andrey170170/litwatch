@@ -25,6 +25,7 @@ from litwatch.jobs import reruns, worker
 from litwatch.llm import CallError, Gateway, Reply, Request, Usage, prices
 from litwatch.llm import ceiling as ceilings
 from litwatch.llm.openrouter import OpenRouterProvider
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import runs
@@ -231,6 +232,14 @@ async def test_a_paper_graded_under_the_current_version_is_not_graded_again(conn
     assert (await jobs_store.get(conn, job))["state"] == "done"
 
 
+async def test_a_topic_edited_back_grades_again_what_the_version_between_decided(conn, models):
+    """Under v1 then v2, A's verdict is v2's: a re-run after the edit back to v1 has A to do."""
+    await graded_before(conn, A, AGENTS.slug, "v1", fit="central")
+    await graded_before(conn, A, AGENTS.slug, "v2", fit="none")
+    assert await verdicts_store.ungraded_under(conn, AGENTS.slug, "v1", [A.id]) == [A.id]
+    assert await verdicts_store.ungraded_under(conn, AGENTS.slug, "v2", [A.id]) == []
+
+
 async def test_a_rerun_whose_topic_was_paused_fails_and_says_why(conn, models):
     job = await rerun(conn, AGENTS.slug, [A.id], ceiling=1.0)
     await edited(conn, AGENTS, status=Status.PAUSED)
@@ -382,6 +391,8 @@ async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_
     queued = await text_pass(conn)
     assert (queued["job_id"], queued["priority"]) == (job, BACKGROUND_PRIORITY)
     assert (await jobs_store.get(conn, job))["state"] == "running"
+    # As if A's Deep card were wanted only once its Brief is written: the Brief's settle queues it.
+    await conn.execute("DELETE FROM fulltext_passes WHERE kind = 'deep'")
 
     # The full-text worker, and a nightly's, leave it to the job.
     assert await fulltext.work(conn, CONFIG, archive(with_text(A)), gateway=models.gateway) == {}
@@ -391,6 +402,8 @@ async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_
     assert (await text_pass(conn))["state"] == "done"
     done = await jobs_store.get(conn, job)
     assert (done["state"], done["counts"]["briefs_written"]) == ("done", 1)
+    (ran,) = await rows(conn, "SELECT counts FROM runs WHERE job_id = %s", job)
+    assert ran["counts"]["briefs_written"] == 1  # counted once on its run too
     roles = [c["operation"] for c in await job_calls(conn, job)]
     assert sorted(roles) == ["brief", "check", "judge"]  # all on the job's run, its ceiling's
     (deep,) = await rows(conn, "SELECT * FROM fulltext_passes WHERE kind = 'deep'")
@@ -421,6 +434,21 @@ async def test_a_text_pass_that_does_not_fit_stops_the_rerun_and_waits_for_run_n
     await work_out(w)
     assert (await jobs_store.get(conn, job))["state"] == "done"
     assert (await text_pass(conn))["state"] == "done"
+
+
+async def test_the_owners_run_it_now_takes_a_stopped_reruns_pass_to_the_regular_queue(conn, models):
+    job = await focus_rerun(conn, models, ceiling=1.0)
+    assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)  # no archive
+    await jobs_store.finish(conn, job, "stopped", "stopped at the ceiling")
+    pass_ = await text_pass(conn)
+    await conn.execute(
+        "UPDATE fulltext_passes SET state = 'failed', failed_runs = 3 WHERE id = %s", (pass_["id"],)
+    )
+    assert await fulltext_store.run_now(conn, pass_["id"], 3)
+    assert (await text_pass(conn))["job_id"] is None
+    assert await fulltext.work(conn, CONFIG, archive(with_text(A)), gateway=models.gateway) == {
+        "briefs_written": 1
+    }
 
 
 async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn, models):
@@ -517,10 +545,18 @@ async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_r
         assert [r["key"] for r in again["running"]] == [r["key"] for r in started["running"]]
         wider = body | {"scopes": ["labels", "members"], "run": True}
         assert len((await http.post("/api/jobs/reruns", json=wider)).json()["running"]) == 2
+        turned = wider | {"scopes": ["members", "labels"]}  # the same scopes, in another order
+        assert len((await http.post("/api/jobs/reruns", json=turned)).json()["running"]) == 2
         empty = body | {"scopes": ["range"]}
         assert (await http.post("/api/jobs/reruns", json=empty)).status_code == 409
+        kept = (await http.post("/api/jobs/reruns", json=body | {"scopes": ["labels"]})).json()
+    (later,) = kept["not_run"]
     async with api(conn, CONFIG.model_copy(update={"schedule": Schedule()})) as http:
         off = await http.post("/api/jobs/reruns", json=body | {"run": True})
+        assert off.status_code == 409 and "schedule is off" in off.json()["detail"]
+        # Nor does Run now on Jobs start one the schedule off would never run.
+        job_id = later["key"].split(":")[-1]
+        off = await http.post(f"/api/jobs/{job_id}/run", json={"ceiling": 1.0})
         assert off.status_code == 409 and "schedule is off" in off.json()["detail"]
 
 
