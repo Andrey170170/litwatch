@@ -110,7 +110,9 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   - *The estimate is of grading:* calls per paper by the topic's depth (an Area's `check` by the share of its last
     200 verdicts that escalated). The Briefs a re-run's verdicts bring are paid under its ceiling but not estimated.
   - *A grading that fails in a re-run is the job's, not the paper's:* no `step_failures` row, so no nightly takes it
-    up; the job ends `failed` ("grading failed on 3"), Try again redoes what has no verdict under the version. A
+    up; the job ends `failed` ("grading failed on 3"), Try again redoes what has no verdict under the version,
+    each grading as far down its graders' lists as its earlier tries reached (D4, kept on the job). A grading
+    whose paper's text changed meanwhile counts as failed too. A re-run's progress is counted from the verdicts. A
     re-run whose topic was paused or unfollowed fails, saying so; Run is refused (409) with the schedule off.
   - *The worst case of a call:* its input bounded by the request's UTF-8 bytes plus 1,024 tokens of framing (a token
     is at least a byte), its output by its cap. An OpenRouter route's bound is, per token type, the tightest charge
@@ -118,12 +120,15 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
     left out of the input price); a Decisions route is held to its input (`max_price` completion 0, models.md: it
     bills input only); a chat route with no output cap of its own is sent 16,000, Anthropic's default. A call that
     does not fit waits while others are in flight and stops the job only with none in flight. An answered provider
-    error frees its reservation; a timeout or a lost connection keeps it, as it may have been billed. A known limit: a charge the journal
-    never learns (a timeout, or a process that died mid-call) is not counted against what is left when the job's next
-    run opens, so such a job can pass its ceiling by those calls' worst cases.
+    error frees its reservation, unless it reports a charge (OpenRouter bills some completions with no choices); a
+    content refusal OpenRouter answers with a 403 costs nothing; a timeout or a lost connection keeps it, as it may
+    have been billed. A known limit: a charge the journal never learns (a timeout, or a process that died
+    mid-call) is not counted against what is left when the job's next run opens, so such a job can pass its
+    ceiling by those calls' worst cases.
   - *A re-run asked for twice is made once:* the same topic version, scopes and dates while one is not yet ended
-    adopts it (under a lock per topic, so two at once make one), and Run moves an offered one to the queue. Run
-    now on Jobs is refused with the schedule off too.
+    adopts it (under a lock per topic, so two at once make one), and Run moves one not run to the queue (a stopped
+    one under a ceiling above what it spent, as Run now on Jobs). Run now on Jobs is refused with the schedule off
+    too.
   - *A topic edited back* to an earlier version re-runs what a version between them decided: a paper is done
     when its latest verdict is under the version, its calls reused from the journal.
   - *A re-run's pass the owner runs from Needs you* ("Run it now") leaves the job for the regular queue. A pass

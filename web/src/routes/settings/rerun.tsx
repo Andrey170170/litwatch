@@ -33,9 +33,9 @@ export function RerunOffer({ slug, line, onDone }: { slug: string; line: string;
       { topic: slug, scopes, since: dated ? range.since : null, until: dated ? range.until : null, ceiling, run: go },
       { onSuccess: onDone },
     );
-  // Run and Not now need a scope that names some paper (the counts as read for the ticks shown) and a ceiling;
-  // with none named, Not now only puts the offer away.
-  const read = !!o && !offer.isPlaceholderData && !run.isPending;
+  // Run and Not now need a scope that names some paper (the counts as read for the ticks shown, not ones cached
+  // before the save, still being read again) and a ceiling; with none named, Not now only puts the offer away.
+  const read = !!o && !offer.isFetching && !run.isPending;
   const ready = read && o.papers > 0 && ceiling != null;
   const empty = read && o.papers === 0;
   return (

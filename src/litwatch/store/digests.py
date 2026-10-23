@@ -680,12 +680,13 @@ async def get(conn: psycopg.AsyncConnection, digest_id: int) -> dict[str, Any] |
 async def waiting_passes(conn: psycopg.AsyncConnection, since: datetime) -> int:
     """The Briefs and Weight re-checks queued since `since` (by a Focus or an Area topic) that a
     digest waits for: still to run on their paper's current text, the paper not dismissed. One
-    that failed in this run, or is terminal, waits no longer."""
+    that failed in this run, or is terminal, waits no longer; nor does a re-run's, which only
+    its job works."""
     row = await (
         await conn.execute(
             "SELECT count(*) AS n FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
             "WHERE f.kind <> 'deep' AND f.reason IN ('focus', 'area') AND f.queued_at >= %s "
-            "AND f.paper_revision = p.revision AND p.dismissed_at IS NULL "
+            "AND f.paper_revision = p.revision AND p.dismissed_at IS NULL AND f.job_id IS NULL "
             "AND f.state IN ('awaiting_text', 'ready', 'running')",
             (since,),
         )

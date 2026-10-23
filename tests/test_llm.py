@@ -230,7 +230,7 @@ async def test_an_openrouter_403_about_the_request_is_a_refusal_that_goes_down_t
     assert answer.value.yes and (len(openrouter.sent), len(anthropic.sent)) == (1, 1)
     refused, answered = await calls(conn)
     assert refused["error"] == f"refused: {category}" and answered["error"] is None
-    assert refused["usage"]["via"] == "openrouter" and refused["usage"]["cost"] is None
+    assert refused["usage"]["via"] == "openrouter" and refused["usage"]["cost"] == 0.0
 
 
 @pytest.mark.parametrize(

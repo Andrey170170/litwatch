@@ -22,7 +22,8 @@ import psycopg
 from litwatch import fulltext, grading
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config, RoleConfig
-from litwatch.core import Depth, Status, Taxonomy, Topic
+from litwatch.core import Depth, Paper, Status, Taxonomy, Topic
+from litwatch.core.grading import GRADERS
 from litwatch.jobs.context import ModelRun
 from litwatch.llm.ceiling import Bound, Ceiling, anthropic_bound, route
 from litwatch.llm.types import DEFAULT_MAX_TOKENS
@@ -35,11 +36,6 @@ from litwatch.store import verdicts as verdicts_store
 type Scope = Literal["labels", "members", "keywords", "range"]
 SCOPES: tuple[Scope, ...] = ("labels", "members", "keywords", "range")
 CEILING = 5.0  # the offer's ceiling, until the owner changes it (DESIGN.md, the re-run offer)
-GRADERS = {
-    Depth.FOCUS: ("judge", "check"),
-    Depth.AREA: ("judge", "area_check", "check"),
-    Depth.FIELD: ("field_grade",),
-}
 WAKE = timedelta(seconds=30)  # a re-run whose passes all await their text looks again after
 
 log = logging.getLogger(__name__)
@@ -202,24 +198,37 @@ async def work(
         ids = papers[job["done"] : job["done"] + size]
         todo = await verdicts_store.ungraded_under(conn, slug, topic.version, ids)
         found = await papers_store.get_many(conn, todo)
-        due = [grading.Due(p, topic, tree.get(slug).name) for p in found]
+        ladder = dict(job["ladder"])
+        name = tree.get(slug).name
+        due = [_due(p, topic, name, ladder.get(p.id)) for p in found]
         async with grading.grade(due, run.gateway, config.grading) as results:
             async for g in results:
                 if g.verdict is None:
                     log.warning("re-run %s: %s failed: %s", job["id"], g.due.paper.id, g.error)
+                    ladder[g.due.paper.id] = {
+                        "runs": g.due.failed_runs + (1 if g.unusable else 0),
+                        "refused": sorted(g.refused),
+                    }
                 elif await grading.record(conn, g, job=job["id"]):
                     counts["graded"] += 1
+                    ladder.pop(g.due.paper.id, None)
         reached = run.gateway.ceiling is not None and run.gateway.ceiling.reached
         if not reached:  # a grading the ceiling cut short is not a failure: it is done on
             # What the chunk leaves without a verdict under the version on its current text (a
             # grading that failed, or one whose text changed meanwhile) fails, for Try again.
             left = await verdicts_store.ungraded_under(conn, slug, topic.version, ids)
             counts["grading_failed"] += len(left)
-        after = await _progress(conn, job, run, counts, job["done"] + (0 if reached else len(ids)))
+        # How far it is, from the verdicts themselves: Try again and a run taken back count
+        # what earlier tries graded.
+        graded = len(papers) - len(
+            await verdicts_store.ungraded_under(conn, slug, topic.version, papers)
+        )
+        after = await _progress(
+            conn, job, run, counts, job["done"] + (0 if reached else len(ids)), graded, ladder
+        )
         if after is None:
             return Chunk("gone")
         if reached:
-            graded = after["counts"].get("graded", 0)
             return Chunk("stopped", f"stopped at the ceiling after {graded} of {len(papers)}")
         return Chunk("more")
     if archive is not None:
@@ -243,14 +252,27 @@ async def _progress(
     run: ModelRun,
     counts: Counter[str],
     done: int,
+    graded: int | None = None,
+    ladder: dict[str, Any] | None = None,
     *,
     on_run: bool = True,
 ) -> dict[str, Any] | None:
-    """Record the chunk on the job and, unless they are there already (`on_run`), on its run;
-    None when the job is no longer this session's."""
+    """Record the chunk on the job (with its scope's papers `graded` so far, when counted) and,
+    unless they are there already (`on_run`), on its run; None when the job is no longer this
+    session's."""
     merged = dict(job["counts"])
     for k, v in counts.items():
         merged[k] = merged.get(k, 0) + v
         if on_run:
             run.add(k, v)
-    return await jobs_store.progress(conn, job["id"], done, merged)
+    if graded is not None:
+        merged["graded"] = graded
+    return await jobs_store.progress(conn, job["id"], done, merged, ladder)
+
+
+def _due(paper: Paper, topic: Topic, name: str, ladder: dict[str, Any] | None) -> grading.Due:
+    """The paper's grading, starting as far down its graders' lists as its earlier tries in the
+    job reached (D4)."""
+    if ladder is None:
+        return grading.Due(paper, topic, name)
+    return grading.Due(paper, topic, name, ladder["runs"], frozenset(ladder["refused"]))
