@@ -306,6 +306,19 @@ describe("a paper's page", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "POST")).toHaveLength(1));
   });
 
+  it("offers no Process again while the failed job's paper waits on the owner: the note above does", async () => {
+    viewport(true);
+    const waits = { kind: "awaiting_classification", revision: 1, error: "no usable answer", refused: false };
+    const stuck = { ...paper, id: "2409.01234", title: "Stuck one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, states: [waits], process: { id: 4, state: "failed", error: "classification failed on 1 (waits on Needs you)" } };
+    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": stuck });
+    renderApp("/paper/2409.01234");
+    const failed = await screen.findByRole("button", { name: "Failed" });
+    expect(failed).toBeDisabled();
+    expect(failed).toHaveAttribute("title", "Processing failed and waits on you: classification failed on 1 (waits on Needs you)");
+    expect(screen.queryByRole("button", { name: "Process again" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Classify by hand" })).toBeInTheDocument();
+  });
+
   it("keeps saying Processing once the classified paper is in the collection, until its job is done", async () => {
     viewport(false);
     let state = "running";

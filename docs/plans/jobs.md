@@ -88,7 +88,9 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
 - **Built in P1 beyond the bullets above:** with the schedule off, Process only fetches the paper (no worker runs
   it); without a taxonomy, Process answers 409 and keeps nothing; a failed Process job is queued again once its
   paper's failures are cleared, and discarded if the paper is dismissed; a card asked for shows as Failed by the
-  rule Needs you uses.
+  rule Needs you uses. On the paper's page a failed Process job reads "Process again" and queues the job again;
+  while its classification waits on the owner, the button reads "Failed" and is off, since the job would find
+  nothing due: the open state's own actions (Classify by hand, Fix the text, Dismiss) settle the job.
 
 ## Decisions
 
