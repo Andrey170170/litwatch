@@ -38,6 +38,7 @@ from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, mod
 from litwatch.jobs.lock import BusyError, run_lock
 from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
+from litwatch.store import papers as papers_store
 
 log = logging.getLogger(__name__)
 
@@ -110,23 +111,31 @@ class Worker:
             after = await self._chunk(job, run)
         except Exception as exc:
             log.exception("jobs: job %s failed", job["id"])
-            await jobs_store.finish(self.conn, job["id"], "failed", f"{type(exc).__name__}: {exc}")
+            await self._end(job, f"{type(exc).__name__}: {exc}")
             await self._close(job["id"], exc)
             return True
         self.worked()
         if after is None:  # no longer this session's
             await self._close(job["id"])
         elif after["done"] >= after["papers"]:
-            # Done only if no paper has a step left failed: one tried again with nothing due,
-            # since it waits for the owner, fails again. Under the papers' settle locks, so an
-            # owner's action that clears a failure meanwhile settles the job after this.
-            papers = job["scope"]["papers"]
-            async with self.conn.transaction():
-                await word.lock_many(self.conn, papers)
-                why = failure(await failures.open_on(self.conn, papers, FAILED_RUNS))
-                await jobs_store.finish(self.conn, job["id"], "failed" if why else "done", why)
+            await self._end(job)
             await self._close(job["id"])
         return True
+
+    async def _end(self, job: dict[str, Any], error: str | None = None) -> None:
+        """End the job: failed with `error`, or failed while a paper has a step left failed (one
+        tried again with nothing due, since it waits for the owner, fails again), else done; a
+        Process job whose paper the owner dismissed meanwhile is discarded. Under the papers'
+        settle locks, so an owner's action on them meanwhile settles the job after this."""
+        papers = job["scope"]["papers"]
+        async with self.conn.transaction():
+            await word.lock_many(self.conn, papers)
+            if job["kind"] == "process" and await papers_store.dismissed_at(self.conn, papers[0]):
+                state, why = "discarded", None
+            else:
+                why = error or failure(await failures.open_on(self.conn, papers, FAILED_RUNS))
+                state = "failed" if why else "done"
+            await jobs_store.finish(self.conn, job["id"], state, why)
 
     async def _chunk(self, job: dict[str, Any], run: ModelRun) -> dict[str, Any] | None:
         """The job's next chunk of papers through classification, analysis and grading; returns

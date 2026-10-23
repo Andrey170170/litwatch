@@ -214,6 +214,20 @@ async def test_a_failed_job_settles_when_the_topic_it_failed_grading_on_is_pause
     assert (await jobs_store.get(conn, job))["state"] == "queued"  # nothing waits on it now
 
 
+async def test_a_job_whose_paper_is_dismissed_while_it_runs_is_discarded_however_it_ends(
+    conn, models, monkeypatch
+):
+    async def dismissed_then_broken(*_, **__):
+        async with await store.sibling(conn) as owner, word.change(owner, A.id, cause=Cause.OWNER):
+            await papers_store.dismiss(owner, A.id)
+        raise RuntimeError("the store went away")
+
+    monkeypatch.setattr(nightly, "analyse", dismissed_then_broken)
+    job = await queued(conn, A.id)
+    assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)
+    assert (await jobs_store.get(conn, job))["state"] == "discarded"
+
+
 async def test_a_failed_job_whose_paper_the_owner_dismisses_is_discarded(conn, models):
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
