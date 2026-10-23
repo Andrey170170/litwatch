@@ -1058,6 +1058,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/reruns/offer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Rerun Offer
+         * @description The re-run offer after an edit of the topic: each scope with its papers and estimate, and
+         *     the chosen `scopes` together (a date range from `since` to `until`, both included).
+         */
+        get: operations["rerun_offer_api_jobs_reruns_offer_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/reruns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rerun
+         * @description Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are
+         *     those of its scopes as they stand now; it grades them under the topic's version when it
+         *     runs (D3). Run needs the schedule on, whose worker runs jobs. Answers with the Jobs page's
+         *     groups.
+         */
+        post: operations["rerun_api_jobs_reruns_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}/{action}": {
         parameters: {
             query?: never;
@@ -1071,7 +1115,9 @@ export interface paths {
          * Act
          * @description Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
          *     a Process job only while no step of its paper waits on the owner, checked under the paper's
-         *     settle lock. Answers with the page's groups as they stand after it.
+         *     settle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its
+         *     ceiling stopped needs above what it spent. A discarded re-run lets go of its text passes.
+         *     Answers with the page's groups as they stand after it.
          */
         post: operations["act_api_jobs__job_id___action__post"];
         delete?: never;
@@ -1911,11 +1957,13 @@ export interface components {
          * Job
          * @description One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked
          *     for (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready
-         *     is queued). `papers` and `done` say how far it got; `cost` is what its runs spent, None
-         *     before any and for a card, which runs on the subscription. `at` is when it last changed
-         *     state. `actions` are those its state allows: Run now, With tonight's run and Discard while
-         *     it is not run; Try again once it failed, for a card only once it waits for the owner (a
-         *     card that failed fewer runs is tried again by the next nightly run).
+         *     is queued). `papers` and `done` say how far it got (a re-run's `graded` how many it graded);
+         *     `cost` is what its runs spent so far, None before any and for a card, which runs on the
+         *     subscription. `at` is when it last changed state. A re-run has its topic, `scopes`, the
+         *     `estimate` it was offered with and its `ceiling`; stopped by the ceiling, `error` says where.
+         *     `actions` are those its state allows: Run now, With tonight's run and Discard while it is
+         *     not run; Try again once it failed, for a card only once it waits for the owner (a card that
+         *     failed fewer runs is tried again by the next nightly run).
          */
         Job: {
             /** Key */
@@ -1924,7 +1972,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "process" | "deep";
+            kind: "process" | "rerun" | "deep";
             /** Id */
             id?: number | null;
             /** Pass Id */
@@ -1935,12 +1983,24 @@ export interface components {
              */
             state: "offered" | "stopped" | "tonight" | "queued" | "running" | "failed" | "done";
             paper?: components["schemas"]["JobPaper"] | null;
+            topic?: components["schemas"]["JobTopic"] | null;
+            /**
+             * Scopes
+             * @default []
+             */
+            scopes: ("labels" | "members" | "keywords" | "range")[];
             /** Papers */
             papers: number;
             /** Done */
             done: number;
+            /** Graded */
+            graded?: number | null;
             /** Cost */
             cost?: number | null;
+            /** Estimate */
+            estimate?: number | null;
+            /** Ceiling */
+            ceiling?: number | null;
             /** Error */
             error?: string | null;
             /**
@@ -1960,6 +2020,27 @@ export interface components {
             id: string;
             /** Title */
             title: string;
+        };
+        /**
+         * JobRun
+         * @description Run now or With tonight's run: a re-run's new ceiling in USD, which a stopped one needs
+         *     above what it spent.
+         */
+        JobRun: {
+            /** Ceiling */
+            ceiling?: number | null;
+        };
+        /**
+         * JobTopic
+         * @description A re-run's topic, and the revision of it the re-run was offered for.
+         */
+        JobTopic: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Revision */
+            revision?: number | null;
         };
         /**
          * Jobs
@@ -2497,6 +2578,70 @@ export interface components {
          * @enum {string}
          */
         ReactionValue: "up" | "down";
+        /**
+         * RerunIn
+         * @description A re-run to start (`run`) or to keep under Not run: its topic, its scopes (the date
+         *     range's days in the schedule's zone, both included) and its ceiling in USD.
+         */
+        RerunIn: {
+            /** Topic */
+            topic: string;
+            /** Scopes */
+            scopes: ("labels" | "members" | "keywords" | "range")[];
+            /** Since */
+            since?: string | null;
+            /** Until */
+            until?: string | null;
+            /** Ceiling */
+            ceiling: number;
+            /** Run */
+            run: boolean;
+        };
+        /**
+         * RerunOffer
+         * @description The re-run offer after a topic edit (DESIGN.md, the re-run offer): each scope with its
+         *     paper count and estimate; `papers` and `estimate` for the scopes chosen, a paper in two of
+         *     them counted once. `missing` are the roles with no calls to estimate by; `unpriced` the
+         *     models (`role: model`) with no price bound, whose calls a re-run does not send. `ceiling`
+         *     is the one offered, in USD.
+         */
+        RerunOffer: {
+            topic: components["schemas"]["JobTopic"];
+            /** Rows */
+            rows: components["schemas"]["RerunScopeRow"][];
+            /** Papers */
+            papers: number;
+            /** Estimate */
+            estimate?: number | null;
+            /**
+             * Missing
+             * @default []
+             */
+            missing: string[];
+            /**
+             * Unpriced
+             * @default []
+             */
+            unpriced: string[];
+            /** Ceiling */
+            ceiling: number;
+        };
+        /**
+         * RerunScopeRow
+         * @description One scope of the re-run offer: its papers and what grading them is estimated to cost
+         *     (None when a role has no calls to estimate by).
+         */
+        RerunScopeRow: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "labels" | "members" | "keywords" | "range";
+            /** Papers */
+            papers: number;
+            /** Estimate */
+            estimate?: number | null;
+        };
         /**
          * Row
          * @description One paper in a list. `rarity` is the list's: the mixed list's on Papers, the topic page's
@@ -5786,6 +5931,129 @@ export interface operations {
             };
         };
     };
+    rerun_offer_api_jobs_reruns_offer_get: {
+        parameters: {
+            query: {
+                topic: string;
+                scopes?: ("labels" | "members" | "keywords" | "range")[];
+                since?: string | null;
+                until?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RerunOffer"];
+                };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The topic is not active, the scopes name no paper, or no worker runs */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_api_jobs_reruns_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RerunIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Jobs"];
+                };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such topic */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The topic is not active, the scopes name no paper, or no worker runs */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     act_api_jobs__job_id___action__post: {
         parameters: {
             query?: never;
@@ -5796,7 +6064,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["JobRun"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
