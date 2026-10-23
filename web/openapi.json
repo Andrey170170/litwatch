@@ -3172,7 +3172,7 @@
             "description": "No such topic"
           },
           "409": {
-            "description": "The topic is not active, the scopes name no paper, or no worker runs"
+            "description": "The topic is not active, the scopes name no paper, the same re-run is under way otherwise than asked, or no worker runs"
           },
           "422": {
             "description": "Validation Error",
@@ -3190,7 +3190,7 @@
     "/api/jobs/reruns": {
       "post": {
         "summary": "Rerun",
-        "description": "Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are\nthose of its scopes as they stand now; it grades them under the topic's version now (D3),\nand fails should the topic be edited before its grading is done. The same re-run not ended\nyet is not made again. Run needs the schedule on, whose worker runs jobs. Answers with the\nJobs page's groups.",
+        "description": "Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are\nthose of its scopes as they stand now; it grades them under the topic's version now (D3),\nand fails should the topic be edited before its grading is done. The same re-run not ended\nyet is not made again; one under way answers only Run under its ceiling (409 otherwise,\nsaying where it is). Run needs the schedule on, whose worker runs jobs. Answers with the\nJobs page's groups.",
         "operationId": "rerun_api_jobs_reruns_post",
         "requestBody": {
           "content": {
@@ -3223,7 +3223,7 @@
             "description": "No such topic"
           },
           "409": {
-            "description": "The topic is not active, the scopes name no paper, or no worker runs"
+            "description": "The topic is not active, the scopes name no paper, the same re-run is under way otherwise than asked, or no worker runs"
           },
           "422": {
             "description": "Validation Error",

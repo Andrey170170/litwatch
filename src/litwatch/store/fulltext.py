@@ -152,11 +152,12 @@ async def queue_deep(
 
 async def owners_first(conn: psycopg.AsyncConnection, paper_ids: Sequence[str]) -> None:
     """The papers' open passes go as the owner's requests do: a text pass ahead of the others,
-    a Deep pass ahead of the automatic ones (a paper the owner had processed, docs/plans/jobs.md).
-    The reason stays: a settle may still drop or relabel the pass."""
+    a Deep pass ahead of the automatic ones (a paper the owner had processed, docs/plans/jobs.md),
+    in the regular queue, a re-run's text pass too. The reason stays: a settle may still drop or
+    relabel the pass."""
     await conn.execute(
         "UPDATE fulltext_passes SET priority = least(priority, "
-        "CASE WHEN kind = 'deep' THEN %s ELSE %s END) "
+        "CASE WHEN kind = 'deep' THEN %s ELSE %s END), job_id = NULL "
         "WHERE paper_id = ANY(%s) AND state <> 'done'",
         (REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY, list(paper_ids)),
     )

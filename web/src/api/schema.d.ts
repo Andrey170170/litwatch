@@ -1093,7 +1093,8 @@ export interface paths {
          * @description Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are
          *     those of its scopes as they stand now; it grades them under the topic's version now (D3),
          *     and fails should the topic be edited before its grading is done. The same re-run not ended
-         *     yet is not made again. Run needs the schedule on, whose worker runs jobs. Answers with the
+         *     yet is not made again; one under way answers only Run under its ceiling (409 otherwise,
+         *     saying where it is). Run needs the schedule on, whose worker runs jobs. Answers with the
          *     Jobs page's groups.
          */
         post: operations["rerun_api_jobs_reruns_post"];
@@ -5977,7 +5978,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The topic is not active, the scopes name no paper, or no worker runs */
+            /** @description The topic is not active, the scopes name no paper, the same re-run is under way otherwise than asked, or no worker runs */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6038,7 +6039,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The topic is not active, the scopes name no paper, or no worker runs */
+            /** @description The topic is not active, the scopes name no paper, the same re-run is under way otherwise than asked, or no worker runs */
             409: {
                 headers: {
                     [name: string]: unknown;

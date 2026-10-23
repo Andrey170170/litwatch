@@ -18,7 +18,7 @@ from litwatch.api import create_app
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config, Models, RoleConfig, Schedule
 from litwatch.core import Cause, Depth, Fit, Label, LabelOrigin, LabelValue, Status, Verdict
-from litwatch.core.fulltext import BACKGROUND_PRIORITY
+from litwatch.core.fulltext import BACKGROUND_PRIORITY, TEXT_REQUEST_PRIORITY
 from litwatch.feedback import word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.jobs import reruns, worker
@@ -617,6 +617,21 @@ async def test_the_owners_run_it_now_takes_a_stopped_reruns_pass_to_the_regular_
     }
 
 
+async def test_a_pass_the_rerun_queues_for_a_paper_being_processed_is_the_owners(conn, models):
+    """A's Process job is under way (on tonight's run): the Brief its re-run grading queues goes
+    as the owner's requests do, in the regular queue, which works it even once the re-run
+    stopped."""
+    await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "tonight")
+    job = await focus_rerun(conn, models, ceiling=1.0)
+    assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)  # the grading
+    await jobs_store.finish(conn, job, "stopped", "stopped at the ceiling")
+    queued = await text_pass(conn)
+    assert (queued["job_id"], queued["priority"]) == (None, TEXT_REQUEST_PRIORITY)
+    assert await fulltext.work(conn, CONFIG, archive(with_text(A)), gateway=models.gateway) == {
+        "briefs_written": 1
+    }
+
+
 async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn, models):
     job = await focus_rerun(conn, models, ceiling=1.0)
     w = worker.Worker(conn, CONFIG, models.gateway, archive=archive(with_text(A)))
@@ -726,6 +741,11 @@ async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_r
         assert started["not_run"] == [] and [r["state"] for r in started["running"]] == ["queued"]
         again = (await http.post("/api/jobs/reruns", json=body | {"run": True})).json()
         assert [r["key"] for r in again["running"]] == [r["key"] for r in started["running"]]
+        # Under way, it is adopted only as asked: not under another ceiling, nor kept not run.
+        for other in (body | {"run": True, "ceiling": 1.0}, body):
+            refused = await http.post("/api/jobs/reruns", json=other)
+            assert refused.status_code == 409
+            assert refused.json()["detail"] == "the same re-run is queued already, under $2.50"
         wider = body | {"scopes": ["labels", "members"], "run": True}
         assert len((await http.post("/api/jobs/reruns", json=wider)).json()["running"]) == 2
         turned = wider | {"scopes": ["members", "labels"]}  # the same scopes, in another order
