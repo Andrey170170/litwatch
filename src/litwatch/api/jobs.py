@@ -5,6 +5,7 @@ a topic edit, which starts a re-run or keeps it under Not run."""
 
 from __future__ import annotations
 
+import math
 from datetime import date
 from typing import Annotated, Any
 
@@ -182,10 +183,14 @@ JOB_REFUSED = {
 RERUN_REFUSED = {
     404: {"description": "No such topic"},
     409: {
-        "description": "The topic is not active, the scopes name no paper, the same re-run is "
-        "under way otherwise than asked, or no worker runs"
+        "description": "The topic is not active, the scopes name no paper, the same re-run "
+        "stands otherwise than asked, or no worker runs"
     },
 }
+
+
+# Where a re-run found again stands, as a refusal names it.
+WHERE = {"offered": "under Not run", "tonight": "on tonight's run"}
 
 
 async def _offered(
@@ -255,9 +260,10 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
     """Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are
     those of its scopes as they stand now; it grades them under the topic's version now (D3),
     and fails should the topic be edited before its grading is done. The same re-run not ended
-    yet is not made again; one under way answers only Run under its ceiling (409 otherwise,
-    saying where it is). Run needs the schedule on, whose worker runs jobs. Answers with the
-    Jobs page's groups."""
+    yet is not made again: Run goes on with one not run, under the new ceiling; else the one
+    found answers only as asked, under its ceiling, queued or running for Run, not run for
+    Not now (409 otherwise, saying where it is). Run needs the schedule on, whose worker runs
+    jobs. Answers with the Jobs page's groups."""
     config = request.app.state.config
     if body.run and not config.schedule.enabled:
         raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
@@ -279,22 +285,26 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
     async with c.transaction():
         # Asked again after a lost reply, the same re-run is found, not made twice; Run puts
         # one under Not run in the queue, under the ceiling given, as Run now on Jobs does.
-        # One already under way is adopted only as asked, so the answer's toast holds.
+        # Else the one found is adopted only when it already is what was asked, so the answer's
+        # toast holds.
         found = await jobs_store.open_rerun(c, scope)
         if found is None:
             await jobs_store.create(
                 c, "rerun", scope, len(chosen), state, ceiling=body.ceiling, estimate=offer.estimate
             )
-        elif found["state"] in jobs_store.NOT_RUN:
-            if body.run:
-                await _above_spent(c, found, body.ceiling)
-                await jobs_store.move(c, found["id"], jobs_store.NOT_RUN, "queued", body.ceiling)
-        elif not body.run or found["state"] == "tonight" or float(found["ceiling"]) != body.ceiling:
-            where = "on tonight's run" if found["state"] == "tonight" else found["state"]
-            raise HTTPException(
-                status_code=409,
-                detail=f"the same re-run is {where} already, under ${float(found['ceiling']):.2f}",
-            )
+        elif body.run and found["state"] in jobs_store.NOT_RUN:
+            await _above_spent(c, found, body.ceiling)
+            await jobs_store.move(c, found["id"], jobs_store.NOT_RUN, "queued", body.ceiling)
+        else:
+            kept = float(found["ceiling"])
+            asked = ("queued", "running") if body.run else jobs_store.NOT_RUN
+            # the column keeps a float to 15 digits
+            if found["state"] not in asked or not math.isclose(kept, body.ceiling):
+                where = WHERE.get(found["state"], found["state"])
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"the same re-run is {where} already, its ceiling ${kept:.2f}",
+                )
     if body.run:
         request.app.state.jobs_wake.set()
     return await _listing(c)

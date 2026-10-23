@@ -128,8 +128,8 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
     against what is left when the job's next run opens, so such a job can pass its ceiling by those charges.
   - *A re-run asked for twice is made once:* the same topic version, scopes and dates while one is not yet ended
     adopts it (under a lock per topic, so two at once make one), and Run moves one not run to the queue (a stopped
-    one under a ceiling above what it spent, as Run now on Jobs). One already under way is adopted only as asked
-    (Run, queued or running under the same ceiling): otherwise a 409 says where it is. Run now on Jobs is refused with the schedule off
+    one under a ceiling above what it spent, as Run now on Jobs). Otherwise the one found is adopted only as asked,
+    under the same ceiling (queued or running for Run, not run for Not now): else a 409 says where it is. Run now on Jobs is refused with the schedule off
     too.
   - *A topic edited back* to an earlier version re-runs what a version between them decided: a paper is done
     when its latest verdict is under the version, its calls reused from the journal.

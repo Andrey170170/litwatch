@@ -736,16 +736,28 @@ async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_r
             2.5,
         )
         assert row["topic"]["slug"] == AGENTS.slug and row["scopes"] == ["members"]
+        # Not now again: the same one, after a lost reply; under another ceiling, refused.
+        assert (await http.post("/api/jobs/reruns", json=body)).json()["not_run"] == [row]
+        refused = await http.post("/api/jobs/reruns", json=body | {"ceiling": 1.0})
+        assert refused.status_code == 409
+        assert (
+            refused.json()["detail"]
+            == "the same re-run is under Not run already, its ceiling $2.50"
+        )
         started = (await http.post("/api/jobs/reruns", json=body | {"run": True})).json()
         # The same re-run asked again (a lost reply): the one kept is put in the queue, once.
         assert started["not_run"] == [] and [r["state"] for r in started["running"]] == ["queued"]
         again = (await http.post("/api/jobs/reruns", json=body | {"run": True})).json()
         assert [r["key"] for r in again["running"]] == [r["key"] for r in started["running"]]
+        rounded = body | {"run": True, "ceiling": 2.5000000000000004}  # kept as 2.5
+        assert (await http.post("/api/jobs/reruns", json=rounded)).status_code == 201
         # Under way, it is adopted only as asked: not under another ceiling, nor kept not run.
         for other in (body | {"run": True, "ceiling": 1.0}, body):
             refused = await http.post("/api/jobs/reruns", json=other)
             assert refused.status_code == 409
-            assert refused.json()["detail"] == "the same re-run is queued already, under $2.50"
+            assert (
+                refused.json()["detail"] == "the same re-run is queued already, its ceiling $2.50"
+            )
         wider = body | {"scopes": ["labels", "members"], "run": True}
         assert len((await http.post("/api/jobs/reruns", json=wider)).json()["running"]) == 2
         turned = wider | {"scopes": ["members", "labels"]}  # the same scopes, in another order
