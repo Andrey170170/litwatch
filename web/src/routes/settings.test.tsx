@@ -232,6 +232,24 @@ describe("Settings", () => {
     await waitFor(() => expect(calls.filter((c) => c.url === "/api/summary").length).toBe(4));
   }, 10_000);
 
+  it("goes on reading a digest written again through a read the server could not answer", async () => {
+    viewport(true);
+    const shown = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "day", day: "2026-10-08", state: "failed", counts: {}, papers: [], written_at: "2026-10-09T03:00:00Z", error: "the writer timed out twice" };
+    let reads = 0;
+    scriptFetch({
+      ...common,
+      "GET /api/jobs": { not_run: [], running: [], failed: [], done: [] },
+      "POST /api/digests/3/write": { ...shown, job: { id: 1, state: "queued" } },
+      // a deploy interrupts one read; the worker goes on and writes it
+      "GET /api/digests/3": () => (++reads === 1 ? json({ detail: "unavailable" }, 503) : { ...shown, state: "written", error: null, gist: "g", text: "t", job: { id: 1, state: "done" } }),
+    });
+    renderApp("/settings/needs");
+    const item = (await screen.findByText("Daily digest · 8 Oct")).closest(".need")!;
+    await userEvent.click(within(item as HTMLElement).getByRole("button", { name: "Write it again" }));
+    await waitFor(() => expect(item).toHaveClass("settled"), { timeout: 8000 });
+    expect(item).toHaveTextContent("Written again; it shows in the Digest.");
+  }, 12_000);
+
   it("settles a digest whose job ended because it no longer waits: its topic paused, or no longer shown", async () => {
     viewport(true);
     const shown = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "week", day: "2026-10-05", state: "failed", counts: {}, written_at: "2026-10-15T10:00:00Z", papers: [] };
@@ -1205,6 +1223,28 @@ describe("Settings", () => {
     await act(async () => finish!());
     await waitFor(() => expect(qc.isMutating()).toBe(0));
     expect((qc.getQueryData(["settings", "overview", "quality"]) as { recall: { finished_at: string | null } }).recall.finished_at).not.toBeNull();
+  });
+
+  it("reads recall once more after a replay ends, though the first read of it was still under way", async () => {
+    viewport(true);
+    const partial = { ...quality, recall: { eval_run: 1, started_at: "2026-10-23T13:00:00Z", finished_at: null, cost: 0, recall: [] } };
+    let first: ((v: unknown) => void) | undefined;
+    let reads = 0;
+    let offers = 0;
+    scriptFetch({
+      ...common,
+      "GET /api/settings/quality": () => (++reads === 1 ? new Promise((r) => (first = r)) : { ...partial, recall: { ...partial.recall, finished_at: "2026-10-23T13:01:00Z" } }),
+      "GET /api/jobs/replays/offer": () => ({ running: ++offers === 1 ? { id: 1, state: "running" } : null, continues: null, spent: 0, ceiling: 5, labels: {}, unpriced: [], papers: 0, pairs: 0, left_out: 0, estimate: 0 }),
+    });
+    const qc = freshClient();
+    renderApp("/settings/overview", qc);
+    const offerKey = ["settings", "overview", "replay-offer"];
+    await waitFor(() => expect(qc.getQueryData<{ running: unknown }>(offerKey)?.running).toBeTruthy());
+    // the replay ends, and the offer reads it ended before the first read of recall comes back
+    await act(async () => void (await qc.refetchQueries({ queryKey: offerKey, exact: true })));
+    await waitFor(() => expect(qc.getQueryData<{ running: unknown }>(offerKey)?.running).toBeNull());
+    await act(async () => first!(partial));
+    await waitFor(() => expect(qc.getQueryData<{ recall: { finished_at: string | null } }>(["settings", "overview", "quality"])?.recall.finished_at).not.toBeNull());
   });
 
   it("goes on with a replay its ceiling stopped only above what it spent", async () => {

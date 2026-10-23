@@ -429,7 +429,8 @@ export function useRunPassNow(paperId: string) {
  * with that reason. The API answers 409 when it no longer waits (written meanwhile, its topic paused: the row
  * settles with that reason) or no worker runs jobs (the row stays, with the reason); a 404 once its topic is no
  * longer shown settles it too. The jobs are reread once it is queued and again when it ends. The row is patched
- * from the mutation, so it is whether or not Needs you is still shown when the job ends. */
+ * from the mutation, so it is whether or not Needs you is still shown when the job ends; a read the server could not
+ * answer (a deploy, a dropped connection) is tried again, as the job goes on. */
 export function useWriteAgain() {
   const qc = useQueryClient();
   return useMutation({
@@ -445,7 +446,12 @@ export function useWriteAgain() {
         const where = d.job!.state === "running" ? "Being written now; it shows in Jobs." : "Queued: it is written once the run lock is free; it shows in Jobs.";
         await settleNeeds(qc, (q) => noted(q, digestId, where));
         await new Promise((r) => setTimeout(r, wait));
-        d = ok(await api.GET("/api/digests/{digest_id}", { params: { path: { digest_id: digestId } } }));
+        try {
+          d = ok(await api.GET("/api/digests/{digest_id}", { params: { path: { digest_id: digestId } } }));
+        } catch (e) {
+          // a deploy or a dropped connection: the job goes on, so the digest is read again
+          if (e instanceof ApiError && e.status < 500) throw e;
+        }
       }
     },
     onSuccess: async (r, digestId) => {

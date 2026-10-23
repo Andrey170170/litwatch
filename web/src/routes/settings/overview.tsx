@@ -63,7 +63,9 @@ export function OverviewPage() {
   const qc = useQueryClient();
   const was = useRef(replaying);
   useEffect(() => {
-    if (was.current && !replaying) void qc.invalidateQueries({ queryKey: qualityQuery("overview").queryKey, exact: true });
+    // a read begun before the end would be joined, and is old: it is dropped for a new one
+    const key = qualityQuery("overview").queryKey;
+    if (was.current && !replaying) void qc.cancelQueries({ queryKey: key, exact: true }).then(() => qc.invalidateQueries({ queryKey: key, exact: true }));
     was.current = replaying;
   }, [replaying, qc]);
   const runs = useQuery(runsQuery("overview"));
