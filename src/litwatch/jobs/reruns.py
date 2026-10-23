@@ -229,9 +229,7 @@ async def work(
             counts["grading_failed"] += len(left)
         # How far it is, from the verdicts themselves: Try again and a run taken back count
         # what earlier tries graded.
-        graded = len(papers) - len(
-            await verdicts_store.ungraded_under(conn, slug, topic.version, papers)
-        )
+        graded = await verdicts_store.graded_under(conn, slug, topic.version, papers)
         after = await _progress(
             conn, job, run, counts, job["done"] + (0 if reached else len(ids)), graded, ladder
         )

@@ -201,7 +201,9 @@ async def _offered(
         raise HTTPException(status_code=404, detail="no such topic")
     if reruns.active_topic(tree, slug) is None:
         raise HTTPException(status_code=409, detail=f"the topic is {topic.status.value}")
-    dates = reruns.Range(since, until) if since and until else None
+    if "range" in scopes and not (since and until and since <= until < date.max):
+        raise HTTPException(status_code=422, detail="a date range needs its first and last day")
+    dates = reruns.Range(since, until) if since and until and until < date.max else None
     found = {
         scope: await reruns.scope_papers(c, config, tree, topic, scope, dates)
         for scope in reruns.SCOPES

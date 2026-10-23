@@ -183,6 +183,26 @@ async def ungraded_under(
     return [r["id"] for r in rows]
 
 
+async def graded_under(
+    conn: psycopg.AsyncConnection, topic: str, version: str, ids: list[str]
+) -> int:
+    """How many of `ids` have their latest verdict for the topic on their current text under
+    its `version`: how far a re-run of the topic got."""
+    row = await (
+        await conn.execute(
+            """
+            SELECT count(*) AS n FROM unnest(%(ids)s::text[]) AS x (id)
+            JOIN papers p ON p.id = x.id
+            WHERE (SELECT v.topic_version FROM verdicts v WHERE v.paper_id = p.id
+                   AND v.topic = %(topic)s AND v.paper_revision = p.revision
+                   ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) = %(version)s
+            """,
+            {"ids": ids, "topic": topic, "version": version},
+        )
+    ).fetchone()
+    return row["n"]
+
+
 async def escalated_share(conn: psycopg.AsyncConnection, topic: str, last: int = 200) -> float:
     """The share of the topic's latest `last` Area verdicts that escalated to `check`: what an
     estimate expects of an Area re-run. 1 with none yet."""
