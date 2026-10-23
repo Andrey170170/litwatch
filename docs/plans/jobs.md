@@ -95,7 +95,8 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   red note with Try again while it can be tried again. A job's gateway sends no batch, but answers a call a dead
   nightly left in an ended batch from that batch, as the full-text worker's does. A Process job whose paper the
   owner acts on while it runs (a Try again on Needs you, say) goes back in the queue when it ends instead of done,
-  so its steps take what that action left due.
+  so its steps take what that action left due; a Process job taken back starts over from its paper for the same
+  reason.
 
 ## Decisions
 

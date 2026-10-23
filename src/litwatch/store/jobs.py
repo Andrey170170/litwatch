@@ -132,11 +132,14 @@ async def move(
 
 async def take_back(conn: psycopg.AsyncConnection) -> list[int]:
     """Put back in the queue every running job whose session is gone (its process died or its
-    connection was lost): its steps pick only what is still due, so nothing done is redone."""
+    connection was lost): its steps pick only what is still due, so nothing done is redone. A
+    Process job starts over from its paper, so a step the owner's action left due while it ran
+    is done too, though the mark of that action (`settle_process`) is lost here."""
     rows = await (
         await conn.execute(
             f"""
             UPDATE jobs r SET state = 'queued', changed_at = now(),
+                   done = CASE WHEN kind = 'process' THEN 0 ELSE done END,
                    backend_pid = NULL, backend_start = NULL
             WHERE state = 'running' AND NOT {ALIVE} RETURNING id
             """

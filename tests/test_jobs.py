@@ -376,6 +376,39 @@ async def test_a_claim_in_progress_is_skipped_and_a_running_job_is_its_sessions(
         assert (await jobs_store.claim(conn))["id"] == job  # its own, chosen again
 
 
+async def test_a_process_job_taken_back_after_its_chunk_does_what_the_owner_left_due(
+    conn, models, monkeypatch
+):
+    """Its session died after recording its chunk, before ending it; meanwhile the owner's Try
+    again left analysis due. Taken back, it starts over from its paper and does it."""
+    models.analyses[A.title] = {"broken": True}
+    job = await queued(conn, A.id)
+    dead = await store.sibling(conn)
+    gone = worker.Worker(dead, CONFIG, models.gateway)
+
+    async def dies(*_):
+        raise asyncio.CancelledError  # its process is killed
+
+    monkeypatch.setattr(gone, "_end", dies)
+    with pytest.raises(asyncio.CancelledError):
+        await gone.step(AFTERNOON)
+    pid = (await jobs_store.get(conn, job))["backend_pid"]
+    assert (await jobs_store.get(conn, job))["done"] == 1
+    await dead.close()
+    await gone.close(RuntimeError("killed"))
+    for _ in range(200):  # the server ends the session soon after its connection closes
+        if not await rows(conn, "SELECT 1 FROM pg_stat_activity WHERE pid = %s", pid):
+            break
+        await asyncio.sleep(0.05)
+    del models.analyses[A.title]
+    async with word.change(conn, A.id, cause=Cause.OWNER):  # as Needs you's Try again
+        await failures.succeeded(conn, A.id, "analysis")
+
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert asked(models, "analyse", A.title) == 2
+
+
 async def test_a_job_whose_session_died_is_taken_back_and_finishes_without_redoing_work(
     conn, models, monkeypatch
 ):
