@@ -12,10 +12,16 @@ from anthropic import AsyncAnthropic, transform_schema
 
 from litwatch.config import RoleConfig
 from litwatch.llm.prices import anthropic_cost
-from litwatch.llm.types import ACCOUNT_STATUSES, ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm.types import (
+    ACCOUNT_STATUSES,
+    DEFAULT_MAX_TOKENS,
+    ProviderError,
+    Reply,
+    Request,
+    Stop,
+    Usage,
+)
 
-# Non-streaming requests stay under the SDK's timeout at this ceiling.
-DEFAULT_MAX_TOKENS = 16000
 # A batch's request errors that are the account's (401, 402, 403), by their error type.
 BATCH_ACCOUNT = frozenset({"authentication_error", "billing_error", "permission_error"})
 
@@ -103,11 +109,9 @@ class AnthropicProvider:
                 # The connection never opened, so nothing was sent: worth another attempt.
                 raise ProviderError("APITimeoutError while connecting", transient=True) from exc
             raise ProviderError(type(exc).__name__, timeout=True) from exc
-        except (
-            anthropic.InternalServerError,
-            anthropic.RateLimitError,
-            anthropic.APIConnectionError,
-        ) as exc:
+        except anthropic.APIConnectionError as exc:  # it may have been sent: billed or not
+            raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
+        except (anthropic.InternalServerError, anthropic.RateLimitError) as exc:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except anthropic.APIError as exc:
             account = getattr(exc, "status_code", None) in ACCOUNT_STATUSES

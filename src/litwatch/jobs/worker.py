@@ -14,6 +14,9 @@ only; each recorded result settles its paper as in the nightly, and the full-tex
 workers then take the passes it queued, as the owner's requests (`feedback.word.settle`). A job
 is done once its papers have no step left failed; else it fails, and settles when they do
 (`store.jobs.settle_process`).
+
+A re-run (`jobs.reruns`) grades its scope for its topic, then works the text passes it queued,
+through a gateway that holds its ceiling: one stopped by it waits on the owner as `stopped`.
 """
 
 from __future__ import annotations
@@ -30,15 +33,18 @@ from typing import Any
 import psycopg
 
 from litwatch import store
+from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
 from litwatch.feedback import word
-from litwatch.jobs import nightly, scheduler
+from litwatch.jobs import nightly, reruns, scheduler
 from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
 from litwatch.jobs.lock import BusyError, run_lock
 from litwatch.store import failures, runs
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
+from litwatch.store import taxonomy as taxonomy_store
 
 log = logging.getLogger(__name__)
 
@@ -47,9 +53,12 @@ TICK_SECONDS = 30
 
 
 async def nightly_waits(conn: psycopg.AsyncConnection, config: Config, now: datetime) -> bool:
-    """Whether a nightly run is due at `now` (`scheduler.is_due`) or running: no chunk starts
-    then."""
-    if scheduler.is_due(config.schedule.nightly, now, await runs.last_started(conn, "nightly")):
+    """Whether a nightly run is running, or due at `now` (`scheduler.is_due`) with the schedule
+    on, which alone starts it: no chunk, and no pass of a re-run, starts then."""
+    nightly = config.schedule.nightly
+    if config.schedule.enabled and scheduler.is_due(
+        nightly, now, await runs.last_started(conn, "nightly")
+    ):
         return True
     latest = await runs.latest(conn, "nightly")
     return bool(latest and latest["finished_at"] is None and latest["alive"])
@@ -64,6 +73,11 @@ def failure(open_: dict[str, tuple[int, int]]) -> str | None:
         for step, (n, stuck) in open_.items()
     ]
     return "; ".join(sorted(failed)) or None
+
+
+# The most runs a worker holds open, each with a connection of its own: re-runs whose passes
+# await their text stay open while others run. Past it only Process jobs start.
+OPEN_MOST = 4
 
 
 @dataclass
@@ -81,9 +95,11 @@ class Worker:
         config: Config,
         gateway: GatewayFactory = default_gateway,
         worked: Callable[[], None] = lambda: None,
+        archive: ArchiveClient | None = None,
     ) -> None:
         self.conn, self.config, self.gateway = conn, config, gateway
         self.worked = worked  # after each chunk: have the full-text and Deep workers look
+        self.archive = archive  # a re-run's text passes read from it; without, the re-run stops
         self.open: dict[int, _Open] = {}  # the jobs this worker runs, each with its run
 
     async def step(self, now: datetime) -> bool:
@@ -103,9 +119,12 @@ class Worker:
             return False
 
     async def _next(self) -> bool:
-        job = await jobs_store.claim(self.conn)
+        job = await jobs_store.claim(self.conn, fresh=len(self.open) < OPEN_MOST)
         if job is None:
             return False
+        if job["kind"] == "rerun":
+            await self._rerun(job)
+            return True
         try:
             after = await self._chunk(job, await self._run_of(job))
         except Exception as exc:
@@ -151,6 +170,50 @@ class Worker:
                 counts[k] = counts.get(k, 0) + v - before.get(k, 0)
         return await jobs_store.progress(self.conn, job["id"], job["done"] + len(ids), counts)
 
+    async def _rerun(self, job: dict[str, Any]) -> None:
+        """A re-run's next chunk. One whose topic is no longer followed and active fails; one
+        its ceiling stopped waits on the owner; one that ends lets go of the text passes it
+        left (failed, or awaiting text too long) to the regular queue."""
+        tree = await taxonomy_store.load(self.conn)
+        topic = reruns.active_topic(tree, job["scope"]["topic"])
+        if tree is None or topic is None:
+            await self._end_rerun(job, "failed", "the topic is no longer followed and active")
+            await self._close(job["id"])
+            return
+        if reruns.edited_since(job, topic):
+            await self._end_rerun(job, "failed", "the topic was edited since; re-run it from there")
+            await self._close(job["id"])
+            return
+        try:
+            run = await self._run_of(job)
+            if run.gateway.ceiling is None:
+                run.gateway.ceiling = await reruns.ceiling(self.conn, self.config, job, topic)
+            chunk = await reruns.work(self.conn, self.config, run, job, tree, self.archive, CHUNK)
+        except Exception as exc:
+            log.exception("jobs: re-run %s failed", job["id"])
+            await self._end_rerun(job, "failed", f"{type(exc).__name__}: {exc}")
+            await self._close(job["id"], exc)
+            return
+        self.worked()
+        match chunk.outcome:
+            case "more":
+                return
+            case "waiting":  # its passes await their text: other jobs go first meanwhile
+                now = datetime.now(self.config.schedule.zone)
+                await jobs_store.wait(self.conn, job["id"], now + reruns.WAKE)
+                return
+            case "stopped":
+                await jobs_store.finish(self.conn, job["id"], "stopped", chunk.where)
+            case "done":
+                why = f"grading failed on {chunk.failed}" if chunk.failed else None
+                await self._end_rerun(job, "failed" if why else "done", why)
+        await self._close(job["id"])
+
+    async def _end_rerun(self, job: dict[str, Any], state: str, error: str | None) -> None:
+        async with self.conn.transaction():
+            await jobs_store.finish(self.conn, job["id"], state, error)
+            await fulltext_store.release_job(self.conn, job["id"])
+
     async def _run_of(self, job: dict[str, Any]) -> ModelRun:
         """The run this worker records the job's work on: opened when it claims the job, kept
         across its chunks. Its gateway sends no batch, and answers a call a dead nightly left in
@@ -191,6 +254,7 @@ async def run_forever(
     gateway: GatewayFactory = default_gateway,
     wake: asyncio.Event | None = None,
     worked: Callable[[], None] = lambda: None,
+    archive: ArchiveClient | None = None,
 ) -> None:
     """Work the queue until cancelled: chunk after chunk while there is one to run, else look
     every `TICK_SECONDS` or as soon as `wake` is set (a job was queued). A lost database is
@@ -200,7 +264,7 @@ async def run_forever(
     while True:
         try:
             async with await store.connect(dsn) as conn:
-                worker = Worker(conn, config, gateway, worked)
+                worker = Worker(conn, config, gateway, worked, archive)
                 try:
                     while True:
                         if not await worker.step(datetime.now(config.schedule.zone)):

@@ -15,9 +15,11 @@ from typing import Any, Protocol, cast
 from pydantic import BaseModel, ValidationError
 
 from litwatch.config import Models, RoleConfig, secret
+from litwatch.llm import ceiling
 from litwatch.llm.batches import MAX_REQUESTS, Answered, Batcher, BatchProvider
 from litwatch.llm.decisions import Decision, chat_request, decision_of
 from litwatch.llm.types import (
+    DEFAULT_MAX_TOKENS,
     DecisionRequest,
     Provider,
     ProviderError,
@@ -112,7 +114,9 @@ class DecisionProvider(Provider, Protocol):
     """A provider with a Decisions endpoint. It answers in the JSON a chat model would give for
     the same request (`decisions.chat_request`)."""
 
-    async def decide(self, role: RoleConfig, request: DecisionRequest) -> Reply: ...
+    async def decide(
+        self, role: RoleConfig, request: DecisionRequest, *, max_price: dict | None = None
+    ) -> Reply: ...
 
 
 class Gateway:
@@ -136,6 +140,8 @@ class Gateway:
         self.retry_delays, self.debug = retry_delays, debug
         self.batch_options = batch_options or {}  # the `Batcher`'s timings and clock (tests)
         self.batchers: dict[str, Batcher] = {}
+        # A job's ceiling (`llm.ceiling`): set, every attempt reserves its most against it.
+        self.ceiling: ceiling.Ceiling | None = None
         self._gates = {name: asyncio.Semaphore(normal_calls) for name in providers}
 
     def batch_until(self, deadline: datetime, *, drain: timedelta | None = None) -> None:
@@ -208,20 +214,30 @@ class Gateway:
         role_name: str,
         role: RoleConfig,
         request: Request,
-        send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
+        send: Callable[..., Awaitable[Reply]] | None = None,
     ) -> Reply:
         """One reply from `role`, a model of the role's list, after retries. Not journalled;
-        `ask` is. `send` replaces the chat call (a Decisions endpoint)."""
+        `ask` is. `send` replaces the chat call (a Decisions endpoint). Under a `ceiling`, each
+        attempt first reserves the most it can cost (`llm.ceiling`)."""
         provider = self._provider(role)
+        role, limits = self._limits(role, request)
         for delay in (*self.retry_delays, None):
+            reserved = await self._reserve(role, request, limits)
+            cost: float | None = None  # what the attempt was charged, when known
             try:
                 async with self._gates[role.provider], asyncio.timeout(role.timeout_seconds):
                     if send:
-                        return await send(provider, role)
-                    return await provider.complete(role, request)
+                        reply = await send(provider, role, **limits)
+                    else:
+                        reply = await provider.complete(role, request, **limits)
+                cost = reply.usage.cost
+                return reply
             except TimeoutError as exc:
                 raise CallError("timeout", f"{role.timeout_seconds:g}s") from exc
             except ProviderError as exc:
+                # A provider's answered error is not billed unless it says so; a timeout or a
+                # lost connection may have been, so its reservation is kept.
+                cost = None if exc.timeout or exc.unanswered else (exc.cost or 0.0)
                 if exc.timeout:
                     raise CallError("timeout", str(exc)) from exc
                 if exc.account:
@@ -229,8 +245,39 @@ class Gateway:
                 if delay is None or not exc.transient:
                     raise CallError("provider", str(exc)) from exc
                 log.warning("role=%s %s, trying again in %ss", role_name, exc, delay)
-                await asyncio.sleep(delay)
+            finally:
+                if reserved is not None and self.ceiling is not None:
+                    await self.ceiling.settle(reserved, cost)
+            await asyncio.sleep(delay)
         raise AssertionError("unreachable")
+
+    def _limits(self, role: RoleConfig, request: Request) -> tuple[RoleConfig, dict[str, Any]]:
+        """Under a ceiling, the role with the output cap its route's bound sets when it has none,
+        and the prices sent with the call (`max_price`); else as it is."""
+        if self.ceiling is None:
+            return role, {}
+        bound = self.ceiling.bound(role, ceiling.input_tokens(request))
+        if bound is None:
+            return role, {}
+        if bound.max_output and not (request.max_output_tokens or role.max_output_tokens):
+            role = role.model_copy(update={"max_output_tokens": bound.max_output})
+        return role, {"max_price": bound.max_price} if bound.max_price else {}
+
+    async def _reserve(self, role: RoleConfig, request: Request, limits: dict) -> float | None:
+        """Reserve the attempt's most against the ceiling, if there is one; raises `CallError`
+        `unpriced` for a route without a price bound, `ceiling` when it does not fit."""
+        if self.ceiling is None:
+            return None
+        tokens_in = ceiling.input_tokens(request)
+        bound = self.ceiling.bound(role, tokens_in)
+        if bound is None:
+            raise CallError("unpriced", f"{role.label} has no price bound to run under a ceiling")
+        most = self.ceiling.most(bound, tokens_in, _max_output(role, request))
+        try:
+            await self.ceiling.reserve(most)
+        except ceiling.CeilingReachedError as exc:
+            raise CallError("ceiling", f"${most:.4f} does not fit in what is left") from exc
+        return most
 
     async def decide(
         self, role_name: str, request: DecisionRequest, *, paper_id: str | None = None
@@ -242,9 +289,9 @@ class Gateway:
         send = None
         if role.decisions:
 
-            async def send(provider: Provider, role: RoleConfig) -> Reply:
+            async def send(provider: Provider, role: RoleConfig, **limits: Any) -> Reply:
                 # Configuration allows a Decisions endpoint only on OpenRouter.
-                return await cast(DecisionProvider, provider).decide(role, request)
+                return await cast(DecisionProvider, provider).decide(role, request, **limits)
 
         answer = await self.ask(role_name, chat, paper_id=paper_id, send=send)
         return Answer(decision_of(answer.value, request), answer.usage, answer.model)
@@ -255,7 +302,7 @@ class Gateway:
         request: Request,
         *,
         paper_id: str | None = None,
-        send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
+        send: Callable[..., Awaitable[Reply]] | None = None,
         start: int = 0,
     ) -> Answer[T]:
         """A validated answer from the role's list: its model, then its fallbacks (models.md,
@@ -329,7 +376,7 @@ class Gateway:
         request: Request,
         *,
         paper_id: str | None = None,
-        send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None = None,
+        send: Callable[..., Awaitable[Reply]] | None = None,
     ) -> Answer[T]:
         """One model of the role's list, asked and journalled under the role's name."""
         key = self.request_key(role, request)
@@ -392,7 +439,7 @@ class Gateway:
         key: str,
         request: Request,
         paper_id: str | None,
-        send: Callable[[Provider, RoleConfig], Awaitable[Reply]] | None,
+        send: Callable[..., Awaitable[Reply]] | None,
     ) -> tuple[int | None, Answered]:
         """The call's journal row, and its reply or account error when a batch gave one (None:
         send it as a normal call). A key a dead run left in an open batch waits on that batch,
@@ -426,6 +473,12 @@ class Gateway:
         if not isinstance(reply, Reply) and journal and call_id in batcher.unsettled:
             return await row_of_its_own(), reply
         return call_id, _of_role(reply, role) if isinstance(reply, Reply) else reply
+
+
+def _max_output(role: RoleConfig, request: Request) -> int:
+    """The most output tokens a call can be billed: its cap, or Anthropic's default one (a route
+    without a default is given its cap by `Gateway._limits`, or bills no output)."""
+    return request.max_output_tokens or role.max_output_tokens or DEFAULT_MAX_TOKENS
 
 
 def _of_role(reply: Reply, role: RoleConfig) -> Reply:

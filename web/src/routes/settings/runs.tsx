@@ -1,12 +1,13 @@
 /** Runs and cost (DESIGN.md, "Runs and cost"): spend per provider against its budget, the schedule, the nights
  * as a table and the latest jobs; and Jobs, the work outside the nightly run in its four groups. */
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useJobAction } from "@/api/mutations";
 import { jobsQuery, qualityQuery, runsQuery, scheduleQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { dateTime, plural, rowDate } from "@/lib/format";
-import { ACTIONS, anyActive, GROUPS, type Job, jobKind, jobMeta, jobStatus, jobTone, latestJobs } from "@/lib/jobs";
+import { ACTIONS, anyActive, ceilingOf, GROUPS, type Job, jobKind, jobMeta, jobStatus, jobTone, latestJobs, nextCeiling, rerunWhat } from "@/lib/jobs";
 import { digests, type Quality, runFailed, spendBar, type Spend, took, usd } from "@/lib/settings";
 import { Failed, Load, PageHead, PaperLink } from "./parts";
 
@@ -116,29 +117,51 @@ export function RunsPage() {
 function JobRow({ job, zone, full }: { job: Job; zone?: string; full?: boolean }) {
   const act = useJobAction();
   const bar = job.state === "running" && job.papers > 1;
+  // A re-run its ceiling stopped runs on under a new one, above what it spent.
+  const stopped = job.state === "stopped" && job.ceiling != null;
+  const [typed, setTyped] = useState(() => usd(nextCeiling(job)));
+  const ceiling = ceilingOf(typed);
+  const above = ceiling != null && ceiling > (job.cost ?? 0);
+  const what = job.paper ? <PaperLink id={job.paper.id}>{job.paper.title}</PaperLink> : (rerunWhat(job) ?? plural(job.papers, "paper"));
   return (
     <div className={`job ${jobTone(job.state)}`}>
       <div className="jh">
         <span className="jk">{jobKind(job)}</span>
-        <span className="jw">{job.paper ? <PaperLink id={job.paper.id}>{job.paper.title}</PaperLink> : plural(job.papers, "paper")}</span>
+        <span className="jw">{what}</span>
         <span className="jst">{jobStatus(job.state)}</span>
       </div>
       <div className="nb">
         {jobMeta(job, zone)}
-        {job.error && (job.state === "failed" || job.state === "stopped") && <span className="badt"> · {job.error}</span>}
+        {job.error && job.state === "failed" && <span className="badt"> · {job.error}</span>}
+        {job.error && job.state === "stopped" && <span> · {job.error}</span>}
       </div>
       {bar && (
         <span className="jbar" aria-hidden>
-          <i style={{ width: `${(job.done / job.papers) * 100}%` }} />
+          <i style={{ width: `${((job.graded ?? job.done) / job.papers) * 100}%` }} />
         </span>
       )}
       {full && job.actions.length > 0 && (
         <div className="nact">
-          {job.actions.map((a) => (
-            <button key={a} className={`btn${a === "run" ? " pri" : ""}`} disabled={act.isPending} onClick={() => act.mutate({ job, action: a })}>
-              {ACTIONS[a]}
-            </button>
-          ))}
+          {stopped && (
+            <label className="faint ofc">
+              Stop at
+              <input className="tin sm mono" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Stop at" aria-invalid={!above} />
+            </label>
+          )}
+          {job.actions.map((a) => {
+            const continues = stopped && (a === "run" || a === "tonight");
+            return (
+              <button
+                key={a}
+                className={`btn${a === "run" ? " pri" : ""}`}
+                disabled={act.isPending || (continues && !above)}
+                title={continues && !above ? `The ceiling must be above what it spent, ${usd(job.cost ?? 0)}` : undefined}
+                onClick={() => act.mutate({ job, action: a, ceiling: continues ? ceiling! : undefined })}
+              >
+                {ACTIONS[a]}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -152,7 +175,7 @@ export function JobsPage() {
   const shown = jobs.data ? GROUPS.filter(([g]) => jobs.data[g].length) : [];
   return (
     <div className="setpg">
-      <PageHead title="Jobs" sub="Work outside the nightly run: papers processed now and Deep cards asked for." deeper />
+      <PageHead title="Jobs" sub="Work outside the nightly run: re-runs after a topic edit, papers processed now and Deep cards asked for. Each re-run stops at its ceiling." deeper />
       <Load q={jobs} />
       {shown.map(([g, label]) => (
         <div key={g}>
@@ -164,7 +187,7 @@ export function JobsPage() {
           ))}
         </div>
       ))}
-      {jobs.data && !shown.length && <div className="empty">No job yet. Process on a paper outside the collection starts one.</div>}
+      {jobs.data && !shown.length && <div className="empty">No job yet. Process on a paper outside the collection starts one, as does a re-run after a topic edit.</div>}
     </div>
   );
 }

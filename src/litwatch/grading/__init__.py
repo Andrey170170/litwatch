@@ -276,13 +276,14 @@ async def due(
     return due, passes
 
 
-async def record(conn: psycopg.AsyncConnection, g: Graded) -> bool:
+async def record(conn: psycopg.AsyncConnection, g: Graded, *, job: int | None = None) -> bool:
     """Store one grading with `verdict.recorded` and settle the paper (its effective grade,
     rarity and library state follow); or record its failure. Returns False when there was
     nothing to record: the paper's text changed meanwhile, it was dismissed, or the topic is
-    no longer active (paused during the call: a paused topic grades nothing)."""
+    no longer active (paused during the call: a paused topic grades nothing). A re-run's
+    grading names its `job`, whose passes the settle queues."""
     paper, slug = g.due.paper, g.due.topic.slug
-    async with word.change(conn, paper.id, cause=Cause.VERDICT):
+    async with word.change(conn, paper.id, cause=Cause.VERDICT, job=job):
         if not await papers_store.still_current(conn, paper):
             return False
         if slug not in {t.slug for t in await taxonomy_store.topics(conn, Status.ACTIVE)}:

@@ -13,7 +13,8 @@ import { Badge } from "@/components/Badge";
 import { Seg } from "@/components/Seg";
 import { DEPTH_NAME, type Depth } from "@/lib/rarity";
 import { savedLine } from "@/lib/settings";
-import { Failed, Field, Later, Load, PageHead } from "./parts";
+import { Failed, Field, Load, PageHead } from "./parts";
+import { RerunOffer } from "./rerun";
 
 type Topic = Schemas["Topic"];
 type Tree = Schemas["Taxonomy"];
@@ -289,18 +290,13 @@ function TopicEditor({ tree, cls, current }: { tree: Tree; cls: Class; current: 
         </Field>
       </div>
       <div className="mt-4">
-        {saved ? (
+        {saved && saved.after.status === "active" ? (
+          // The offer's Run or Not now puts it away; the form stays as saved.
+          <RerunOffer slug={cls.slug} line={savedLine(saved.before, saved.after, version)} onDone={() => setSaved(null)} />
+        ) : saved ? (
           <div className="offer">
             <div className="oh">{savedLine(saved.before, saved.after, version)}</div>
-            <div className="nsub">Re-run it now on:</div>
-            {["Labelled papers and reported misses", "The topic's existing members", "Papers matching its keywords · last 90 days", "A date range"].map((row) => (
-              <div className="ofr off" key={row}>
-                <span className="box" />
-                <span className="ol">{row}</span>
-                <span className="mono faint">–</span>
-              </div>
-            ))}
-            <Later>The scoped re-runs come with the jobs API; nothing runs by itself. The edit applies forward meanwhile.</Later>
+            <div className="nsub">A {saved.after.status} topic grades nothing, so there is nothing to re-run.</div>
             <div className="nact">
               <Link to="/settings/$page" params={{ page: "topics" }} className="btn pri">
                 Back to Topics

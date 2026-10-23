@@ -992,3 +992,15 @@ button.car:hover { color: var(--fg); background: var(--line2); }
   :is(.cp, .pghead .au .more, .inl, .st, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n, .dghead .h1 a) { position: relative; }
   :is(.cp, .pghead .au .more, .inl, .st, a.t, .lnk, .mnum, .kw .x, .tcard .n, .dblock .n, .dghead .h1 a)::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
 }
+/* the re-run offer's rows: a box to tick, what it re-runs, its papers, its estimate; whole-row targets */
+.offer .ofr { width: 100%; min-height: 40px; grid-template-columns: 18px minmax(0, 1fr) 56px 64px; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.offer .ofr:not(.on) { color: var(--fg3); }
+.offer .ofr .box { display: grid; place-items: center; font-size: 11px; line-height: 1; }
+.offer .ofr.on .box { border-color: var(--acc); color: var(--fg); }
+.offer .ofd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 0 8px 28px; }
+.offer .ofd .tin { width: 150px; }
+.offer .ofn { font-size: 12.5px; color: var(--fg3); padding: 6px 0 0; }
+.offer .ofc { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.offer .ofc .tin { width: 84px; }
+.job .ofc { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.job .ofc .tin { width: 84px; }

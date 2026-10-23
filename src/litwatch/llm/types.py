@@ -10,6 +10,10 @@ from pydantic import BaseModel
 
 from litwatch.config import RoleConfig
 
+# Anthropic's output cap for a request that sets none: non-streaming requests stay under the
+# SDK's timeout at it.
+DEFAULT_MAX_TOKENS = 16000
+
 
 @dataclass(frozen=True)
 class Request:
@@ -104,15 +108,25 @@ ACCOUNT_STATUSES = frozenset({401, 402, 403})
 
 class ProviderError(Exception):
     """A provider did not answer. `transient` failures are worth another attempt; an `account`
-    one (models.md, the gateway) never is."""
+    one (models.md, the gateway) never is. A `timeout` or a connection lost (`unanswered`) may
+    have been billed; an answered error was not, unless it says what it was charged (`cost`)."""
 
     def __init__(
-        self, message: str, *, transient: bool = False, timeout: bool = False, account: bool = False
+        self,
+        message: str,
+        *,
+        transient: bool = False,
+        timeout: bool = False,
+        account: bool = False,
+        unanswered: bool = False,
+        cost: float | None = None,
     ) -> None:
         super().__init__(message)
+        self.cost = cost
         self.transient = transient
         self.timeout = timeout
         self.account = account
+        self.unanswered = unanswered
 
 
 class Provider(Protocol):
@@ -121,7 +135,10 @@ class Provider(Protocol):
 
     name: str
 
-    async def complete(self, role: RoleConfig, request: Request) -> Reply: ...
+    async def complete(self, role: RoleConfig, request: Request) -> Reply:
+        """The reply. Under a job's ceiling an OpenRouter call is also given `max_price`, the
+        per-million prices no provider serving it may exceed (`llm.ceiling.Bound`)."""
+        ...
 
     def routing(self, role: RoleConfig) -> tuple[str, ...]:
         """What else decides who serves the request; part of the reuse key."""

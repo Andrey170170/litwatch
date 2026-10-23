@@ -694,6 +694,107 @@ describe("Settings", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
+  it("offers the scoped re-runs with their counts and estimate, and runs the ticked ones under the ceiling", async () => {
+    viewport(true);
+    const after = { ...topic, interests: "Sparse circuits" };
+    const row = (scope: string, papers: number, estimate: number) => ({ scope, papers, estimate });
+    const rows = [row("labels", 64, 0.09), row("members", 412, 0.58), row("keywords", 41, 0.06), row("range", 0, 0)];
+    // The union of the ticked scopes, as the API counts it: a paper in two is counted once.
+    const union: Record<string, number> = { "labels,members": 450, "labels,members,keywords": 470, members: 412 };
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/taxonomy": () => (calls.some((c) => c.method === "PUT") ? { ...tree, topics: [after] } : tree),
+      "GET /api/settings/topics/mi/keywords": { circuit: 4 },
+      "GET /api/settings/schedule": { enabled: true, zone: "UTC", jobs: [] },
+      "PUT /api/settings/topics/mi": after,
+      "GET /api/jobs/reruns/offer": (c) => {
+        const scopes = new URL(`http://t${c.url}`).searchParams.getAll("scopes").join(",");
+        const papers = union[scopes] ?? 0;
+        return { topic: { slug: "mi", name: "Mech interp", revision: 2 }, rows, papers, estimate: papers * 0.0014, missing: [], unpriced: ["check: meta/muse"], ceiling: 5 };
+      },
+      "POST /api/jobs/reruns": { not_run: [], running: [], failed: [], done: [] },
+    });
+    renderApp("/settings/topics/mi");
+    await userEvent.type(await screen.findByRole("textbox", { name: "Interests" }), "Sparse circuits");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    const members = await screen.findByRole("checkbox", { name: /existing members/ });
+    expect(members).toHaveAttribute("aria-checked", "true");
+    expect(members).toHaveTextContent("412≈ $0.58");
+    expect(screen.getByRole("checkbox", { name: /Labelled papers/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("checkbox", { name: /keywords/ })).toHaveAttribute("aria-checked", "false");
+    expect(await screen.findByRole("button", { name: "Run · 450 papers ≈ $0.63" })).toBeEnabled();
+    expect(screen.getByText(/not sent under a ceiling: check: meta\/muse/)).toBeInTheDocument();
+    // Ticking a row reads the offer again for the scopes together.
+    await userEvent.click(screen.getByRole("checkbox", { name: /keywords/ }));
+    expect(await screen.findByRole("button", { name: "Run · 470 papers ≈ $0.66" })).toBeEnabled();
+    // A ceiling that is no amount stops both; a fixed one goes with Run.
+    const stop = screen.getByRole("textbox", { name: "Stop at" });
+    await userEvent.clear(stop);
+    await userEvent.type(stop, "lots");
+    expect(screen.getByRole("button", { name: /^Run/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Not now" })).toBeDisabled();
+    await userEvent.clear(stop);
+    await userEvent.type(stop, "$1.50");
+    await userEvent.click(screen.getByRole("button", { name: "Run · 470 papers ≈ $0.66" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ topic: "mi", scopes: ["labels", "members", "keywords"], since: null, until: null, ceiling: 1.5, run: true }));
+    // The offer goes; Save is back, with nothing to save.
+    expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("checkbox", { name: /existing members/ })).toBeNull();
+  });
+
+  it("keeps Run and Not now off while the offer's counts after a save are not read: cached ones are a save behind", async () => {
+    viewport(true);
+    const after = { ...topic, interests: "Sparse circuits" };
+    let reads = 0;
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/taxonomy": () => (calls.some((c) => c.method === "PUT") ? { ...tree, topics: [after] } : tree),
+      "GET /api/settings/topics/mi/keywords": { circuit: 4 },
+      "GET /api/settings/schedule": { enabled: true, zone: "UTC", jobs: [] },
+      "PUT /api/settings/topics/mi": after,
+      "GET /api/jobs/reruns/offer": () =>
+        ++reads === 1 ? { topic: { slug: "mi", name: "Mech interp", revision: 2 }, rows: [], papers: 12, estimate: null, missing: [], unpriced: [], ceiling: 5 } : json({ detail: "down" }, 500),
+    });
+    // Kept in the cache as the app keeps it, so the second save's offer starts from the first's counts.
+    renderApp("/settings/topics/mi", new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }));
+    const interests = await screen.findByRole("textbox", { name: "Interests" });
+    await userEvent.type(interests, "Sparse circuits");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("button", { name: "Run · 12 papers" })).toBeEnabled();
+    await userEvent.type(interests, " and more");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/Could not load the re-run's counts/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Run/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Not now" })).toBeDisabled();
+  });
+
+  it("keeps a re-run under Not run with Not now, and sends a date range when ticked", async () => {
+    viewport(true);
+    const after = { ...topic, interests: "Sparse circuits" };
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/taxonomy": () => (calls.some((c) => c.method === "PUT") ? { ...tree, topics: [after] } : tree),
+      "GET /api/settings/topics/mi/keywords": { circuit: 4 },
+      "GET /api/settings/schedule": { enabled: true, zone: "UTC", jobs: [] },
+      "PUT /api/settings/topics/mi": after,
+      "GET /api/jobs/reruns/offer": { topic: { slug: "mi", name: "Mech interp", revision: 2 }, rows: [], papers: 12, estimate: null, missing: ["judge"], unpriced: [], ceiling: 5 },
+      "POST /api/jobs/reruns": { not_run: [], running: [], failed: [], done: [] },
+    });
+    renderApp("/settings/topics/mi");
+    await userEvent.type(await screen.findByRole("textbox", { name: "Interests" }), "Sparse circuits");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(await screen.findByRole("checkbox", { name: /A date range/ }));
+    expect(await screen.findByText("No estimate: judge has no calls to go by yet.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run · 12 papers" })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-10-13" } });
+    await waitFor(() => expect(calls.some((c) => c.url.includes("since=2026-09-01&until=2026-10-13"))).toBe(true));
+    await userEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "POST")?.body).toEqual({ topic: "mi", scopes: ["labels", "members", "range"], since: "2026-09-01", until: "2026-10-13", ceiling: 5, run: false }),
+    );
+  });
+
   it("records a Calibrate answer on Next, then shows the next paper", async () => {
     viewport(true);
     const items = [1, 2].map((position) => ({ position, paper_id: `2610.0000${position}`, topic: "mi", why: "above", verdict: "related", answer: null, answered_at: null, title: `Drawn ${position}`, abstract: "A.", authors: ["A"], published: "2026-10-13", fit: {}, appraisal: null }));
@@ -1273,6 +1374,54 @@ describe("Jobs", () => {
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/settings/fulltext/9/now"]);
     const needs = client.getQueryData(["settings", "needs", "quality"]) as { night: { fulltext: { settled?: string }[] } };
     expect(needs.night.fulltext.map((r) => r.settled)).toEqual(["Running now, first in line, with three more runs."]);
+  });
+
+  it("shows a stopped re-run with what it spent, and continues it under a new ceiling above that", async () => {
+    viewport(true);
+    const stopped = {
+      ...base,
+      key: "job:7",
+      id: 7,
+      kind: "rerun",
+      state: "stopped",
+      paper: null,
+      topic: { slug: "mi", name: "Mech interp", revision: 4 },
+      scopes: ["members"],
+      papers: 476,
+      done: 200,
+      graded: 212,
+      cost: 0.98,
+      ceiling: 1,
+      estimate: 0.67,
+      error: "stopped at the ceiling after 212 of 476",
+      at: at(12),
+      actions: ["run", "tonight", "discard"],
+    };
+    const calls = scriptFetch({ ...common, "GET /api/jobs": { ...jobs, not_run: [stopped] }, "GET /api/settings/schedule": schedule, "POST /api/jobs/7/run": jobs });
+    renderApp("/settings/runs/jobs");
+    const row = (await screen.findByText(/Mech interp · version 4 · members/)).closest(".job") as HTMLElement;
+    expect(row).toHaveClass("ask");
+    expect(within(row).getByText("Re-run")).toBeInTheDocument();
+    expect(row).toHaveTextContent("212 of 476 papers · $0.98 of $1.00 · 22 Oct, 12:00 · stopped at the ceiling after 212 of 476");
+    const stop = within(row).getByRole("textbox", { name: "Stop at" });
+    expect(stop).toHaveValue("$1.98");
+    await userEvent.clear(stop);
+    await userEvent.type(stop, "0.50");
+    expect(within(row).getByRole("button", { name: "Run now" })).toBeDisabled(); // not above what it spent
+    expect(within(row).getByRole("button", { name: "Discard" })).toBeEnabled();
+    await userEvent.clear(stop);
+    await userEvent.type(stop, "3");
+    await userEvent.click(within(row).getByRole("button", { name: "Run now" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")).toMatchObject({ url: "/api/jobs/7/run", body: { ceiling: 3 } }));
+  });
+
+  it("offers twice its ceiling to a re-run its first call stopped before it spent anything", async () => {
+    viewport(true);
+    const stopped = { ...base, key: "job:8", id: 8, kind: "rerun", state: "stopped", paper: null, topic: { slug: "mi", name: "Mech interp", revision: 4 }, scopes: ["members"], papers: 12, done: 0, graded: 0, cost: null, ceiling: 0.25, estimate: 0.2, error: "stopped at the ceiling after 0 of 12", at: at(12), actions: ["run", "tonight", "discard"] };
+    scriptFetch({ ...common, "GET /api/jobs": { ...jobs, not_run: [stopped] }, "GET /api/settings/schedule": schedule });
+    renderApp("/settings/runs/jobs");
+    const row = (await screen.findByText(/Mech interp · version 4 · members/)).closest(".job") as HTMLElement;
+    expect(within(row).getByRole("textbox", { name: "Stop at" })).toHaveValue("$0.50");
   });
 
   it("shows the latest three jobs on Runs and cost, with All jobs", async () => {

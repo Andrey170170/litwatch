@@ -3,6 +3,7 @@ the Jobs page lists, Deep cards asked for read alongside from their passes."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -11,6 +12,7 @@ from psycopg.types.json import Jsonb
 from litwatch.core.fulltext import REQUESTED
 from litwatch.store.failures import ACTIONABLE
 from litwatch.store.fulltext import STARTED, STUCK, stuck_params
+from litwatch.store.reading import SHOWN_MEMBER
 from litwatch.store.runs import ALIVE
 
 # The states each of the Jobs page's groups shows (DESIGN.md, Jobs); `discarded` is hidden.
@@ -22,19 +24,34 @@ _ME = "pg_backend_pid(), (SELECT backend_start FROM pg_stat_activity WHERE pid =
 
 
 async def create(
-    conn: psycopg.AsyncConnection, kind: str, scope: dict[str, Any], papers: int, state: str
+    conn: psycopg.AsyncConnection,
+    kind: str,
+    scope: dict[str, Any],
+    papers: int,
+    state: str,
+    *,
+    ceiling: float | None = None,
+    estimate: float | None = None,
 ) -> int:
     row = await (
         await conn.execute(
-            "INSERT INTO jobs (kind, scope, papers, state) VALUES (%s, %s, %s, %s) RETURNING id",
-            (kind, Jsonb(scope), papers, state),
+            "INSERT INTO jobs (kind, scope, papers, state, ceiling, estimate) "
+            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (kind, Jsonb(scope), papers, state, ceiling, estimate),
         )
     ).fetchone()
     return row["id"]
 
 
-async def get(conn: psycopg.AsyncConnection, job_id: int) -> dict[str, Any] | None:
-    return await (await conn.execute("SELECT * FROM jobs WHERE id = %s", (job_id,))).fetchone()
+async def get(
+    conn: psycopg.AsyncConnection, job_id: int, *, lock: bool = False
+) -> dict[str, Any] | None:
+    """The job; with `lock`, its row locked to the end of the transaction."""
+    return await (
+        await conn.execute(
+            "SELECT * FROM jobs WHERE id = %s" + (" FOR UPDATE" if lock else ""), (job_id,)
+        )
+    ).fetchone()
 
 
 async def process_of(
@@ -109,23 +126,30 @@ async def settle_process(
 
 
 async def move(
-    conn: psycopg.AsyncConnection, job_id: int, sources: tuple[str, ...], to: str
+    conn: psycopg.AsyncConnection,
+    job_id: int,
+    sources: tuple[str, ...],
+    to: str,
+    ceiling: float | None = None,
 ) -> dict[str, Any] | None:
     """Move the job from one of `sources` to `to`; None when it is in none of them. Put in the
-    queue or on tonight's run, it waits from now; a failed job put back starts over, its steps
-    taking only what is still due."""
+    queue or on tonight's run, it waits from now, under `ceiling` when given; a failed job put
+    back starts over, its steps taking only what is still due; a stopped one goes on from
+    where it stopped."""
     return await (
         await conn.execute(
             """
-            UPDATE jobs SET state = %(to)s, changed_at = now(),
+            UPDATE jobs SET state = %(to)s, changed_at = now(), wake_at = NULL,
                    queued_at = CASE WHEN %(to)s IN ('tonight', 'queued') THEN now()
                                     ELSE queued_at END,
+                   ceiling = coalesce(%(ceiling)s, ceiling),
                    done = CASE WHEN state = 'failed' THEN 0 ELSE done END,
                    counts = CASE WHEN state = 'failed' THEN '{}' ELSE counts END,
-                   error = CASE WHEN state = 'failed' THEN NULL ELSE error END
+                   error = CASE WHEN state IN ('failed', 'stopped') AND %(to)s <> 'discarded'
+                                THEN NULL ELSE error END
             WHERE id = %(id)s AND state = ANY(%(sources)s) RETURNING *
             """,
-            {"to": to, "id": job_id, "sources": list(sources)},
+            {"to": to, "id": job_id, "sources": list(sources), "ceiling": ceiling},
         )
     ).fetchone()
 
@@ -148,56 +172,88 @@ async def take_back(conn: psycopg.AsyncConnection) -> list[int]:
     return [r["id"] for r in rows]
 
 
-async def claim(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
+async def claim(conn: psycopg.AsyncConnection, *, fresh: bool = True) -> dict[str, Any] | None:
     """The most urgent job this session may run now, marked running in its name: Process jobs
     first (the owner waits on them), then the oldest in the queue. Runnable are the queued
     jobs, those this session already runs, and those on tonight's run once a nightly run has
-    finished after they were put there. Another session's claim in progress is skipped, so two
-    workers never take one job."""
+    finished after they were put there, none before its `wake_at`; without `fresh`, only
+    Process jobs and those this session runs (it holds as many runs open as it may). Another
+    session's claim in progress is skipped, so two workers never take one job."""
     return await (
         await conn.execute(
             f"""
             WITH chosen AS (
                 SELECT j.id FROM jobs j
-                WHERE j.state = 'queued'
+                WHERE (j.wake_at IS NULL OR j.wake_at <= now())
+                  AND (j.state = 'queued'
                    OR (j.state = 'running' AND (j.backend_pid, j.backend_start) = ({_ME}))
                    OR (j.state = 'tonight' AND EXISTS (
                            SELECT 1 FROM runs n WHERE n.kind = 'nightly'
-                           AND n.finished_at >= j.queued_at))
+                           AND n.finished_at >= j.queued_at)))
+                  AND (%(fresh)s OR j.kind = 'process' OR j.state = 'running')
                 ORDER BY j.kind = 'process' DESC, j.queued_at, j.id
                 LIMIT 1 FOR UPDATE SKIP LOCKED
             )
             UPDATE jobs j SET state = 'running', (backend_pid, backend_start) = ({_ME}),
                    changed_at = CASE WHEN j.state = 'running' THEN j.changed_at ELSE now() END
             FROM chosen WHERE j.id = chosen.id RETURNING j.*
-            """
+            """,
+            {"fresh": fresh},
         )
     ).fetchone()
 
 
 async def progress(
-    conn: psycopg.AsyncConnection, job_id: int, done: int, counts: dict[str, int]
+    conn: psycopg.AsyncConnection,
+    job_id: int,
+    done: int,
+    counts: dict[str, int],
+    ladder: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Record how far the job got and what its steps recorded so far, for a job this session
-    runs; None when it is no longer this session's."""
+    """Record how far the job got and what its steps recorded so far (a re-run's `ladder` too,
+    when given), for a job this session runs; None when it is no longer this session's."""
     return await (
         await conn.execute(
             f"""
-            UPDATE jobs SET done = %s, counts = %s
+            UPDATE jobs SET done = %s, counts = %s, ladder = coalesce(%s, ladder)
             WHERE id = %s AND state = 'running' AND (backend_pid, backend_start) = ({_ME})
             RETURNING *
             """,
-            (done, Jsonb(counts), job_id),
+            (done, Jsonb(counts), Jsonb(ladder) if ladder is not None else None, job_id),
         )
     ).fetchone()
+
+
+async def wait(conn: psycopg.AsyncConnection, job_id: int, until: datetime) -> None:
+    """The job, still this session's, is not claimed again before `until`: what it has left
+    waits for the archive."""
+    await conn.execute(
+        f"UPDATE jobs SET wake_at = %s WHERE id = %s AND state = 'running' "
+        f"AND (backend_pid, backend_start) = ({_ME})",
+        (until, job_id),
+    )
+
+
+async def spent(conn: psycopg.AsyncConnection, job_id: int) -> float:
+    """What the job's calls cost so far, in all its runs (a call of unknown cost counts
+    nothing, as in the month's spend)."""
+    row = await (
+        await conn.execute(
+            "SELECT coalesce(sum((c.usage ->> 'cost')::numeric), 0) AS cost "
+            "FROM inference_calls c JOIN runs r ON r.id = c.run_id WHERE r.job_id = %s",
+            (job_id,),
+        )
+    ).fetchone()
+    return float(row["cost"])
 
 
 async def finish(
     conn: psycopg.AsyncConnection, job_id: int, state: str, error: str | None = None
 ) -> None:
-    """End this session's run of the job as done, failed or discarded. One done that the owner
-    asked again while it ran (`settle_process`) goes back in the queue from its first paper
-    instead, so its steps take what the owner's action left due."""
+    """End this session's run of the job as done, failed, discarded or stopped (by its ceiling,
+    `error` saying where). One done that the owner asked again while it ran (`settle_process`)
+    goes back in the queue from its first paper instead, so its steps take what the owner's
+    action left due."""
     await conn.execute(
         f"""
         UPDATE jobs SET error = %(error)s, changed_at = now(),
@@ -222,14 +278,18 @@ async def listing(
     card with its pass's state, mapped onto a job's, failed once it waits on the owner (`stuck`,
     as Needs you lists it, after `runs` failed runs or a long wait for its text). A dismissed
     paper's card is left out unless done or its attempt is open: nothing else runs it. Only the
-    newest `done_limit` of those done."""
+    newest `done_limit` of those done. A re-run comes with its topic, scopes, revision, ceiling
+    and estimate."""
     return await (
         await conn.execute(
             f"""
             WITH found AS (
                 SELECT 'job' AS source, j.id, j.kind, j.state, j.papers, j.done, j.counts,
-                       j.error, j.changed_at AS at, j.queued_at,
-                       j.scope -> 'papers' ->> 0 AS paper_id,
+                       j.error, j.changed_at AS at, j.queued_at, j.ceiling, j.estimate,
+                       j.scope ->> 'topic' AS topic, j.scope -> 'scopes' AS scopes,
+                       j.scope ->> 'revision' AS revision,
+                       CASE WHEN j.kind = 'process' THEN j.scope -> 'papers' ->> 0 END
+                           AS paper_id,
                        j.kind = 'process' AND EXISTS (
                            SELECT 1 FROM step_failures f JOIN papers p ON p.id = f.paper_id
                            WHERE f.paper_id = j.scope -> 'papers' ->> 0
@@ -244,7 +304,7 @@ async def listing(
                             ELSE f.state END,
                        1, CASE WHEN f.state = 'done' THEN 1 ELSE 0 END, '{{}}'::jsonb,
                        f.last_error, coalesce(f.finished_at, f.tried_at, f.queued_at),
-                       f.queued_at, f.paper_id, {STUCK}, NULL
+                       f.queued_at, NULL, NULL, NULL, NULL, NULL, f.paper_id, {STUCK}, NULL
                 FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
                 WHERE f.kind = 'deep' AND f.reason = %(requested)s
                   AND (p.dismissed_at IS NULL OR f.state = 'done' OR {STARTED})
@@ -253,10 +313,86 @@ async def listing(
                           AS newest
                 FROM found
             )
-            SELECT x.*, p.title FROM ranked x LEFT JOIN papers p ON p.id = x.paper_id
+            SELECT x.*, p.title, k.name AS topic_name FROM ranked x
+            LEFT JOIN papers p ON p.id = x.paper_id LEFT JOIN classes k ON k.slug = x.topic
             WHERE x.state <> 'done' OR x.newest <= %(done)s
             ORDER BY x.at DESC, x.id DESC
             """,
             {"requested": REQUESTED, "done": done_limit} | stuck_params(runs),
         )
     ).fetchall()
+
+
+# The class of advisory locks one per topic serializes making its re-runs in (`open_rerun`).
+RERUN_LOCK = 7213916
+
+
+async def open_rerun(conn: psycopg.AsyncConnection, scope: dict[str, Any]) -> dict[str, Any] | None:
+    """The newest re-run not ended (not run, on tonight's run, queued or running) with the
+    same topic version, scopes and date range as `scope`, its row locked: one asked for again
+    after a lost reply. The version is the one it grades under; the revision beside it only
+    names it. The topic's re-run lock is held to the transaction's end, so two asking at once
+    make one."""
+    same = {k: scope.get(k) for k in ("topic", "version", "scopes", "since", "until")}
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (RERUN_LOCK, scope["topic"])
+    )
+    return await (
+        await conn.execute(
+            "SELECT * FROM jobs WHERE kind = 'rerun' AND state = ANY(%s) "
+            "AND jsonb_build_object('topic', scope -> 'topic', 'version', scope -> 'version', "
+            "'scopes', scope -> 'scopes', 'since', scope -> 'since', 'until', scope -> 'until') "
+            "= %s ORDER BY id DESC LIMIT 1 FOR UPDATE",
+            ([*NOT_RUN, *ACTIVE], Jsonb(same)),
+        )
+    ).fetchone()
+
+
+# -- a topic re-run's scopes (pipeline.md, section 10) ----------------------------------------
+
+
+async def labelled(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
+    """The papers the owner labelled for the topic or reported missed there, not dismissed."""
+    rows = await (
+        await conn.execute(
+            "SELECT id FROM papers WHERE dismissed_at IS NULL AND id IN ("
+            "SELECT paper_id FROM labels WHERE topic = %(t)s "
+            "UNION SELECT paper_id FROM misses WHERE topic = %(t)s) ORDER BY id",
+            {"t": topic},
+        )
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
+async def members(conn: psycopg.AsyncConnection, classes: list[str]) -> list[str]:
+    """The papers on a topic's page (`store.reading.SCOPE`), not dismissed: those standing in any
+    of `classes` (its class and those under it), and those with an effective grade for it or a
+    followed topic under it (a keyword hit, a reported miss)."""
+    rows = await (
+        await conn.execute(
+            f"""
+            SELECT id FROM (
+                SELECT m.paper_id AS id FROM memberships m
+                WHERE m.class = ANY(%(classes)s) AND {SHOWN_MEMBER}
+                UNION
+                SELECT g.paper_id FROM effective_grades g WHERE g.topic = ANY(%(classes)s)
+            ) x JOIN papers p USING (id) WHERE p.dismissed_at IS NULL ORDER BY id
+            """,
+            {"classes": classes},
+        )
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
+async def published_between(
+    conn: psycopg.AsyncConnection, since: datetime, until: datetime
+) -> list[str]:
+    """The papers published in [since, until), not dismissed."""
+    rows = await (
+        await conn.execute(
+            "SELECT id FROM papers WHERE dismissed_at IS NULL AND published >= %s "
+            "AND published < %s ORDER BY id",
+            (since, until),
+        )
+    ).fetchall()
+    return [r["id"] for r in rows]

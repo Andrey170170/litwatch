@@ -22,12 +22,12 @@ from litwatch.feedback import misses, word
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import run_lock
-from litwatch.llm import Gateway
+from litwatch.llm import Gateway, prices
 from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import TREE, answering, paper
+from tests.conftest import AGENTS, TREE, answering, paper
 from tests.fakes import BatchingProvider, ScriptedProvider
 from tests.test_batches import FAST
 from tests.test_steps import CONFIG, Scripted, decision
@@ -459,7 +459,7 @@ async def test_a_job_taken_back_mid_chunk_skips_the_steps_it_had_done(conn, mode
 
 async def test_no_chunk_starts_while_a_nightly_is_due_or_running(conn, models):
     job = await queued(conn, A.id)
-    w = worker.Worker(conn, CONFIG, models.gateway)
+    w = worker.Worker(conn, SCHEDULED, models.gateway)
     assert not await w.step(NIGHT)  # due at 02:00, not started
     async with await store.sibling(conn) as nightly_session:
         night = await runs.start(nightly_session, "nightly")
@@ -473,7 +473,7 @@ async def test_no_chunk_starts_while_a_nightly_is_due_or_running(conn, models):
 async def test_a_nightly_due_mid_job_runs_before_its_next_chunk(conn, models, monkeypatch):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await queued(conn, A.id, B.id)
-    w = worker.Worker(conn, CONFIG, models.gateway)
+    w = worker.Worker(conn, SCHEDULED, models.gateway)
     assert await w.step(NIGHT - timedelta(minutes=10))  # A's chunk, before the nightly is due
     assert not await w.step(NIGHT)  # due now: the job waits
     assert (await jobs_store.get(conn, job))["done"] == 1
@@ -499,18 +499,22 @@ async def test_a_held_run_lock_holds_every_chunk(conn, models):
 async def test_a_process_job_queued_during_a_longer_job_goes_at_its_next_chunk(
     conn, models, monkeypatch
 ):
-    """A re-run (P2) stands in as a job of another kind, made here as P2 will make it."""
-    await conn.execute("ALTER TABLE jobs DROP CONSTRAINT jobs_kind_check")
+    """A re-run of the Field topic over B and C, a chunk each; prices for its model let it
+    run under its ceiling."""
+    monkeypatch.setitem(prices.ANTHROPIC, "test-field", (1.0, 2.0, 0.1))
     monkeypatch.setattr(worker, "CHUNK", 1)
-    longer = await queued(conn, B.id, C.id, kind="rerun")
+    scope = {"topic": AGENTS.slug, "revision": 1, "scopes": ["members"], "papers": [B.id, C.id]}
+    longer = await jobs_store.create(conn, "rerun", scope, 2, "queued", ceiling=1.0)
     w = worker.Worker(conn, CONFIG, models.gateway)
     assert await w.step(AFTERNOON)  # B
     process = await queued(conn, A.id)
     assert await w.step(AFTERNOON)  # A: the Process job first
     assert (await jobs_store.get(conn, process))["state"] == "done"
     assert (await jobs_store.get(conn, longer))["state"] == "running"
-    assert await classified(conn) == {A.id, B.id}
-    assert await w.step(AFTERNOON) and (await jobs_store.get(conn, longer))["state"] == "done"
+    graded = [r["paper_id"] for r in await rows(conn, "SELECT paper_id FROM verdicts ORDER BY id")]
+    assert graded == [B.id] and await classified(conn) == {A.id}
+    await work_out(w)  # C, then the passes it queued (none)
+    assert (await jobs_store.get(conn, longer))["state"] == "done"
 
 
 async def test_a_job_with_tonights_run_waits_for_a_nightly_to_finish(conn, models):

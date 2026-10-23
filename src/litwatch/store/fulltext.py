@@ -16,6 +16,7 @@ from litwatch.core.digests import PUBLISHED
 from litwatch.core.fulltext import (
     AUTOMATIC_PRIORITY,
     AWAITING_TOO_LONG,
+    BACKGROUND_PRIORITY,
     REQUEST_PRIORITY,
     REQUESTED,
     TEXT_PRIORITY,
@@ -140,18 +141,23 @@ async def request_card(conn: psycopg.AsyncConnection, paper_id: str, revision: i
 
 
 async def queue_deep(
-    conn: psycopg.AsyncConnection, paper_id: str, revision: int, reason: str
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    revision: int,
+    reason: str,
+    priority: int = AUTOMATIC_PRIORITY,
 ) -> int:
-    return await queue(conn, paper_id, revision, PassKind.DEEP, reason, AUTOMATIC_PRIORITY)
+    return await queue(conn, paper_id, revision, PassKind.DEEP, reason, priority)
 
 
 async def owners_first(conn: psycopg.AsyncConnection, paper_ids: Sequence[str]) -> None:
     """The papers' open passes go as the owner's requests do: a text pass ahead of the others,
-    a Deep pass ahead of the automatic ones (a paper the owner had processed, docs/plans/jobs.md).
-    The reason stays: a settle may still drop or relabel the pass."""
+    a Deep pass ahead of the automatic ones (a paper the owner had processed, docs/plans/jobs.md),
+    in the regular queue, a re-run's text pass too. The reason stays: a settle may still drop or
+    relabel the pass."""
     await conn.execute(
         "UPDATE fulltext_passes SET priority = least(priority, "
-        "CASE WHEN kind = 'deep' THEN %s ELSE %s END) "
+        "CASE WHEN kind = 'deep' THEN %s ELSE %s END), job_id = NULL "
         "WHERE paper_id = ANY(%s) AND state <> 'done'",
         (REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY, list(paper_ids)),
     )
@@ -175,12 +181,14 @@ async def queue(
     kind: PassKind,
     reason: str,
     priority: int,
+    job_id: int | None = None,
 ) -> int:
+    """Queue a pass; one `job_id` names is that re-run's to work (docs/plans/jobs.md)."""
     row = await (
         await conn.execute(
-            "INSERT INTO fulltext_passes (paper_id, paper_revision, kind, reason, priority) "
-            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (paper_id, revision, kind.value, reason, priority),
+            "INSERT INTO fulltext_passes (paper_id, paper_revision, kind, reason, priority, "
+            "job_id) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (paper_id, revision, kind.value, reason, priority, job_id),
         )
     ).fetchone()
     return row["id"]
@@ -240,6 +248,7 @@ class Claimed:
     retry_text: bool = False  # the archive is to retry the downloads it gave up on
     use_pdf: bool = False  # the owner's "Use the PDF": read its PDF, not its LaTeX
     unusable_runs: int = 0  # how far down `brief`'s list it starts (models.md, roles)
+    job: int | None = None  # the re-run whose pass it is, which its settling keeps working
 
 
 # Held by the worker that works the Deep passes, so the service's and a terminal's never run
@@ -273,6 +282,8 @@ async def claim(
     *,
     deep: bool = False,
     owners: bool | None = None,
+    job: int | None = None,
+    background: bool = True,
 ) -> list[Claimed]:
     """Take up to `limit` text passes to try, least recently tried first, `besides` those
     already tried: passes awaiting text, those to be tried again, and running ones whose lease
@@ -281,14 +292,20 @@ async def claim(
     With `deep`, Deep passes instead, the owner's requests first, of any revision (a Deep pass
     reads the text the paper has when it runs); one whose job was submitted is taken whatever a
     dismissal says, as following its job spends nothing new and ends its attempt. Text passes
-    the owner ran now only when `owners` is True, none of them when it is False."""
+    the owner ran now only when `owners` is True, none of them when it is False. Text passes a
+    re-run works only for that `job`, and none of them without it. Without `background`, no
+    Deep pass at a background priority but one whose job was submitted (a nightly is running
+    or due, pipeline.md, section 10)."""
     which = (
         f"f.kind = 'deep' AND ({STARTED} OR p.dismissed_at IS NULL)"
         if deep
-        else "f.kind <> 'deep' AND f.paper_revision = p.revision AND p.dismissed_at IS NULL"
+        else "f.kind <> 'deep' AND f.paper_revision = p.revision AND p.dismissed_at IS NULL "
+        "AND f.job_id IS NOT DISTINCT FROM %(job)s"
     )
     if not deep and owners is not None:
         which += f" AND f.priority {'<' if owners else '>='} {TEXT_PRIORITY}"
+    if deep and not background:
+        which += f" AND (f.priority < {BACKGROUND_PRIORITY} OR {STARTED})"
     rows = await (
         await conn.execute(
             f"""
@@ -304,10 +321,10 @@ async def claim(
                                              lease_until = now() + %(lease)s
                 FROM taken WHERE f.id = taken.id
                 RETURNING f.id, f.kind, f.reason, f.paper_revision, f.lease_until, f.paper_id,
-                          f.retry_text, f.use_pdf, f.unusable_runs
+                          f.retry_text, f.use_pdf, f.unusable_runs, f.job_id
             )
             SELECT {COLUMNS}, x.id AS pass_id, x.kind, x.reason, x.paper_revision AS pass_revision,
-                   x.lease_until, x.retry_text, x.use_pdf, x.unusable_runs,
+                   x.lease_until, x.retry_text, x.use_pdf, x.unusable_runs, x.job_id,
                    k.slug, k.name, k.description, k.parent, k.threshold
             FROM claimed x JOIN papers p ON p.id = x.paper_id
             LEFT JOIN LATERAL (SELECT primary_class FROM classifications
@@ -320,6 +337,7 @@ async def claim(
                 "besides": list(besides or ()),
                 "limit": limit,
                 "lease": lease,
+                "job": job,
             },
         )
     ).fetchall()
@@ -335,9 +353,36 @@ async def claim(
             retry_text=r["retry_text"],
             use_pdf=r["use_pdf"],
             unusable_runs=r["unusable_runs"],
+            job=r["job_id"],
         )
         for r in rows
     ]
+
+
+async def job_open(conn: psycopg.AsyncConnection, job_id: int) -> int:
+    """The re-run's text passes it still works: to try, running, or awaiting their text, short
+    of the wait after which a pass is the owner's (`STUCK`)."""
+    row = await (
+        await conn.execute(
+            "SELECT count(*) AS n FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
+            "WHERE f.job_id = %s AND f.paper_revision = p.revision AND p.dismissed_at IS NULL "
+            "AND (f.state IN ('ready', 'running') "
+            "OR (f.state = 'awaiting_text' AND f.queued_at >= now() - %s))",
+            (job_id, AWAITING_TOO_LONG),
+        )
+    ).fetchone()
+    return row["n"]
+
+
+async def release_job(conn: psycopg.AsyncConnection, job_id: int) -> None:
+    """The re-run ended: what it left of its text passes (failed, or awaiting text too long)
+    goes to the regular queue, where a nightly tries it again or the owner sees it. The
+    taxonomy lock is taken shared first, as in `retry_failed`."""
+    await lock_shared(conn)
+    await conn.execute(
+        "UPDATE fulltext_passes SET job_id = NULL WHERE job_id = %s AND state <> 'done'",
+        (job_id,),
+    )
 
 
 async def take_back(conn: psycopg.AsyncConnection, lease: timedelta) -> int:
@@ -395,8 +440,10 @@ async def let_go(conn: psycopg.AsyncConnection, c: Claimed, error: str) -> None:
 
 
 async def wait_again(conn: psycopg.AsyncConnection, c: Claimed, error: str) -> None:
-    """A Deep pass the service failed, with no job of it left: back in the queue, the failure not
-    counted, behind those tried less recently. Call it in a transaction that `held` it."""
+    """A pass that could not be worked through no fault of its paper (a Deep pass the service
+    failed, with no job of it left; a re-run's pass its ceiling stopped): back in the queue,
+    the failure not counted, behind those tried less recently. Call it in a transaction that
+    `held` it."""
     await conn.execute(
         "UPDATE fulltext_passes SET state = 'ready', lease_until = NULL, last_error = %s "
         "WHERE id = %s",
@@ -814,11 +861,12 @@ async def run_now(
     model, and first in line.
     A Deep pass becomes the owner's request, ahead of the automatic ones;
     a text pass too, ahead of them and the service worker's while a nightly runs.
-    With `pdf` ("Use the PDF"), it reads the paper's PDF from then on, not its LaTeX. Returns
-    False when it does not wait for the owner."""
+    With `pdf` ("Use the PDF"), it reads the paper's PDF from then on, not its LaTeX. A re-run's
+    pass leaves it for the regular queue: the owner asked for it. Returns False when it does
+    not wait for the owner."""
     cur = await conn.execute(
         "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, unusable_runs = 0, "
-        "refused = false, "
+        "refused = false, job_id = NULL, "
         "tried_at = NULL, acknowledged_at = NULL, "
         "queued_at = now(), retry_text = true, use_pdf = f.use_pdf OR %(pdf)s, "
         "reason = CASE WHEN f.kind = 'deep' THEN %(requested)s ELSE f.reason END, "

@@ -36,6 +36,9 @@ TEXT_REQUEST_PRIORITY = -1
 # Deep passes are worked by their own worker, one at a time: the owner's requests first.
 REQUEST_PRIORITY = 0
 AUTOMATIC_PRIORITY = 1
+# A re-run's passes (pipeline.md, section 10): after the text and automatic ones, and held while
+# a nightly is running or due.
+BACKGROUND_PRIORITY = 2
 # Why a Deep pass runs: the owner asked (never dropped by a settle), a Focus topic grades the
 # paper must read, or a published Area digest picked it.
 REQUESTED = "request"

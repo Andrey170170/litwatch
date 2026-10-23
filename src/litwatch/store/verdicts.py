@@ -158,3 +158,59 @@ async def passed(conn: psycopg.AsyncConnection, passes: list[tuple[str, int]]) -
             "ON CONFLICT DO NOTHING",
             (paper_id, revision),
         )
+
+
+async def ungraded_under(
+    conn: psycopg.AsyncConnection, topic: str, version: str, ids: list[str]
+) -> list[str]:
+    """Those of `ids`, in their order, not dismissed and whose verdict for the topic on their
+    current text, the latest, is not under its `version`: what a re-run of the topic still has
+    to grade. A topic edited back to an earlier version grades again what a version between
+    them decided (its calls reused from the journal)."""
+    rows = await (
+        await conn.execute(
+            """
+            SELECT p.id FROM unnest(%(ids)s::text[]) WITH ORDINALITY AS x (id, n)
+            JOIN papers p ON p.id = x.id AND p.dismissed_at IS NULL
+            WHERE (SELECT v.topic_version FROM verdicts v WHERE v.paper_id = p.id
+                   AND v.topic = %(topic)s AND v.paper_revision = p.revision
+                   ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) IS DISTINCT FROM %(version)s
+            ORDER BY x.n
+            """,
+            {"ids": ids, "topic": topic, "version": version},
+        )
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
+async def graded_under(
+    conn: psycopg.AsyncConnection, topic: str, version: str, ids: list[str]
+) -> int:
+    """How many of `ids` have their latest verdict for the topic on their current text under
+    its `version`: how far a re-run of the topic got."""
+    row = await (
+        await conn.execute(
+            """
+            SELECT count(*) AS n FROM unnest(%(ids)s::text[]) AS x (id)
+            JOIN papers p ON p.id = x.id
+            WHERE (SELECT v.topic_version FROM verdicts v WHERE v.paper_id = p.id
+                   AND v.topic = %(topic)s AND v.paper_revision = p.revision
+                   ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) = %(version)s
+            """,
+            {"ids": ids, "topic": topic, "version": version},
+        )
+    ).fetchone()
+    return row["n"]
+
+
+async def escalated_share(conn: psycopg.AsyncConnection, topic: str, last: int = 200) -> float:
+    """The share of the topic's latest `last` Area verdicts that escalated to `check`: what an
+    estimate expects of an Area re-run. 1 with none yet."""
+    row = await (
+        await conn.execute(
+            "SELECT avg(escalated::int) AS share FROM (SELECT escalated FROM verdicts "
+            "WHERE topic = %s AND opinions ? 'area_check' ORDER BY id DESC LIMIT %s) recent",
+            (topic, last),
+        )
+    ).fetchone()
+    return 1.0 if row["share"] is None else float(row["share"])

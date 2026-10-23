@@ -916,7 +916,7 @@ def fulltext_queue(
             if limit is not None and worked >= limit:
                 return total
             done = await deep_passes.work(
-                conn, archive, maker, limit=None if limit is None else limit - worked
+                conn, archive, maker, limit=None if limit is None else limit - worked, config=cfg
             )
             console.print(dict(done))
             total.update(done)

@@ -1,6 +1,7 @@
 /** TanStack Query options over the typed client: one per endpoint, and one per shelf of a list. */
 import { infiniteQueryOptions, queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { api, ok } from "./client";
+import type { RerunScope } from "@/lib/jobs";
 import type { Shelf } from "@/lib/rarity";
 import type { Quality, Run, Session, SessionRow } from "@/lib/settings";
 import { sortOf, type ListSearch } from "@/lib/search";
@@ -196,6 +197,16 @@ export const scheduleQuery = settingsRead("runs", "schedule", async () => ok(awa
 
 /** The jobs in their groups, for Runs and cost (`page` "runs") and the Jobs page ("runs/jobs"). */
 export const jobsQuery = (page: "runs" | "runs/jobs") => settingsRead(page, "jobs", async () => ok(await api.GET("/api/jobs")));
+
+/** The re-run offer for a topic just saved, for the scopes ticked (and the date range when it is one of them). */
+export const rerunOfferQuery = (slug: string, scopes: RerunScope[], since: string | null, until: string | null) =>
+  queryOptions({
+    queryKey: ["settings", `topics/${slug}`, "rerun-offer", scopes, since, until],
+    queryFn: async () => ok(await api.GET("/api/jobs/reruns/offer", { params: { query: { topic: slug, scopes, since, until } } })),
+    // Read afresh each time the offer opens: the save it follows changes the counts (keywords) and versions.
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
 
 /** Both pages' reads of the jobs, for a write that changes them. */
 export const JOBS_PAGES = ["runs", "runs/jobs"] as const;

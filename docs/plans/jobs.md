@@ -73,7 +73,7 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   still waiting for its text when the job's chunk ends is worked by its next chunk. Its Deep passes go to the Deep
   worker, behind the automatic ones, and stay outside the ceiling: Deep runs on the subscription, not on API spend
   (models.md). Neither the job's passes nor its Deep passes run while a nightly is running or due, by the same check
-  the jobs worker uses. A Process job's passes are the owner's request: they keep the request priorities and the
+  the jobs worker uses (due only with the schedule on, which alone starts it). A Process job's passes are the owner's request: they keep the request priorities and the
   regular workers, and a Process job has no ceiling.
 - **Deep cards asked for are not `jobs` rows.** Their queue is the card passes the deep integration already runs.
   `/api/jobs` reads the passes with reason `request` and puts them in the same groups, so no state is stored twice.
@@ -100,6 +100,52 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   owner acts on while it runs (a Try again on Needs you, say) goes back in the queue when it ends instead of done,
   so its steps take what that action left due; a Process job taken back starts over from its paper for the same
   reason.
+
+- **Built in P2 beyond the bullets above:**
+  - *The four scopes, read one way:* labelled papers and reported misses for the topic; its members as its page
+    shows them (standing in its class or those under it, or graded for it or a followed topic under it); papers its keywords match over the editor's 90
+    days, counted as the editor counts them; papers published in the date range, both days included in the
+    schedule's zone, members or not (as the keyword scope). Dismissed papers are left out of each. The ticked scopes
+    together count a paper once, and their papers are fixed when the job is made.
+  - *The estimate is of grading:* calls per paper by the topic's depth (an Area's `check` by the share of its last
+    200 verdicts that escalated). The Briefs a re-run's verdicts bring are paid under its ceiling but not estimated.
+  - *A grading that fails in a re-run is the job's, not the paper's:* no `step_failures` row, so no nightly takes it
+    up; the job ends `failed` ("grading failed on 3"), Try again redoes what has no verdict under the version,
+    each grading as far down its graders' lists as its earlier tries on the same text reached (D4, kept on the
+    job; both Focus sides refused asks both again). A grading whose paper's text changed meanwhile counts as
+    failed too. A re-run's progress is counted from the verdicts. A
+    re-run whose topic was paused or unfollowed fails, saying so; Run is refused (409) with the schedule off.
+  - *The worst case of a call:* its input bounded by the request's UTF-8 bytes plus 1,024 tokens of framing (a token
+    is at least a byte), its output by its cap. An OpenRouter route's bound is, per token type, the tightest charge
+    over tokens among its last 200 calls per serving provider, the highest across providers (a call with cached input
+    left out of the input price); a Decisions route is held to its input (`max_price` completion 0, models.md: it
+    bills input only); a chat route with no output cap of its own is sent 16,000, Anthropic's default. A call that
+    does not fit waits while others are in flight and stops the job only with none in flight. An answered provider
+    error frees its reservation, unless it reports a charge (OpenRouter bills some completions with no choices); a
+    content refusal OpenRouter answers with a 403 costs nothing; a timeout or a lost connection keeps it, as it may
+    have been billed. A known limit: a charge the journal never learns (a timeout, a process that died mid-call,
+    or a charge an error reported, which the journal does not keep yet: [backlog](../backlog.md)) is not counted
+    against what is left when the job's next run opens, so such a job can pass its ceiling by those charges.
+  - *A re-run asked for twice is made once:* the same topic version, scopes and dates while one is not yet ended
+    adopts it (under a lock per topic, so two at once make one), and Run moves one not run to the queue (a stopped
+    one under a ceiling above what it spent, as Run now on Jobs). Otherwise the one found is adopted only as asked,
+    under the same ceiling (queued or running for Run, not run for Not now): else a 409 says where it is. Run now on Jobs is refused with the schedule off
+    too.
+  - *A topic edited back* to an earlier version re-runs what a version between them decided: a paper is done
+    when its latest verdict is under the version, its calls reused from the journal.
+  - *A re-run's pass the owner runs from Needs you* ("Run it now") leaves the job for the regular queue, as do the
+    passes of a paper whose Process job is under way, which go as the owner's requests. A pass
+    the job works settles under the job: the passes and the Deep card it brings are the job's, at background
+    priority.
+  - *Where it stopped:* "stopped at the ceiling after 212 of 476" while grading, "with 3 full-text passes left"
+    after. Run now on a stopped re-run takes a new ceiling above what it spent; the ceiling is over the job's life.
+    Discarding it lets go of its text passes; a re-run that ends lets go of those it left (failed, or awaiting text
+    a week) to the regular queue. With no archive configured, a re-run stops with its passes kept ("with 2
+    full-text passes left: no archive"). A topic edited before its re-run has graded all fails the re-run: its
+    verdicts would be under two versions, and the editor offers the new version's. A re-run whose passes all await
+    their text is not claimed again for 30 seconds; it keeps its run, a database connection, open meanwhile, so a
+    worker holding four open starts only Process jobs until one ends.
+  - *The Jobs page* shows a running job's spend as its calls are journalled, and a re-run's as spent of its ceiling.
 
 ## Decisions
 
@@ -164,12 +210,6 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | V6. A replay job writes only evaluation tables | pytest asserting that verdicts and the outbox are untouched (P3) |
 | V7. The Jobs page shows the four groups and their actions; Process, the re-run offer and Run replay start jobs | vitest; a browser walk on `serve` over a fresh `--production` sandbox, with screenshots per stage |
 | V8. It works end to end with real models | One sandbox Process and one small re-run with real providers, under the $5 evidence budget |
-
-## Left for P2
-
-Found while building P1: the Processing note says "in a minute or two" even for a `tonight` job (nothing creates an
-offered or `tonight` Process job before P2); the Jobs page's sub-line leaves out "Each stops at its ceiling" until
-ceilings exist.
 
 ## Scope
 

@@ -44,11 +44,19 @@ DEFAULT_ROUTING: dict[str, tuple[str, ...]] = {
 }
 
 
-def chat_request(role: RoleConfig, request: Request, routing: tuple[str, ...]) -> dict[str, Any]:
-    """The chat-completions call for a request."""
+def chat_request(
+    role: RoleConfig,
+    request: Request,
+    routing: tuple[str, ...],
+    max_price: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """The chat-completions call for a request; with `max_price` (a job's ceiling), no provider
+    dearer than it serves the call."""
     provider: dict[str, Any] = {"require_parameters": True}
     if routing:
         provider |= {"order": list(routing), "only": list(routing)}
+    if max_price:
+        provider["max_price"] = max_price
     # `usage.include` makes OpenRouter report the call's cost in the usage block.
     extra: dict[str, Any] = {"usage": {"include": True}, "provider": provider}
     if role.effort:
@@ -75,9 +83,13 @@ def chat_request(role: RoleConfig, request: Request, routing: tuple[str, ...]) -
 
 
 def decisions_request(
-    role: RoleConfig, request: DecisionRequest, routing: tuple[str, ...]
+    role: RoleConfig,
+    request: DecisionRequest,
+    routing: tuple[str, ...],
+    max_price: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """The Decisions endpoint's call: `noul` for a yes/no question, `choice` for a choice."""
+    """The Decisions endpoint's call: `noul` for a yes/no question, `choice` for a choice; with
+    `max_price`, as a chat call's."""
     questions: dict[str, Any] = {}
     for q in request.questions:
         match q:
@@ -90,8 +102,11 @@ def decisions_request(
                     "criteria": dict(q.options),
                 }
     body: dict[str, Any] = {"model": role.model, "state": request.content, "questions": questions}
-    if routing:
-        body["provider"] = {"order": list(routing), "only": list(routing)}
+    provider: dict[str, Any] = {"order": list(routing), "only": list(routing)} if routing else {}
+    if max_price:
+        provider["max_price"] = max_price
+    if provider:
+        body["provider"] = provider
     return body
 
 
@@ -162,7 +177,7 @@ def reply_of(completion: Any, role: RoleConfig) -> Reply:
     )
     choices = getattr(completion, "choices", None)
     if not choices:
-        raise ProviderError("the completion has no choices", transient=True)
+        raise ProviderError("the completion has no choices", transient=True, cost=usage.cost)
     choice = choices[0]
     text = choice.message.content or ""
     if said := getattr(choice.message, "refusal", None):
@@ -201,13 +216,21 @@ class OpenRouterProvider:
     def routing(self, role: RoleConfig) -> tuple[str, ...]:
         return role.routing or DEFAULT_ROUTING.get(role.model, ())
 
-    async def complete(self, role: RoleConfig, request: Request) -> Reply:
-        body = chat_request(role, request, self.routing(role))
+    async def complete(
+        self, role: RoleConfig, request: Request, *, max_price: dict[str, float] | None = None
+    ) -> Reply:
+        body = chat_request(role, request, self.routing(role), max_price)
         completion = await self._call(self.client.chat.completions.create(**body), role)
         return completion if isinstance(completion, Reply) else reply_of(completion, role)
 
-    async def decide(self, role: RoleConfig, request: DecisionRequest) -> Reply:
-        body = decisions_request(role, request, self.routing(role))
+    async def decide(
+        self,
+        role: RoleConfig,
+        request: DecisionRequest,
+        *,
+        max_price: dict[str, float] | None = None,
+    ) -> Reply:
+        body = decisions_request(role, request, self.routing(role), max_price)
         raw = await self._call(self.client.post(DECISIONS_URL, body=body, cast_to=object), role)
         return raw if isinstance(raw, Reply) else decision_reply(raw, request, role)
 
@@ -223,16 +246,18 @@ class OpenRouterProvider:
             raise ProviderError(type(exc).__name__, timeout=True) from exc
         # OpenRouter answers 404 when a model's only provider has no endpoint up, which the
         # SDK never retries.
+        except openai.APIConnectionError as exc:  # it may have been sent: billed or not
+            raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
         except (
             openai.NotFoundError,
             openai.InternalServerError,
             openai.RateLimitError,
-            openai.APIConnectionError,
         ) as exc:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except openai.PermissionDeniedError as exc:
             if category := declined(exc.body):
-                usage = Usage(model=role.model, via="openrouter", effort=role.effort)
+                # An answered error, not billed.
+                usage = Usage(model=role.model, via="openrouter", effort=role.effort, cost=0.0)
                 said = json.dumps(exc.body, default=str)
                 return Reply("", Stop.REFUSED, usage, refusal=category, raw=said)
             raise ProviderError(f"{type(exc).__name__}: {exc}", account=True) from exc
