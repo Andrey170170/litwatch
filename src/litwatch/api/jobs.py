@@ -112,32 +112,36 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
     meanwhile included), and puts a failed one back in the queue, unless a step of the paper
     waits on the owner (409: it would find nothing due, and the owner's action on Needs you
     settles the job). Without a taxonomy there is nothing to sort the paper into: 409, nothing
-    kept. With the schedule off no worker runs jobs: the paper is
-    fetched only, for the next run, and the answer is null."""
+    kept. With the schedule off no worker runs jobs: the paper is fetched only, for the next run,
+    and the answer is null."""
     try:
         paper_id, fetched = await misses.resolve(c, body.paper_id)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    # A job already under way is only answered, outside a change: the owner's settle would ask a
-    # running one again (`settle_process`), and it would run once more for nothing.
-    found = await jobs_store.process_of(c, paper_id)
-    if found is not None and found["state"] in jobs_store.ACTIVE:
-        return s.ProcessJob(id=found["id"], state=found["state"], error=found["error"])
-    async with word.change(c, paper_id, cause=Cause.OWNER):
-        if await taxonomy_store.load(c) is None:  # nothing to sort the paper into
-            raise HTTPException(status_code=409, detail="no taxonomy yet")
-        await misses.keep(c, paper_id, fetched)
-        if await word_store.in_collection(c, paper_id):
-            raise HTTPException(status_code=409, detail="already in the collection")
-        if await papers_store.dismissed_at(c, paper_id) is not None:
-            raise HTTPException(status_code=409, detail="the paper is dismissed")
-        if await failures.waits_on_owner(c, [paper_id], FAILED_RUNS):
-            raise HTTPException(status_code=409, detail=WAITS)
-        if not request.app.state.config.schedule.enabled:
-            return None
-        job = await jobs_store.process(c, paper_id)
+    async with c.transaction():
+        # A job already under way is only answered, before any change: the owner's settle would
+        # ask a running one again (`settle_process`), and it would run once more for nothing.
+        # Under the paper's locks, so a Process in flight (a double click) has either committed
+        # its job or not started.
+        await word.lock_many(c, [paper_id])
+        found = await jobs_store.process_of(c, paper_id, lock=True)
+        if found is not None and found["state"] in jobs_store.ACTIVE:
+            return s.ProcessJob(id=found["id"], state=found["state"], error=found["error"])
+        async with word.change(c, paper_id, cause=Cause.OWNER):
+            if await taxonomy_store.load(c) is None:  # nothing to sort the paper into
+                raise HTTPException(status_code=409, detail="no taxonomy yet")
+            await misses.keep(c, paper_id, fetched)
+            if await word_store.in_collection(c, paper_id):
+                raise HTTPException(status_code=409, detail="already in the collection")
+            if await papers_store.dismissed_at(c, paper_id) is not None:
+                raise HTTPException(status_code=409, detail="the paper is dismissed")
+            if await failures.waits_on_owner(c, [paper_id], FAILED_RUNS):
+                raise HTTPException(status_code=409, detail=WAITS)
+            if not request.app.state.config.schedule.enabled:
+                return None
+            job = await jobs_store.process(c, paper_id)
     request.app.state.jobs_wake.set()
     return s.ProcessJob(id=job["id"], state=job["state"], error=job["error"])
 

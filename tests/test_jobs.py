@@ -695,6 +695,35 @@ async def test_process_asked_again_while_its_job_runs_only_answers_with_it(conn,
     assert (await jobs_store.get(conn, job))["state"] == "done"
 
 
+async def test_process_asked_twice_at_once_never_asks_its_running_job_again(
+    conn, models, monkeypatch
+):
+    """A double click: the first request queues the job and the worker claims it while the
+    second looks for it. The second answers with that job and does not ask it again."""
+    process_of, first = jobs_store.process_of, None
+
+    async def queued_and_claimed():  # the first request, then the worker
+        async with await store.sibling(conn) as other, word.change(other, A.id, cause=Cause.OWNER):
+            await jobs_store.process(other, A.id)
+        return (await jobs_store.claim(conn))["id"]
+
+    async def overtaken(*args, **kwargs):
+        nonlocal first
+        found = await process_of(*args, **kwargs)
+        if first is None:
+            first = asyncio.create_task(queued_and_claimed())
+            await asyncio.sleep(0.3)
+        return found
+
+    monkeypatch.setattr(jobs_store, "process_of", overtaken)
+    async with api(conn) as http:
+        second = await http.post("/api/jobs/process", json={"paper_id": A.id})
+    job = await first
+    assert second.status_code == 202 and second.json()["id"] == job
+    await jobs_store.finish(conn, job, "done")
+    assert [r["state"] for r in await rows(conn, "SELECT state FROM jobs")] == ["done"]
+
+
 async def test_a_paper_fetched_but_not_processed_can_be_processed_while_the_schedule_is_on(
     conn, models
 ):
