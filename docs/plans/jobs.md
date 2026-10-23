@@ -85,6 +85,10 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   estimate; `run`, `tonight`, `discard` and `again` act on one job. Each has a Pydantic response model, and the web
   client is regenerated.
 - **Deep read on a paper outside the collection** starts the same Process job, and its card is asked for as today.
+- **Built in P1 beyond the bullets above:** with the schedule off, Process only fetches the paper (no worker runs
+  it); without a taxonomy, Process answers 409 and keeps nothing; a failed Process job is queued again once its
+  paper's failures are cleared, and discarded if the paper is dismissed; a card asked for shows as Failed by the
+  rule Needs you uses.
 
 ## Decisions
 
@@ -149,6 +153,12 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | V6. A replay job writes only evaluation tables | pytest asserting that verdicts and the outbox are untouched (P3) |
 | V7. The Jobs page shows the four groups and their actions; Process, the re-run offer and Run replay start jobs | vitest; a browser walk on `serve` over a fresh `--production` sandbox, with screenshots per stage |
 | V8. It works end to end with real models | One sandbox Process and one small re-run with real providers, under the $5 evidence budget |
+
+## Left for P2
+
+Found while building P1: the Processing note says "in a minute or two" even for a `tonight` job (nothing creates an
+offered or `tonight` Process job before P2); the Jobs page's sub-line leaves out "Each stops at its ceiling" until
+ceilings exist; a running job shows $0.00 until its run closes.
 
 ## Scope
 
