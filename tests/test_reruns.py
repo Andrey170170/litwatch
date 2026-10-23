@@ -17,7 +17,7 @@ from litwatch import fulltext
 from litwatch.api import create_app
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config, Models, RoleConfig, Schedule
-from litwatch.core import Cause, Fit, Label, LabelOrigin, LabelValue, Status, Verdict
+from litwatch.core import Cause, Depth, Fit, Label, LabelOrigin, LabelValue, Status, Verdict
 from litwatch.core.fulltext import BACKGROUND_PRIORITY
 from litwatch.feedback import word
 from litwatch.fulltext import deep as deep_passes
@@ -35,7 +35,7 @@ from tests.conftest import AGENTS, FAITH, TREE, paper
 from tests.fakes import ScriptedProvider, SdkClient, openrouter_completion
 from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.test_deep import DONE, make
-from tests.test_fulltext import ANSWER, BODY
+from tests.test_fulltext import ANSWER, BODY, analysed
 from tests.test_steps import ROLES, Scripted
 
 BRIEF = RoleConfig(provider="anthropic", model="test-brief")
@@ -265,6 +265,45 @@ async def test_a_grading_that_fails_fails_the_rerun_and_try_again_does_what_is_l
     assert models.sent("field_grade").count(A.title) == 1  # graded once, not again
 
 
+async def test_a_grading_its_papers_text_change_left_unrecorded_fails_the_rerun(
+    conn, models, monkeypatch
+):
+    """B's text changed while it was graded: its verdict is not recorded, so the job does not
+    end done without it; Try again grades B's current text."""
+    current = papers_store.still_current
+
+    async def changed(conn_, p):
+        return p.id != B.id and await current(conn_, p)
+
+    monkeypatch.setattr(papers_store, "still_current", changed)
+    job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    failed = await jobs_store.get(conn, job)
+    assert (failed["state"], failed["error"]) == ("failed", "grading failed on 1")
+
+    monkeypatch.setattr(papers_store, "still_current", current)
+    await jobs_store.move(conn, job, ("failed",), "queued")
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert await verdicts_store.ungraded_under(conn, AGENTS.slug, AGENTS.version, [B.id]) == []
+
+
+async def test_a_topics_new_depth_between_chunks_brings_its_graders_bounds(
+    conn, models, monkeypatch
+):
+    """A Field re-run of A and B, one paper a chunk; the topic becomes an Area after A: B's
+    graders include `area_check`, on OpenRouter, whose bound the next chunk has."""
+    monkeypatch.setattr(worker, "CHUNK", 1)
+    job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
+    w = worker.Worker(conn, CONFIG, models.gateway)
+    assert await w.step(AFTERNOON)
+    await edited(conn, AGENTS, depth=Depth.AREA)
+    await work_out(w)
+    done = await jobs_store.get(conn, job)
+    assert (done["state"], done["error"]) == ("done", None)
+    assert models.sent("area_check") == [B.title]
+
+
 # -- V4: the ceiling -----------------------------------------------------------------------------
 
 
@@ -385,14 +424,16 @@ async def text_pass(conn) -> dict:
 
 
 async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_else(conn, models):
+    """A's abstract Weight is incremental, so central makes it relevant: no Deep card until its
+    Brief finds it a landmark, and that settle is the job's too."""
+    await analysed(conn, "incremental", A.id)
     job = await focus_rerun(conn, models, ceiling=1.0)
     w = worker.Worker(conn, CONFIG, models.gateway, archive=archive(with_text(A)))
     assert await w.step(AFTERNOON)  # the grading
     queued = await text_pass(conn)
     assert (queued["job_id"], queued["priority"]) == (job, BACKGROUND_PRIORITY)
     assert (await jobs_store.get(conn, job))["state"] == "running"
-    # As if A's Deep card were wanted only once its Brief is written: the Brief's settle queues it.
-    await conn.execute("DELETE FROM fulltext_passes WHERE kind = 'deep'")
+    assert await rows(conn, "SELECT * FROM fulltext_passes WHERE kind = 'deep'") == []
 
     # The full-text worker, and a nightly's, leave it to the job.
     assert await fulltext.work(conn, CONFIG, archive(with_text(A)), gateway=models.gateway) == {}

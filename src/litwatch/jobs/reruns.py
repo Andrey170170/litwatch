@@ -203,18 +203,18 @@ async def work(
         todo = await verdicts_store.ungraded_under(conn, slug, topic.version, ids)
         found = await papers_store.get_many(conn, todo)
         due = [grading.Due(p, topic, tree.get(slug).name) for p in found]
-        failed: list[grading.Graded] = []
         async with grading.grade(due, run.gateway, config.grading) as results:
             async for g in results:
-                if g.verdict is not None:
-                    if await grading.record(conn, g, job=job["id"]):
-                        counts["graded"] += 1
-                else:
+                if g.verdict is None:
                     log.warning("re-run %s: %s failed: %s", job["id"], g.due.paper.id, g.error)
-                    failed.append(g)
+                elif await grading.record(conn, g, job=job["id"]):
+                    counts["graded"] += 1
         reached = run.gateway.ceiling is not None and run.gateway.ceiling.reached
         if not reached:  # a grading the ceiling cut short is not a failure: it is done on
-            counts["grading_failed"] += len(failed)
+            # What the chunk leaves without a verdict under the version on its current text (a
+            # grading that failed, or one whose text changed meanwhile) fails, for Try again.
+            left = await verdicts_store.ungraded_under(conn, slug, topic.version, ids)
+            counts["grading_failed"] += len(left)
         after = await _progress(conn, job, run, counts, job["done"] + (0 if reached else len(ids)))
         if after is None:
             return Chunk("gone")
