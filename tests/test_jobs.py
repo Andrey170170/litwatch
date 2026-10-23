@@ -683,6 +683,18 @@ async def test_process_fetches_the_paper_and_queues_its_job_once(conn, models, m
     assert listed["done"][0]["cost"] > 0
 
 
+async def test_process_asked_again_while_its_job_runs_only_answers_with_it(conn, models):
+    """A retry after a lost reply, while the job runs and has not classified the paper yet: it
+    answers with the job and does not ask it again, so the job ends done, not queued."""
+    job = await queued(conn, A.id)
+    await jobs_store.claim(conn)
+    async with api(conn) as http:
+        again = await http.post("/api/jobs/process", json={"paper_id": A.id})
+    assert (again.status_code, again.json()["id"], again.json()["state"]) == (202, job, "running")
+    await jobs_store.finish(conn, job, "done")
+    assert (await jobs_store.get(conn, job))["state"] == "done"
+
+
 async def test_process_holds_its_job_so_a_try_again_meanwhile_waits_and_is_refused(
     conn, models, monkeypatch
 ):
