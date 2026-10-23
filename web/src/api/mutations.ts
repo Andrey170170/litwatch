@@ -200,15 +200,34 @@ function jobsChanged(qc: QueryClient) {
   return Promise.all(JOBS_PAGES.map((page) => qc.invalidateQueries({ queryKey: jobsQuery(page).queryKey, exact: true })));
 }
 
-/** An action on a row of Jobs: Run now, With tonight's run, Discard or Try again on a job; Try again on a Deep card
- * asked for runs its pass now, as Needs you's Run it now does: its row there settles the same way, and the paper is
- * settled as after any write. */
+/** The re-run offer's Run and Not now (DESIGN.md, "The re-run offer"): Run starts it, Not now keeps it under Not run;
+ * the toast says where it is either way. */
+export function useRerun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Schemas["RerunIn"]) => ok(await api.POST("/api/jobs/reruns", { body })),
+    onSuccess: (_, body) => {
+      toast(
+        body.run
+          ? `Re-run started; it stops at $${body.ceiling.toFixed(2)}. Progress in Settings › Runs and cost › Jobs.`
+          : "Not run. It waits in Settings › Runs and cost › Jobs, to run now or with tonight's run.",
+      );
+      return jobsChanged(qc);
+    },
+    onError: (e) => toast(said(e, "Could not start the re-run"), "error"),
+  });
+}
+
+/** An action on a row of Jobs: Run now, With tonight's run, Discard or Try again on a job (Run now on a re-run its
+ * ceiling stopped, under the new `ceiling`); Try again on a Deep card asked for runs its pass now, as Needs you's
+ * Run it now does: its row there settles the same way, and the paper is settled as after any write. */
 export function useJobAction() {
   const qc = useQueryClient();
   const card = settling<{ id: number }>("fulltext", (v) => v);
   return useMutation({
-    mutationFn: async ({ job, action }: { job: Job; action: JobAction }) => {
-      if (job.pass_id == null) ok(await api.POST("/api/jobs/{job_id}/{action}", { params: { path: { job_id: job.id!, action } } }));
+    mutationFn: async ({ job, action, ceiling }: { job: Job; action: JobAction; ceiling?: number }) => {
+      const body = ceiling == null ? undefined : { ceiling };
+      if (job.pass_id == null) ok(await api.POST("/api/jobs/{job_id}/{action}", { params: { path: { job_id: job.id!, action } }, body }));
       else ok(await api.POST("/api/settings/fulltext/{pass_id}/now", { params: { path: { pass_id: job.pass_id } } }));
     },
     onSuccess: (_, { job }) => {

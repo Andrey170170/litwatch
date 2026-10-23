@@ -327,7 +327,12 @@ describe("a paper's page", () => {
     renderApp("/paper/2409.01234", qc);
     await screen.findByRole("heading", { name: "Classified one" });
     expect(screen.getByText("Processing.")).toBeInTheDocument();
+    expect(screen.getByText(/follow in a minute or two/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Jobs" })).toHaveAttribute("href", "/settings/runs/jobs");
+    // Put on tonight's run, it promises no minute or two.
+    state = "tonight";
+    await qc.invalidateQueries();
+    expect(await screen.findByText(/follow after tonight's run/)).toBeInTheDocument();
     state = "done";
     await qc.invalidateQueries();
     await waitFor(() => expect(screen.queryByText("Processing.")).toBeNull());

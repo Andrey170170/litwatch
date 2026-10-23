@@ -3023,7 +3023,7 @@
     "/api/jobs/process": {
       "post": {
         "summary": "Process",
-        "description": "Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks\nit, with no transaction open, then store it and queue its Process job in one. Asked again,\nit answers with the job already queued or running, and puts a failed one back in the\nqueue, unless a step of the paper waits on the owner (409: it would find nothing due, and\nthe owner's action on Needs you settles the job). Without a taxonomy there is nothing to sort\nthe paper into: 409, nothing kept. With the schedule off no worker runs jobs: the paper is\nfetched only, for the next run, and the answer is null.",
+        "description": "Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks\nit, with no transaction open, then store it and queue its Process job in one. Asked again,\nit answers with the job already queued or running, and puts a failed one back in the\nqueue. Without a taxonomy there is nothing to sort the paper into: 409, nothing kept. With\nthe schedule off no worker runs jobs: the paper is fetched only, for the next run, and the\nanswer is null.",
         "operationId": "process_api_jobs_process_post",
         "requestBody": {
           "content": {
@@ -3064,7 +3064,7 @@
             "description": "No such paper"
           },
           "409": {
-            "description": "The paper is in the collection already, dismissed or waits on the owner, or no taxonomy"
+            "description": "The paper is in the collection already or dismissed, or no taxonomy"
           },
           "503": {
             "description": "arXiv did not answer in time; nothing was stored"
@@ -3082,10 +3082,166 @@
         }
       }
     },
+    "/api/jobs/reruns/offer": {
+      "get": {
+        "summary": "Rerun Offer",
+        "description": "The re-run offer after an edit of the topic: each scope with its papers and estimate, and\nthe chosen `scopes` together (a date range from `since` to `until`, both included).",
+        "operationId": "rerun_offer_api_jobs_reruns_offer_get",
+        "parameters": [
+          {
+            "name": "topic",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Topic"
+            }
+          },
+          {
+            "name": "scopes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "labels",
+                  "members",
+                  "keywords",
+                  "range"
+                ],
+                "type": "string"
+              },
+              "default": [],
+              "title": "Scopes"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerunOffer"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "404": {
+            "description": "No such topic"
+          },
+          "409": {
+            "description": "The topic is not active, the scopes name no paper, or no worker runs"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/reruns": {
+      "post": {
+        "summary": "Rerun",
+        "description": "Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are\nthose of its scopes as they stand now; it grades them under the topic's version when it\nruns (D3). Run needs the schedule on, whose worker runs jobs. Answers with the Jobs page's\ngroups.",
+        "operationId": "rerun_api_jobs_reruns_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RerunIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Jobs"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "404": {
+            "description": "No such topic"
+          },
+          "409": {
+            "description": "The topic is not active, the scopes name no paper, or no worker runs"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/{job_id}/{action}": {
       "post": {
         "summary": "Act",
-        "description": "Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,\na Process job only while no step of its paper waits on the owner, checked under the paper's\nsettle lock. Answers with the page's groups as they stand after it.",
+        "description": "Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one.\nRun now and With tonight's run take a re-run's new ceiling, which a job its ceiling stopped\nneeds above what it spent. A discarded re-run lets go of its text passes. Answers with the\npage's groups as they stand after it.",
         "operationId": "act_api_jobs__job_id___action__post",
         "parameters": [
           {
@@ -3113,6 +3269,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/JobRun"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3134,7 +3307,7 @@
             "description": "No such job"
           },
           "409": {
-            "description": "The job's state does not allow it, or its paper waits on the owner"
+            "description": "The job's state does not allow it"
           },
           "422": {
             "description": "Validation Error",
@@ -5107,6 +5280,7 @@
             "type": "string",
             "enum": [
               "process",
+              "rerun",
               "deep"
             ],
             "title": "Kind"
@@ -5156,6 +5330,30 @@
               }
             ]
           },
+          "topic": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobTopic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scopes": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "labels",
+                "members",
+                "keywords",
+                "range"
+              ]
+            },
+            "type": "array",
+            "title": "Scopes",
+            "default": []
+          },
           "papers": {
             "type": "integer",
             "title": "Papers"
@@ -5163,6 +5361,17 @@
           "done": {
             "type": "integer",
             "title": "Done"
+          },
+          "graded": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graded"
           },
           "cost": {
             "anyOf": [
@@ -5174,6 +5383,28 @@
               }
             ],
             "title": "Cost"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimate"
+          },
+          "ceiling": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ceiling"
           },
           "error": {
             "anyOf": [
@@ -5216,7 +5447,7 @@
           "at"
         ],
         "title": "Job",
-        "description": "One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked\nfor (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready\nis queued). `papers` and `done` say how far it got; `cost` is what its runs spent, None\nbefore any and for a card, which runs on the subscription. `at` is when it last changed\nstate. `actions` are those its state allows: Run now, With tonight's run and Discard while\nit is not run; Try again once it failed, for a card only once it waits for the owner (a\ncard that failed fewer runs is tried again by the next nightly run)."
+        "description": "One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked\nfor (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready\nis queued). `papers` and `done` say how far it got (a re-run's `graded` how many it graded);\n`cost` is what its runs spent so far, None before any and for a card, which runs on the\nsubscription. `at` is when it last changed state. A re-run has its topic, `scopes`, the\n`estimate` it was offered with and its `ceiling`; stopped by the ceiling, `error` says where.\n`actions` are those its state allows: Run now, With tonight's run and Discard while it is\nnot run; Try again once it failed, for a card only once it waits for the owner (a card that\nfailed fewer runs is tried again by the next nightly run)."
       },
       "JobPaper": {
         "properties": {
@@ -5235,6 +5466,55 @@
           "title"
         ],
         "title": "JobPaper"
+      },
+      "JobRun": {
+        "properties": {
+          "ceiling": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ceiling"
+          }
+        },
+        "type": "object",
+        "title": "JobRun",
+        "description": "Run now or With tonight's run: a re-run's new ceiling in USD, which a stopped one needs\nabove what it spent."
+      },
+      "JobTopic": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "JobTopic",
+        "description": "A re-run's topic, and the revision of it the re-run was offered for."
       },
       "Jobs": {
         "properties": {
@@ -6404,11 +6684,6 @@
               }
             ],
             "title": "Error"
-          },
-          "again": {
-            "type": "boolean",
-            "title": "Again",
-            "default": false
           }
         },
         "type": "object",
@@ -6417,7 +6692,7 @@
           "state"
         ],
         "title": "ProcessJob",
-        "description": "A paper's Process job (DESIGN.md, the paper page): its button reads \"Processing\" while\nthe job is queued or running. `again`: failed, and Process would put it back in the queue,\nsince no step of its paper waits on the owner (then the owner's action there settles it)."
+        "description": "A paper's Process job (DESIGN.md, the paper page): its button reads \"Processing\" while\nthe job is queued or running."
       },
       "Publication": {
         "properties": {
@@ -6706,6 +6981,164 @@
           "down"
         ],
         "title": "ReactionValue"
+      },
+      "RerunIn": {
+        "properties": {
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "scopes": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "labels",
+                "members",
+                "keywords",
+                "range"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Scopes"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "ceiling": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Ceiling"
+          },
+          "run": {
+            "type": "boolean",
+            "title": "Run"
+          }
+        },
+        "type": "object",
+        "required": [
+          "topic",
+          "scopes",
+          "ceiling",
+          "run"
+        ],
+        "title": "RerunIn",
+        "description": "A re-run to start (`run`) or to keep under Not run: its topic, its scopes (the date\nrange's days in the schedule's zone, both included) and its ceiling in USD."
+      },
+      "RerunOffer": {
+        "properties": {
+          "topic": {
+            "$ref": "#/components/schemas/JobTopic"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/RerunScopeRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "papers": {
+            "type": "integer",
+            "title": "Papers"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimate"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing",
+            "default": []
+          },
+          "unpriced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unpriced",
+            "default": []
+          },
+          "ceiling": {
+            "type": "number",
+            "title": "Ceiling"
+          }
+        },
+        "type": "object",
+        "required": [
+          "topic",
+          "rows",
+          "papers",
+          "ceiling"
+        ],
+        "title": "RerunOffer",
+        "description": "The re-run offer after a topic edit (DESIGN.md, the re-run offer): each scope with its\npaper count and estimate; `papers` and `estimate` for the scopes chosen, a paper in two of\nthem counted once. `missing` are the roles with no calls to estimate by; `unpriced` the\nmodels (`role: model`) with no price bound, whose calls a re-run does not send. `ceiling`\nis the one offered, in USD."
+      },
+      "RerunScopeRow": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "labels",
+              "members",
+              "keywords",
+              "range"
+            ],
+            "title": "Scope"
+          },
+          "papers": {
+            "type": "integer",
+            "title": "Papers"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "papers"
+        ],
+        "title": "RerunScopeRow",
+        "description": "One scope of the re-run offer: its papers and what grading them is estimated to cost\n(None when a role has no calls to estimate by)."
       },
       "Row": {
         "properties": {

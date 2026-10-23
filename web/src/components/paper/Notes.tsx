@@ -208,7 +208,7 @@ export function Notes({ paper, onLabel }: { paper: Paper; onLabel: (topic: strin
       {paper.in_collection && processing(paper.process) && (
         <div className="note run">
           <div>
-            <b>Processing.</b> Its analysis and grading follow in a minute or two;{" "}
+            <b>Processing.</b> Its analysis and grading follow {paper.process?.state === "tonight" ? "after tonight's run" : "in a minute or two"};{" "}
             <Link to="/settings/runs/jobs" className="inl">
               Jobs
             </Link>{" "}
