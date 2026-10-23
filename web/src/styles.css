@@ -998,6 +998,7 @@ button.car:hover { color: var(--fg); background: var(--line2); }
 .offer .ofr .box { display: grid; place-items: center; font-size: 11px; line-height: 1; }
 .offer .ofr.on .box { border-color: var(--acc); color: var(--fg); }
 .offer .ofd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 0 8px 28px; }
+.offer .ofd .tin { width: 150px; }
 .offer .ofn { font-size: 12.5px; color: var(--fg3); padding: 6px 0 0; }
 .offer .ofc { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; }
 .offer .ofc .tin { width: 84px; }

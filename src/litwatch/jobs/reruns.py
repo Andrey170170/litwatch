@@ -10,6 +10,7 @@ bound, whose calls a re-run does not send."""
 
 from __future__ import annotations
 
+import logging
 import math
 from collections import Counter
 from dataclasses import dataclass
@@ -40,6 +41,8 @@ GRADERS = {
     Depth.FIELD: ("field_grade",),
 }
 WAKE = timedelta(seconds=30)  # a re-run whose passes all await their text looks again after
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -207,6 +210,7 @@ async def work(
                     if await grading.record(conn, g, job=job["id"]):
                         counts["graded"] += 1
                 else:
+                    log.warning("re-run %s: %s failed: %s", job["id"], g.due.paper.id, g.error)
                     failed.append(g)
         reached = run.gateway.ceiling is not None and run.gateway.ceiling.reached
         if not reached:  # a grading the ceiling cut short is not a failure: it is done on

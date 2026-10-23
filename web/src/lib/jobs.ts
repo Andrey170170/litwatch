@@ -98,7 +98,7 @@ export function ceilingOf(typed: string): number | null {
 export function runLabel(offer: Pick<RerunOffer, "papers" | "estimate"> | undefined): string {
   if (!offer?.papers) return "Run";
   const cost = offer.estimate == null ? "" : ` ≈ ${usd(offer.estimate)}`;
-  return `Run · ${plural(offer.papers, "paper")}${cost}`;
+  return `Run · ${offer.papers.toLocaleString("en")} ${offer.papers === 1 ? "paper" : "papers"}${cost}`;
 }
 
 /** A day `days` before today in `zone` (the schedule's), as an ISO date: the date range's defaults. */
