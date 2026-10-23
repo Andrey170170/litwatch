@@ -498,6 +498,7 @@ export function useSaveTopic() {
         digestsStale(qc),
         qc.invalidateQueries(settingsReads("topics")),
         qc.invalidateQueries(settingsReads("taxonomy")),
+        jobsChanged(qc), // a paused topic may settle a failed Process job
       ]),
     onError: (e) => toast(said(e, "Could not save it"), "error"),
   });
