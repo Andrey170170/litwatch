@@ -18,13 +18,13 @@ from litwatch.api import create_app
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config, Models, RoleConfig, Schedule
 from litwatch.core import Cause, Fit, Label, LabelOrigin, LabelValue, Status, Verdict
-from litwatch.core.fulltext import BACKGROUND_PRIORITY, LEASE
+from litwatch.core.fulltext import BACKGROUND_PRIORITY
 from litwatch.feedback import word
+from litwatch.fulltext import deep as deep_passes
 from litwatch.jobs import reruns, worker
 from litwatch.llm import CallError, Gateway, Reply, Request, Usage, prices
 from litwatch.llm import ceiling as ceilings
 from litwatch.llm.openrouter import OpenRouterProvider
-from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import runs
@@ -32,7 +32,8 @@ from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests.conftest import AGENTS, FAITH, TREE, paper
 from tests.fakes import ScriptedProvider, SdkClient, openrouter_completion
-from tests.fakes_http import FakeArchive, mock
+from tests.fakes_http import FakeArchive, FakeDeep, mock
+from tests.test_deep import DONE, make
 from tests.test_fulltext import ANSWER, BODY
 from tests.test_steps import ROLES, Scripted
 
@@ -429,18 +430,15 @@ async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn, m
     assert not await w.step(NIGHT)  # a nightly is due: no chunk, so no pass
     assert (await text_pass(conn))["state"] == "awaiting_text"
 
-    # The Deep worker holds the re-run's card while a nightly runs, and takes it after.
-    (deep,) = await rows(conn, "SELECT * FROM fulltext_passes WHERE kind = 'deep'")
+    # The Deep worker holds the re-run's card while a nightly runs, and makes it after.
+    service = FakeDeep(DONE)
     nightly = await runs.start(conn, "nightly", None, None)
-    lease = LEASE
-    assert await fulltext_store.claim(conn, lease, 1, deep=True, background=False) == []
-    from litwatch.jobs.worker import nightly_waits  # noqa: PLC0415
-
-    assert await nightly_waits(conn, CONFIG, datetime.now(UTC).astimezone(ZONE))
+    assert await deep_passes.work(conn, archive(with_text(A)), make(service), config=CONFIG) == {}
+    assert service.requests == []
     await runs.finish(conn, nightly)
-    (claimed,) = await fulltext_store.claim(conn, lease, 1, deep=True, background=True)
-    assert claimed.id == deep["id"]
-    assert (await jobs_store.get(conn, job))["state"] == "running"
+    done = await deep_passes.work(conn, archive(with_text(A)), make(service), config=CONFIG)
+    assert done == {"cards_written": 1} and len(service.requests) == 1
+    assert (await jobs_store.get(conn, job))["state"] == "running"  # its text pass still waits
 
 
 async def test_a_discarded_rerun_lets_its_passes_go(conn, models):
@@ -513,7 +511,12 @@ async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_r
         )
         assert row["topic"]["slug"] == AGENTS.slug and row["scopes"] == ["members"]
         started = (await http.post("/api/jobs/reruns", json=body | {"run": True})).json()
-        assert [r["state"] for r in started["running"]] == ["queued"]
+        # The same re-run asked again (a lost reply): the one kept is put in the queue, once.
+        assert started["not_run"] == [] and [r["state"] for r in started["running"]] == ["queued"]
+        again = (await http.post("/api/jobs/reruns", json=body | {"run": True})).json()
+        assert [r["key"] for r in again["running"]] == [r["key"] for r in started["running"]]
+        wider = body | {"scopes": ["labels", "members"], "run": True}
+        assert len((await http.post("/api/jobs/reruns", json=wider)).json()["running"]) == 2
         empty = body | {"scopes": ["range"]}
         assert (await http.post("/api/jobs/reruns", json=empty)).status_code == 409
     async with api(conn, CONFIG.model_copy(update={"schedule": Schedule()})) as http:
