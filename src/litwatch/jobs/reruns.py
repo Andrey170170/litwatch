@@ -225,7 +225,7 @@ async def work(
     if archive is not None:
         done = await fulltext.work(conn, config, archive, run=run, job=job["id"], limit=size)
         counts.update({k: v for k, v in done.items() if k != "awaiting_text"})
-        after = await _progress(conn, job, run, counts, job["done"])
+        after = await _progress(conn, job, run, counts, job["done"], on_run=False)
         if after is None:
             return Chunk("gone")
         if run.gateway.ceiling is not None and run.gateway.ceiling.reached:
@@ -243,10 +243,14 @@ async def _progress(
     run: ModelRun,
     counts: Counter[str],
     done: int,
+    *,
+    on_run: bool = True,
 ) -> dict[str, Any] | None:
-    """Record the chunk on the job and its run; None when the job is no longer this session's."""
+    """Record the chunk on the job and, unless they are there already (`on_run`), on its run;
+    None when the job is no longer this session's."""
     merged = dict(job["counts"])
     for k, v in counts.items():
         merged[k] = merged.get(k, 0) + v
-        run.add(k, v)
+        if on_run:
+            run.add(k, v)
     return await jobs_store.progress(conn, job["id"], done, merged)

@@ -108,15 +108,23 @@ ACCOUNT_STATUSES = frozenset({401, 402, 403})
 
 class ProviderError(Exception):
     """A provider did not answer. `transient` failures are worth another attempt; an `account`
-    one (models.md, the gateway) never is."""
+    one (models.md, the gateway) never is. A `timeout` or a connection lost (`unanswered`) may
+    have been billed; an answered error was not."""
 
     def __init__(
-        self, message: str, *, transient: bool = False, timeout: bool = False, account: bool = False
+        self,
+        message: str,
+        *,
+        transient: bool = False,
+        timeout: bool = False,
+        account: bool = False,
+        unanswered: bool = False,
     ) -> None:
         super().__init__(message)
         self.transient = transient
         self.timeout = timeout
         self.account = account
+        self.unanswered = unanswered
 
 
 class Provider(Protocol):

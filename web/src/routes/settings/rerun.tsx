@@ -33,8 +33,11 @@ export function RerunOffer({ slug, line, onDone }: { slug: string; line: string;
       { topic: slug, scopes, since: dated ? range.since : null, until: dated ? range.until : null, ceiling, run: go },
       { onSuccess: onDone },
     );
-  // Run and Not now need a scope that names some paper (the counts as read for the ticks shown) and a ceiling.
-  const ready = !!o && !offer.isPlaceholderData && o.papers > 0 && ceiling != null && !run.isPending;
+  // Run and Not now need a scope that names some paper (the counts as read for the ticks shown) and a ceiling;
+  // with none named, Not now only puts the offer away.
+  const read = !!o && !offer.isPlaceholderData && !run.isPending;
+  const ready = read && o.papers > 0 && ceiling != null;
+  const empty = read && o.papers === 0;
   return (
     <div className="offer">
       <div className="oh">{line}</div>
@@ -74,7 +77,7 @@ export function RerunOffer({ slug, line, onDone }: { slug: string; line: string;
           <input className="tin sm mono" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Stop at" aria-invalid={ceiling == null} />
         </label>
         <span className="sp" />
-        <button className="btn" disabled={!ready} onClick={() => send(false)}>
+        <button className="btn" disabled={!ready && !empty} onClick={() => (empty ? onDone() : send(false))}>
           Not now
         </button>
         <button className="btn pri" disabled={!ready} title={ceiling == null ? "The ceiling is an amount in dollars" : undefined} onClick={() => send(true)}>

@@ -115,11 +115,17 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
     left out of the input price); a Decisions route is held to its input (`max_price` completion 0, models.md: it
     bills input only); a chat route with no output cap of its own is sent 16,000, Anthropic's default. A call that
     does not fit waits while others are in flight and stops the job only with none in flight. An answered provider
-    error frees its reservation; a timeout keeps it, as it may have been billed. A known limit: a charge the journal
+    error frees its reservation; a timeout or a lost connection keeps it, as it may have been billed. A known limit: a charge the journal
     never learns (a timeout, or a process that died mid-call) is not counted against what is left when the job's next
     run opens, so such a job can pass its ceiling by those calls' worst cases.
   - *A re-run asked for twice is made once:* the same topic version, scopes and dates while one is not yet ended
-    adopts it, and Run moves an offered one to the queue.
+    adopts it (under a lock per topic, so two at once make one), and Run moves an offered one to the queue. Run
+    now on Jobs is refused with the schedule off too.
+  - *A topic edited back* to an earlier version re-runs what a version between them decided: a paper is done
+    when its latest verdict is under the version, its calls reused from the journal.
+  - *A re-run's pass the owner runs from Needs you* ("Run it now") leaves the job for the regular queue. A pass
+    the job works settles under the job: the passes and the Deep card it brings are the job's, at background
+    priority.
   - *Where it stopped:* "stopped at the ceiling after 212 of 476" while grading, "with 3 full-text passes left"
     after. Run now on a stopped re-run takes a new ceiling above what it spent; the ceiling is over the job's life.
     Discarding it lets go of its text passes; a re-run that ends lets go of those it left (failed, or awaiting text

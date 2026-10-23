@@ -109,11 +109,9 @@ class AnthropicProvider:
                 # The connection never opened, so nothing was sent: worth another attempt.
                 raise ProviderError("APITimeoutError while connecting", transient=True) from exc
             raise ProviderError(type(exc).__name__, timeout=True) from exc
-        except (
-            anthropic.InternalServerError,
-            anthropic.RateLimitError,
-            anthropic.APIConnectionError,
-        ) as exc:
+        except anthropic.APIConnectionError as exc:  # it may have been sent: billed or not
+            raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
+        except (anthropic.InternalServerError, anthropic.RateLimitError) as exc:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except anthropic.APIError as exc:
             account = getattr(exc, "status_code", None) in ACCOUNT_STATUSES

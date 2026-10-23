@@ -148,7 +148,7 @@ async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
     ceiling stopped goes back unworked. Returns False when the worker no longer held the
     pass."""
     c = a.claimed
-    async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
+    async with word.change(conn, c.paper.id, cause=Cause.VERDICT, job=c.job):
         if not await store_.held(conn, c):
             return False
         read = _read_of(a.text)
@@ -218,7 +218,7 @@ async def still_wanted(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
     still runs as claimed; else why not. One no longer wanted is dropped; one wanted for
     another reason is relabelled and given back, to run on its next claim; one for a paper
     dismissed since its claim is given back, left for the owner's word as `record` leaves it."""
-    async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
+    async with word.change(conn, c.paper.id, cause=Cause.VERDICT, job=c.job):
         return await judged(conn, c)
 
 
@@ -232,7 +232,7 @@ async def judged(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
     if await store_.dismissed(conn, c.paper.id):  # `settle` leaves its pass alone
         await store_.release(conn, c)
         return "fulltext_dismissed"
-    await word.settle(conn, c.paper.id, cause=Cause.VERDICT, claimed=c.id)
+    await word.settle(conn, c.paper.id, cause=Cause.VERDICT, claimed=c.id, job=c.job)
     label = await store_.label_of(conn, c.id)
     if label is None:
         return "fulltext_dropped"
