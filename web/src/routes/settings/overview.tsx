@@ -1,13 +1,15 @@
 /** Overview (DESIGN.md, "Overview"): four tiles, then recall, precision, reactions and "Matters, no topic". */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { qualityQuery, runsQuery, sessionsQuery } from "@/api/queries";
+import { useEffect, useRef } from "react";
+import { qualityQuery, replayOfferQuery, runsQuery, sessionsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rowDate } from "@/lib/format";
 import { type ReactionReason, reasonLabel } from "@/lib/reactions";
 import { digests, type Quality, runFailed, spendTotals, usd, waiting } from "@/lib/settings";
-import { Failed, Later, Load, PageHead, PaperLink, Share, useTopicCards } from "./parts";
+import { Failed, Load, PageHead, PaperLink, Share, useTopicCards } from "./parts";
+import { RunReplay } from "./replay";
 
 type Tone = "ask" | "fail" | "warn" | "ok" | "";
 
@@ -50,8 +52,20 @@ function Reactions({ q, name }: { q: Quality; name: (slug: string) => React.Reac
   );
 }
 
+/** While a replay is queued or running, its offer and the recall it feeds are read every `REPLAY_POLL` ms; once it
+ * has ended, recall is read once more, so the last numbers come after its end. */
+const REPLAY_POLL = 10_000;
+
 export function OverviewPage() {
-  const quality = useQuery(qualityQuery("overview"));
+  const offer = useQuery({ ...replayOfferQuery, refetchInterval: (q) => (q.state.data?.running ? REPLAY_POLL : false) });
+  const replaying = !!offer.data?.running;
+  const quality = useQuery({ ...qualityQuery("overview"), refetchInterval: replaying ? REPLAY_POLL : false });
+  const qc = useQueryClient();
+  const was = useRef(replaying);
+  useEffect(() => {
+    if (was.current && !replaying) void qc.invalidateQueries({ queryKey: qualityQuery("overview").queryKey, exact: true });
+    was.current = replaying;
+  }, [replaying, qc]);
   const runs = useQuery(runsQuery("overview"));
   const sessions = useQuery(sessionsQuery("overview"));
   const desktop = useDesktop();
@@ -108,7 +122,7 @@ export function OverviewPage() {
       {q && (
         <>
           <div className="cap">Recall per Focus topic</div>
-          <div className="nsub">Over the papers labelled central or related, from the last replay. A replay starts from the command line until the jobs API lands.</div>
+          <div className="nsub">Over the papers labelled central or related, per cohort, from the last replay.</div>
           {replay?.recall.length ? (
             <div className="mtbl r5">
               <div className="mh">
@@ -134,6 +148,7 @@ export function OverviewPage() {
           ) : (
             <div className="empty">{replay ? "This replay has no outcomes yet." : "No replay has run yet."}</div>
           )}
+          <RunReplay offer={offer} />
           <div className="cap">Precision at relevant</div>
           <div className="nsub">
             From Calibrate's draws over the last 90 days.{" "}
@@ -183,7 +198,6 @@ export function OverviewPage() {
           ) : (
             <div className="empty">None.</div>
           )}
-          <Later>Recall per cohort and "Run replay" come with the jobs API.</Later>
         </>
       )}
     </>

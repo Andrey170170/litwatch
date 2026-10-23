@@ -59,6 +59,8 @@ WORKDIR /var/lib/litwatch
 
 COPY --from=builder --chown=0:0 /app/.venv /app/.venv
 COPY --from=builder --chown=0:0 /app/src /app/src
+# The evaluation labels, which a replay run from Overview reads (`quality.replay.LABELS`).
+COPY --chown=0:0 evals/labels /app/evals/labels
 COPY --chown=0:0 LICENSE /app/LICENSE
 
 # Fixed 1000:1000 so bind-mounted secret files can be readable without root.

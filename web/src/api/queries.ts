@@ -209,6 +209,9 @@ export const rerunOfferQuery = (slug: string, scopes: RerunScope[], since: strin
   });
 
 /** Both pages' reads of the jobs, for a write that changes them. */
+/** What Overview's Run replay would do: the replay running, or what a new or stopped one leaves to do and costs. */
+export const replayOfferQuery = settingsRead("overview", "replay-offer", async () => ok(await api.GET("/api/jobs/replays/offer")));
+
 export const JOBS_PAGES = ["runs", "runs/jobs"] as const;
 
 export const configQuery = settingsRead("configuration", "config", async () => ok(await api.GET("/api/settings/config")) as Record<string, unknown>);

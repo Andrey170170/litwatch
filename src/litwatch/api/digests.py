@@ -1,5 +1,5 @@
-"""The Digest tab's routes: a Day, a Week, History, a digest, and writing a failed one again
-(docs/specs/v1/DESIGN.md, Digest; digests.md, what the Digest tab shows)."""
+"""The Digest tab's routes: a Day, a Week, History, a digest, and writing a failed one again as
+a job (docs/specs/v1/DESIGN.md, Digest and Jobs; digests.md, what the Digest tab shows)."""
 
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, protected
 from litwatch.api.reading import _looks
 from litwatch.config import Schedule
-from litwatch.core.digests import DigestPeriod, week_of
-from litwatch.jobs import digests as jobs
+from litwatch.core import Status
+from litwatch.core.digests import DigestPeriod, DigestState, week_of
 from litwatch.jobs import scheduler
-from litwatch.jobs.lock import BusyError
 from litwatch.store import digests as store_
+from litwatch.store import jobs as jobs_store
 from litwatch.store import reading
 from litwatch.store import taxonomy as taxonomy_store
 
@@ -25,7 +25,7 @@ router = protected("/api/digests")
 
 NO_DIGEST = {404: {"description": "No such digest, or its topic is no longer shown"}}
 WRITE_AGAIN = NO_DIGEST | {
-    409: {"description": "The digest is not failed, its topic is not active, or a job runs"}
+    409: {"description": "The digest is not failed, its topic is not active, or no worker runs"}
 }
 
 
@@ -204,23 +204,43 @@ async def in_full(c: psycopg.AsyncConnection, digest_id: int) -> s.Digest | None
     )
 
 
+async def _with_job(c: psycopg.AsyncConnection, digest_id: int) -> s.Digest:
+    """The digest in full with its newest job writing it again, read after it: a job read done
+    comes with the digest it wrote."""
+    job = await jobs_store.digest_job(c, digest_id)
+    found = await _digest(c, digest_id)
+    if job is not None:
+        found.job = s.JobRef(id=job["id"], state=job["state"], error=job["error"])
+    return found
+
+
 @router.get("/{digest_id}", responses=NO_DIGEST)
 async def digest(digest_id: int, c: Conn) -> s.Digest:
-    """A digest in full: its text and its papers by role, each as it was shown."""
-    return await _digest(c, digest_id)
+    """A digest in full: its text and its papers by role, each as it was shown, and its newest
+    job writing it again."""
+    return await _with_job(c, digest_id)
 
 
-@router.post("/{digest_id}/write", responses=WRITE_AGAIN)
+@router.post("/{digest_id}/write", status_code=202, responses=WRITE_AGAIN)
 async def write_again(digest_id: int, request: Request, c: Conn) -> s.Digest:
-    """Write a failed digest again now, over the papers due for it now, as a run of its own.
-    It may fail again. 409 when it is not failed (written meanwhile), its topic is paused, or
-    another job holds the run lock."""
+    """Write a failed digest again, as a job (DESIGN.md, Jobs): queued now, and written by the
+    jobs worker as soon as the run lock is free (a nightly run or another job's chunk may hold
+    it), over the papers due for it then; it may fail again. Asked again while its job is
+    queued or running, it answers with that job; a failed one goes back in the queue. 409 when
+    it is not failed (written meanwhile) or its topic is not active, checked under the digest's
+    row lock, or when the schedule is off (no worker runs jobs). Answers with the digest and its
+    job."""
     await _digest(c, digest_id)
-    app = request.app.state
-    try:
-        state = await jobs.again(c, app.config, digest_id, app.gateway)
-    except BusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if state is None:
-        raise HTTPException(status_code=409, detail="the digest is not one to write again")
-    return await _digest(c, digest_id)
+    if not request.app.state.config.schedule.enabled:
+        raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
+    async with c.transaction():
+        row = await store_.get(c, digest_id, lock=True)
+        tree = await taxonomy_store.load(c)
+        topic = tree.topic(row["topic"]) if tree and row else None
+        if row is None or row["state"] != DigestState.FAILED or topic is None:
+            raise HTTPException(status_code=409, detail="the digest is not one to write again")
+        if topic.status != Status.ACTIVE:
+            raise HTTPException(status_code=409, detail="the digest is not one to write again")
+        await jobs_store.write_digest(c, digest_id)
+    request.app.state.jobs_wake.set()
+    return await _with_job(c, digest_id)

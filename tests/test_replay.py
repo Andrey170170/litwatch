@@ -2,25 +2,31 @@
 and that it writes nothing outside the evaluation tables. Models are scripted, as in
 test_steps."""
 
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 import httpx
 import pytest
 
-from litwatch import grading
+from litwatch import grading, store
 from litwatch.api import create_app
-from litwatch.config import Classification, Config
+from litwatch.config import Classification, Config, Schedule
 from litwatch.core import Depth, Fit, Status, Taxonomy, TaxonomyClass, Topic
 from litwatch.core.classification import Source
 from litwatch.core.evaluation import Outcome, recall
 from litwatch.feedback import misses as misses_feedback
-from litwatch.llm import ProviderError
+from litwatch.jobs import worker
+from litwatch.llm import ProviderError, prices
 from litwatch.quality import replay
 from litwatch.store import classifications as classifications_store
 from litwatch.store import evaluation, quality
+from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests.conftest import FAITH, TREE, paper
+from tests.test_reruns import COST, Priced, charged, work_out
 from tests.test_steps import CONFIG, Scripted, decision, rows
 
 LABELS = Path(__file__).parent.parent / "evals" / "labels"
@@ -387,3 +393,156 @@ async def test_quality_shows_recall_from_the_latest_replay_and_the_report_names_
     )
     assert "| owner | cot-faithfulness | 2 | 0.50 (1/2) | 1.00 (2/2) | 0.50 (1/2) |" in text
     assert "a member; graded adjacent (judge none, check adjacent)" in text
+
+
+# -- a replay as a job (docs/plans/jobs.md, P3: V6) ---------------------------------------------
+
+SCHEDULED = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})  # the worker runs
+AFTERNOON = datetime(2026, 10, 22, 14, 0, tzinfo=SCHEDULED.schedule.zone)  # no nightly due
+FIT_HEAD = "paper_id,topic,fit,legacy,cohort,origin,labelled_at,note\n"
+
+
+@pytest.fixture
+def labels(tmp_path, monkeypatch):
+    """Label files of the owner's three labels and one legacy label, where a job reads them."""
+    (tmp_path / "fit.csv").write_text(
+        FIT_HEAD
+        + "".join(
+            f"{p},{TOPIC},{fit},,owner,gold,2026-10-09,\n"
+            for p, fit in ((A.id, "central"), (B.id, "central"), (C.id, "none"))
+        )
+    )
+    regression = f"paper_id,topic,tier,source\n{A.id},{TOPIC},4,legacy\n"
+    (tmp_path / "regression.csv").write_text(regression)
+    monkeypatch.setattr(replay, "LABELS", tmp_path)
+
+
+@pytest.fixture
+async def priced(conn, monkeypatch, labels):
+    """The taxonomy, the three papers, and every replay role with a price bound: the Anthropic
+    judge at a listed price, the OpenRouter classifier and check by their charged history. Each
+    call costs `test_reruns.COST`."""
+    await taxonomy_store.save(conn, TREE)
+    await papers_store.upsert(conn, [A, B, C])
+    monkeypatch.setitem(prices.ANTHROPIC, "test-judge", (1.0, 2.0, 0.1))
+    for model in ("test/decider", "test/check"):
+        await charged(conn, model, cost=0.0003, tokens_in=1000, tokens_out=1000)
+    return Priced()
+
+
+@asynccontextmanager
+async def api(conn, config=SCHEDULED):
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    app = create_app(dsn, "t", config)
+    transport = httpx.ASGITransport(app=app)
+    headers = {"authorization": "Bearer t"}
+    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+        yield c
+
+
+async def run_replay(conn, ceiling: float = 5.0, config=SCHEDULED) -> dict:
+    """Run replay from Overview: the job it queued or answered with."""
+    async with api(conn, config) as http:
+        answer = await http.post("/api/jobs/replays", json={"ceiling": ceiling})
+    assert answer.status_code == 201, answer.text
+    (job,) = [j for j in answer.json()["running"] if j["kind"] == "replay"]
+    return job
+
+
+async def test_a_replay_job_from_overview_writes_only_to_the_evaluation_tables(conn, priced):
+    await misses_feedback.report(conn, C.id, TOPIC, Fit.CENTRAL)
+    before = await contents(conn)
+    async with api(conn) as http:
+        offer = (await http.get("/api/jobs/replays/offer")).json()
+        assert offer["labels"] == {"owner": 3, "legacy": 1, "miss": 1}
+        assert (offer["papers"], offer["pairs"], offer["running"]) == (3, 3, None)
+        assert offer["estimate"] > 0 and offer["unpriced"] == [] and offer["continues"] is None
+        job = await run_replay(conn)
+        assert (job["state"], job["papers"], job["ceiling"]) == ("queued", 3, 5.0)
+        # Asked again while it waits (a lost reply, a second click), it only answers with it.
+        assert (await run_replay(conn))["id"] == job["id"]
+        assert (await http.get("/api/jobs/replays/offer")).json()["running"]["id"] == job["id"]
+
+    await work_out(worker.Worker(conn, SCHEDULED, priced.gateway))
+    after = await contents(conn)
+    changed = {t for t in before if before[t] != after[t]}
+    # Its job, run and call journal; nothing of the pipeline moves, verdicts and the outbox
+    # included, nor what the status document reads of the providers.
+    evaluated = {"eval_runs", "eval_labels", "eval_results", "runs", "inference_calls"}
+    assert changed == evaluated | {"jobs"}
+    done = await jobs_store.get(conn, job["id"])
+    assert (done["state"], done["done"], done["counts"]["graded"]) == ("done", 3, 3)
+    shown = await quality.replay_recall(conn)
+    assert shown["eval_run"] == done["scope"]["eval_run"] and shown["finished_at"] is not None
+    owner = next(x for x in shown["recall"] if x.cohort == "owner")
+    assert (owner.positives, owner.grading.n) == (2, 2)
+    (run,) = await rows(conn, "SELECT kind FROM runs WHERE job_id = %s", job["id"])
+    assert run["kind"] == "job"  # its cost reaches the month's spend
+
+
+async def test_a_replay_job_taken_back_goes_on_without_redoing_what_it_concluded(
+    conn, priced, monkeypatch
+):
+    monkeypatch.setattr(worker, "CHUNK", 1)
+    job = await run_replay(conn)
+    dead = await store.sibling(conn)
+    gone = worker.Worker(dead, SCHEDULED, priced.gateway)
+    assert await gone.step(AFTERNOON)  # A's chunk, then its process dies
+    pid = (await jobs_store.get(conn, job["id"]))["backend_pid"]
+    await dead.close()
+    await gone.close(RuntimeError("killed"))
+    for _ in range(200):  # the server ends the session soon after its connection closes
+        if not await rows(conn, "SELECT 1 FROM pg_stat_activity WHERE pid = %s", pid):
+            break
+        await asyncio.sleep(0.05)
+
+    await work_out(worker.Worker(conn, SCHEDULED, priced.gateway))
+    done = await jobs_store.get(conn, job["id"])
+    assert (done["state"], done["done"]) == ("done", 3)
+    assert sorted(priced.sent("classify")) == sorted([A.title, B.title, C.title])
+    assert sorted(priced.sent("judge")) == sorted([A.title, B.title, C.title])
+    run = await evaluation.get(conn, done["scope"]["eval_run"])
+    assert len(run["run_ids"]) == 2 and run["finished_at"] is not None  # both runs' cost
+
+
+async def test_a_replay_job_stops_at_its_ceiling_and_run_replay_goes_on_with_it(conn, priced):
+    """No call fits under a ceiling of a millionth of a dollar: none is sent, nothing is
+    recorded as concluded, and the job waits under Not run saying where. Run replay goes on
+    with it under a new ceiling, and concludes every paper."""
+    job = await run_replay(conn, ceiling=1e-6)
+    await work_out(worker.Worker(conn, SCHEDULED, priced.gateway))
+    stopped = await jobs_store.get(conn, job["id"])
+    assert stopped["state"] == "stopped"
+    assert stopped["error"] == "stopped at the ceiling after 0 of 3"
+    assert priced.sent("classify") == [] and priced.sent("judge") == []
+    eval_run = stopped["scope"]["eval_run"]
+    assert await evaluation.results(conn, eval_run) == []
+
+    async with api(conn) as http:
+        offer = (await http.get("/api/jobs/replays/offer")).json()
+    assert (offer["continues"], offer["papers"], offer["pairs"]) == (job["id"], 3, 3)
+    assert (await run_replay(conn, ceiling=5.0))["id"] == job["id"]
+    await work_out(worker.Worker(conn, SCHEDULED, priced.gateway))
+    done = await jobs_store.get(conn, job["id"])
+    assert (done["state"], done["error"], float(done["ceiling"])) == ("done", None, 5.0)
+    assert done["scope"]["eval_run"] == eval_run
+    assert sorted(priced.sent("classify")) == sorted([A.title, B.title, C.title])
+    assert await jobs_store.spent(conn, job["id"]) == pytest.approx(9 * COST)  # 3 papers, 3 calls
+
+
+async def test_a_stopped_replay_that_no_longer_resumes_gives_way_to_a_new_one(conn, priced):
+    job = await run_replay(conn, ceiling=1e-6)
+    await work_out(worker.Worker(conn, SCHEDULED, priced.gateway))
+    stricter = SCHEDULED.model_copy(update={"classification": Classification(focus_threshold=0.6)})
+    async with api(conn, stricter) as http:
+        assert (await http.get("/api/jobs/replays/offer")).json()["continues"] is None
+    made = await run_replay(conn, ceiling=5.0, config=stricter)
+    assert made["id"] != job["id"]
+    assert (await jobs_store.get(conn, job["id"]))["state"] == "discarded"
+
+
+async def test_run_replay_needs_the_worker(conn, priced):
+    async with api(conn, CONFIG) as http:
+        off = await http.post("/api/jobs/replays", json={"ceiling": 5.0})
+    assert off.status_code == 409 and "schedule is off" in off.json()["detail"]
+    assert await rows(conn, "SELECT id FROM jobs") == []

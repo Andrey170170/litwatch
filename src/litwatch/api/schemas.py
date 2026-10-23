@@ -489,14 +489,19 @@ class CardPass(BaseModel):
 JobState = Literal["offered", "stopped", "tonight", "queued", "running", "failed", "done"]
 
 
-class ProcessJob(BaseModel):
-    """A paper's Process job (DESIGN.md, the paper page): its button reads "Processing" while
-    the job is queued or running. `again`: failed, and Process would put it back in the queue,
-    since no step of its paper waits on the owner (then the owner's action there settles it)."""
+class JobRef(BaseModel):
+    """A job as the thing it works on names it: where it stands, and why it failed or stopped."""
 
     id: int
     state: JobState
     error: str | None = None
+
+
+class ProcessJob(JobRef):
+    """A paper's Process job (DESIGN.md, the paper page): its button reads "Processing" while
+    the job is queued or running. `again`: failed, and Process would put it back in the queue,
+    since no step of its paper waits on the owner (then the owner's action there settles it)."""
+
     again: bool = False
 
 
@@ -681,13 +686,15 @@ class DigestCard(DigestMark):
 
 class Digest(DigestMark):
     """A digest in full: its text, which marks each paper it names as [the name](its arXiv
-    id), and every paper by role; why it failed, when it did."""
+    id), and every paper by role; why it failed, when it did. `job` is its newest job writing it
+    again, on /api (Write again; DESIGN.md, Jobs)."""
 
     gist: str | None = None
     text: str | None = None
     error: str | None = None
     written_at: datetime
     papers: list[DigestPaper]
+    job: JobRef | None = None
 
 
 class TodayRun(BaseModel):
@@ -845,24 +852,35 @@ class JobTopic(BaseModel):
     revision: int | None = None
 
 
+class JobDigest(BaseModel):
+    """The digest a job writes again."""
+
+    id: int
+    period: DigestPeriod
+    day: date
+
+
 class Job(BaseModel):
     """One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked
     for (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready
     is queued). `papers` and `done` say how far it got (a re-run's `graded` how many it graded);
     `cost` is what its runs spent so far, None before any and for a card, which runs on the
     subscription. `at` is when it last changed state. A re-run has its topic, `scopes`, the
-    `estimate` it was offered with and its `ceiling`; stopped by the ceiling, `error` says where.
+    `estimate` it was offered with and its `ceiling`, a replay its estimate and ceiling;
+    stopped by the ceiling, `error` says where. A digest written again has its `digest` and
+    topic.
     `actions` are those its state allows: Run now, With tonight's run and Discard while it is
     not run; Try again once it failed, for a card only once it waits for the owner (a card that
     failed fewer runs is tried again by the next nightly run)."""
 
     key: str  # unique across jobs and cards
-    kind: Literal["process", "rerun", "deep"]
+    kind: Literal["process", "rerun", "replay", "digest", "deep"]
     id: int | None = None
     pass_id: int | None = None
     state: JobState
     paper: JobPaper | None = None
     topic: JobTopic | None = None
+    digest: JobDigest | None = None
     scopes: list[RerunScope] = []
     papers: int
     done: int
@@ -923,6 +941,33 @@ class RerunIn(BaseModel):
     until: date | None = None
     ceiling: float = Field(gt=0, allow_inf_nan=False)
     run: bool
+
+
+class ReplayOffer(BaseModel):
+    """Overview's Run replay (DESIGN.md, Overview): what Run would do. `running`: a replay
+    queued or running already, which Run only answers with. Else `continues`, a replay its
+    ceiling stopped that Run goes on with, having spent `spent`; else a new replay of every
+    cohort's labels. `labels` counts its labels by cohort, `papers` and `pairs` what is left to
+    classify and to grade (paper and topic), `left_out` the labelled papers the database lacks;
+    `estimate` what is left would cost, `unpriced` the models (`role: model`) with no price
+    bound, whose calls a replay does not send, and `ceiling` the one offered, in USD."""
+
+    running: JobRef | None = None
+    continues: int | None = None
+    spent: float = 0.0
+    labels: dict[str, int] = {}
+    papers: int = 0
+    pairs: int = 0
+    left_out: int = 0
+    estimate: float = 0.0
+    unpriced: list[str] = []
+    ceiling: float
+
+
+class ReplayIn(BaseModel):
+    """Run replay under a ceiling, in USD; a stopped replay goes on only above what it spent."""
+
+    ceiling: float = Field(gt=0, allow_inf_nan=False)
 
 
 class JobRun(BaseModel):

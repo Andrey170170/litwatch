@@ -365,7 +365,8 @@ export interface paths {
         };
         /**
          * Digest
-         * @description A digest in full: its text and its papers by role, each as it was shown.
+         * @description A digest in full: its text and its papers by role, each as it was shown, and its newest
+         *     job writing it again.
          */
         get: operations["digest_api_digests__digest_id__get"];
         put?: never;
@@ -387,9 +388,13 @@ export interface paths {
         put?: never;
         /**
          * Write Again
-         * @description Write a failed digest again now, over the papers due for it now, as a run of its own.
-         *     It may fail again. 409 when it is not failed (written meanwhile), its topic is paused, or
-         *     another job holds the run lock.
+         * @description Write a failed digest again, as a job (DESIGN.md, Jobs): queued now, and written by the
+         *     jobs worker as soon as the run lock is free (a nightly run or another job's chunk may hold
+         *     it), over the papers due for it then; it may fail again. Asked again while its job is
+         *     queued or running, it answers with that job; a failed one goes back in the queue. 409 when
+         *     it is not failed (written meanwhile) or its topic is not active, checked under the digest's
+         *     row lock, or when the schedule is off (no worker runs jobs). Answers with the digest and its
+         *     job.
          */
         post: operations["write_again_api_digests__digest_id__write_post"];
         delete?: never;
@@ -1105,6 +1110,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/replays/offer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Replay Offer
+         * @description What Overview's Run replay would do: answer with the replay already running, go on with
+         *     one its ceiling stopped, or start a new one of every cohort's labels, with what it would
+         *     cost.
+         */
+        get: operations["replay_offer_api_jobs_replays_offer_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/replays": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Replay
+         * @description Run replay under the ceiling given: a dry run that writes the evaluation tables only.
+         *     Asked again while a replay is queued or running, it answers with it, changing nothing; a
+         *     replay its ceiling stopped goes on, under a ceiling above what it spent; else a new replay
+         *     freezes every cohort's labels now and is queued (one not run that no longer resumes under
+         *     the configuration now is discarded). Needs the schedule on, whose worker runs jobs. Answers
+         *     with the Jobs page's groups.
+         */
+        post: operations["run_replay_api_jobs_replays_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}/{action}": {
         parameters: {
             query?: never;
@@ -1118,10 +1170,10 @@ export interface paths {
          * Act
          * @description Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
          *     a Process job only while no step of its paper waits on the owner, checked under the paper's
-         *     settle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its
-         *     ceiling stopped needs above what it spent; a re-run runs only with the schedule on, as in
-         *     `rerun`. A discarded re-run lets go of its text passes. Answers with the page's groups as
-         *     they stand after it.
+         *     settle lock. Run now and With tonight's run take a re-run's or a replay's new ceiling,
+         *     which a job its ceiling stopped needs above what it spent; a job other than Process runs
+         *     only with the schedule on, as in `rerun`. A discarded re-run lets go of its text passes.
+         *     Answers with the page's groups as they stand after it.
          */
         post: operations["act_api_jobs__job_id___action__post"];
         delete?: never;
@@ -1531,7 +1583,8 @@ export interface components {
         /**
          * Digest
          * @description A digest in full: its text, which marks each paper it names as [the name](its arXiv
-         *     id), and every paper by role; why it failed, when it did.
+         *     id), and every paper by role; why it failed, when it did. `job` is its newest job writing it
+         *     again, on /api (Write again; DESIGN.md, Jobs).
          */
         Digest: {
             /** Id */
@@ -1559,6 +1612,7 @@ export interface components {
             written_at: string;
             /** Papers */
             papers: components["schemas"]["DigestPaper"][];
+            job?: components["schemas"]["JobRef"] | null;
         };
         /**
          * DigestCard
@@ -1964,7 +2018,9 @@ export interface components {
          *     is queued). `papers` and `done` say how far it got (a re-run's `graded` how many it graded);
          *     `cost` is what its runs spent so far, None before any and for a card, which runs on the
          *     subscription. `at` is when it last changed state. A re-run has its topic, `scopes`, the
-         *     `estimate` it was offered with and its `ceiling`; stopped by the ceiling, `error` says where.
+         *     `estimate` it was offered with and its `ceiling`, a replay its estimate and ceiling;
+         *     stopped by the ceiling, `error` says where. A digest written again has its `digest` and
+         *     topic.
          *     `actions` are those its state allows: Run now, With tonight's run and Discard while it is
          *     not run; Try again once it failed, for a card only once it waits for the owner (a card that
          *     failed fewer runs is tried again by the next nightly run).
@@ -1976,7 +2032,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "process" | "rerun" | "deep";
+            kind: "process" | "rerun" | "replay" | "digest" | "deep";
             /** Id */
             id?: number | null;
             /** Pass Id */
@@ -1988,6 +2044,7 @@ export interface components {
             state: "offered" | "stopped" | "tonight" | "queued" | "running" | "failed" | "done";
             paper?: components["schemas"]["JobPaper"] | null;
             topic?: components["schemas"]["JobTopic"] | null;
+            digest?: components["schemas"]["JobDigest"] | null;
             /**
              * Scopes
              * @default []
@@ -2018,12 +2075,41 @@ export interface components {
              */
             actions: ("run" | "tonight" | "discard" | "again")[];
         };
+        /**
+         * JobDigest
+         * @description The digest a job writes again.
+         */
+        JobDigest: {
+            /** Id */
+            id: number;
+            period: components["schemas"]["DigestPeriod"];
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+        };
         /** JobPaper */
         JobPaper: {
             /** Id */
             id: string;
             /** Title */
             title: string;
+        };
+        /**
+         * JobRef
+         * @description A job as the thing it works on names it: where it stands, and why it failed or stopped.
+         */
+        JobRef: {
+            /** Id */
+            id: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "offered" | "stopped" | "tonight" | "queued" | "running" | "failed" | "done";
+            /** Error */
+            error?: string | null;
         };
         /**
          * JobRun
@@ -2582,6 +2668,68 @@ export interface components {
          * @enum {string}
          */
         ReactionValue: "up" | "down";
+        /**
+         * ReplayIn
+         * @description Run replay under a ceiling, in USD; a stopped replay goes on only above what it spent.
+         */
+        ReplayIn: {
+            /** Ceiling */
+            ceiling: number;
+        };
+        /**
+         * ReplayOffer
+         * @description Overview's Run replay (DESIGN.md, Overview): what Run would do. `running`: a replay
+         *     queued or running already, which Run only answers with. Else `continues`, a replay its
+         *     ceiling stopped that Run goes on with, having spent `spent`; else a new replay of every
+         *     cohort's labels. `labels` counts its labels by cohort, `papers` and `pairs` what is left to
+         *     classify and to grade (paper and topic), `left_out` the labelled papers the database lacks;
+         *     `estimate` what is left would cost, `unpriced` the models (`role: model`) with no price
+         *     bound, whose calls a replay does not send, and `ceiling` the one offered, in USD.
+         */
+        ReplayOffer: {
+            running?: components["schemas"]["JobRef"] | null;
+            /** Continues */
+            continues?: number | null;
+            /**
+             * Spent
+             * @default 0
+             */
+            spent: number;
+            /**
+             * Labels
+             * @default {}
+             */
+            labels: {
+                [key: string]: number;
+            };
+            /**
+             * Papers
+             * @default 0
+             */
+            papers: number;
+            /**
+             * Pairs
+             * @default 0
+             */
+            pairs: number;
+            /**
+             * Left Out
+             * @default 0
+             */
+            left_out: number;
+            /**
+             * Estimate
+             * @default 0
+             */
+            estimate: number;
+            /**
+             * Unpriced
+             * @default []
+             */
+            unpriced: string[];
+            /** Ceiling */
+            ceiling: number;
+        };
         /**
          * RerunIn
          * @description A re-run to start (`run`) or to keep under Not run: its topic, its scopes (the date
@@ -4291,7 +4439,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4320,7 +4468,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The digest is not failed, its topic is not active, or a job runs */
+            /** @description The digest is not failed, its topic is not active, or no worker runs */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6041,6 +6189,101 @@ export interface operations {
                 content?: never;
             };
             /** @description The topic is not active, the scopes name no paper, the same re-run stands otherwise than asked, or no worker runs */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_offer_api_jobs_replays_offer_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayOffer"];
+                };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No taxonomy, no labelled paper in the database, or no worker runs */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    run_replay_api_jobs_replays_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplayIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Jobs"];
+                };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No taxonomy, no labelled paper in the database, or no worker runs */
             409: {
                 headers: {
                     [name: string]: unknown;

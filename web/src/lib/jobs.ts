@@ -1,6 +1,7 @@
 /** The Jobs page's rows (DESIGN.md, "Runs and cost", Jobs): the groups, what a row says and in which colour, the
  * latest three Runs and cost shows, and what a paper's Process button reads while its job runs. */
 import type { Schemas } from "@/api/client";
+import { periodLine } from "./digests";
 import { dateTime, plural } from "./format";
 import { usd } from "./settings";
 
@@ -23,7 +24,7 @@ export const jobTone = (s: JobState) => ({ offered: "ask", stopped: "ask", tonig
 export const jobStatus = (s: JobState) =>
   ({ offered: "not run", stopped: "stopped", tonight: "with tonight's run", queued: "queued", running: "running", failed: "failed", done: "done" })[s];
 
-export const jobKind = (j: Job) => ({ deep: "Deep card", process: "Process", rerun: "Re-run" })[j.kind];
+export const jobKind = (j: Job) => ({ deep: "Deep card", process: "Process", rerun: "Re-run", replay: "Replay", digest: "Digest" })[j.kind];
 
 /** What a row is about: a Process job's or a card's paper (linked by the page), a re-run's topic, its version and
  * scopes. */
@@ -38,12 +39,17 @@ const SCOPE_SHORT: Record<Schemas["RerunScopeRow"]["scope"], string> = { labels:
 
 export const ACTIONS: Record<JobAction, string> = { run: "Run now", tonight: "With tonight's run", discard: "Discard", again: "Try again" };
 
-/** The line under a row: its papers (how far a running one got; a re-run's graded), what its runs spent so far (of
- * a re-run's ceiling, or its estimate before it ran), when it last changed; a card that failed without waiting on
- * the owner says the next run tries it again. */
+/** A digest written again: which one, as the Digest names it. */
+export const digestWhat = (j: Job) => (j.digest ? `${j.topic?.name ?? ""} · ${periodLine(j.digest)}` : null);
+
+/** The line under a row: its papers (how far a running one got; a re-run's graded, a replay's concluded), what its
+ * runs spent so far (of a re-run's or a replay's ceiling, or its estimate before it ran), when it last changed; a
+ * card that failed without waiting on the owner says the next run tries it again. A digest written again is about
+ * its digest, not papers. */
 export function jobMeta(j: Job, zone?: string): string {
   const far = j.graded ?? j.done;
-  const papers = (j.state === "running" || j.state === "stopped") && j.papers > 1 ? `${far} of ${plural(j.papers, "paper")}` : plural(j.papers, "paper");
+  const counted = (j.state === "running" || j.state === "stopped") && j.papers > 1 ? `${far} of ${plural(j.papers, "paper")}` : plural(j.papers, "paper");
+  const papers = j.kind === "digest" ? null : counted;
   const retried = j.kind === "deep" && j.state === "failed" && !j.actions.length ? "tried again on the next run" : null;
   return [papers, jobSpend(j), retried, dateTime(j.at, zone)].filter(Boolean).join(" · ");
 }
@@ -54,9 +60,9 @@ function jobSpend(j: Job): string | null {
   return j.ceiling != null ? `${usd(j.cost)} of ${usd(j.ceiling)}` : usd(j.cost);
 }
 
-/** A stopped re-run's Run now continues it under a new ceiling, the box's first value: what it spent plus its last
- * ceiling again. One stopped before spending anything had that ceiling whole and its first call did not fit, so it
- * gets twice the ceiling. */
+/** A stopped re-run's or replay's Run now continues it under a new ceiling, the box's first value: what it spent plus
+ * its last ceiling again. One stopped before spending anything had that ceiling whole and its first call did not fit,
+ * so it gets twice the ceiling. */
 export function nextCeiling(j: Job): number {
   const last = j.ceiling ?? 5;
   return j.cost != null && j.cost > 0 ? j.cost + last : 2 * last;
@@ -109,4 +115,19 @@ export function runLabel(offer: Pick<RerunOffer, "papers" | "estimate"> | undefi
 export function dayIn(zone: string | undefined, days = 0, now = new Date()): string {
   const at = new Date(now.getTime() - days * 86_400_000);
   return new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+}
+
+// -- Overview's Run replay (DESIGN.md, "Overview") ----------------------------------------------------------------
+
+export type ReplayOffer = Schemas["ReplayOffer"];
+
+/** What Run replay would do, in a line: the labels by cohort and what is left to classify and grade, going on with
+ * a stopped replay when there is one. */
+export function replayLine(o: ReplayOffer): string {
+  const cohorts = Object.entries(o.labels)
+    .map(([c, n]) => `${c} ${n.toLocaleString("en")}`)
+    .join(", ");
+  const left = `classify ${plural(o.papers, "paper")}, grade ${plural(o.pairs, "paper-topic pair")}`;
+  if (o.continues != null) return `Goes on with the replay its ceiling stopped, which spent ${usd(o.spent)}: ${left} left.`;
+  return `A replay of every cohort's labels (${cohorts || "none"}): ${left}.`;
 }

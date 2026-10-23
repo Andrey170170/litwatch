@@ -16,7 +16,10 @@ is done once its papers have no step left failed; else it fails, and settles whe
 (`store.jobs.settle_process`).
 
 A re-run (`jobs.reruns`) grades its scope for its topic, then works the text passes it queued,
-through a gateway that holds its ceiling: one stopped by it waits on the owner as `stopped`.
+through a gateway that holds its ceiling: one stopped by it waits on the owner as `stopped`. A
+replay (`jobs.replays`) works its papers the same way under its ceiling, writing the evaluation
+tables only. A digest written again (`jobs.digests.again`) is one chunk, and goes first, as a
+Process job does.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ import contextlib
 import logging
 from collections.abc import Callable
 from contextlib import AsyncExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -37,7 +40,8 @@ from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
 from litwatch.feedback import word
-from litwatch.jobs import nightly, reruns, scheduler
+from litwatch.jobs import digests as digest_jobs
+from litwatch.jobs import nightly, replays, reruns, scheduler
 from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
 from litwatch.jobs.lock import BusyError, run_lock
 from litwatch.store import failures, runs
@@ -84,6 +88,7 @@ OPEN_MOST = 4
 class _Open:
     stack: AsyncExitStack
     run: ModelRun
+    tried: set[str] = field(default_factory=set)  # a replay's papers this run has tried
 
 
 class Worker:
@@ -122,9 +127,16 @@ class Worker:
         job = await jobs_store.claim(self.conn, fresh=len(self.open) < OPEN_MOST)
         if job is None:
             return False
-        if job["kind"] == "rerun":
-            await self._rerun(job)
-            return True
+        match job["kind"]:
+            case "rerun":
+                await self._rerun(job)
+                return True
+            case "replay":
+                await self._replay(job)
+                return True
+            case "digest":
+                await self._digest(job)
+                return True
         try:
             after = await self._chunk(job, await self._run_of(job))
         except Exception as exc:
@@ -187,7 +199,9 @@ class Worker:
         try:
             run = await self._run_of(job)
             if run.gateway.ceiling is None:
-                run.gateway.ceiling = await reruns.ceiling(self.conn, self.config, job, topic)
+                run.gateway.ceiling = await reruns.ceiling(
+                    self.conn, self.config, job, reruns.roles(topic)
+                )
             chunk = await reruns.work(self.conn, self.config, run, job, tree, self.archive, CHUNK)
         except Exception as exc:
             log.exception("jobs: re-run %s failed", job["id"])
@@ -209,6 +223,46 @@ class Worker:
                 await self._end_rerun(job, "failed" if why else "done", why)
         await self._close(job["id"])
 
+    async def _replay(self, job: dict[str, Any]) -> None:
+        """A replay's next chunk, under its ceiling; one its ceiling stopped waits on the owner.
+        Its run is an evaluation's: it observes nothing of the providers."""
+        try:
+            run = await self._run_of(job)
+            if run.gateway.ceiling is None:
+                run.gateway.ceiling = await replays.ceiling(self.conn, self.config, job)
+            tried = self.open[job["id"]].tried
+            chunk = await replays.work(self.conn, self.config, run, job, tried, CHUNK)
+        except Exception as exc:
+            log.exception("jobs: replay %s failed", job["id"])
+            await jobs_store.finish(self.conn, job["id"], "failed", f"{type(exc).__name__}: {exc}")
+            await self._close(job["id"], exc)
+            return
+        self.worked()
+        match chunk.outcome:
+            case "more":
+                return
+            case "stopped":
+                await jobs_store.finish(self.conn, job["id"], "stopped", chunk.where)
+            case "done":
+                await jobs_store.finish(self.conn, job["id"], "done")
+        await self._close(job["id"])
+
+    async def _digest(self, job: dict[str, Any]) -> None:
+        """A failed digest written again (`jobs.digests.again`), in one chunk."""
+        try:
+            run = await self._run_of(job)
+            state, why = await digest_jobs.again(self.conn, run, job["scope"]["digest"])
+            counts = {k: v for k, v in run.counts.items() if isinstance(v, int)}
+            await jobs_store.progress(self.conn, job["id"], 1, counts)
+            await jobs_store.finish(self.conn, job["id"], state, why)
+        except Exception as exc:
+            log.exception("jobs: writing digest %s again failed", job["scope"]["digest"])
+            await jobs_store.finish(self.conn, job["id"], "failed", f"{type(exc).__name__}: {exc}")
+            await self._close(job["id"], exc)
+            return
+        self.worked()
+        await self._close(job["id"])
+
     async def _end_rerun(self, job: dict[str, Any], state: str, error: str | None) -> None:
         async with self.conn.transaction():
             await jobs_store.finish(self.conn, job["id"], state, error)
@@ -222,7 +276,14 @@ class Worker:
             stack = AsyncExitStack()
             factory = attaching(self.gateway)
             run = await stack.enter_async_context(
-                model_run(self.conn, self.config, "job", gateway=factory, job_id=job["id"])
+                model_run(
+                    self.conn,
+                    self.config,
+                    "job",
+                    gateway=factory,
+                    job_id=job["id"],
+                    evaluation=job["kind"] == "replay",
+                )
             )
             stack.push_async_callback(run.gateway.close)
             self.open[job["id"]] = _Open(stack, run)

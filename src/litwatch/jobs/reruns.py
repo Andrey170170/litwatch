@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any, Literal
@@ -125,23 +126,27 @@ def roles(topic: Topic) -> tuple[str, ...]:
 
 
 async def bounds(
-    conn: psycopg.AsyncConnection, config: Config, topic: Topic
+    conn: psycopg.AsyncConnection, config: Config, names: Iterable[str]
 ) -> dict[str, Bound | None]:
-    """The OpenRouter routes' bounds, for every model of the re-run's roles' lists."""
+    """The OpenRouter routes' bounds, for every model of the lists of a job's roles (`names`):
+    a re-run's (`roles`), a replay's."""
     found: dict[str, Bound | None] = {}
-    for name in roles(topic):
+    for name in names:
         for model in config.models.role(name).models:
             if model.provider == "openrouter" and route(model) not in found:
                 found[route(model)] = await bound(conn, model)
     return found
 
 
-async def unpriced(conn: psycopg.AsyncConnection, config: Config, topic: Topic) -> list[str]:
-    """The models of the re-run's roles' lists that have no price bound, as `role: model`: a
-    re-run does not send their calls."""
-    found = await bounds(conn, config, topic)
+async def unpriced(
+    conn: psycopg.AsyncConnection, config: Config, names: Iterable[str]
+) -> list[str]:
+    """The models of the lists of a job's roles (`names`) that have no price bound, as `role:
+    model`: a job under a ceiling does not send their calls."""
+    names = tuple(names)
+    found = await bounds(conn, config, names)
     out = []
-    for name in roles(topic):
+    for name in names:
         for model in config.models.role(name).models:
             if model.provider == "anthropic":
                 missing = anthropic_bound(model, 0) is None
@@ -153,11 +158,12 @@ async def unpriced(conn: psycopg.AsyncConnection, config: Config, topic: Topic) 
 
 
 async def ceiling(
-    conn: psycopg.AsyncConnection, config: Config, job: dict[str, Any], topic: Topic
+    conn: psycopg.AsyncConnection, config: Config, job: dict[str, Any], names: Iterable[str]
 ) -> Ceiling:
-    """The job's ceiling as its run opens: what is left of it after what its runs spent."""
+    """The job's ceiling as its run opens: what is left of it after what its runs spent, over
+    the routes of its roles (`names`)."""
     left = float(job["ceiling"]) - await jobs_store.spent(conn, job["id"])
-    return Ceiling(max(left, 0.0), await bounds(conn, config, topic))
+    return Ceiling(max(left, 0.0), await bounds(conn, config, names))
 
 
 @dataclass

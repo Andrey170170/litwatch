@@ -408,7 +408,9 @@ def eval_replay(
             help="COHORT=N: at most N of the cohort's negatives, drawn with a fixed seed."
         ),
     ] = None,
-    labels: Annotated[Path, typer.Option(help="The evaluation labels.")] = Path("evals/labels"),
+    labels: Annotated[
+        Path | None, typer.Option(help="The evaluation labels. Default: evals/labels.")
+    ] = None,
     limit: Annotated[int | None, typer.Option(help="Only the first N papers.")] = None,
     resume: Annotated[int | None, typer.Option(help="Go on with this replay.")] = None,
     note: Annotated[str | None, typer.Option(help="A note kept with the run.")] = None,
@@ -432,7 +434,7 @@ def eval_replay(
             tree = await taxonomy_store.load(conn)
             if tree is None:
                 raise ValueError("no taxonomy yet: `litwatch taxonomy import` the seed first")
-            every = replay.load(labels) + await replay.misses(conn)
+            every = replay.load(labels or replay.LABELS) + await replay.misses(conn)
             chosen = replay.select(every, replay.focus(tree), cohorts=cohort, negatives=sample)
             r = await replay.prepare(conn, chosen, limit=limit)
         return r, await replay.estimate(conn, cfg, r)

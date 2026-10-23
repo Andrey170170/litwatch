@@ -8,7 +8,7 @@ import { useInfiniteQuery, useQuery, useQueryClient, type UseQueryResult } from 
 import { Link, useLocation, useNavigate, useSearch, type LinkProps } from "@tanstack/react-router";
 import { Fragment, useEffect, useReducer, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { ApiError, type Schemas } from "@/api/client";
-import { useWriteAgain } from "@/api/mutations";
+import { useWriteAgain, writing } from "@/api/mutations";
 import { dayQuery, digestQuery, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { Prose } from "@/components/Prose";
@@ -542,11 +542,12 @@ function Papers({ s, digest, topic, list }: { s: Section; digest: number; topic:
   );
 }
 
-/** A digest in full: the head, the text, then its papers by role. A failed one offers Write again; the answer lands
- * in the digest's cache (`useWriteAgain`). Keyed by id where it is placed, so one digest's pending write is not
- * another's. */
+/** A digest in full: the head, the text, then its papers by role. A failed one offers Write again, a job; the digest
+ * read while its job is queued or running lands in the digest's cache (`useWriteAgain`), and a digest opened while
+ * one is under way is read until it ends, so the button says where it is. Keyed by id where it is placed, so one
+ * digest's pending write is not another's. */
 export function DigestView({ id }: { id: number }) {
-  const q = useQuery(digestQuery(id));
+  const q = useQuery({ ...digestQuery(id), refetchInterval: (r) => (r.state.data && writing(r.state.data) ? 3_000 : false) });
   const write = useWriteAgain();
   const d = q.data;
   if (!d) return q.isError ? q.error instanceof ApiError && q.error.status === 404 ? <div className="empty">No such digest.</div> : <Failed q={q} what="the digest" /> : <Load q={q} />;
@@ -576,8 +577,8 @@ export function DigestView({ id }: { id: number }) {
             {d.error && <div className="err">{d.error}</div>}
           </div>
           <div className="acts">
-            <button className="btn" disabled={write.isPending} onClick={() => write.mutate(d.id)}>
-              {write.isPending ? "Writing…" : "Write again"}
+            <button className="btn" disabled={write.isPending || writing(d)} onClick={() => write.mutate(d.id)}>
+              {writing(d) ? (d.job!.state === "running" ? "Writing…" : "Queued…") : write.isPending ? "Writing…" : "Write again"}
             </button>
           </div>
         </div>

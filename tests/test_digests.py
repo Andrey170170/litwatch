@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from litwatch import digests, fulltext
+from litwatch import digests, fulltext, store
 from litwatch.api import create_app
 from litwatch.api.digests import today_run
 from litwatch.config import Config, Schedule
@@ -22,8 +22,9 @@ from litwatch.core.digests import DigestPeriod, listing_day, plain, voice_proble
 from litwatch.digests import writer
 from litwatch.feedback import word
 from litwatch.jobs import digests as digests_job
-from litwatch.jobs import nightly
+from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
+from litwatch.jobs.lock import run_lock
 from litwatch.llm import Gateway, ProviderError, Reply, Stop, Usage
 from litwatch.store import classifications as classifications_store
 from litwatch.store import digests as store_
@@ -1403,22 +1404,96 @@ async def test_the_tab_steps_only_through_the_digests_it_shows(db):
     assert (wed["previous"], history["start"]) == (None, str(WED))
 
 
-async def test_a_failed_digest_is_written_again_at_the_owners_word(db):
-    w = Writer()
+SCHEDULED = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
+AFTERNOON = datetime(2026, 10, 7, 14, 0, tzinfo=SCHEDULED.schedule.zone)  # no nightly due
+
+
+async def failed_day(db, w: Writer) -> int:
+    """P's daily digest of Tuesday, failed: its id."""
     w.failures = [ProviderError("down")]
     await focus(db, P, "central")
     await listed(db, TUE, P)
     await day(db, w, TUE)
-    async with client(db, w) as http:
-        today = (await http.get(f"/api/digests/days/{TUE}")).json()
-        failed = today["digests"][0]
-        assert failed["state"] == "failed"
+    (row,) = await store_.failed(db)
+    return row["id"]
+
+
+async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_written(db):
+    """Write again queues a job instead of answering 409 while another job holds the run lock;
+    the worker writes the digest once the lock is free, and its Needs you item and its job
+    settle together."""
+    w = Writer()
+    digest_id = await failed_day(db, w)
+    async with client(db, w, SCHEDULED) as http:
         quality = (await http.get("/api/settings/quality")).json()
-        assert [d["id"] for d in quality["night"]["digests"]] == [failed["id"]]
-        again = await http.post(f"/api/digests/{failed['id']}/write")
-        assert (again.status_code, again.json()["state"]) == (200, "written")
-        assert [p["id"] for p in again.json()["papers"]] == [P.id]
-        assert (await http.post(f"/api/digests/{failed['id']}/write")).status_code == 409
+        assert [d["id"] for d in quality["night"]["digests"]] == [digest_id]
+        async with await store.sibling(db) as other, run_lock(other):
+            asked = await http.post(f"/api/digests/{digest_id}/write")
+            assert asked.status_code == 202
+            body = asked.json()
+            assert (body["state"], body["job"]["state"]) == ("failed", "queued")
+            # Asked again (a lost reply, a second click), the same job answers.
+            again = (await http.post(f"/api/digests/{digest_id}/write")).json()
+            assert again["job"]["id"] == body["job"]["id"]
+            # The lock is held: no chunk starts, and the job waits in the queue.
+            assert not await worker.Worker(db, SCHEDULED, w.gateway).step(AFTERNOON)
+            jobs = (await http.get("/api/jobs")).json()
+            [row] = jobs["running"]
+            assert (row["kind"], row["state"]) == ("digest", "queued")
+            assert row["digest"]["id"] == digest_id
+            assert (row["topic"]["slug"], row["digest"]["period"]) == (FAITH.slug, "day")
+        assert await worker.Worker(db, SCHEDULED, w.gateway).step(AFTERNOON)
+        written = (await http.get(f"/api/digests/{digest_id}")).json()
+        assert (written["state"], written["job"]["state"]) == ("written", "done")
+        assert [p["id"] for p in written["papers"]] == [P.id]
+        quality = (await http.get("/api/settings/quality")).json()
+        assert quality["night"]["digests"] == []
+        jobs = (await http.get("/api/jobs")).json()
+        assert [(j["kind"], j["state"]) for j in jobs["done"]] == [("digest", "done")]
+        # Written, it is no longer one to write again.
+        assert (await http.post(f"/api/digests/{digest_id}/write")).status_code == 409
+    job_runs = await rows(db, "SELECT kind, job_id FROM runs WHERE job_id IS NOT NULL")
+    assert [r["kind"] for r in job_runs] == ["job"]  # its cost reaches the month's spend
+
+
+async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_run_writes_it(db):
+    w = Writer()
+    digest_id = await failed_day(db, w)
+    async with client(db, w, SCHEDULED) as http:
+        w.failures = [ProviderError("still down")] * 4  # every writer of the list
+        assert (await http.post(f"/api/digests/{digest_id}/write")).status_code == 202
+        assert await worker.Worker(db, SCHEDULED, w.gateway).step(AFTERNOON)
+        failed = (await http.get(f"/api/digests/{digest_id}")).json()
+        assert (failed["state"], failed["job"]["state"]) == ("failed", "failed")
+        assert failed["job"]["error"].startswith("the writer failed again")
+        [row] = (await http.get("/api/jobs")).json()["failed"]
+        assert row["actions"] == ["again"]
+        # The next run writes it: the failed job settles with it, done.
+        w.failures = []
+        tree = await taxonomy_store.load(db)
+        async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+            await digests.retry_failed(db, run, tree)
+        settled = (await http.get(f"/api/digests/{digest_id}")).json()
+        assert (settled["state"], settled["job"]["state"]) == ("written", "done")
+        assert (await http.get("/api/jobs")).json()["failed"] == []
+
+
+async def test_a_digest_is_written_again_only_through_a_worker_and_while_its_topic_is_active(db):
+    w = Writer()
+    digest_id = await failed_day(db, w)
+    async with client(db, w) as http:  # the schedule off: no worker runs jobs
+        off = await http.post(f"/api/digests/{digest_id}/write")
+        assert off.status_code == 409 and "schedule is off" in off.json()["detail"]
+    paused = FAITH.model_copy(update={"status": Status.PAUSED})
+    await taxonomy_store.save(db, TREE.model_copy(update={"topics": [paused, INTERP, AGENTS]}))
+    async with client(db, w, SCHEDULED) as http:
+        refused = await http.post(f"/api/digests/{digest_id}/write")
+        assert refused.status_code == 409 and "not one to write again" in refused.json()["detail"]
+    assert await rows(db, "SELECT id FROM jobs") == []
+
+
+async def rows(conn, query: str, *params) -> list[dict]:
+    return await (await conn.execute(query, params)).fetchall()
 
 
 DENVER = Schedule(enabled=True, timezone="America/Denver")  # nightly 02:00, deadline 07:30

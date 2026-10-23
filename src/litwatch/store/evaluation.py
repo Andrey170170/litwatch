@@ -54,11 +54,12 @@ async def latest(conn: psycopg.AsyncConnection, kind: str) -> int | None:
 
 
 async def ran_under(conn: psycopg.AsyncConnection, eval_run_id: int, run_id: int) -> None:
-    """Add a run record whose cost the evaluation carries."""
+    """Add a run record whose cost the evaluation carries, once however often it is named."""
     await conn.execute(
-        "UPDATE eval_runs SET run_ids = array_append(run_ids, %s), "
-        "run_id = coalesce(run_id, %s), finished_at = NULL WHERE id = %s",
-        (run_id, run_id, eval_run_id),
+        "UPDATE eval_runs SET run_ids = CASE WHEN %(run)s = ANY(run_ids) THEN run_ids "
+        "ELSE array_append(run_ids, %(run)s) END, "
+        "run_id = coalesce(run_id, %(run)s), finished_at = NULL WHERE id = %(id)s",
+        {"run": run_id, "id": eval_run_id},
     )
 
 
