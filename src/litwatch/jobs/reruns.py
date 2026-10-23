@@ -206,8 +206,10 @@ async def work(
                 if g.verdict is None:
                     log.warning("re-run %s: %s failed: %s", job["id"], g.due.paper.id, g.error)
                     ladder[g.due.paper.id] = {
+                        "revision": g.due.paper.revision,
                         "runs": g.due.failed_runs + (1 if g.unusable else 0),
-                        "refused": sorted(g.refused),
+                        # Both sides refused stops the grading: the next try asks both again.
+                        "refused": [] if g.stops else sorted(g.refused),
                     }
                 elif await grading.record(conn, g, job=job["id"]):
                     counts["graded"] += 1
@@ -272,7 +274,7 @@ async def _progress(
 
 def _due(paper: Paper, topic: Topic, name: str, ladder: dict[str, Any] | None) -> grading.Due:
     """The paper's grading, starting as far down its graders' lists as its earlier tries in the
-    job reached (D4)."""
-    if ladder is None:
+    job reached on the same text (D4); new text starts at the top."""
+    if ladder is None or ladder.get("revision") != paper.revision:
         return grading.Due(paper, topic, name)
     return grading.Due(paper, topic, name, ladder["runs"], frozenset(ladder["refused"]))

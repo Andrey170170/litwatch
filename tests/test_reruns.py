@@ -36,7 +36,7 @@ from tests.fakes import ScriptedProvider, SdkClient, openrouter_completion
 from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.test_deep import DONE, make
 from tests.test_fulltext import ANSWER, BODY, analysed
-from tests.test_steps import LISTS, ROLES, Scripted
+from tests.test_steps import LISTS, ROLES, Scripted, refusal
 
 BRIEF = RoleConfig(provider="anthropic", model="test-brief")
 CONFIG = Config(models=Models(**ROLES, brief=BRIEF), schedule=Schedule(enabled=True))
@@ -295,6 +295,36 @@ async def test_try_again_starts_a_grading_one_model_further_down_after_an_unusab
     await work_out(worker.Worker(conn, listed, models.gateway))
     assert (await jobs_store.get(conn, job))["state"] == "done"
     assert [m for m, t in models.scripted.models_asked if t == B.title] == [first, second]
+
+
+async def test_new_text_starts_a_reruns_grading_at_the_top_of_its_list(conn, models, monkeypatch):
+    listed = CONFIG.model_copy(
+        update={"models": CONFIG.models.model_copy(update={"field_grade": LISTS["field_grade"]})}
+    )
+    for m in LISTS["field_grade"].models:
+        monkeypatch.setitem(prices.ANTHROPIC, m.model, (1.0, 2.0, 0.1))
+    first = LISTS["field_grade"].models[0].model
+    models.scripted.said[(first, B.title)] = {"fit": "nowhere"}  # unusable on this text
+    job = await rerun(conn, AGENTS.slug, [B.id], ceiling=1.0)
+    await work_out(worker.Worker(conn, listed, models.gateway))
+    await conn.execute("UPDATE papers SET revision = revision + 1 WHERE id = %s", (B.id,))
+    del models.scripted.said[(first, B.title)]
+    await jobs_store.move(conn, job, ("failed",), "queued")
+    await work_out(worker.Worker(conn, listed, models.gateway))
+    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert [m for m, t in models.scripted.models_asked if t == B.title] == [first, first]
+
+
+async def test_try_again_after_both_focus_sides_refused_asks_both_again(conn, models):
+    for role in ("judge", "check"):
+        models.scripted.said[(ROLES[role].model, A.title)] = refusal(ROLES[role].model)
+    job = await rerun(conn, FAITH.slug, [A.id], ceiling=1.0)
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    assert (await jobs_store.get(conn, job))["error"] == "grading failed on 1"
+    await jobs_store.move(conn, job, ("failed",), "queued")
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    again = await jobs_store.get(conn, job)
+    assert (again["state"], again["error"]) == ("failed", "grading failed on 1")
 
 
 async def test_a_grading_its_papers_text_change_left_unrecorded_fails_the_rerun(

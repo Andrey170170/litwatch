@@ -742,6 +742,32 @@ describe("Settings", () => {
     expect(screen.queryByRole("checkbox", { name: /existing members/ })).toBeNull();
   });
 
+  it("keeps Run and Not now off while the offer's counts after a save are not read: cached ones are a save behind", async () => {
+    viewport(true);
+    const after = { ...topic, interests: "Sparse circuits" };
+    let reads = 0;
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/settings/taxonomy": () => (calls.some((c) => c.method === "PUT") ? { ...tree, topics: [after] } : tree),
+      "GET /api/settings/topics/mi/keywords": { circuit: 4 },
+      "GET /api/settings/schedule": { enabled: true, zone: "UTC", jobs: [] },
+      "PUT /api/settings/topics/mi": after,
+      "GET /api/jobs/reruns/offer": () =>
+        ++reads === 1 ? { topic: { slug: "mi", name: "Mech interp", revision: 2 }, rows: [], papers: 12, estimate: null, missing: [], unpriced: [], ceiling: 5 } : json({ detail: "down" }, 500),
+    });
+    // Kept in the cache as the app keeps it, so the second save's offer starts from the first's counts.
+    renderApp("/settings/topics/mi", new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }));
+    const interests = await screen.findByRole("textbox", { name: "Interests" });
+    await userEvent.type(interests, "Sparse circuits");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("button", { name: "Run · 12 papers" })).toBeEnabled();
+    await userEvent.type(interests, " and more");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/Could not load the re-run's counts/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Run/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Not now" })).toBeDisabled();
+  });
+
   it("keeps a re-run under Not run with Not now, and sends a date range when ticked", async () => {
     viewport(true);
     const after = { ...topic, interests: "Sparse circuits" };
