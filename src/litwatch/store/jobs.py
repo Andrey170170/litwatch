@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core.fulltext import REQUESTED
 from litwatch.store.failures import ACTIONABLE
+from litwatch.store.fulltext import STUCK, stuck_params
 from litwatch.store.runs import ALIVE
 
 # The states each of the Jobs page's groups shows (DESIGN.md, Jobs); `discarded` is hidden.
@@ -192,30 +193,37 @@ async def finish(
     )
 
 
-async def listing(conn: psycopg.AsyncConnection, done_limit: int) -> list[dict[str, Any]]:
+async def listing(
+    conn: psycopg.AsyncConnection, done_limit: int, runs: int
+) -> list[dict[str, Any]]:
     """Every job not discarded and every Deep card the owner asked for, as the Jobs page shows
     them: a job with its paper (a Process job's) and what its runs' calls cost, a run whose
     process died included (a call of unknown cost counts nothing, as in the month's spend); a
-    card with its pass's state, mapped onto a job's. Only the newest `done_limit` of those done."""
+    card with its pass's state, mapped onto a job's, failed once it waits on the owner (`stuck`,
+    as Needs you lists it, after `runs` failed runs or a long wait for its text). A dismissed
+    paper's card that never started is left out: nothing runs it. Only the newest `done_limit`
+    of those done."""
     return await (
         await conn.execute(
-            """
+            f"""
             WITH found AS (
                 SELECT 'job' AS source, j.id, j.kind, j.state, j.papers, j.done, j.counts,
                        j.error, j.changed_at AS at, j.queued_at,
-                       j.scope -> 'papers' ->> 0 AS paper_id, NULL::int AS failed_runs,
+                       j.scope -> 'papers' ->> 0 AS paper_id, NULL::bool AS stuck,
                        (SELECT sum((c.usage ->> 'cost')::numeric) FROM inference_calls c
                         JOIN runs r ON r.id = c.run_id WHERE r.job_id = j.id) AS cost
                 FROM jobs j WHERE j.state <> 'discarded'
                 UNION ALL
                 SELECT 'card', f.id, 'deep',
-                       CASE f.state WHEN 'awaiting_text' THEN 'queued' WHEN 'ready' THEN 'queued'
-                                    ELSE f.state END,
-                       1, CASE WHEN f.state = 'done' THEN 1 ELSE 0 END, '{}'::jsonb,
+                       CASE WHEN {STUCK} THEN 'failed'
+                            WHEN f.state IN ('awaiting_text', 'ready') THEN 'queued'
+                            ELSE f.state END,
+                       1, CASE WHEN f.state = 'done' THEN 1 ELSE 0 END, '{{}}'::jsonb,
                        f.last_error, coalesce(f.finished_at, f.tried_at, f.queued_at),
-                       f.queued_at, f.paper_id, f.failed_runs, NULL
-                FROM fulltext_passes f
+                       f.queued_at, f.paper_id, {STUCK}, NULL
+                FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
                 WHERE f.kind = 'deep' AND f.reason = %(requested)s
+                  AND (p.dismissed_at IS NULL OR f.state IN ('running', 'done'))
             ), ranked AS (
                 SELECT *, row_number() OVER (PARTITION BY state = 'done' ORDER BY at DESC, id DESC)
                           AS newest
@@ -225,6 +233,6 @@ async def listing(conn: psycopg.AsyncConnection, done_limit: int) -> list[dict[s
             WHERE x.state <> 'done' OR x.newest <= %(done)s
             ORDER BY x.at DESC, x.id DESC
             """,
-            {"requested": REQUESTED, "done": done_limit},
+            {"requested": REQUESTED, "done": done_limit} | stuck_params(runs),
         )
     ).fetchall()

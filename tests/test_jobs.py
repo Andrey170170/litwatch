@@ -15,7 +15,7 @@ from litwatch import store
 from litwatch.api import create_app
 from litwatch.api import reading as api_reading
 from litwatch.config import Schedule
-from litwatch.core import Cause
+from litwatch.core import Cause, Depth, Status
 from litwatch.core.fulltext import REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY
 from litwatch.feedback import misses, word
 from litwatch.jobs import nightly, worker
@@ -199,6 +199,21 @@ async def test_a_failed_job_put_back_by_a_settle_gives_its_passes_the_owners_pri
     }
 
 
+async def test_a_failed_job_settles_when_the_topic_it_failed_grading_on_is_paused(conn, models):
+    job = await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "failed")
+    await conn.execute(
+        "INSERT INTO step_failures (paper_id, step, topic, paper_revision, failed_runs, last_error)"
+        " VALUES (%s, 'grading', 'cot-faithfulness', 1, 1, 'unusable')",
+        (A.id,),
+    )
+    paused = [
+        t.model_copy(update={"status": Status.PAUSED}) if t.depth == Depth.FOCUS else t
+        for t in TREE.topics
+    ]
+    await word.save_taxonomy(conn, TREE.model_copy(update={"topics": paused}))
+    assert (await jobs_store.get(conn, job))["state"] == "queued"  # nothing waits on it now
+
+
 async def test_a_failed_job_whose_paper_the_owner_dismisses_is_discarded(conn, models):
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
@@ -302,7 +317,7 @@ async def test_a_job_whose_session_died_is_taken_back_and_finishes_without_redoi
         conn, "SELECT run_id, (usage->>'cost')::numeric AS cost FROM inference_calls"
     )
     assert {c["run_id"] for c in calls} == {e["id"] for e in executions}
-    (listed,) = [r for r in await jobs_store.listing(conn, 20) if r["source"] == "job"]
+    (listed,) = [r for r in await jobs_store.listing(conn, 20, 3) if r["source"] == "job"]
     assert executions[0]["finished_at"] is None and listed["cost"] == sum(c["cost"] for c in calls)
 
 
@@ -431,6 +446,24 @@ async def test_jobs_are_listed_in_the_four_groups_with_the_cards_asked_for(conn,
     assert row["actions"] == ["run", "tonight", "discard"]
     assert listed["failed"][0]["actions"] == ["again"]
     assert listed["running"][1]["actions"] == [] and listed["running"][1]["kind"] == "deep"
+
+
+async def test_a_card_waiting_on_the_owner_fails_and_one_nothing_runs_is_left_out(conn, models):
+    """A card awaiting its text over a week waits on the owner, as on Needs you: Failed, with
+    Try again. A dismissed paper's card that never started is not listed: nothing runs it."""
+    await papers_store.dismiss(conn, B.id)
+    for paper_id, state, queued in ((A.id, "awaiting_text", "8 days"), (B.id, "ready", "1 hour")):
+        await conn.execute(
+            "INSERT INTO fulltext_passes (paper_id, paper_revision, kind, reason, priority, "
+            "state, queued_at, tried_at) "
+            "VALUES (%s, 1, 'deep', 'request', 0, %s, now() - %s::interval, now())",
+            (paper_id, state, queued),
+        )
+    async with api(conn) as http:
+        listed = (await http.get("/api/jobs")).json()
+    (card,) = listed["failed"]
+    assert (card["paper"]["id"], card["actions"]) == (A.id, ["again"])
+    assert listed["running"] == []
 
 
 @pytest.mark.parametrize(

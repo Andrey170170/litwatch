@@ -42,9 +42,8 @@ MOVES: dict[s.JobAction, tuple[tuple[str, ...], str]] = {
 
 
 def _actions(row: dict[str, Any]) -> list[s.JobAction]:
-    if row["source"] == "card":
-        stuck = row["state"] == "failed" and row["failed_runs"] >= FAILED_RUNS
-        return ["again"] if stuck else []
+    if row["source"] == "card":  # Try again only once it waits on the owner, as on Needs you
+        return ["again"] if row["stuck"] else []
     return [a for a, (sources, _) in MOVES.items() if row["state"] in sources]
 
 
@@ -69,7 +68,7 @@ def _job(row: dict[str, Any]) -> s.Job:
 
 
 async def _listing(c: Conn) -> s.Jobs:
-    rows = await jobs_store.listing(c, DONE_SHOWN)
+    rows = await jobs_store.listing(c, DONE_SHOWN, FAILED_RUNS)
     groups: dict[str, list[dict[str, Any]]] = {
         name: [r for r in rows if r["state"] in states] for name, states in _GROUPS.items()
     }

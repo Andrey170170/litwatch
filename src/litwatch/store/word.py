@@ -149,13 +149,16 @@ async def rarity_of(
 
 
 async def topic_papers(conn: psycopg.AsyncConnection, slug: str) -> list[str]:
-    """The papers the topic has a grade, verdict, label or reaction for, in id order."""
+    """The papers the topic has a grade, verdict, label, reaction or grading failure for, in id
+    order."""
     rows = await (
         await conn.execute(
             "SELECT paper_id FROM effective_grades WHERE topic = %(t)s "
             "UNION SELECT paper_id FROM verdicts WHERE topic = %(t)s "
             "UNION SELECT paper_id FROM labels WHERE topic = %(t)s "
-            "UNION SELECT paper_id FROM reactions WHERE topic = %(t)s ORDER BY 1",
+            "UNION SELECT paper_id FROM reactions WHERE topic = %(t)s "
+            "UNION SELECT paper_id FROM step_failures WHERE step = 'grading' AND topic = %(t)s "
+            "ORDER BY 1",
             {"t": slug},
         )
     ).fetchall()
