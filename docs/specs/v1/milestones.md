@@ -128,8 +128,8 @@ collections are renamed then (decision 66). Notion stops at the switch (decision
 Carried notes: do not share v1's Postgres with services holding transactions open; check a resumed WebDAV upload's
 md5 and mtime against the real library once.
 
-**N9 · Release** (the first spec's M8, unchanged): compose file, install and configuration docs, repository clean-up,
-MIT licence, `v1.0.0`; `evals/` and homelab specifics leave the repository; the AGPL `pdf` extra stays optional.
+**N9 · Release** (the first spec's M8; the licence Apache-2.0 since 2026-10-20): compose file, install and configuration docs, repository clean-up,
+Apache-2.0 licence, `v1.0.0`; `evals/` and homelab specifics leave the repository; the AGPL `pdf` extra stays optional.
 
 **The Notion export** (decisions 68–76, after the switch; [integrations.md](integrations.md)): the built-in `notion`
 integration and its database for the PI, on the owner's instance on the existing LitWatch page, then 0.14's Notion
@@ -143,6 +143,10 @@ with its own token; the client configuration in the owner's dotfiles; its teleme
 [`docs/plans/mcp-server.md`](../../plans/mcp-server.md) (approved 2026-10-20), in three stages. *Check:* from a
 research session on another machine, an agent given only a vague memory of a digest finds the paper, reads the
 section asked for and shows a figure, without the web.
+
+**Jobs** ([`docs/plans/jobs.md`](../../plans/jobs.md), approved 2026-10-22): the jobs API and the Jobs page, deferred
+from W2, in three stages. What is specified and not built yet, and in what order, is in
+[`docs/backlog.md`](../../backlog.md).
 
 After v1: backfill of the archive's older papers (the owner's plan: a local decision-style model over several nights,
 for example DiffusionGemma with constrained decoding, then leftover monthly credit on the stronger graders for what it
