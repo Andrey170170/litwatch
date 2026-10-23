@@ -676,6 +676,26 @@ async def test_a_rerun_with_no_archive_stops_keeping_its_passes_and_a_discarded_
     assert (await text_pass(conn))["job_id"] is None
 
 
+async def test_a_worker_holding_its_most_runs_open_starts_only_process_jobs(
+    conn, models, monkeypatch
+):
+    """A re-run whose passes await their text keeps its run, and that run's connection, open;
+    past `OPEN_MOST` such runs no other re-run starts, but a Process job does."""
+    monkeypatch.setattr(worker, "OPEN_MOST", 1)
+    first = await focus_rerun(conn, models, ceiling=1.0)
+    w = worker.Worker(conn, CONFIG, models.gateway, archive=archive(FakeArchive()))
+    assert await w.step(AFTERNOON)  # the grading
+    assert first in w.open
+    await conn.execute(
+        "UPDATE jobs SET wake_at = now() + interval '1 hour' WHERE id = %s", (first,)
+    )
+    second = await rerun(conn, AGENTS.slug, [C.id], ceiling=1.0)
+    assert not await w.step(AFTERNOON)
+    assert (await jobs_store.get(conn, second))["state"] == "queued"
+    process = await jobs_store.create(conn, "process", {"papers": [B.id]}, 1, "queued")
+    assert (await jobs_store.claim(conn, fresh=False))["id"] == process
+
+
 # -- the offer -----------------------------------------------------------------------------------
 
 

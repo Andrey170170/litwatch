@@ -72,6 +72,11 @@ def failure(open_: dict[str, tuple[int, int]]) -> str | None:
     return "; ".join(sorted(failed)) or None
 
 
+# The most runs a worker holds open, each with a connection of its own: re-runs whose passes
+# await their text stay open while others run. Past it only Process jobs start.
+OPEN_MOST = 4
+
+
 @dataclass
 class _Open:
     stack: AsyncExitStack
@@ -111,7 +116,7 @@ class Worker:
             return False
 
     async def _next(self) -> bool:
-        job = await jobs_store.claim(self.conn)
+        job = await jobs_store.claim(self.conn, fresh=len(self.open) < OPEN_MOST)
         if job is None:
             return False
         if job["kind"] == "rerun":

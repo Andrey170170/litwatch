@@ -172,12 +172,13 @@ async def take_back(conn: psycopg.AsyncConnection) -> list[int]:
     return [r["id"] for r in rows]
 
 
-async def claim(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
+async def claim(conn: psycopg.AsyncConnection, *, fresh: bool = True) -> dict[str, Any] | None:
     """The most urgent job this session may run now, marked running in its name: Process jobs
     first (the owner waits on them), then the oldest in the queue. Runnable are the queued
     jobs, those this session already runs, and those on tonight's run once a nightly run has
-    finished after they were put there, none before its `wake_at`. Another session's claim in
-    progress is skipped, so two workers never take one job."""
+    finished after they were put there, none before its `wake_at`; without `fresh`, only
+    Process jobs and those this session runs (it holds as many runs open as it may). Another
+    session's claim in progress is skipped, so two workers never take one job."""
     return await (
         await conn.execute(
             f"""
@@ -189,13 +190,15 @@ async def claim(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
                    OR (j.state = 'tonight' AND EXISTS (
                            SELECT 1 FROM runs n WHERE n.kind = 'nightly'
                            AND n.finished_at >= j.queued_at)))
+                  AND (%(fresh)s OR j.kind = 'process' OR j.state = 'running')
                 ORDER BY j.kind = 'process' DESC, j.queued_at, j.id
                 LIMIT 1 FOR UPDATE SKIP LOCKED
             )
             UPDATE jobs j SET state = 'running', (backend_pid, backend_start) = ({_ME}),
                    changed_at = CASE WHEN j.state = 'running' THEN j.changed_at ELSE now() END
             FROM chosen WHERE j.id = chosen.id RETURNING j.*
-            """
+            """,
+            {"fresh": fresh},
         )
     ).fetchone()
 

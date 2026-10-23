@@ -142,7 +142,9 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
     Discarding it lets go of its text passes; a re-run that ends lets go of those it left (failed, or awaiting text
     a week) to the regular queue. With no archive configured, a re-run stops with its passes kept ("with 2
     full-text passes left: no archive"). A topic edited before its re-run has graded all fails the re-run: its
-    verdicts would be under two versions, and the editor offers the new version's. A re-run whose passes all await their text is not claimed again for 30 seconds.
+    verdicts would be under two versions, and the editor offers the new version's. A re-run whose passes all await
+    their text is not claimed again for 30 seconds; it keeps its run, a database connection, open meanwhile, so a
+    worker holding four open starts only Process jobs until one ends.
   - *The Jobs page* shows a running job's spend as its calls are journalled, and a re-run's as spent of its ceiling.
 
 ## Decisions
