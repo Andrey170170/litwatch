@@ -318,6 +318,9 @@ async def paper_page(
     """The paper's page, as /api and /mcp both show it; for a paper litwatch has not fetched,
     the archive's record of it (`unfetched`); None when neither has it. Raises
     `ArchiveDownError`."""
+    # The Process job before the paper: one read done after what it wrote, never before it,
+    # so the page polls until it shows the job's results.
+    job = await jobs_store.process_of(c, paper_id)
     found = await reading.paper(c, paper_id)
     if found is None:
         return await unfetched(archive, paper_id, integrations)
@@ -374,7 +377,6 @@ async def paper_page(
     )
     published = await publications_store.get(c, paper_id)
     card, card_pass, card_requestable = await integrations_api.card(c, paper_id, integrations)
-    job = await jobs_store.process_of(c, paper_id)
     unattached = next((r for r in found["reactions"] if r["topic"] is None), None)
     return s.Paper(
         **{

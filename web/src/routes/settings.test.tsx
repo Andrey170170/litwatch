@@ -1214,10 +1214,20 @@ describe("Jobs", () => {
     expect(row("A processed paper")).toHaveTextContent("1 paper · $0.04 · 22 Oct, 09:00");
   });
 
-  it("moves a job as the action answers: Run now puts it in Running and queued", async () => {
+  it("moves a job as the jobs read again say: Run now puts it in Running and queued", async () => {
     viewport(true);
     const queued = { ...offered, state: "queued", actions: [] };
-    const calls = scriptFetch({ ...common, "GET /api/jobs": jobs, "GET /api/settings/schedule": schedule, "POST /api/jobs/5/run": { ...jobs, not_run: [], running: [running, queued] } });
+    let ran = false;
+    const after = { ...jobs, not_run: [], running: [running, queued] };
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/jobs": () => (ran ? after : jobs),
+      "GET /api/settings/schedule": schedule,
+      "POST /api/jobs/5/run": () => {
+        ran = true;
+        return after;
+      },
+    });
     // the paper's page, read before, shows the job
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(["paper", "2610.00005"], { id: "2610.00005", process: { id: 5, state: "offered", error: null } });
@@ -1228,6 +1238,17 @@ describe("Jobs", () => {
     expect(screen.getByRole("link", { name: "An offered paper" }).closest(".job")).toHaveTextContent("queued");
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/jobs/5/run"]);
     expect(client.getQueryState(["paper", "2610.00005"])?.isInvalidated).toBe(true); // its page reads the job again
+  });
+
+  it("reads a job's paper again when the job moved meanwhile", async () => {
+    viewport(true);
+    scriptFetch({ ...common, "GET /api/jobs": jobs, "GET /api/settings/schedule": schedule, "POST /api/jobs/5/run": json({ detail: "the job is queued now" }, 409) });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["paper", "2610.00005"], { id: "2610.00005", process: { id: 5, state: "offered", error: null } });
+    renderApp("/settings/runs/jobs", client);
+    await userEvent.click(await screen.findByRole("button", { name: "Run now" }));
+    expect(await screen.findByText("the job is queued now")).toBeInTheDocument();
+    expect(client.getQueryState(["paper", "2610.00005"])?.isInvalidated).toBe(true);
   });
 
   it("runs a failed card's pass now on Try again, and reads the jobs again", async () => {

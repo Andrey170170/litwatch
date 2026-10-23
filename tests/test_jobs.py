@@ -13,6 +13,7 @@ import pytest
 
 from litwatch import store
 from litwatch.api import create_app
+from litwatch.api import reading as api_reading
 from litwatch.config import Schedule
 from litwatch.core import Cause
 from litwatch.core.fulltext import REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY
@@ -193,6 +194,27 @@ async def test_a_process_jobs_passes_go_as_the_owners_requests(conn, models):
     for p in passes:
         first = REQUEST_PRIORITY if p["kind"] == "deep" else TEXT_REQUEST_PRIORITY
         assert p["priority"] == first, p
+
+
+async def test_a_process_jobs_paper_the_nightly_took_first_still_goes_as_the_owners(conn, models):
+    """Process while the nightly is due: the night processes the paper, its passes the owner's."""
+    models.decisions[A.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
+    models.fits = {(r, A.title): {"reason": "Core.", "fit": "central"} for r in ("judge", "check")}
+    await queued(conn, A.id)
+    await nightly.run(conn, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
+    passes = await rows(conn, "SELECT * FROM fulltext_passes WHERE paper_id = %s", A.id)
+    assert {(p["kind"], p["priority"]) for p in passes} == {
+        ("brief", TEXT_REQUEST_PRIORITY),
+        ("deep", REQUEST_PRIORITY),
+    }
+
+
+async def test_a_job_without_a_taxonomy_fails_and_says_so(conn):
+    await papers_store.upsert(conn, [A])
+    job = await queued(conn, A.id)
+    assert await worker.Worker(conn, CONFIG, Scripted().gateway).step(AFTERNOON)
+    failed = await jobs_store.get(conn, job)
+    assert (failed["state"], failed["error"]) == ("failed", "no taxonomy yet")
 
 
 async def test_a_job_that_raises_fails_with_its_error_and_its_run_records_it(
@@ -471,6 +493,23 @@ async def test_process_holds_its_job_so_a_try_again_meanwhile_waits_and_is_refus
             processed = await jobs_store.process(conn, A.id)
         assert await page is None  # it waited, then found the job queued
     assert processed["id"] == job and processed["state"] == "queued"
+
+
+async def test_the_paper_page_reads_the_job_before_the_paper(conn, models, monkeypatch):
+    """The job ends while the page is read: the page says it still runs, so it is read again."""
+    job = await queued(conn, A.id)
+    await jobs_store.claim(conn)
+    read = api_reading.reading.paper
+
+    async def ended_meanwhile(c, paper_id):
+        found = await read(c, paper_id)
+        await jobs_store.finish(conn, job, "done")
+        return found
+
+    monkeypatch.setattr(api_reading.reading, "paper", ended_meanwhile)
+    async with api(conn) as http:
+        page = (await http.get(f"/api/papers/{A.id}")).json()
+    assert page["process"]["state"] == "running"
 
 
 async def test_with_the_schedule_off_process_only_fetches_the_paper_for_the_next_run(

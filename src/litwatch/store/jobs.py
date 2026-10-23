@@ -67,6 +67,18 @@ async def process(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any
     return job
 
 
+async def processing(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """Whether the paper's Process job is under way: on tonight's run, queued or running."""
+    row = await (
+        await conn.execute(
+            "SELECT 1 FROM jobs WHERE kind = 'process' AND scope -> 'papers' = %s "
+            "AND state = ANY(%s)",
+            (Jsonb([paper_id]), list(ACTIVE)),
+        )
+    ).fetchone()
+    return row is not None
+
+
 async def settle_process(conn: psycopg.AsyncConnection, paper_id: str) -> None:
     """A failed Process job settles with its paper's failures (DESIGN.md, Jobs): once none is
     left (a later run did the step, the owner acted on Needs you), it goes back in the queue to

@@ -145,7 +145,7 @@ async def settle(
     conn: psycopg.AsyncConnection, paper_id: str, *, cause: Cause, claimed: int | None = None
 ) -> Settled:
     """Recompute and store the paper's effective Fits and grades, its rarity and its library
-    state, with their events, its text pass, and its failed Process job. `cause` is what
+    state, with their events, its text pass, and its Process job's. `cause` is what
     changed them, for `grade.changed`; a `verdict` that left the Fit where it was is reported as
     `weight`.
     `claimed` is a pass the caller holds and has not worked yet: it is judged as one not
@@ -223,6 +223,10 @@ async def settle(
             )
         await _text_pass(conn, paper_id, topics, after, claimed)
         await _deep_pass(conn, paper_id, topics, after, hand == Hand.UNSAVE, claimed)
+        # A paper the owner had processed: its passes go as their requests do, whoever ran its
+        # steps (the job, or a nightly run before it).
+        if await jobs_store.processing(conn, paper_id):
+            await fulltext_store.owners_first(conn, [paper_id])
         await jobs_store.settle_process(conn, paper_id)
     return result
 

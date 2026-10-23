@@ -7,7 +7,7 @@
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ApiError, api, ok, type Schemas } from "./client";
 import { digestQuery, JOBS_PAGES, jobsQuery, patchRead, qualityQuery, refreshSummary, sessionQuery, sessionsQuery, settingsReads } from "./queries";
-import type { Job, JobAction, Jobs } from "@/lib/jobs";
+import type { Job, JobAction } from "@/lib/jobs";
 import { rememberCard } from "@/lib/remember";
 import { acknowledged, labelled, noted, type Quality, type Seen, type Session, type SessionRow, sessionRow, settle, type Settled, settleFromPaper, type Waiting } from "@/lib/settings";
 import { plural } from "@/lib/format";
@@ -179,15 +179,10 @@ export function useProcess() {
   });
 }
 
-/** The jobs pages' reads after a write that changed the jobs: replaced by the groups the write answered with, or read
- * again. */
-function jobsChanged(qc: QueryClient, jobs?: Jobs) {
-  return Promise.all(
-    JOBS_PAGES.map((page) => {
-      const key = jobsQuery(page).queryKey;
-      return jobs ? patchRead<Jobs>(qc, key, () => jobs) : qc.invalidateQueries({ queryKey: key, exact: true });
-    }),
-  );
+/** The jobs pages' reads after a write that changed the jobs: read again, never patched from an answer, which may
+ * arrive after a later action's and would undo it. */
+function jobsChanged(qc: QueryClient) {
+  return Promise.all(JOBS_PAGES.map((page) => qc.invalidateQueries({ queryKey: jobsQuery(page).queryKey, exact: true })));
 }
 
 /** An action on a row of Jobs: Run now, With tonight's run, Discard or Try again on a job; Try again on a Deep card
@@ -198,20 +193,23 @@ export function useJobAction() {
   const card = settling<{ id: number }>("fulltext", (v) => v);
   return useMutation({
     mutationFn: async ({ job, action }: { job: Job; action: JobAction }) => {
-      if (job.pass_id == null) return ok(await api.POST("/api/jobs/{job_id}/{action}", { params: { path: { job_id: job.id!, action } } }));
-      await ok(await api.POST("/api/settings/fulltext/{pass_id}/now", { params: { path: { pass_id: job.pass_id } } }));
-      return undefined;
+      if (job.pass_id == null) ok(await api.POST("/api/jobs/{job_id}/{action}", { params: { path: { job_id: job.id!, action } } }));
+      else ok(await api.POST("/api/settings/fulltext/{pass_id}/now", { params: { path: { pass_id: job.pass_id } } }));
     },
-    onSuccess: (jobs, { job }) => {
+    onSuccess: (_, { job }) => {
       // a Process job's paper reads its job: "Processing" once it is queued again
-      if (jobs) return Promise.all([jobsChanged(qc, jobs), job.paper && qc.invalidateQueries({ queryKey: ["paper", job.paper.id] })]);
+      if (job.pass_id == null) return Promise.all([jobsChanged(qc), job.paper && qc.invalidateQueries({ queryKey: ["paper", job.paper.id] })]);
       if (!job.paper) return jobsChanged(qc);
       return Promise.all([card.done(qc, job.paper.id, { id: job.pass_id! }, "Running now, first in line, with three more runs."), settled(qc, job.paper.id)]);
     },
     onError: (e, { job }) => {
       toast(said(e), "error");
-      // a 409: the row moved meanwhile, and a card's row on Needs you no longer waits either
-      return Promise.all([jobsChanged(qc), job.pass_id != null && job.paper && card.failed(qc, job.paper.id, { id: job.pass_id }, e)]);
+      // a 409: the row moved meanwhile, and its paper with it; a card's row on Needs you no longer waits either
+      return Promise.all([
+        jobsChanged(qc),
+        job.paper && qc.invalidateQueries({ queryKey: ["paper", job.paper.id] }),
+        job.pass_id != null && job.paper && card.failed(qc, job.paper.id, { id: job.pass_id }, e),
+      ]);
     },
   });
 }

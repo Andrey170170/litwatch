@@ -11,8 +11,9 @@ to stop, is one run of kind `job`, however many chunks that takes.
 
 A Process job runs the nightly's own steps (classification, analysis, grading) on its papers
 only; each recorded result settles its paper as in the nightly, and the full-text and Deep
-workers then take the passes it queued, as the owner's requests. A job is done once its papers
-have no step left failed; else it fails, and settles when they do (`store.jobs.settle_process`).
+workers then take the passes it queued, as the owner's requests (`feedback.word.settle`). A job
+is done once its papers have no step left failed; else it fails, and settles when they do
+(`store.jobs.settle_process`).
 """
 
 from __future__ import annotations
@@ -36,8 +37,8 @@ from litwatch.jobs import nightly, scheduler
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.jobs.lock import BusyError, run_lock
 from litwatch.store import failures, runs
-from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
+from litwatch.store import taxonomy as taxonomy_store
 
 log = logging.getLogger(__name__)
 
@@ -105,6 +106,10 @@ class Worker:
         job = await jobs_store.claim(self.conn)
         if job is None:
             return False
+        if await taxonomy_store.load(self.conn) is None:  # nothing to sort its papers into
+            await jobs_store.finish(self.conn, job["id"], "failed", "no taxonomy yet")
+            await self._close(job["id"])
+            return True
         run = await self._run_of(job)
         try:
             after = await self._chunk(job, run)
@@ -136,8 +141,6 @@ class Worker:
         await nightly.classify(self.conn, self.config, run, ids=ids)
         await nightly.analyse(self.conn, run, ids=ids)
         await nightly.grade(self.conn, self.config, run, ids=ids)
-        if job["kind"] == "process":  # the owner's: its passes go as their requests do
-            await fulltext_store.owners_first(self.conn, ids)
         counts = dict(job["counts"])
         for k, v in run.counts.items():
             if isinstance(v, int) and v != before.get(k, 0):
