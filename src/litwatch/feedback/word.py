@@ -44,6 +44,8 @@ from litwatch.core import (
     page_standing,
 )
 from litwatch.core.fulltext import (
+    AUTOMATIC_PRIORITY,
+    BACKGROUND_PRIORITY,
     TEXT_PRIORITY,
     PassKind,
     PassState,
@@ -106,7 +108,7 @@ _open: weakref.WeakKeyDictionary[psycopg.AsyncConnection, Change] = weakref.Weak
 
 @asynccontextmanager
 async def change(
-    conn: psycopg.AsyncConnection, *paper_ids: str, cause: Cause
+    conn: psycopg.AsyncConnection, *paper_ids: str, cause: Cause, job: int | None = None
 ) -> AsyncIterator[Change]:
     """Change the papers in one transaction: their locks first (`lock_many`), then the block's
     checks and writes, then a settle of each paper, in id order, before commit, for `cause`. The
@@ -116,7 +118,7 @@ async def change(
     Inside another change on the connection, it joins that one, in a savepoint: the outermost
     change settles once at its exit, for its own cause, and only then is `settled` filled. A
     nested change names only papers the outer one locked; a lock taken late would break the
-    order, so it raises.
+    order, so it raises. A re-run's change names its `job`, whose passes the settle queues.
     """
     outer = _open.get(conn)
     if outer is not None:
@@ -132,7 +134,7 @@ async def change(
         try:
             yield current
             for paper_id in current.paper_ids:
-                current.settled[paper_id] = await settle(conn, paper_id, cause=cause)
+                current.settled[paper_id] = await settle(conn, paper_id, cause=cause, job=job)
         finally:
             del _open[conn]
 
@@ -142,14 +144,21 @@ def _value(e: Effective | None) -> dict[str, str | None]:
 
 
 async def settle(
-    conn: psycopg.AsyncConnection, paper_id: str, *, cause: Cause, claimed: int | None = None
+    conn: psycopg.AsyncConnection,
+    paper_id: str,
+    *,
+    cause: Cause,
+    claimed: int | None = None,
+    job: int | None = None,
 ) -> Settled:
     """Recompute and store the paper's effective Fits and grades, its rarity and its library
     state, with their events, its text pass, and its Process job's. `cause` is what
     changed them, for `grade.changed`; a `verdict` that left the Fit where it was is reported as
     `weight`.
     `claimed` is a pass the caller holds and has not worked yet: it is judged as one not
-    started, so it may be dropped or relabelled.
+    started, so it may be dropped or relabelled. For a re-run's `job`, a pass it queues is
+    background work: a text pass the job's to work, under its ceiling, a Deep pass after the
+    automatic ones (docs/plans/jobs.md).
 
     Settles of one paper are serialized and read only after the lock is held, so the last to
     run sees every committed change and leaves the stored state right.
@@ -221,8 +230,8 @@ async def settle(
             await events.emit(
                 conn, events.PAPER_SAVED if result.saved else events.PAPER_UNSAVED, paper_id
             )
-        await _text_pass(conn, paper_id, topics, after, claimed)
-        await _deep_pass(conn, paper_id, topics, after, hand == Hand.UNSAVE, claimed)
+        await _text_pass(conn, paper_id, topics, after, claimed, job)
+        await _deep_pass(conn, paper_id, topics, after, hand == Hand.UNSAVE, claimed, job)
         # A paper the owner had processed: its passes go as their requests do, whoever ran its
         # steps (the job, or a nightly run before it), its failed job put back first.
         await jobs_store.settle_process(conn, paper_id, owner=cause == Cause.OWNER)
@@ -237,6 +246,7 @@ async def _text_pass(
     topics: dict,
     after: dict[str, Effective],
     claimed: int | None,
+    job: int | None = None,
 ) -> None:
     """Queue the paper's Brief or Weight re-check when it qualifies on its effective Fits and
     grades in active topics, an Area's including its descendants' (pipeline.md, sections 4
@@ -277,7 +287,8 @@ async def _text_pass(
         await fulltext_store.relabel(conn, last.id, *want, claimed=ours)
     elif want is not None and to_queue(want, last, found.version):
         kind, reason = want
-        await fulltext_store.queue(conn, paper_id, found.revision, kind, reason, TEXT_PRIORITY)
+        priority = TEXT_PRIORITY if job is None else BACKGROUND_PRIORITY
+        await fulltext_store.queue(conn, paper_id, found.revision, kind, reason, priority, job)
 
 
 async def _deep_pass(
@@ -287,6 +298,7 @@ async def _deep_pass(
     after: dict[str, Effective],
     unsaved: bool,
     claimed: int | None,
+    job: int | None = None,
 ) -> None:
     """Queue the paper's automatic Deep card when an active Focus topic grades it must read, or
     a published digest of an active Area topic picked it, it is not unsaved and it has no card;
@@ -311,7 +323,8 @@ async def _deep_pass(
     elif want is not None and deep_to_relabel(want, open_pass):
         await fulltext_store.relabel(conn, open_pass.id, PassKind.DEEP, want, claimed=ours)
     elif want is not None and deep_to_queue(want, open_pass):
-        await fulltext_store.queue_deep(conn, paper_id, found.revision, want)
+        priority = AUTOMATIC_PRIORITY if job is None else BACKGROUND_PRIORITY
+        await fulltext_store.queue_deep(conn, paper_id, found.revision, want, priority)
 
 
 # Each helper below is a change of one paper (`change`): alone it settles the paper before it

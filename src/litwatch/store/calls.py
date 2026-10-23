@@ -289,6 +289,43 @@ async def mean_cost(
     return row["cost"]
 
 
+async def charged_prices(
+    conn: psycopg.AsyncConnection, provider: str, model: str, last: int = 200
+) -> tuple[float | None, float | None]:
+    """The highest price per input token and per output token the model's latest `last` billed
+    calls on `provider` were charged, in USD, or None where none tells. A call's charge bounds
+    each price it paid (charge / input tokens bounds the input price, charge / output tokens
+    the output price), the tightest such bound per serving provider holds for it, and the
+    highest across the serving providers holds for the model. A call with cached input left out
+    of the input price, as caching discounts it."""
+    row = await (
+        await conn.execute(
+            """
+            WITH recent AS (
+                SELECT (usage->>'cost')::float AS cost,
+                       (usage->>'prompt_tokens')::float AS tokens_in,
+                       (usage->>'completion_tokens')::float AS tokens_out,
+                       coalesce((usage->>'cached_tokens')::int, 0) AS cached,
+                       coalesce(usage->>'provider', '') AS served_by
+                FROM inference_calls
+                WHERE usage->>'model' = %s AND usage->>'via' = %s
+                  AND usage->>'cost' IS NOT NULL
+                  AND NOT coalesce((usage->>'reused')::boolean, false)
+                  AND usage->>'service_tier' IS DISTINCT FROM 'batch'
+                ORDER BY id DESC LIMIT %s
+            ), per AS (
+                SELECT min(cost / tokens_in) FILTER (WHERE tokens_in > 0 AND cached = 0) AS p_in,
+                       min(cost / tokens_out) FILTER (WHERE tokens_out > 0) AS p_out
+                FROM recent GROUP BY served_by
+            )
+            SELECT max(p_in) AS p_in, max(p_out) AS p_out FROM per
+            """,
+            (model, provider, last),
+        )
+    ).fetchone()
+    return row["p_in"], row["p_out"]
+
+
 async def observations(conn: psycopg.AsyncConnection) -> dict[str, dict[str, Any]]:
     """Each provider's latest account error and latest reply, by provider."""
     rows = await (await conn.execute("SELECT * FROM provider_observations")).fetchall()

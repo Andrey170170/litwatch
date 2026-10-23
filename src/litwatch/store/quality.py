@@ -194,22 +194,44 @@ async def topic_revisions(conn: psycopg.AsyncConnection) -> dict[str, int]:
     return {r["class"]: r["revision"] for r in rows}
 
 
-async def keyword_matches(
-    conn: psycopg.AsyncConnection, patterns: list[str], days: int = 90
-) -> dict[str, int]:
-    """How many papers published in the trailing days each keyword pattern matches, as the
-    keyword check matches them (core.classification.keyword_hit)."""
+KEYWORD_DAYS = 90  # the window the topic editor counts keyword matches over
+
+
+async def _keyword_hits(
+    conn: psycopg.AsyncConnection, patterns: list[str], days: int
+) -> dict[str, list[str]]:
+    """The papers published in the trailing days that each keyword pattern matches, as the
+    keyword check matches them (core.classification.keyword_hit), not dismissed."""
     if not patterns:
         return {}
     rows = await _all(
         conn,
-        "SELECT title, abstract FROM papers WHERE dismissed_at IS NULL "
-        "AND published >= now() - make_interval(days => %s)",
+        "SELECT id, title, abstract FROM papers WHERE dismissed_at IS NULL "
+        "AND published >= now() - make_interval(days => %s) ORDER BY id",
         (days,),
     )
 
     # The regexes run over the whole window; a thread keeps the event loop free meanwhile.
-    def count() -> dict[str, int]:
-        return {k: sum(keyword_hit(k, r["title"], r["abstract"]) for r in rows) for k in patterns}
+    def hits() -> dict[str, list[str]]:
+        return {
+            k: [r["id"] for r in rows if keyword_hit(k, r["title"], r["abstract"])]
+            for k in patterns
+        }
 
-    return await asyncio.to_thread(count)
+    return await asyncio.to_thread(hits)
+
+
+async def keyword_matches(
+    conn: psycopg.AsyncConnection, patterns: list[str], days: int = KEYWORD_DAYS
+) -> dict[str, int]:
+    """How many papers published in the trailing days each keyword pattern matches."""
+    return {k: len(ids) for k, ids in (await _keyword_hits(conn, patterns, days)).items()}
+
+
+async def keyword_papers(
+    conn: psycopg.AsyncConnection, patterns: list[str], days: int = KEYWORD_DAYS
+) -> list[str]:
+    """The papers published in the trailing days that any keyword pattern matches: the papers
+    the editor's keyword counts count."""
+    found = await _keyword_hits(conn, patterns, days)
+    return sorted({p for ids in found.values() for p in ids})

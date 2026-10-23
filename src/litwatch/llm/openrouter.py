@@ -44,11 +44,19 @@ DEFAULT_ROUTING: dict[str, tuple[str, ...]] = {
 }
 
 
-def chat_request(role: RoleConfig, request: Request, routing: tuple[str, ...]) -> dict[str, Any]:
-    """The chat-completions call for a request."""
+def chat_request(
+    role: RoleConfig,
+    request: Request,
+    routing: tuple[str, ...],
+    max_price: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """The chat-completions call for a request; with `max_price` (a job's ceiling), no provider
+    dearer than it serves the call."""
     provider: dict[str, Any] = {"require_parameters": True}
     if routing:
         provider |= {"order": list(routing), "only": list(routing)}
+    if max_price:
+        provider["max_price"] = max_price
     # `usage.include` makes OpenRouter report the call's cost in the usage block.
     extra: dict[str, Any] = {"usage": {"include": True}, "provider": provider}
     if role.effort:
@@ -75,9 +83,13 @@ def chat_request(role: RoleConfig, request: Request, routing: tuple[str, ...]) -
 
 
 def decisions_request(
-    role: RoleConfig, request: DecisionRequest, routing: tuple[str, ...]
+    role: RoleConfig,
+    request: DecisionRequest,
+    routing: tuple[str, ...],
+    max_price: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """The Decisions endpoint's call: `noul` for a yes/no question, `choice` for a choice."""
+    """The Decisions endpoint's call: `noul` for a yes/no question, `choice` for a choice; with
+    `max_price`, as a chat call's."""
     questions: dict[str, Any] = {}
     for q in request.questions:
         match q:
@@ -90,8 +102,11 @@ def decisions_request(
                     "criteria": dict(q.options),
                 }
     body: dict[str, Any] = {"model": role.model, "state": request.content, "questions": questions}
-    if routing:
-        body["provider"] = {"order": list(routing), "only": list(routing)}
+    provider: dict[str, Any] = {"order": list(routing), "only": list(routing)} if routing else {}
+    if max_price:
+        provider["max_price"] = max_price
+    if provider:
+        body["provider"] = provider
     return body
 
 
@@ -201,13 +216,21 @@ class OpenRouterProvider:
     def routing(self, role: RoleConfig) -> tuple[str, ...]:
         return role.routing or DEFAULT_ROUTING.get(role.model, ())
 
-    async def complete(self, role: RoleConfig, request: Request) -> Reply:
-        body = chat_request(role, request, self.routing(role))
+    async def complete(
+        self, role: RoleConfig, request: Request, *, max_price: dict[str, float] | None = None
+    ) -> Reply:
+        body = chat_request(role, request, self.routing(role), max_price)
         completion = await self._call(self.client.chat.completions.create(**body), role)
         return completion if isinstance(completion, Reply) else reply_of(completion, role)
 
-    async def decide(self, role: RoleConfig, request: DecisionRequest) -> Reply:
-        body = decisions_request(role, request, self.routing(role))
+    async def decide(
+        self,
+        role: RoleConfig,
+        request: DecisionRequest,
+        *,
+        max_price: dict[str, float] | None = None,
+    ) -> Reply:
+        body = decisions_request(role, request, self.routing(role), max_price)
         raw = await self._call(self.client.post(DECISIONS_URL, body=body, cast_to=object), role)
         return raw if isinstance(raw, Reply) else decision_reply(raw, request, role)
 

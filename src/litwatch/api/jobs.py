@@ -1,21 +1,27 @@
 """The jobs API (docs/plans/jobs.md; DESIGN.md, Jobs): the owner's queue in four groups, with
-the Deep cards they asked for read alongside from their passes; the actions on a job; and
-Process, which fetches a paper and queues the job that processes it now (D1)."""
+the Deep cards they asked for read alongside from their passes; the actions on a job; Process,
+which fetches a paper and queues the job that processes it now (D1); and the re-run offer after
+a topic edit, which starts a re-run or keeps it under Not run."""
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import date
+from typing import Annotated, Any
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Query, Request
 
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, protected
-from litwatch.core import FAILED_RUNS, Cause
+from litwatch.config import Config
+from litwatch.core import FAILED_RUNS, Cause, Topic
 from litwatch.feedback import misses, word
 from litwatch.intake.search import NoAnswerError
+from litwatch.jobs import reruns
 from litwatch.store import failures
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
+from litwatch.store import quality
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 
@@ -57,8 +63,13 @@ def _actions(row: dict[str, Any]) -> list[s.JobAction]:
     ]
 
 
+def _money(value: Any) -> float | None:
+    return None if value is None else float(value)
+
+
 def _job(row: dict[str, Any]) -> s.Job:
     card = row["source"] == "card"
+    rerun = row["kind"] == "rerun"
     return s.Job(
         key=f"{row['source']}:{row['id']}",
         kind=row["kind"],
@@ -68,9 +79,20 @@ def _job(row: dict[str, Any]) -> s.Job:
         paper=s.JobPaper(id=row["paper_id"], title=row["title"])
         if row["title"] is not None
         else None,
+        topic=s.JobTopic(
+            slug=row["topic"],
+            name=row["topic_name"] or row["topic"],
+            revision=None if row["revision"] is None else int(row["revision"]),
+        )
+        if rerun
+        else None,
+        scopes=row["scopes"] or [],
         papers=row["papers"],
         done=row["done"],
-        cost=float(row["cost"]) if row["cost"] is not None else None,
+        graded=row["counts"].get("graded", 0) if rerun else None,
+        cost=_money(row["cost"]),
+        estimate=_money(row["estimate"]),
+        ceiling=_money(row["ceiling"]),
         error=row["error"],
         at=row["at"],
         actions=_actions(row),
@@ -142,24 +164,137 @@ JOB_REFUSED = {
 }
 
 
+# -- the re-run offer ---------------------------------------------------------------------------
+
+RERUN_REFUSED = {
+    404: {"description": "No such topic"},
+    409: {"description": "The topic is not active, the scopes name no paper, or no worker runs"},
+}
+
+
+async def _offered(
+    c: Conn,
+    config: Config,
+    slug: str,
+    scopes: list[s.RerunScope],
+    since: date | None,
+    until: date | None,
+) -> tuple[Topic, s.RerunOffer, list[str]]:
+    """The offer for the topic, and the papers of the chosen scopes, in id order."""
+    tree = await taxonomy_store.load(c)
+    topic = tree.topic(slug) if tree else None
+    if tree is None or topic is None:
+        raise HTTPException(status_code=404, detail="no such topic")
+    if reruns.active_topic(tree, slug) is None:
+        raise HTTPException(status_code=409, detail=f"the topic is {topic.status.value}")
+    dates = reruns.Range(since, until) if since and until else None
+    found = {
+        scope: await reruns.scope_papers(c, config, tree, topic, scope, dates)
+        for scope in reruns.SCOPES
+    }
+    per_paper, missing = await reruns.per_paper(c, config, topic)
+    chosen = sorted({p for scope in scopes for p in found[scope]})
+
+    def cost(n: int) -> float | None:
+        return None if per_paper is None else n * per_paper
+
+    offer = s.RerunOffer(
+        topic=s.JobTopic(
+            slug=slug,
+            name=tree.get(slug).name,
+            revision=(await quality.topic_revisions(c)).get(slug),
+        ),
+        rows=[
+            s.RerunScopeRow(scope=scope, papers=len(ids), estimate=cost(len(ids)))
+            for scope, ids in found.items()
+        ],
+        papers=len(chosen),
+        estimate=cost(len(chosen)),
+        missing=missing,
+        unpriced=await reruns.unpriced(c, config, topic),
+        ceiling=reruns.CEILING,
+    )
+    return topic, offer, chosen
+
+
+@router.get("/reruns/offer", responses=RERUN_REFUSED)
+async def rerun_offer(
+    topic: str,
+    request: Request,
+    c: Conn,
+    scopes: Annotated[list[s.RerunScope], Query()] = [],  # noqa: B006 (FastAPI copies it)
+    since: date | None = None,
+    until: date | None = None,
+) -> s.RerunOffer:
+    """The re-run offer after an edit of the topic: each scope with its papers and estimate, and
+    the chosen `scopes` together (a date range from `since` to `until`, both included)."""
+    _, offer, _ = await _offered(c, request.app.state.config, topic, scopes, since, until)
+    return offer
+
+
+@router.post("/reruns", status_code=201, responses=RERUN_REFUSED)
+async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
+    """Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are
+    those of its scopes as they stand now; it grades them under the topic's version when it
+    runs (D3). Run needs the schedule on, whose worker runs jobs. Answers with the Jobs page's
+    groups."""
+    config = request.app.state.config
+    if body.run and not config.schedule.enabled:
+        raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
+    topic, offer, chosen = await _offered(
+        c, config, body.topic, body.scopes, body.since, body.until
+    )
+    if not chosen:
+        raise HTTPException(status_code=409, detail="the scopes name no paper")
+    scope = {
+        "topic": topic.slug,
+        "revision": offer.topic.revision,
+        "scopes": body.scopes,
+        "since": body.since.isoformat() if body.since else None,
+        "until": body.until.isoformat() if body.until else None,
+        "papers": chosen,
+    }
+    state = "queued" if body.run else "offered"
+    await jobs_store.create(
+        c, "rerun", scope, len(chosen), state, ceiling=body.ceiling, estimate=offer.estimate
+    )
+    if body.run:
+        request.app.state.jobs_wake.set()
+    return await _listing(c)
+
+
 @router.post("/{job_id}/{action}", responses=JOB_REFUSED)
-async def act(job_id: int, action: s.JobAction, request: Request, c: Conn) -> s.Jobs:
+async def act(
+    job_id: int, action: s.JobAction, request: Request, c: Conn, body: s.JobRun | None = None
+) -> s.Jobs:
     """Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
     a Process job only while no step of its paper waits on the owner, checked under the paper's
-    settle lock. Answers with the page's groups as they stand after it."""
+    settle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its
+    ceiling stopped needs above what it spent. A discarded re-run lets go of its text passes.
+    Answers with the page's groups as they stand after it."""
     sources, to = MOVES[action]
+    ceiling = body.ceiling if body else None
     async with c.transaction():
         job = await jobs_store.get(c, job_id)
         if job is not None and action == "again" and job["kind"] == "process":
             await word.lock_many(c, job["scope"]["papers"])
             if await failures.waits_on_owner(c, job["scope"]["papers"], FAILED_RUNS):
                 raise HTTPException(status_code=409, detail=WAITS)
-        moved = await jobs_store.move(c, job_id, sources, to)
-    if moved is None:
-        job = await jobs_store.get(c, job_id)
+        # The job's row after its paper's settle lock, the order a settle takes them in.
+        job = await jobs_store.get(c, job_id, lock=True)
         if job is None:
             raise HTTPException(status_code=404, detail="no such job")
-        raise HTTPException(status_code=409, detail=f"the job is {job['state']} now")
+        if job["state"] not in sources:
+            raise HTTPException(status_code=409, detail=f"the job is {job['state']} now")
+        if job["state"] == "stopped" and to in ("queued", "tonight"):
+            spent = await jobs_store.spent(c, job_id)
+            if (ceiling or float(job["ceiling"])) <= spent:
+                raise HTTPException(
+                    status_code=409, detail=f"the ceiling must be above what it spent, ${spent:.2f}"
+                )
+        await jobs_store.move(c, job_id, sources, to, ceiling if job["kind"] == "rerun" else None)
+        if to == "discarded":
+            await fulltext_store.release_job(c, job_id)
     if to == "queued":
         request.app.state.jobs_wake.set()
     return await _listing(c)

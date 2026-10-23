@@ -56,7 +56,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if maker := integrations_api.card_maker(app.state.integrations):
             tasks.append(
                 asyncio.create_task(
-                    deep_passes.run_forever(app.state.dsn, archive, maker, app.state.deep_wake)
+                    deep_passes.run_forever(
+                        app.state.dsn, archive, maker, app.state.deep_wake, app.state.config
+                    )
                 )
             )
     if app.state.config.schedule.enabled:
@@ -75,7 +77,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(
             asyncio.create_task(
                 worker.run_forever(
-                    app.state.dsn, app.state.config, app.state.gateway, app.state.jobs_wake, worked
+                    app.state.dsn,
+                    app.state.config,
+                    app.state.gateway,
+                    app.state.jobs_wake,
+                    worked,
+                    archive,
                 )
             )
         )
