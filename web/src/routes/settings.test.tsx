@@ -232,6 +232,34 @@ describe("Settings", () => {
     await waitFor(() => expect(calls.filter((c) => c.url === "/api/summary").length).toBe(4));
   }, 10_000);
 
+  it("settles a digest whose job ended because it no longer waits: its topic paused, or no longer shown", async () => {
+    viewport(true);
+    const shown = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "week", day: "2026-10-05", state: "failed", counts: {}, written_at: "2026-10-15T10:00:00Z", papers: [] };
+    const queued = { ...shown, error: "the writer timed out", job: { id: 1, state: "queued" } };
+    const paused = { ...queued, job: { id: 1, state: "failed", error: "its topic is paused" } };
+    const two = { ...quality, night: { ...quality.night, digests: [{ ...digest, period: "week", day: "2026-10-05" }, { ...digest, id: 4 }] } };
+    scriptFetch({
+      ...common,
+      "GET /api/settings/quality": two,
+      "GET /api/jobs": { not_run: [], running: [], failed: [], done: [] },
+      "POST /api/digests/3/write": queued,
+      "GET /api/digests/3": paused,
+      "POST /api/digests/4/write": { ...queued, id: 4, period: "day", day: "2026-10-08" },
+      "GET /api/digests/4": () => json({ detail: "no such digest" }, 404),
+    });
+    renderApp("/settings/needs");
+    expect(await screen.findByText("5 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+    const weekly = (await screen.findByText("Weekly digest · the week of 5 Oct")).closest(".need")!;
+    await userEvent.click(within(weekly as HTMLElement).getByRole("button", { name: "Write it again" }));
+    await waitFor(() => expect(weekly).toHaveClass("settled"), { timeout: 4000 });
+    expect(weekly).toHaveTextContent("No longer to be written: its topic is paused.");
+    const daily = screen.getByText("Daily digest · 8 Oct").closest(".need")!;
+    await userEvent.click(within(daily as HTMLElement).getByRole("button", { name: "Write it again" }));
+    await waitFor(() => expect(daily).toHaveClass("settled"), { timeout: 4000 });
+    expect(daily).toHaveTextContent("No longer to be written: its topic is no longer shown.");
+    expect(screen.getByText("3 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
+  }, 10_000);
+
   it("names last night from the quality read, never a run of another kind", async () => {
     viewport(true);
     const manual = { id: 9, kind: "digests", started_at: "2026-10-15T12:00:00Z", finished_at: "2026-10-15T12:01:00Z", cost: 0.2, error: null, counts: { digests_written: 1 }, fetched: 0, inserted: 0, updated: 0 };
@@ -1151,6 +1179,8 @@ describe("Settings", () => {
     expect(screen.getByRole("link", { name: "Jobs ›" })).toBeInTheDocument();
     expect(calls.filter((c) => c.method === "POST").map((c) => [c.url, c.body])).toEqual([["/api/jobs/replays", { ceiling: 2.5 }]]);
     expect(screen.queryByRole("button", { name: "Run replay" })).toBeNull();
+    // recall is read again too: a small replay may end before the offer reads it running
+    expect(calls.filter((c) => c.url === "/api/settings/quality").length).toBe(2);
   });
 
   it("goes on with a replay its ceiling stopped only above what it spent", async () => {
@@ -1387,6 +1417,38 @@ describe("Jobs", () => {
     const digestRow = link.closest(".job") as HTMLElement;
     expect(within(digestRow).getByText("Digest")).toBeInTheDocument();
     expect(digestRow).not.toHaveTextContent(/paper/);
+  });
+
+  it("writes a failed digest again on Try again, and reads the jobs again once it is queued", async () => {
+    viewport(true);
+    const failedJob = { ...base, key: "job:13", id: 13, kind: "digest", state: "failed", paper: null, topic: { slug: "mi", name: "Mech interp" }, digest: { id: 3, period: "day", day: "2026-10-08" }, error: "the writer failed again: timed out", at: at(11), actions: ["again"] };
+    const shown = { id: 3, topic: { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600" }, period: "day", day: "2026-10-08", counts: {}, papers: [], written_at: "2026-10-09T03:00:00Z" };
+    const calls = scriptFetch({
+      ...common,
+      "GET /api/jobs": { not_run: [], running: [], failed: [failedJob], done: [] },
+      "GET /api/settings/schedule": schedule,
+      "POST /api/digests/3/write": { ...shown, state: "failed", error: "timed out", job: { id: 13, state: "queued" } },
+      "GET /api/digests/3": { ...shown, state: "written", gist: "g", text: "t", error: null, job: { id: 13, state: "done" } },
+    });
+    renderApp("/settings/runs/jobs");
+    await userEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/jobs").length).toBe(2)); // once queued
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/digests/3/write"]);
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/jobs").length).toBe(3), { timeout: 4000 }); // once ended
+  }, 10_000);
+
+  it("reads Overview's offer and recall again when a stopped replay runs on from Jobs", async () => {
+    viewport(true);
+    const replay = { ...base, key: "job:12", id: 12, kind: "replay", state: "stopped", paper: null, papers: 412, done: 150, cost: 4.98, ceiling: 5, error: "stopped at the ceiling after 150 of 412", at: at(8), actions: ["run", "tonight", "discard"] };
+    const calls = scriptFetch({ ...common, "GET /api/jobs": { not_run: [replay], running: [], failed: [], done: [] }, "GET /api/settings/schedule": schedule, "POST /api/jobs/12/run": { not_run: [], running: [{ ...replay, state: "queued", actions: [] }], failed: [], done: [] } });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["settings", "overview", "replay-offer"], { running: null, continues: 12 });
+    client.setQueryData(["settings", "overview", "quality"], quality);
+    renderApp("/settings/runs/jobs", client);
+    await userEvent.click(await screen.findByRole("button", { name: "Run now" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").map((c) => [c.url, c.body])).toEqual([["/api/jobs/12/run", { ceiling: 9.98 }]]));
+    await waitFor(() => expect(client.getQueryState(["settings", "overview", "replay-offer"])?.isInvalidated).toBe(true));
+    expect(client.getQueryState(["settings", "overview", "quality"])?.isInvalidated).toBe(true);
   });
 
   it("moves a job as the jobs read again say: Run now puts it in Running and queued", async () => {

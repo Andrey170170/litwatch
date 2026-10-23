@@ -154,13 +154,16 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
     role, or the fallback costs), its ceiling $5.00 until the owner changes it. One replay is under way at a time:
     asked again while one is queued or running, Run replay only answers with it; one its ceiling stopped goes on, as
     Run now on Jobs does, under a ceiling above what it spent; one not run that no longer resumes (the configuration
-    or taxonomy changed) is discarded for a new one. Run replay needs the schedule on (409 otherwise).
+    or taxonomy changed) is discarded for a new one; Try again or Run now on Jobs puts a replay back only while no
+    other is under way (409 otherwise). Run replay needs the schedule on (409 otherwise).
   - *A replay job's runs* are evaluation runs (kind `eval`, carrying the job's id), as the CLI's are: they observe
     nothing of the providers and the status document's reply counts leave their calls out, while their cost counts
     in the job's and the month's spend as any run's does. Each run goes over
     what is left once, as `--resume` does: what has not concluded or failed in an earlier run, a chunk of papers at
-    a time; an attempt the ceiling cut short is not recorded, so it is left to do. A replay whose configuration or
-    taxonomy changed since it was made fails at its next chunk, saying to start a new one.
+    a time; an attempt the ceiling cut short is not recorded, so it is left to do, and a paper whose text changed
+    since it concluded is done again. A replay whose configuration or taxonomy changed since it was made fails at its
+    next chunk, saying to start a new one. Its gateway, as the CLI's, leaves a batch a dead nightly left to the next
+    run that accounts for it, where a Process or re-run job's answers from it.
   - *The evaluation labels ship in the image* (`/app/evals/labels`, read through `quality.replay.LABELS`, which the
     CLI's `--labels` now defaults to as well), since Run replay runs inside `litwatch serve`.
   - *A digest's Write again* is refused (409) with the schedule off, or when the digest is not failed or its topic
@@ -171,11 +174,10 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
     settles done when a run publishes its digest, in that write's transaction. Digests written again go first with
     Process jobs, as the owner waits on them; neither keeps a run open.
   - *The web* reads the digest until its write job ends, noting the Needs you row "Queued" or "Being written" in
-    the meantime, then settles it as before; a digest opened while its job is under way is read until it ends.
-    Overview reads the replay offer and recall every 10 s while a replay is queued or running, and recall once
-    more after it ends.
-
-## Decisions
+    the meantime, then settles it as before, or with the reason once its topic is paused or no longer shown; a
+    digest opened while its job is under way is read until it ends. Try again on a failed digest job in Jobs is the
+    same Write again. Overview reads the replay offer and recall every 10 s while a replay is queued or running,
+    and recall once more after it ends; Run replay, and a replay's action on Jobs, read both again.
 
 ## Decisions
 

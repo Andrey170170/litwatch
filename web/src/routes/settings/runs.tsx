@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useJobAction } from "@/api/mutations";
+import { useJobAction, useWriteAgain } from "@/api/mutations";
 import { jobsQuery, qualityQuery, runsQuery, scheduleQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { dateTime, plural, rowDate } from "@/lib/format";
@@ -116,6 +116,7 @@ export function RunsPage() {
  * and on the Jobs page (`full`) the actions its state allows. */
 function JobRow({ job, zone, full }: { job: Job; zone?: string; full?: boolean }) {
   const act = useJobAction();
+  const write = useWriteAgain(); // Try again on a digest is its Write again, followed to its end
   const bar = job.state === "running" && job.papers > 1;
   // A re-run or replay its ceiling stopped runs on under a new one, above what it spent.
   const stopped = job.state === "stopped" && job.ceiling != null;
@@ -166,9 +167,9 @@ function JobRow({ job, zone, full }: { job: Job; zone?: string; full?: boolean }
               <button
                 key={a}
                 className={`btn${a === "run" ? " pri" : ""}`}
-                disabled={act.isPending || (continues && !above)}
+                disabled={act.isPending || write.isPending || (continues && !above)}
                 title={continues && !above ? `The ceiling must be above what it spent, ${usd(job.cost ?? 0)}` : undefined}
-                onClick={() => act.mutate({ job, action: a, ceiling: continues ? ceiling! : undefined })}
+                onClick={() => (job.digest && a === "again" ? write.mutate(job.digest.id) : act.mutate({ job, action: a, ceiling: continues ? ceiling! : undefined }))}
               >
                 {ACTIONS[a]}
               </button>

@@ -200,6 +200,12 @@ function jobsChanged(qc: QueryClient) {
   return Promise.all(JOBS_PAGES.map((page) => qc.invalidateQueries({ queryKey: jobsQuery(page).queryKey, exact: true })));
 }
 
+/** A replay started, gone on or ended: Overview's offer and its recall are reread (a replay may end before the offer
+ * is read running, so recall is not left to Overview's poll). */
+function replayChanged(qc: QueryClient) {
+  return Promise.all([replayOfferQuery, qualityQuery("overview")].map((q) => qc.invalidateQueries({ queryKey: q.queryKey, exact: true })));
+}
+
 /** The re-run offer's Run and Not now (DESIGN.md, "The re-run offer"): Run starts it, Not now keeps it under Not run;
  * the toast says where it is either way. */
 export function useRerun() {
@@ -220,7 +226,8 @@ export function useRerun() {
 
 /** An action on a row of Jobs: Run now, With tonight's run, Discard or Try again on a job (Run now on a re-run its
  * ceiling stopped, under the new `ceiling`); Try again on a Deep card asked for runs its pass now, as Needs you's
- * Run it now does: its row there settles the same way, and the paper is settled as after any write. */
+ * Run it now does: its row there settles the same way, and the paper is settled as after any write. A replay's
+ * action rereads Overview's offer and recall. (Try again on a digest is Write again, `useWriteAgain`.) */
 export function useJobAction() {
   const qc = useQueryClient();
   const card = settling<{ id: number }>("fulltext", (v) => v);
@@ -232,6 +239,7 @@ export function useJobAction() {
     },
     onSuccess: (_, { job }) => {
       // a Process job's paper reads its job: "Processing" once it is queued again
+      if (job.kind === "replay") return Promise.all([jobsChanged(qc), replayChanged(qc)]);
       if (job.pass_id == null) return Promise.all([jobsChanged(qc), job.paper && qc.invalidateQueries({ queryKey: ["paper", job.paper.id] })]);
       if (!job.paper) return jobsChanged(qc);
       return Promise.all([card.done(qc, job.paper.id, { id: job.pass_id! }, "Running now, first in line, with three more runs."), settled(qc, job.paper.id)]);
@@ -241,6 +249,7 @@ export function useJobAction() {
       // a 409: the row moved meanwhile, and its paper with it; a card's row on Needs you no longer waits either
       return Promise.all([
         jobsChanged(qc),
+        job.kind === "replay" && replayChanged(qc),
         job.paper && qc.invalidateQueries({ queryKey: ["paper", job.paper.id] }),
         job.pass_id != null && job.paper && card.failed(qc, job.paper.id, { id: job.pass_id }, e),
       ]);
@@ -415,15 +424,18 @@ export function useRunPassNow(paperId: string) {
  * as the run lock is free. The digest is read until its job ends, each read landing where the digest is open (so its
  * button tells queued from being written) and its Needs you row noted with where the job is. The job ended, the
  * digest is as it now stands: written, its row settles; not written, the row stays to be written, with the reason.
- * The API answers 409 when it no longer waits (written meanwhile, its topic paused: the row settles with that
- * reason) or no worker runs jobs (the row stays, with the reason). The row is patched from the mutation, so it is
- * whether or not Needs you is still shown when the job ends. */
+ * A job that ended because the digest no longer waits (its topic paused or unfollowed meanwhile) settles the row
+ * with that reason. The API answers 409 when it no longer waits (written meanwhile, its topic paused: the row
+ * settles with that reason) or no worker runs jobs (the row stays, with the reason); a 404 once its topic is no
+ * longer shown settles it too. The jobs are reread once it is queued and again when it ends. The row is patched
+ * from the mutation, so it is whether or not Needs you is still shown when the job ends. */
 export function useWriteAgain() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (digestId: number) => {
       const key = ["digest", String(digestId)];
       let d = ok(await api.POST("/api/digests/{digest_id}/write", { params: { path: { digest_id: digestId } } }));
+      await jobsChanged(qc);
       for (let wait = WRITE_POLL; ; wait = Math.min(wait * 1.5, WRITE_POLL_MOST)) {
         // each read lands as the digest's; one begun before it is dropped, so it cannot land over it
         await qc.cancelQueries({ queryKey: key, exact: true });
@@ -442,11 +454,18 @@ export function useWriteAgain() {
       refreshSummary(qc);
       await jobsChanged(qc);
       if (r.state !== "failed") return settleNeeds(qc, (q) => settle(q, "digests", { id: digestId }, "Written again; it shows in the Digest."));
-      const again = r.job?.error?.startsWith("the writer failed again");
-      return settleNeeds(qc, (q) => noted(q, digestId, again || !r.job?.error ? `Failed again: ${r.error ?? "no text"}. The next run writes it again.` : `Not written: ${r.job.error}.`));
+      const why = r.job?.error;
+      if (why && LEFT.some((s) => why.startsWith(s))) return settleNeeds(qc, (q) => settle(q, "digests", { id: digestId }, `No longer to be written: ${why}.`));
+      const again = why?.startsWith("the writer failed again");
+      return settleNeeds(qc, (q) => noted(q, digestId, again || !why ? `Failed again: ${r.error ?? "no text"}. The next run writes it again.` : `Not written: ${why}.`));
     },
     onError: async (e, digestId) => {
       toast(said(e), "error");
+      if (e instanceof ApiError && e.status === 404) {
+        digestViewsStale(qc);
+        refreshSummary(qc);
+        return Promise.all([jobsChanged(qc), settleNeeds(qc, (q) => settle(q, "digests", { id: digestId }, "No longer to be written: its topic is no longer shown."))]);
+      }
       if (!(e instanceof ApiError && e.status === 409)) return;
       // A 409 says the server's view moved (written meanwhile, its topic paused) or no worker runs: the digest is
       // reread, its squares follow it, and its views and the counts are reread too.
@@ -461,18 +480,22 @@ export function useWriteAgain() {
   });
 }
 
+/** The reasons a digest's job gives when the digest no longer waits on the owner (jobs/digests.py, `again`). */
+const LEFT = ["its topic is ", "the digest is gone"];
+
 /** How often a digest written again is read while its job is under way: soon at first, then less often, as a job
  * queued behind a nightly run may wait an hour. A digest opened while its job is under way is read at the slowest. */
 export const WRITE_POLL = 2_000;
 export const WRITE_POLL_MOST = 15_000;
 
 /** Overview's Run replay: a replay of every cohort's labels, or the stopped one going on, under the ceiling given.
- * Overview shows it in place (the offer reads it running), so there is no toast; the jobs are reread. */
+ * Overview shows it in place (the offer reads it running), so there is no toast; the jobs, the offer and recall are
+ * reread. */
 export function useRunReplay() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (ceiling: number) => ok(await api.POST("/api/jobs/replays", { body: { ceiling } })),
-    onSuccess: () => Promise.all([jobsChanged(qc), qc.invalidateQueries({ queryKey: replayOfferQuery.queryKey, exact: true })]),
+    onSuccess: () => Promise.all([jobsChanged(qc), replayChanged(qc)]),
     onError: (e) => {
       toast(said(e, "Could not start the replay"), "error");
       return qc.invalidateQueries({ queryKey: replayOfferQuery.queryKey, exact: true });

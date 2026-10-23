@@ -404,7 +404,8 @@ async def act(
     a Process job only while no step of its paper waits on the owner, checked under the paper's
     settle lock. Run now and With tonight's run take a re-run's or a replay's new ceiling,
     which a job its ceiling stopped needs above what it spent; a job other than Process runs
-    only with the schedule on, as in `rerun`. A discarded re-run lets go of its text passes.
+    only with the schedule on, as in `rerun`, and a replay only while no other is under way. A
+    discarded re-run lets go of its text passes.
     Answers with the page's groups as they stand after it."""
     sources, to = MOVES[action]
     ceiling = body.ceiling if body else None
@@ -415,6 +416,11 @@ async def act(
             await word.lock_many(c, job["scope"]["papers"])
             if await failures.waits_on_owner(c, job["scope"]["papers"], FAILED_RUNS):
                 raise HTTPException(status_code=409, detail=WAITS)
+        if job is not None and job["kind"] == "replay" and to in ("queued", "tonight"):
+            # One replay under way at a time: the replay lock before the row, as Run replay.
+            found = await jobs_store.open_replay(c)
+            if found is not None and found["id"] != job_id:
+                raise HTTPException(status_code=409, detail="another replay is under way")
         # The job's row after its paper's settle lock, the order a settle takes them in.
         job = await jobs_store.get(c, job_id, lock=True)
         if job is None:

@@ -18,15 +18,17 @@ from litwatch.core.classification import Source
 from litwatch.core.evaluation import Outcome, recall
 from litwatch.feedback import misses as misses_feedback
 from litwatch.jobs import worker
-from litwatch.llm import ProviderError, prices
+from litwatch.llm import Gateway, ProviderError, prices
 from litwatch.quality import replay
 from litwatch.store import classifications as classifications_store
-from litwatch.store import evaluation, quality
+from litwatch.store import evaluation, quality, runs
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store.calls import CallJournal
 from tests.conftest import FAITH, TREE, paper
-from tests.test_reruns import COST, Priced, charged, work_out
+from tests.fakes import BatchingProvider
+from tests.test_reruns import COST, Costed, Priced, charged, work_out
 from tests.test_steps import CONFIG, Scripted, decision, rows
 
 LABELS = Path(__file__).parent.parent / "evals" / "labels"
@@ -546,3 +548,56 @@ async def test_run_replay_needs_the_worker(conn, priced):
         off = await http.post("/api/jobs/replays", json={"ceiling": 5.0})
     assert off.status_code == 409 and "schedule is off" in off.json()["detail"]
     assert await rows(conn, "SELECT id FROM jobs") == []
+
+
+async def test_try_again_on_a_failed_replay_waits_while_another_is_under_way(conn, priced):
+    first = await run_replay(conn)
+    await conn.execute("UPDATE jobs SET state = 'failed' WHERE id = %s", (first["id"],))
+    second = await run_replay(conn)
+    assert second["id"] != first["id"]
+    async with api(conn) as http:
+        refused = await http.post(f"/api/jobs/{first['id']}/again")
+        assert refused.status_code == 409 and "another replay" in refused.json()["detail"]
+        await conn.execute("UPDATE jobs SET state = 'done' WHERE id = %s", (second["id"],))
+        assert (await http.post(f"/api/jobs/{first['id']}/again")).status_code == 200
+
+
+async def test_a_paper_revised_between_chunks_is_replayed_on_its_new_text(
+    conn, priced, monkeypatch
+):
+    monkeypatch.setattr(worker, "CHUNK", 1)
+    job = await run_replay(conn)
+    w = worker.Worker(conn, SCHEDULED, priced.gateway)
+    assert await w.step(AFTERNOON)  # A's chunk
+    revised = A.model_copy(update={"abstract": "Sparse autoencoders on activations."})
+    await papers_store.upsert(conn, [revised])
+    await work_out(w)
+    done = await jobs_store.get(conn, job["id"])
+    assert (done["state"], done["done"]) == ("done", 3)
+    assert priced.sent("classify").count(A.title) == 2
+
+
+async def test_a_replay_leaves_a_dead_nightlys_batch_alone(conn, priced):
+    """A batch a nightly left when its process died is the next run's to account for, not a
+    replay's: a dry run neither cancels it nor answers from it."""
+    role = SCHEDULED.models.judge
+    request = grading.request(A, FAITH, TREE.get(FAITH.slug).name)
+    batching = BatchingProvider("anthropic", priced.respond, hold=True)
+
+    def gateway(config, journal):
+        providers = {"anthropic": batching, "openrouter": Costed("openrouter", priced.respond)}
+        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+
+    key = gateway(SCHEDULED, None).request_key(role, request)
+    batch = await batching.submit([(key, role, request)])
+    nightly = await runs.start(conn, "nightly")
+    journal = CallJournal(conn, nightly)
+    call = await journal.start("judge", role.model, key, A.id, role.provider)
+    await journal.batched([call], batch, role.provider)
+    await runs.finish(conn, nightly, error="process died")
+
+    await run_replay(conn)
+    await work_out(worker.Worker(conn, SCHEDULED, gateway))
+    assert batching.cancelled == []
+    (left,) = await rows(conn, "SELECT output FROM inference_calls WHERE id = %s", call)
+    assert left["output"] is None

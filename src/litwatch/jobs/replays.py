@@ -120,12 +120,14 @@ async def work(
     size: int,
 ) -> Chunk:
     """The replay's next chunk: the next `size` papers with a stage left that this run has not
-    `tried` (the worker keeps it with the run), through classification and grading, as
+    `tried` (the worker keeps it with the run; one whose text changed since counts as not
+    tried), through classification and grading, as
     `--resume` goes on (a configuration or taxonomy changed since raises `ValueError`). Its
     progress is the papers concluded; done once this run has tried every paper left, the
     evaluation run then finished."""
     eval_run = job["scope"]["eval_run"]
     r = await replay.resume(conn, config, eval_run)
+    tried.difference_update(r.stale)  # a paper whose text changed since is to do again
     ids = [p for p in r.left if p not in tried][:size]
     before = run.tally()
     await replay.work(conn, config, r, run, ids)

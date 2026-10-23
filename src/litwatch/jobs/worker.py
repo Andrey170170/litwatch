@@ -274,12 +274,14 @@ class Worker:
     async def _run_of(self, job: dict[str, Any]) -> ModelRun:
         """The run this worker records the job's work on, of kind `job` (`eval` for a replay):
         opened when it claims the job, kept across its chunks. Its gateway sends no batch, and
-        answers a call a dead nightly left in an ended batch from that batch (`attaching`)."""
+        answers a call a dead nightly left in an ended batch from that batch (`attaching`); a
+        replay's, as the CLI's, leaves other runs' batches alone."""
         if job["id"] not in self.open:
             stack = AsyncExitStack()
-            factory = attaching(self.gateway)
             # A replay's runs are evaluation runs: they observe nothing of the providers.
-            kind = EVAL if job["kind"] == "replay" else "job"
+            replaying = job["kind"] == "replay"
+            factory = self.gateway if replaying else attaching(self.gateway)
+            kind = EVAL if replaying else "job"
             run = await stack.enter_async_context(
                 model_run(self.conn, self.config, kind, gateway=factory, job_id=job["id"])
             )
