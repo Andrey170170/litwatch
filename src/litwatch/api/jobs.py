@@ -236,8 +236,8 @@ async def rerun_offer(
 async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
     """Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are
     those of its scopes as they stand now; it grades them under the topic's version when it
-    runs (D3). Run needs the schedule on, whose worker runs jobs. Answers with the Jobs page's
-    groups."""
+    runs (D3). The same re-run not ended yet is not made again. Run needs the schedule on,
+    whose worker runs jobs. Answers with the Jobs page's groups."""
     config = request.app.state.config
     if body.run and not config.schedule.enabled:
         raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
@@ -255,9 +255,16 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
         "papers": chosen,
     }
     state = "queued" if body.run else "offered"
-    await jobs_store.create(
-        c, "rerun", scope, len(chosen), state, ceiling=body.ceiling, estimate=offer.estimate
-    )
+    async with c.transaction():
+        # Asked again after a lost reply, the same re-run is found, not made twice; Run puts
+        # one kept under Not run in the queue.
+        found = await jobs_store.open_rerun(c, scope)
+        if found is None:
+            await jobs_store.create(
+                c, "rerun", scope, len(chosen), state, ceiling=body.ceiling, estimate=offer.estimate
+            )
+        elif body.run and found["state"] == "offered":
+            await jobs_store.move(c, found["id"], ("offered",), "queued", body.ceiling)
     if body.run:
         request.app.state.jobs_wake.set()
     return await _listing(c)

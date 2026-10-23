@@ -316,6 +316,22 @@ async def listing(
     ).fetchall()
 
 
+async def open_rerun(conn: psycopg.AsyncConnection, scope: dict[str, Any]) -> dict[str, Any] | None:
+    """The newest re-run not ended (not run, on tonight's run, queued or running) with the
+    same topic, revision, scopes and date range as `scope`, its row locked: one asked for again
+    after a lost reply."""
+    same = {k: scope.get(k) for k in ("topic", "revision", "scopes", "since", "until")}
+    return await (
+        await conn.execute(
+            "SELECT * FROM jobs WHERE kind = 'rerun' AND state = ANY(%s) "
+            "AND jsonb_build_object('topic', scope -> 'topic', 'revision', scope -> 'revision', "
+            "'scopes', scope -> 'scopes', 'since', scope -> 'since', 'until', scope -> 'until') "
+            "= %s ORDER BY id DESC LIMIT 1 FOR UPDATE",
+            ([*NOT_RUN, *ACTIVE], Jsonb(same)),
+        )
+    ).fetchone()
+
+
 # -- a topic re-run's scopes (pipeline.md, section 10) ----------------------------------------
 
 
