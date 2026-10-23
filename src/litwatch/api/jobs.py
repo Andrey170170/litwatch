@@ -249,9 +249,10 @@ async def rerun_offer(
 @router.post("/reruns", status_code=201, responses=RERUN_REFUSED)
 async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
     """Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are
-    those of its scopes as they stand now; it grades them under the topic's version when it
-    runs (D3). The same re-run not ended yet is not made again. Run needs the schedule on,
-    whose worker runs jobs. Answers with the Jobs page's groups."""
+    those of its scopes as they stand now; it grades them under the topic's version now (D3),
+    and fails should the topic be edited before its grading is done. The same re-run not ended
+    yet is not made again. Run needs the schedule on, whose worker runs jobs. Answers with the
+    Jobs page's groups."""
     config = request.app.state.config
     if body.run and not config.schedule.enabled:
         raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
@@ -263,6 +264,7 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
     scope = {
         "topic": topic.slug,
         "revision": offer.topic.revision,
+        "version": topic.version,
         "scopes": [k for k in reruns.SCOPES if k in body.scopes],  # one order, so one identity
         "since": body.since.isoformat() if body.since else None,
         "until": body.until.isoformat() if body.until else None,

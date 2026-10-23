@@ -172,12 +172,14 @@ class Worker:
             await self._end_rerun(job, "failed", "the topic is no longer followed and active")
             await self._close(job["id"])
             return
+        if reruns.edited_since(job, topic):
+            await self._end_rerun(job, "failed", "the topic was edited since; re-run it from there")
+            await self._close(job["id"])
+            return
         try:
             run = await self._run_of(job)
             if run.gateway.ceiling is None:
                 run.gateway.ceiling = await reruns.ceiling(self.conn, self.config, job, topic)
-            else:  # the topic's depth, so its graders, may have changed since
-                run.gateway.ceiling.bounds = await reruns.bounds(self.conn, self.config, topic)
             chunk = await reruns.work(self.conn, self.config, run, job, tree, self.archive, CHUNK)
         except Exception as exc:
             log.exception("jobs: re-run %s failed", job["id"])

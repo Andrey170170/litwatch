@@ -361,16 +361,20 @@ async def labelled(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
 
 
 async def members(conn: psycopg.AsyncConnection, classes: list[str]) -> list[str]:
-    """The papers standing in any of `classes` (a topic's class and those under it), as its page
-    and the Taxonomy's member counts show them, not dismissed."""
+    """The papers on a topic's page (`store.reading.SCOPE`), not dismissed: those standing in any
+    of `classes` (its class and those under it), and those with an effective grade for it or a
+    followed topic under it (a keyword hit, a reported miss)."""
     rows = await (
         await conn.execute(
             f"""
-            SELECT DISTINCT m.paper_id AS id FROM memberships m
-            JOIN papers p ON p.id = m.paper_id AND p.dismissed_at IS NULL
-            WHERE m.class = ANY(%s) AND {SHOWN_MEMBER} ORDER BY m.paper_id
+            SELECT id FROM (
+                SELECT m.paper_id AS id FROM memberships m
+                WHERE m.class = ANY(%(classes)s) AND {SHOWN_MEMBER}
+                UNION
+                SELECT g.paper_id FROM effective_grades g WHERE g.topic = ANY(%(classes)s)
+            ) x JOIN papers p USING (id) WHERE p.dismissed_at IS NULL ORDER BY id
             """,
-            (classes,),
+            {"classes": classes},
         )
     ).fetchall()
     return [r["id"] for r in rows]
