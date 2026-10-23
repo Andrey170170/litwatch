@@ -486,6 +486,18 @@ class CardPass(BaseModel):
     error: str | None = None
 
 
+JobState = Literal["offered", "stopped", "tonight", "queued", "running", "failed", "done"]
+
+
+class ProcessJob(BaseModel):
+    """A paper's Process job (DESIGN.md, the paper page): its button reads "Processing" while
+    the job is queued or running."""
+
+    id: int
+    state: JobState
+    error: str | None = None
+
+
 class Paper(BaseModel):
     """A paper's page: its header, its ladder (Gist, Brief or abstract, deep card, the paper)
     and the rail, its open states and its history. Outside the collection (never classified)
@@ -528,6 +540,7 @@ class Paper(BaseModel):
     # A card provider is loaded and no card is queued or being written: "Deep read", or "Write
     # again" under a card.
     card_requestable: bool = False
+    process: ProcessJob | None = None  # the paper's newest Process job, when it has one
 
 
 # -- what the owner says ---------------------------------------------------------------------------
@@ -803,3 +816,49 @@ class Changes(BaseModel):
 
     events: list[Event]
     next: str
+
+
+# -- jobs ------------------------------------------------------------------------------------------
+
+JobAction = Literal["run", "tonight", "discard", "again"]
+
+
+class JobPaper(BaseModel):
+    id: str
+    title: str
+
+
+class Job(BaseModel):
+    """One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked
+    for (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready
+    is queued). `papers` and `done` say how far it got; `cost` is what its runs spent, None
+    before any and for a card, which runs on the subscription. `at` is when it last changed
+    state. `actions` are those its state allows: Run now, With tonight's run and Discard while
+    it is not run; Try again once it failed, for a card only once it waits for the owner (a
+    card that failed fewer runs is tried again by the next nightly run)."""
+
+    key: str  # unique across jobs and cards
+    kind: Literal["process", "deep"]
+    id: int | None = None
+    pass_id: int | None = None
+    state: JobState
+    paper: JobPaper | None = None
+    papers: int
+    done: int
+    cost: float | None = None
+    error: str | None = None
+    at: datetime
+    actions: list[JobAction] = []
+
+
+class Jobs(BaseModel):
+    """The Jobs page's four groups: Not run, Running and queued, Failed, and the newest Done."""
+
+    not_run: list[Job]
+    running: list[Job]
+    failed: list[Job]
+    done: list[Job]
+
+
+class ProcessIn(BaseModel):
+    paper_id: str  # an arXiv id

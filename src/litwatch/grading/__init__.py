@@ -225,9 +225,14 @@ def grade(
 
 
 async def due(
-    conn: psycopg.AsyncConnection, tree: Taxonomy, runs: int, limit: int | None = None
+    conn: psycopg.AsyncConnection,
+    tree: Taxonomy,
+    runs: int,
+    limit: int | None = None,
+    ids: list[str] | None = None,
 ) -> tuple[list[Due], list[tuple[str, int]]]:
-    """The gradings due, for at most `limit` papers (`store.candidates`), and the (paper,
+    """The gradings due, for at most `limit` papers among `ids` when given
+    (`store.candidates`), and the (paper,
     revision) whose grading pass they make, to record with `store.passed` once they are
     recorded. A paper's first pass on its current text grades each active topic it leads to
     (`core.grading.grading_topics`); after that only a grading that failed is tried again, and
@@ -242,7 +247,7 @@ async def due(
     passes: list[tuple[str, int]] = []
     failed_runs: dict[tuple[str, str], int] = {}
     refused: dict[tuple[str, str], list[str]] = {}
-    for row in await store.candidates(conn, runs, limit):
+    for row in await store.candidates(conn, runs, limit, ids):
         failed = row["failed"]
         failed_runs |= {(row["paper_id"], t): n for t, n in failed.items()}
         refused |= {(row["paper_id"], t): r for t, r in row["refused"].items()}

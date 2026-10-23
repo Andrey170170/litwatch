@@ -78,10 +78,12 @@ async def collected_reactions(conn: psycopg.AsyncConnection, limit: int = 200) -
 
 
 async def runs(conn: psycopg.AsyncConnection, limit: int = 30) -> list[dict[str, Any]]:
+    """The newest nightly runs, for the Nights table: jobs and other runs never push a night
+    out of it."""
     return await _all(
         conn,
         "SELECT id, kind, started_at, finished_at, cost, error, counts, fetched, inserted, "
-        "updated FROM runs ORDER BY id DESC LIMIT %s",
+        "updated FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT %s",
         (limit,),
     )
 

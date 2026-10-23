@@ -43,11 +43,15 @@ class RunRecord:
 
 @asynccontextmanager
 async def run_record(
-    conn: psycopg.AsyncConnection, kind: str, *, window: tuple[datetime, datetime] | None = None
+    conn: psycopg.AsyncConnection,
+    kind: str,
+    *,
+    window: tuple[datetime, datetime] | None = None,
+    job_id: int | None = None,
 ) -> AsyncIterator[RunRecord]:
     """Open a run and close it with what the job recorded on it and the error that ended it,
     whatever happens inside, a cancelled job included."""
-    record = RunRecord(await runs.start(conn, kind, *(window or (None, None))))
+    record = RunRecord(await runs.start(conn, kind, *(window or (None, None)), job_id=job_id))
     failed = True
     try:
         yield record
@@ -98,13 +102,17 @@ async def model_run(
     *,
     window: tuple[datetime, datetime] | None = None,
     gateway: GatewayFactory = default_gateway,
+    job_id: int | None = None,
 ) -> AsyncIterator[ModelRun]:
     """A run record (`run_record`) that also closes with the calls' cost and counts by role.
 
     The journal writes on a connection of its own, since calls finish while the job's
     connection is inside a transaction.
     """
-    async with run_record(conn, kind, window=window) as record, await store.sibling(conn) as side:
+    async with (
+        run_record(conn, kind, window=window, job_id=job_id) as record,
+        await store.sibling(conn) as side,
+    ):
         # An evaluation run writes its own tables only (AGENTS.md): no provider observations.
         journal = CallJournal(side, record.run_id, observes=kind != EVAL)
         failed = True

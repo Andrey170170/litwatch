@@ -71,16 +71,19 @@ async def for_paper(conn: psycopg.AsyncConnection, paper_id: str) -> list[Verdic
 
 
 async def candidates(
-    conn: psycopg.AsyncConnection, runs: int, limit: int | None = None
+    conn: psycopg.AsyncConnection,
+    runs: int,
+    limit: int | None = None,
+    ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """The papers with grading work, at most `limit`, those without a grading pass on their
-    current text first, then oldest first. A paper not dismissed and classified at its current
-    revision has work when it has no grading pass yet on that text, a grading on an active topic
-    that failed fewer than `runs` runs, or a miss reported for an active topic with no verdict
-    on that text and no grading stopped there. Each comes with its direct membership rows
-    (`memberships`), whether its grading pass is done (`passed`), the topics graded on its
-    current text (`graded`), the topics whose current verdict on an earlier revision has a Fit
-    above none (`held`; pipeline.md, section 8), the failed grading runs in a row per topic on
+    """The papers with grading work, at most `limit` and among `ids` when given, those without a
+    grading pass on their current text first, then oldest first. A paper not dismissed and
+    classified at its current revision has work when it has no grading pass yet on that text, a
+    grading on an active topic that failed fewer than `runs` runs, or a miss reported for an active
+    topic with no verdict on that text and no grading stopped there. Each comes with its direct
+    membership rows (`memberships`), whether its grading pass is done (`passed`), the topics graded
+    on its current text (`graded`), the topics whose current verdict on an earlier revision has a
+    Fit above none (`held`; pipeline.md, section 8), the failed grading runs in a row per topic on
     its current text (`failed`), the roles whose every model refused per topic (`refused`) and the
     active topics a miss was reported for (`missed`)."""
     rows = await (
@@ -93,6 +96,7 @@ async def candidates(
                                    AND g.paper_revision = p.revision) AS passed
                     FROM papers p
                     WHERE p.dismissed_at IS NULL
+                      AND (%(ids)s::text[] IS NULL OR p.id = ANY(%(ids)s))
                       AND EXISTS (SELECT 1 FROM classifications c
                                   WHERE c.paper_id = p.id AND c.paper_revision = p.revision)
                 ) p
@@ -138,7 +142,7 @@ async def candidates(
             FROM chosen p
             ORDER BY p.passed, p.fetched_at, p.id
             """,
-            {"runs": runs, "limit": limit},
+            {"runs": runs, "limit": limit, "ids": ids},
         )
     ).fetchall()
     for r in rows:

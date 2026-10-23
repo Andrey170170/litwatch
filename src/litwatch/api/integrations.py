@@ -28,8 +28,10 @@ from litwatch.integrations.archive import Archive
 from litwatch.integrations.deep import Deep
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as integrations_store
+from litwatch.store import jobs as jobs_store
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
+from litwatch.store import word as word_store
 
 router = protected("/api")
 
@@ -196,7 +198,8 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
     when it has one: the request goes through the full-text queue, first in line, and the card
     shows on the paper once it is written. Asking again while one is queued or being written
     changes nothing. A paper litwatch lacks is fetched first, as Process fetches it, with no
-    transaction open, and stored in the request's own."""
+    transaction open, and stored in the request's own; a paper outside the collection gets its
+    Process job too, queued in the same transaction."""
     if not answers_card_requests(loaded(request)):
         raise HTTPException(status_code=409, detail="no card provider is configured")
     try:
@@ -210,7 +213,13 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
         pass_id = await deep_passes.request(c, paper_id)
         if pass_id is None:
             raise HTTPException(status_code=409, detail="the paper is dismissed")
+        # Outside the collection, the paper is processed now too, as Process does.
+        processing = not await word_store.in_collection(c, paper_id)
+        if processing:
+            await jobs_store.process(c, paper_id)
     request.app.state.deep_wake.set()
+    if processing:
+        request.app.state.jobs_wake.set()
     return s.CardRequested(pass_id=pass_id)
 
 

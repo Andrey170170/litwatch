@@ -1041,7 +1041,8 @@ async def test_the_owner_may_ask_for_a_card_an_automatic_pass_waits_for(db):
 
 async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypatch):
     """Deep read outside the collection: an archive paper not fetched yet is fetched as
-    Process fetches it, then its card is asked for; arXiv lacking it is a 404."""
+    Process fetches it, then its card is asked for and its Process job queued; arXiv lacking it
+    is a 404."""
     fetched = []
     found = {"2610.09999": paper("2610.09999", title="Elsewhere")}
     monkeypatch.setattr(
@@ -1066,6 +1067,7 @@ async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypa
     assert asked.status_code == 202 and fetched[:2] == [["2610.09999"], ["2601.99999"]]
     assert (page["stored"], page["in_collection"]) == (True, False)
     assert page["card_pass"]["reason"] == "request" and missing.status_code == 404
+    assert page["process"]["state"] == "queued"  # outside the collection, processed now too
     assert await papers_store.get(db, "2610.08888") is None
 
 

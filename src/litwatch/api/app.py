@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from litwatch import fulltext
-from litwatch.api import digests, mcp, reading, settings, summary
+from litwatch.api import digests, jobs, mcp, reading, settings, summary
 from litwatch.api import integrations as integrations_api
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
@@ -23,7 +23,7 @@ from litwatch.core import (
 )
 from litwatch.events import Integration, dispatch
 from litwatch.fulltext import deep as deep_passes
-from litwatch.jobs import scheduler
+from litwatch.jobs import scheduler, worker
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.publications import Dblp, PublicationSource
 
@@ -33,11 +33,11 @@ WEB = Path(str(resources.files("litwatch.api").joinpath("web")))
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Start the scheduler with the service when the configuration enables it, with the
-    full-text worker when an archive is configured too (it calls models and has the archive
-    fetch, so, like the schedule, it waits for cutover) and the Deep card worker when a card
-    provider is loaded as well, the integrations' dispatcher when any is loaded, and the MCP
-    server (its session manager and PDF executor) while `/mcp` is served."""
+    """Start the scheduler and the jobs worker with the service when the configuration enables
+    them, with the full-text worker when an archive is configured too (it calls models and has
+    the archive fetch, so, like the schedule, it waits for cutover) and the Deep card worker
+    when a card provider is loaded as well, the integrations' dispatcher when any is loaded, and
+    the MCP server (its session manager and PDF executor) while `/mcp` is served."""
     tasks = []
     enabled = app.state.config.schedule.enabled
     archive = app.state.archive if enabled else None
@@ -64,6 +64,18 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             asyncio.create_task(
                 scheduler.run_forever(
                     app.state.dsn, app.state.config, app.state.gateway, app.state.publications
+                )
+            )
+        )
+
+        def worked() -> None:  # a chunk may have queued passes: their workers look now
+            app.state.fulltext_wake.set()
+            app.state.deep_wake.set()
+
+        tasks.append(
+            asyncio.create_task(
+                worker.run_forever(
+                    app.state.dsn, app.state.config, app.state.gateway, app.state.jobs_wake, worked
                 )
             )
         )
@@ -116,12 +128,14 @@ def create_app(
     app.state.search_stats = {}
     app.state.fulltext_wake = asyncio.Event()  # set to have the full-text worker look now
     app.state.deep_wake = asyncio.Event()  # and the Deep card worker
+    app.state.jobs_wake = asyncio.Event()  # and the jobs worker
     # Each router but the sign-in asks for the token (`deps.protected`).
     app.include_router(reading.router)
     app.include_router(digests.router)
     app.include_router(settings.router)
     app.include_router(integrations_api.router)
     app.include_router(summary.router)
+    app.include_router(jobs.router)
     app.include_router(reading.session)
     # Before the web app's catch-all, which would shadow it.
     app.state.mcp = app.state.mcp_calls = None

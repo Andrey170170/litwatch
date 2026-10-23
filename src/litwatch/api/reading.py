@@ -47,6 +47,7 @@ from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import digests as digests_store
 from litwatch.store import feedback as feedback_store
+from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
 from litwatch.store import reading
@@ -373,6 +374,7 @@ async def paper_page(
     )
     published = await publications_store.get(c, paper_id)
     card, card_pass, card_requestable = await integrations_api.card(c, paper_id, integrations)
+    job = await jobs_store.process_of(c, paper_id)
     unattached = next((r for r in found["reactions"] if r["topic"] is None), None)
     return s.Paper(
         **{
@@ -413,6 +415,7 @@ async def paper_page(
         card=card,
         card_pass=card_pass,
         card_requestable=card_requestable,
+        process=s.ProcessJob(id=job["id"], state=job["state"], error=job["error"]) if job else None,
     )
 
 

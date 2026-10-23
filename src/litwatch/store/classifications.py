@@ -15,11 +15,16 @@ from litwatch.store.papers import COLUMNS, row_to_paper
 MACHINE = [Source.CLASSIFIER.value, Source.UNCERTAIN.value, Source.KEYWORD.value]
 
 
-async def due(conn: psycopg.AsyncConnection, runs: int, limit: int | None = None) -> list[Paper]:
-    """Papers with no classification of their current text, oldest first. One that failed is
-    tried again after the new ones, so it never takes a new paper's place under `limit`, and
-    after `runs` failed runs it is not tried at all: it waits for the owner. A dismissed paper
-    is never classified."""
+async def due(
+    conn: psycopg.AsyncConnection,
+    runs: int,
+    limit: int | None = None,
+    ids: list[str] | None = None,
+) -> list[Paper]:
+    """Papers with no classification of their current text, oldest first, among `ids` when
+    given. One that failed is tried again after the new ones, so it never takes a new paper's
+    place under `limit`, and after `runs` failed runs it is not tried at all: it waits for the
+    owner. A dismissed paper is never classified."""
     rows = await (
         await conn.execute(
             f"""
@@ -27,12 +32,13 @@ async def due(conn: psycopg.AsyncConnection, runs: int, limit: int | None = None
             LEFT JOIN step_failures f ON f.paper_id = p.id AND f.step = 'classification'
                  AND f.paper_revision = p.revision
             WHERE p.dismissed_at IS NULL AND coalesce(f.failed_runs, 0) < %s
+              AND (%s::text[] IS NULL OR p.id = ANY(%s))
               AND NOT EXISTS (SELECT 1 FROM classifications c
                               WHERE c.paper_id = p.id AND c.paper_revision = p.revision)
             ORDER BY f.paper_id IS NOT NULL, coalesce(f.failed_runs, 0), p.fetched_at, p.id
             LIMIT %s
             """,
-            (runs, limit),
+            (runs, ids, ids, limit),
         )
     ).fetchall()
     return [row_to_paper(r) for r in rows]
