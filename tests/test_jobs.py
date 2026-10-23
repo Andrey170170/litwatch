@@ -6,7 +6,7 @@ scripted (`test_steps.Scripted`)."""
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -22,11 +22,14 @@ from litwatch.feedback import misses, word
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import run_lock
+from litwatch.llm import Gateway
 from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests.conftest import TREE, answering, paper
+from tests.fakes import BatchingProvider, ScriptedProvider
+from tests.test_batches import FAST
 from tests.test_steps import CONFIG, Scripted, decision
 
 SCHEDULED = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})  # the worker runs
@@ -213,6 +216,36 @@ async def test_a_failed_job_settles_when_the_topic_it_failed_grading_on_is_pause
     ]
     await word.save_taxonomy(conn, TREE.model_copy(update={"topics": paused}))
     assert (await jobs_store.get(conn, job))["state"] == "queued"  # nothing waits on it now
+
+
+async def test_a_job_answers_a_call_a_dead_nightly_left_in_an_ended_batch_from_it(conn, models):
+    """The nightly batched the paper's analysis and died before reading it: the job reads the
+    ended batch rather than paying for the call again."""
+    models.decisions[A.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
+    models.fits = {(r, A.title): {"reason": "Core.", "fit": "central"} for r in ("judge", "check")}
+    anthropic = BatchingProvider("anthropic", models.respond)
+    openrouter = ScriptedProvider("openrouter", models.respond)
+    providers = {"anthropic": anthropic, "openrouter": openrouter}
+
+    def plain(config, journal):  # as `default_gateway`: no batch unless told
+        return Gateway(config.models, providers, journal, retry_delays=(0.0,), batch_options=FAST)
+
+    def batches(config, journal):  # as the nightly's
+        gw = plain(config, journal)
+        gw.batch_until(datetime.now(UTC) + timedelta(hours=1))
+        return gw
+
+    async with model_run(conn, CONFIG, "nightly", gateway=batches) as night:
+        await nightly.classify(conn, CONFIG, night, ids=[A.id])
+        await nightly.analyse(conn, night, ids=[A.id])
+    assert anthropic.batched and not anthropic.calls
+    await conn.execute("DELETE FROM analyses")  # as if it died before reading the batch
+    await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")
+
+    job = await queued(conn, A.id)
+    await work_out(worker.Worker(conn, CONFIG, plain))
+    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert [r for r, _ in anthropic.calls if r.model == "test-analyse"] == []  # not paid again
 
 
 async def test_a_job_whose_run_cannot_start_fails_and_says_why(conn, models, monkeypatch):

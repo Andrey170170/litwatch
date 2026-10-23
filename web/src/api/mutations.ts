@@ -179,6 +179,21 @@ export function useProcess() {
   });
 }
 
+/** Try again on the paper's failed Process job from its page, as Jobs' Try again: the job goes back in the queue and
+ * the page reads it running. A 409 (the job moved meanwhile, or a step of the paper now waits on the owner) reads the
+ * page again too. */
+export function useProcessAgain(paperId: string) {
+  return usePaperMutation(
+    paperId,
+    async (_, job: number) => ok(await api.POST("/api/jobs/{job_id}/{action}", { params: { path: { job_id: job, action: "again" } } })),
+    (qc, id) => {
+      toast("Processing it again");
+      return settled(qc, id);
+    },
+    (qc, id) => settled(qc, id),
+  );
+}
+
 /** The jobs pages' reads after a write that changed the jobs: read again, never patched from an answer, which may
  * arrive after a later action's and would undo it. */
 function jobsChanged(qc: QueryClient) {

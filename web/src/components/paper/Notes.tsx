@@ -1,13 +1,14 @@
 /**
  * The open states under the header (DESIGN.md, "Open states"): yellow for a split or escalation, red for ungraded,
  * a failed analysis, a full-text pass waiting on the owner or awaiting classification, each with its buttons.
- * Settling one settles it on Needs you too. Cyan while the paper's Process job runs on in the collection.
+ * Settling one settles it on Needs you too. Cyan while the paper's Process job runs on in the collection, red once it
+ * failed there and can be tried again.
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { Schemas } from "@/api/client";
-import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useRetryAnalysis, useRunPassNow } from "@/api/mutations";
+import { useClassifyByHand, useDismiss, useFixText, useGradeNow, useProcessAgain, useRetryAnalysis, useRunPassNow } from "@/api/mutations";
 import { taxonomyQuery } from "@/api/queries";
 import { processing } from "@/lib/jobs";
 import type { Paper } from "./Actions";
@@ -181,6 +182,25 @@ function Note({ paper, state, onLabel }: { paper: Paper; state: OpenState; onLab
   }
 }
 
+/** The paper's Process job failed after classifying it, and can be tried again (`again`); once a step waits on the owner,
+ * that step's own note has the actions instead. */
+function ProcessFailed({ paper, job }: { paper: Paper; job: NonNullable<Paper["process"]> }) {
+  const again = useProcessAgain(paper.id);
+  return (
+    <div className="note fail">
+      <div>
+        <b>Processing failed.</b> The next run tries what is left; Try again does it now.
+        {job.error && <div className="err">{job.error}</div>}
+      </div>
+      <div className="acts">
+        <button className="btn" disabled={again.isPending} onClick={() => again.mutate(job.id)}>
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Notes({ paper, onLabel }: { paper: Paper; onLabel: (topic: string) => void }) {
   return (
     <>
@@ -196,6 +216,7 @@ export function Notes({ paper, onLabel }: { paper: Paper; onLabel: (topic: strin
           </div>
         </div>
       )}
+      {paper.in_collection && paper.process?.state === "failed" && paper.process.again && <ProcessFailed paper={paper} job={paper.process} />}
       {paper.states?.map((s) => (
         // One state per kind and topic or pass: a refetch that drops one keeps the others' open forms.
         <Note key={`${s.kind}:${s.topic ?? ""}:${s.pass_id ?? ""}`} paper={paper} state={s} onLabel={onLabel} />

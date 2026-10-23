@@ -34,7 +34,7 @@ from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
 from litwatch.feedback import word
 from litwatch.jobs import nightly, scheduler
-from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
+from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
 from litwatch.jobs.lock import BusyError, run_lock
 from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
@@ -152,11 +152,13 @@ class Worker:
 
     async def _run_of(self, job: dict[str, Any]) -> ModelRun:
         """The run this worker records the job's work on: opened when it claims the job, kept
-        across its chunks."""
+        across its chunks. Its gateway sends no batch, and answers a call a dead nightly left in
+        an ended batch from that batch (`attaching`)."""
         if job["id"] not in self.open:
             stack = AsyncExitStack()
+            factory = attaching(self.gateway)
             run = await stack.enter_async_context(
-                model_run(self.conn, self.config, "job", gateway=self.gateway, job_id=job["id"])
+                model_run(self.conn, self.config, "job", gateway=factory, job_id=job["id"])
             )
             stack.push_async_callback(run.gateway.close)
             self.open[job["id"]] = _Open(stack, run)

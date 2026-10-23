@@ -333,6 +333,27 @@ describe("a paper's page", () => {
     await waitFor(() => expect(screen.queryByText("Processing.")).toBeNull());
   });
 
+  it("offers Try again on a Process job that failed after classifying the paper, and then says Processing", async () => {
+    viewport(true);
+    let job: { id: number; state: string; error: string | null; again: boolean } = { id: 4, state: "failed", error: "analysis failed on 1", again: true };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": () => ({ ...paper, id: "2409.01234", title: "Half done", states: [], process: job }),
+      "POST /api/jobs/4/again": () => {
+        job = { id: 4, state: "queued", error: null, again: false };
+        return json({ not_run: [], running: [], failed: [], done: [] });
+      },
+    });
+    renderApp("/paper/2409.01234");
+    const note = (await screen.findByText("Processing failed.")).closest(".note") as HTMLElement;
+    expect(within(note).getByText("analysis failed on 1")).toBeInTheDocument();
+    await userEvent.click(within(note).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Processing.")).toBeInTheDocument();
+    expect(screen.queryByText("Processing failed.")).toBeNull();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
   it("says a fetched paper no run will process is fetched, without promising the next run", async () => {
     viewport(true);
     const dismissed = { ...paper, id: "2409.01234", title: "Dismissed one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };

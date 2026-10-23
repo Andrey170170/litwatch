@@ -7,7 +7,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -25,6 +25,20 @@ GatewayFactory = Callable[[Config, CallJournal], llm.Gateway]
 
 def default_gateway(config: Config, journal: CallJournal) -> llm.Gateway:
     return llm.build(config.models, journal, debug=config.debug)
+
+
+def attaching(factory: GatewayFactory) -> GatewayFactory:
+    """`factory`'s gateways, sending no batch but answering a call a dead run left in a batch
+    that has ended from that batch rather than paying for it again: the service's workers, which
+    run outside the nightly's batch window. A batch still running is past that run's deadline:
+    it is cancelled and given up at once (no drain), so a worker never waits on it."""
+
+    def gateway(config: Config, journal: CallJournal) -> llm.Gateway:
+        found = factory(config, journal)
+        found.batch_until(datetime.now(UTC), drain=timedelta(0))
+        return found
+
+    return gateway
 
 
 @dataclass

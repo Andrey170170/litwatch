@@ -91,7 +91,9 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   rule Needs you uses. A failed Process job is tried again (Jobs' Try again, the paper's "Process again") only while
   no step of its paper waits on the owner; then it would find nothing due, so neither is offered and the API
   answers 409 (Deep read queues no job either): the owner's action on Needs you settles it, and on the paper's page
-  the button reads "Failed".
+  the button reads "Failed". A Process job that failed after classifying its paper shows on the paper's page as a
+  red note with Try again while it can be tried again. A job's gateway sends no batch, but answers a call a dead
+  nightly left in an ended batch from that batch, as the full-text worker's does.
 
 ## Decisions
 
