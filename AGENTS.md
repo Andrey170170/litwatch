@@ -9,6 +9,7 @@ production since 2026-10-17, in place of release 0.14.
 - `GLOSSARY.md`: the domain terms. Code, docs and generated prose use them as defined there.
 - `docs/specs/v1/`: what v1 does and why, one file per subject, indexed by its `README.md`. `milestones.md` there
   says what is built and what comes next; `DESIGN.md` there is the web app.
+- `docs/backlog.md`: everything specified or agreed but not built yet, in the order it should be picked up.
 - `docs/plans/`: approved build plans; `v1-build.md` is the order of work for v1, its PRs and their evidence.
 - `docs/install.md`: installing a fresh litwatch with the stack in `deploy/`; keep it in step with `deploy/`.
 - `docs/agents/workflow.md`: how changes ship here. `docs/agents/verification.md`: how a change is shown to work.

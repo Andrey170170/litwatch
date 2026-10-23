@@ -156,7 +156,7 @@ overview, where an error costs little.
   would cost at API prices); litwatch records them with the card's attempt. Settings' Runs and cost shows the month to
   date as a subscription estimate beside the providers, with no budget and no amber, and says how many attempts' usage
   is unknown, so the estimate reads as a lower bound when any is.
-- Re-runs and backfills show their estimated cost (calls by role times the role's average cost over the last 30 days)
+- Re-runs and backfills show their estimated cost (calls by role times the mean cost of the role's model over its last 200 calls)
   before they start, and take a hard ceiling they cannot exceed; reaching it stops the job and records where.
 
 Anthropic credit (a monthly grant on the owner's account) pays for the Anthropic roles; whatever is left near the end

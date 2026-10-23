@@ -144,6 +144,10 @@ with its own token; the client configuration in the owner's dotfiles; its teleme
 research session on another machine, an agent given only a vague memory of a digest finds the paper, reads the
 section asked for and shows a figure, without the web.
 
+**Jobs** ([`docs/plans/jobs.md`](../../plans/jobs.md), approved 2026-10-22): the jobs API and the Jobs page, deferred
+from W2, in three stages. What is specified and not built yet, and in what order, is in
+[`docs/backlog.md`](../../backlog.md).
+
 After v1: backfill of the archive's older papers (the owner's plan: a local decision-style model over several nights,
 for example DiffusionGemma with constrained decoding, then leftover monthly credit on the stronger graders for what it
 surfaces); semantic search and a citation graph in the archive; other sources.

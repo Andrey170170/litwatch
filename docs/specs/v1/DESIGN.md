@@ -182,8 +182,8 @@ collection" in place of a rarity.
   two rows the rest fold behind one line: their badges and a count by grade in the grades' colours ("+4 · 1 must
   read, 3 adjacent"). It opens closed on every paper; a note's Label opens it when its topic is folded.
 - The quick actions as a 2×2 grid: Save, BibTeX ⧉, arXiv ↗, PDF ↗, with Deep read across the full width while the
-  paper has no card. For a paper outside the collection: Process, BibTeX, Deep read, Report as a miss. Once
-  fetched, Process reads "Fetched", and "Fetched · next run" while the next run will process it (not dismissed).
+  paper has no card. For a paper outside the collection: Process, BibTeX, Deep read, Report as a miss. Process
+  fetches it and starts a job that processes it now (Jobs); the button reads "Processing" while it runs.
 
 **On the phone** the page is one column: the header and the ladder without its last rung. The bottom bar: ☆ Save, 👍,
 the paper's place in its list ("3/22"), 👎, and ⋯. ⋯ opens the paper sheet: a label per topic (the topic's name, its
@@ -292,7 +292,9 @@ tick, amber when projected over. Under them, Deep cards' month to date as a subs
 and never amber, and "at least" with the count of attempts whose usage is unknown when there are any. Then the nights as a table (night, papers, graded, digests, took, cost, and what
 failed, red-edged), then the latest three jobs and "All jobs ›". **Jobs** holds the work outside the nightly run in
 four groups: Not run (yellow; Run now, With tonight's run, Discard), Running and queued (cyan, with progress), Failed
-(red; Try again) and Done. A job that is also a Needs you item settles with it.
+(red; Try again) and Done. A job that is also a Needs you item settles with it. A job its ceiling stopped waits under Not run with
+what is left. A job is a re-run, a replay, a paper processed by Process or a digest written again; Deep cards asked for show in the same groups, read from their passes
+([`docs/plans/jobs.md`](../../plans/jobs.md)).
 
 **Integrations.** A card per integration: its name, what it is connected to, what it does and its status (cyan up to
 date, red failed, grey not loaded); a failed event with Retry now and Skip this event; a failing setup with its error
