@@ -249,6 +249,17 @@ async def test_a_topic_edited_back_grades_again_what_the_version_between_decided
     assert await verdicts_store.ungraded_under(conn, AGENTS.slug, "v2", [A.id]) == []
 
 
+async def test_the_members_scope_is_the_topics_page_graded_papers_included(conn, models):
+    """B has no membership but a grade for the topic (a keyword hit): its page shows it."""
+    await conn.execute(
+        "INSERT INTO memberships (paper_id, class, source, probability, class_version, "
+        "paper_revision) VALUES (%s, %s, 'classifier', 0.9, 'v', 1)",
+        (A.id, AGENTS.slug),
+    )
+    await graded_before(conn, B, AGENTS.slug, AGENTS.version)
+    assert await jobs_store.members(conn, [AGENTS.slug]) == [A.id, B.id]
+
+
 async def test_a_rerun_whose_topic_was_paused_fails_and_says_why(conn, models):
     job = await rerun(conn, AGENTS.slug, [A.id], ceiling=1.0)
     await edited(conn, AGENTS, status=Status.PAUSED)
@@ -350,20 +361,30 @@ async def test_a_grading_its_papers_text_change_left_unrecorded_fails_the_rerun(
     assert await verdicts_store.ungraded_under(conn, AGENTS.slug, AGENTS.version, [B.id]) == []
 
 
-async def test_a_topics_new_depth_between_chunks_brings_its_graders_bounds(
-    conn, models, monkeypatch
-):
-    """A Field re-run of A and B, one paper a chunk; the topic becomes an Area after A: B's
-    graders include `area_check`, on OpenRouter, whose bound the next chunk has."""
+async def test_a_topic_edited_before_its_rerun_has_graded_all_fails_it(conn, models, monkeypatch):
+    """One paper a chunk; the topic is edited after A: B would be graded under another version
+    than A, so the job fails and says why. Its editor offers the new version's re-run."""
     monkeypatch.setattr(worker, "CHUNK", 1)
-    job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
+    async with api(conn) as http:
+        body = {"topic": AGENTS.slug, "scopes": ["members"], "ceiling": 1.0, "run": True}
+        for p in (A, B):
+            await conn.execute(
+                "INSERT INTO memberships (paper_id, class, source, probability, class_version, "
+                "paper_revision) VALUES (%s, %s, 'classifier', 0.9, 'v', 1)",
+                (p.id, AGENTS.slug),
+            )
+        assert (await http.post("/api/jobs/reruns", json=body)).status_code == 201
+    (job,) = await rows(conn, "SELECT id FROM jobs")
     w = worker.Worker(conn, CONFIG, models.gateway)
     assert await w.step(AFTERNOON)
     await edited(conn, AGENTS, depth=Depth.AREA)
     await work_out(w)
-    done = await jobs_store.get(conn, job)
-    assert (done["state"], done["error"]) == ("done", None)
-    assert models.sent("area_check") == [B.title]
+    failed = await jobs_store.get(conn, job["id"])
+    assert (failed["state"], failed["error"]) == (
+        "failed",
+        "the topic was edited since; re-run it from there",
+    )
+    assert models.sent("field_grade") == [A.title] and models.sent("judge") == []
 
 
 # -- V4: the ceiling -----------------------------------------------------------------------------
@@ -603,11 +624,17 @@ async def test_a_nightly_digest_does_not_wait_for_a_reruns_passes(conn, models):
     assert await digests.waiting_passes(conn, since) == 0
 
 
-async def test_a_discarded_rerun_lets_its_passes_go(conn, models):
+async def test_a_rerun_with_no_archive_stops_keeping_its_passes_and_a_discarded_one_lets_go(
+    conn, models
+):
     job = await focus_rerun(conn, models, ceiling=1.0)
-    w = worker.Worker(conn, CONFIG, models.gateway)  # no archive: the pass waits
-    assert await w.step(AFTERNOON)
-    await jobs_store.finish(conn, job, "stopped", "stopped at the ceiling")  # as if stopped there
+    await work_out(worker.Worker(conn, CONFIG, models.gateway))  # no archive: nothing reads text
+    stopped = await jobs_store.get(conn, job)
+    assert (stopped["state"], stopped["error"]) == (
+        "stopped",
+        "stopped with 1 full-text passes left: no archive",
+    )
+    assert (await text_pass(conn))["job_id"] == job
     async with api(conn) as http:
         assert (await http.post(f"/api/jobs/{job}/discard")).status_code == 200
     assert (await text_pass(conn))["job_id"] is None

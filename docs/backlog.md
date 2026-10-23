@@ -45,6 +45,11 @@ a short plan before it is built.
      question from the settings sketch.
    - A Calibrate session whose drawn topic left Focus: answering it is a 422 now. *Needs a decision* on what an
      answer there means.
+   - Journal the charge an error reports (OpenRouter bills some completions with no choices): the gateway counts
+     it against a re-run's ceiling in the run, but the journal keeps only the call's final reply or error, so the
+     month's spend and a re-run's spend over its runs miss it (docs/plans/jobs.md, P2's known limit).
+   - Estimates for roles whose history is all batched (`field_grade`, `brief` today): `store.calls.mean_cost`
+     leaves batch calls out, so a Field topic's re-run offer has no estimate. Twice the batch mean would do.
 
 ## After v1's plan ends
 

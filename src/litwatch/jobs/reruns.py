@@ -171,6 +171,13 @@ class Chunk:
     failed: int = 0
 
 
+def edited_since(job: dict[str, Any], topic: Topic) -> bool:
+    """Whether the topic was edited since the re-run was made, its grading not done: its verdicts
+    would be under two versions. The editor offers a re-run of the new one."""
+    made = job["scope"].get("version")
+    return job["done"] < len(job["scope"]["papers"]) and made is not None and made != topic.version
+
+
 def active_topic(tree: Taxonomy | None, slug: str) -> Topic | None:
     topic = tree.topic(slug) if tree else None
     return topic if topic and topic.status == Status.ACTIVE else None
@@ -233,7 +240,10 @@ async def work(
         if reached:
             return Chunk("stopped", f"stopped at the ceiling after {graded} of {len(papers)}")
         return Chunk("more")
-    if archive is not None:
+    if archive is None:  # nothing reads the full text: the passes stay the job's, for Run now
+        if left := await fulltext_store.job_open(conn, job["id"]):
+            return Chunk("stopped", f"stopped with {left} full-text passes left: no archive")
+    else:
         done = await fulltext.work(conn, config, archive, run=run, job=job["id"], limit=size)
         counts.update({k: v for k, v in done.items() if k != "awaiting_text"})
         after = await _progress(conn, job, run, counts, job["done"], on_run=False)
