@@ -235,9 +235,9 @@ class Gateway:
             except TimeoutError as exc:
                 raise CallError("timeout", f"{role.timeout_seconds:g}s") from exc
             except ProviderError as exc:
-                # A provider's answered error is not billed; a timeout or a lost connection may
-                # have been, so its reservation is kept.
-                cost = None if exc.timeout or exc.unanswered else 0.0
+                # A provider's answered error is not billed unless it says so; a timeout or a
+                # lost connection may have been, so its reservation is kept.
+                cost = None if exc.timeout or exc.unanswered else (exc.cost or 0.0)
                 if exc.timeout:
                     raise CallError("timeout", str(exc)) from exc
                 if exc.account:

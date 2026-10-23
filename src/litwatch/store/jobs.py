@@ -201,18 +201,22 @@ async def claim(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
 
 
 async def progress(
-    conn: psycopg.AsyncConnection, job_id: int, done: int, counts: dict[str, int]
+    conn: psycopg.AsyncConnection,
+    job_id: int,
+    done: int,
+    counts: dict[str, int],
+    ladder: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Record how far the job got and what its steps recorded so far, for a job this session
-    runs; None when it is no longer this session's."""
+    """Record how far the job got and what its steps recorded so far (a re-run's `ladder` too,
+    when given), for a job this session runs; None when it is no longer this session's."""
     return await (
         await conn.execute(
             f"""
-            UPDATE jobs SET done = %s, counts = %s
+            UPDATE jobs SET done = %s, counts = %s, ladder = coalesce(%s, ladder)
             WHERE id = %s AND state = 'running' AND (backend_pid, backend_start) = ({_ME})
             RETURNING *
             """,
-            (done, Jsonb(counts), job_id),
+            (done, Jsonb(counts), Jsonb(ladder) if ladder is not None else None, job_id),
         )
     ).fetchone()
 

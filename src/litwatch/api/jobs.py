@@ -257,17 +257,29 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
     state = "queued" if body.run else "offered"
     async with c.transaction():
         # Asked again after a lost reply, the same re-run is found, not made twice; Run puts
-        # one kept under Not run in the queue.
+        # one under Not run in the queue, under the ceiling given, as Run now on Jobs does.
         found = await jobs_store.open_rerun(c, scope)
         if found is None:
             await jobs_store.create(
                 c, "rerun", scope, len(chosen), state, ceiling=body.ceiling, estimate=offer.estimate
             )
-        elif body.run and found["state"] == "offered":
-            await jobs_store.move(c, found["id"], ("offered",), "queued", body.ceiling)
+        elif body.run and found["state"] in jobs_store.NOT_RUN:
+            await _above_spent(c, found, body.ceiling)
+            await jobs_store.move(c, found["id"], jobs_store.NOT_RUN, "queued", body.ceiling)
     if body.run:
         request.app.state.jobs_wake.set()
     return await _listing(c)
+
+
+async def _above_spent(c: Conn, job: dict[str, Any], ceiling: float | None) -> None:
+    """A stopped re-run goes on only under a ceiling above what it spent."""
+    if job["state"] != "stopped":
+        return
+    spent = await jobs_store.spent(c, job["id"])
+    if (ceiling or float(job["ceiling"])) <= spent:
+        raise HTTPException(
+            status_code=409, detail=f"the ceiling must be above what it spent, ${spent:.2f}"
+        )
 
 
 @router.post("/{job_id}/{action}", responses=JOB_REFUSED)
@@ -297,12 +309,8 @@ async def act(
             raise HTTPException(status_code=409, detail=f"the job is {job['state']} now")
         if job["kind"] == "rerun" and to in ("queued", "tonight") and not schedule_on:
             raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
-        if job["state"] == "stopped" and to in ("queued", "tonight"):
-            spent = await jobs_store.spent(c, job_id)
-            if (ceiling or float(job["ceiling"])) <= spent:
-                raise HTTPException(
-                    status_code=409, detail=f"the ceiling must be above what it spent, ${spent:.2f}"
-                )
+        if to in ("queued", "tonight"):
+            await _above_spent(c, job, ceiling)
         await jobs_store.move(c, job_id, sources, to, ceiling if job["kind"] == "rerun" else None)
         if to == "discarded":
             await fulltext_store.release_job(c, job_id)

@@ -177,7 +177,7 @@ def reply_of(completion: Any, role: RoleConfig) -> Reply:
     )
     choices = getattr(completion, "choices", None)
     if not choices:
-        raise ProviderError("the completion has no choices", transient=True)
+        raise ProviderError("the completion has no choices", transient=True, cost=usage.cost)
     choice = choices[0]
     text = choice.message.content or ""
     if said := getattr(choice.message, "refusal", None):
@@ -256,7 +256,8 @@ class OpenRouterProvider:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except openai.PermissionDeniedError as exc:
             if category := declined(exc.body):
-                usage = Usage(model=role.model, via="openrouter", effort=role.effort)
+                # An answered error, not billed.
+                usage = Usage(model=role.model, via="openrouter", effort=role.effort, cost=0.0)
                 said = json.dumps(exc.body, default=str)
                 return Reply("", Stop.REFUSED, usage, refusal=category, raw=said)
             raise ProviderError(f"{type(exc).__name__}: {exc}", account=True) from exc

@@ -36,7 +36,7 @@ from tests.fakes import ScriptedProvider, SdkClient, openrouter_completion
 from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.test_deep import DONE, make
 from tests.test_fulltext import ANSWER, BODY, analysed
-from tests.test_steps import ROLES, Scripted
+from tests.test_steps import LISTS, ROLES, Scripted
 
 BRIEF = RoleConfig(provider="anthropic", model="test-brief")
 CONFIG = Config(models=Models(**ROLES, brief=BRIEF), schedule=Schedule(enabled=True))
@@ -101,10 +101,19 @@ async def models(conn, monkeypatch):
 
 
 async def charged(
-    conn, model: str, *, cost: float, tokens_in: int, tokens_out: int, cached: int = 0, by="X"
+    conn,
+    model: str,
+    *,
+    cost: float,
+    tokens_in: int,
+    tokens_out: int,
+    cached: int = 0,
+    by="X",
+    job: int | None = None,
 ) -> None:
-    """A billed OpenRouter call of `model` in the journal, on a run that is not a nightly's."""
-    run_id = await runs.start(conn, "fulltext", None, None)
+    """A billed OpenRouter call of `model` in the journal, on a run that is not a nightly's (the
+    `job`'s, when given)."""
+    run_id = await runs.start(conn, "job" if job else "fulltext", None, None, job)
     usage = {
         "model": model,
         "via": "openrouter",
@@ -261,8 +270,31 @@ async def test_a_grading_that_fails_fails_the_rerun_and_try_again_does_what_is_l
     del models.scripted.fits[("field_grade", B.title)]
     await jobs_store.move(conn, job, ("failed",), "queued")
     await work_out(worker.Worker(conn, CONFIG, models.gateway))
-    assert (await jobs_store.get(conn, job))["state"] == "done"
+    done = await jobs_store.get(conn, job)
+    # Both count as graded, A by the first try: the count is of the verdicts themselves.
+    assert (done["state"], done["counts"]["graded"]) == ("done", 2)
     assert models.sent("field_grade").count(A.title) == 1  # graded once, not again
+
+
+async def test_try_again_starts_a_grading_one_model_further_down_after_an_unusable_answer(
+    conn, models, monkeypatch
+):
+    """D4 in a re-run: an unusable answer from the first model moves the next try down the
+    role's list, as a nightly's failed runs would."""
+    listed = CONFIG.model_copy(
+        update={"models": CONFIG.models.model_copy(update={"field_grade": LISTS["field_grade"]})}
+    )
+    for m in LISTS["field_grade"].models:
+        monkeypatch.setitem(prices.ANTHROPIC, m.model, (1.0, 2.0, 0.1))
+    first, second = (m.model for m in LISTS["field_grade"].models[:2])
+    models.scripted.said[(first, B.title)] = {"fit": "nowhere"}  # unusable
+    job = await rerun(conn, AGENTS.slug, [B.id], ceiling=1.0)
+    await work_out(worker.Worker(conn, listed, models.gateway))
+    assert (await jobs_store.get(conn, job))["state"] == "failed"
+    await jobs_store.move(conn, job, ("failed",), "queued")
+    await work_out(worker.Worker(conn, listed, models.gateway))
+    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert [m for m, t in models.scripted.models_asked if t == B.title] == [first, second]
 
 
 async def test_a_grading_its_papers_text_change_left_unrecorded_fails_the_rerun(
@@ -383,6 +415,27 @@ async def test_an_openrouter_call_under_a_ceiling_carries_its_max_price_and_a_ca
     with pytest.raises(CallError) as refused:
         await gateway.ask("check", Request(system="s", user="v", output=Output))
     assert refused.value.kind == "unpriced" and len(sdk.sent) == 1
+
+
+async def test_a_charge_an_error_reports_counts_against_the_ceiling():
+    """OpenRouter can bill a completion with no choices: its charge counts, and the retry is
+    reserved from what is left after it."""
+    empty = openrouter_completion(text="{}", cost=0.25)
+    empty.choices = []
+    sdk = SdkClient(
+        empty, openrouter_completion(text=json.dumps({"reason": "r", "fit": "related"}))
+    )
+    role = RoleConfig(provider="openrouter", model="meta/muse")
+    gateway = Gateway(
+        Models(check=role), {"openrouter": OpenRouterProvider(client=sdk)}, retry_delays=(0.0,)
+    )
+    bound = ceilings.Bound(1e-7, 2e-7, 16000, {"prompt": 0.1, "completion": 0.2})
+    gateway.ceiling = ceilings.Ceiling(1.0, {"openrouter:meta/muse": bound})
+    from litwatch.grading import Output  # noqa: PLC0415
+
+    await gateway.ask("check", Request(system="s", user="u", output=Output))
+    assert len(sdk.sent) == 2
+    assert gateway.ceiling.spent == pytest.approx(0.25 + 0.0021)
 
 
 async def test_an_openrouter_route_is_bound_by_what_its_calls_were_charged(conn):
@@ -510,6 +563,16 @@ async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn, m
     assert (await jobs_store.get(conn, job))["state"] == "running"  # its text pass still waits
 
 
+async def test_a_nightly_digest_does_not_wait_for_a_reruns_passes(conn, models):
+    from litwatch.store import digests  # noqa: PLC0415
+
+    since = datetime.now(UTC)
+    await focus_rerun(conn, models, ceiling=1.0)
+    assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)
+    assert (await text_pass(conn))["reason"] == "focus"
+    assert await digests.waiting_passes(conn, since) == 0
+
+
 async def test_a_discarded_rerun_lets_its_passes_go(conn, models):
     job = await focus_rerun(conn, models, ceiling=1.0)
     w = worker.Worker(conn, CONFIG, models.gateway)  # no archive: the pass waits
@@ -588,6 +651,16 @@ async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_r
         assert len((await http.post("/api/jobs/reruns", json=wider)).json()["running"]) == 2
         turned = wider | {"scopes": ["members", "labels"]}  # the same scopes, in another order
         assert len((await http.post("/api/jobs/reruns", json=turned)).json()["running"]) == 2
+        # The same re-run, stopped at its ceiling: Run goes on with it under the new ceiling,
+        # which must be above what it spent.
+        stopped_id = int(again["running"][0]["key"].split(":")[-1])
+        await conn.execute("UPDATE jobs SET state = 'stopped' WHERE id = %s", (stopped_id,))
+        await charged(conn, "x/y", cost=0.4, tokens_in=10, tokens_out=10, job=stopped_id)
+        low = await http.post("/api/jobs/reruns", json=body | {"run": True, "ceiling": 0.3})
+        assert low.status_code == 409 and "above what it spent" in low.json()["detail"]
+        on = (await http.post("/api/jobs/reruns", json=body | {"run": True, "ceiling": 3.0})).json()
+        (resumed,) = [r for r in on["running"] if r["key"] == f"job:{stopped_id}"]
+        assert (resumed["state"], resumed["ceiling"]) == ("queued", 3.0)
         empty = body | {"scopes": ["range"]}
         assert (await http.post("/api/jobs/reruns", json=empty)).status_code == 409
         kept = (await http.post("/api/jobs/reruns", json=body | {"scopes": ["labels"]})).json()
