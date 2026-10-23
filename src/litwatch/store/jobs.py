@@ -10,7 +10,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core.fulltext import REQUESTED
 from litwatch.store.failures import ACTIONABLE
-from litwatch.store.fulltext import STUCK, stuck_params
+from litwatch.store.fulltext import STARTED, STUCK, stuck_params
 from litwatch.store.runs import ALIVE
 
 # The states each of the Jobs page's groups shows (DESIGN.md, Jobs); `discarded` is hidden.
@@ -201,8 +201,8 @@ async def listing(
     process died included (a call of unknown cost counts nothing, as in the month's spend); a
     card with its pass's state, mapped onto a job's, failed once it waits on the owner (`stuck`,
     as Needs you lists it, after `runs` failed runs or a long wait for its text). A dismissed
-    paper's card that never started is left out: nothing runs it. Only the newest `done_limit`
-    of those done."""
+    paper's card is left out unless done or its attempt is open: nothing else runs it. Only the
+    newest `done_limit` of those done."""
     return await (
         await conn.execute(
             f"""
@@ -223,7 +223,7 @@ async def listing(
                        f.queued_at, f.paper_id, {STUCK}, NULL
                 FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
                 WHERE f.kind = 'deep' AND f.reason = %(requested)s
-                  AND (p.dismissed_at IS NULL OR f.state IN ('running', 'done'))
+                  AND (p.dismissed_at IS NULL OR f.state = 'done' OR {STARTED})
             ), ranked AS (
                 SELECT *, row_number() OVER (PARTITION BY state = 'done' ORDER BY at DESC, id DESC)
                           AS newest

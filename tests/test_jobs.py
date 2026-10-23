@@ -452,7 +452,12 @@ async def test_a_card_waiting_on_the_owner_fails_and_one_nothing_runs_is_left_ou
     """A card awaiting its text over a week waits on the owner, as on Needs you: Failed, with
     Try again. A dismissed paper's card that never started is not listed: nothing runs it."""
     await papers_store.dismiss(conn, B.id)
-    for paper_id, state, queued in ((A.id, "awaiting_text", "8 days"), (B.id, "ready", "1 hour")):
+    await papers_store.dismiss(conn, C.id)  # its pass claimed, its worker gone before an attempt
+    for paper_id, state, queued in (
+        (A.id, "awaiting_text", "8 days"),
+        (B.id, "ready", "1 hour"),
+        (C.id, "running", "1 hour"),
+    ):
         await conn.execute(
             "INSERT INTO fulltext_passes (paper_id, paper_revision, kind, reason, priority, "
             "state, queued_at, tried_at) "
