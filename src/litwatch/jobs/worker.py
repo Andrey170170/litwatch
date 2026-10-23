@@ -38,7 +38,6 @@ from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, mod
 from litwatch.jobs.lock import BusyError, run_lock
 from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
-from litwatch.store import taxonomy as taxonomy_store
 
 log = logging.getLogger(__name__)
 
@@ -106,10 +105,6 @@ class Worker:
         job = await jobs_store.claim(self.conn)
         if job is None:
             return False
-        if await taxonomy_store.load(self.conn) is None:  # nothing to sort its papers into
-            await jobs_store.finish(self.conn, job["id"], "failed", "no taxonomy yet")
-            await self._close(job["id"])
-            return True
         run = await self._run_of(job)
         try:
             after = await self._chunk(job, run)

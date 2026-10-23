@@ -1045,8 +1045,9 @@ export interface paths {
          * @description Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks
          *     it, with no transaction open, then store it and queue its Process job in one. Asked again,
          *     it answers with the job already queued or running, and puts a failed one back in the
-         *     queue. With the schedule off no worker runs jobs: the paper is fetched only, for the next
-         *     run, and the answer is null.
+         *     queue. Without a taxonomy there is nothing to sort the paper into: 409, nothing kept. With
+         *     the schedule off no worker runs jobs: the paper is fetched only, for the next run, and the
+         *     answer is null.
          */
         post: operations["process_api_jobs_process_post"];
         delete?: never;
@@ -5746,7 +5747,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The paper is in the collection already, or dismissed */
+            /** @description The paper is in the collection already or dismissed, or no taxonomy */
             409: {
                 headers: {
                     [name: string]: unknown;

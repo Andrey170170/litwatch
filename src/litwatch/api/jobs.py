@@ -15,6 +15,7 @@ from litwatch.feedback import misses, word
 from litwatch.intake.search import NoAnswerError
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 
 router = protected("/api/jobs")
@@ -86,7 +87,7 @@ async def jobs(c: Conn) -> s.Jobs:
 
 PROCESS_REFUSED = {
     404: {"description": "No such paper"},
-    409: {"description": "The paper is in the collection already, or dismissed"},
+    409: {"description": "The paper is in the collection already or dismissed, or no taxonomy"},
     503: {"description": "arXiv did not answer in time; nothing was stored"},
 }
 
@@ -96,8 +97,9 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
     """Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks
     it, with no transaction open, then store it and queue its Process job in one. Asked again,
     it answers with the job already queued or running, and puts a failed one back in the
-    queue. With the schedule off no worker runs jobs: the paper is fetched only, for the next
-    run, and the answer is null."""
+    queue. Without a taxonomy there is nothing to sort the paper into: 409, nothing kept. With
+    the schedule off no worker runs jobs: the paper is fetched only, for the next run, and the
+    answer is null."""
     try:
         paper_id, fetched = await misses.resolve(c, body.paper_id)
     except misses.NotFoundError as exc:
@@ -105,6 +107,8 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
     async with word.change(c, paper_id, cause=Cause.OWNER):
+        if await taxonomy_store.load(c) is None:  # nothing to sort the paper into
+            raise HTTPException(status_code=409, detail="no taxonomy yet")
         await misses.keep(c, paper_id, fetched)
         if await word_store.in_collection(c, paper_id):
             raise HTTPException(status_code=409, detail="already in the collection")

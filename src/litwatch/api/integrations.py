@@ -31,6 +31,7 @@ from litwatch.store import integrations as integrations_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
+from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 
 router = protected("/api")
@@ -214,9 +215,11 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
         if pass_id is None:
             raise HTTPException(status_code=409, detail="the paper is dismissed")
         # Outside the collection, the paper is processed now too, as Process does: with the
-        # schedule on, which runs the jobs worker.
-        processing = request.app.state.config.schedule.enabled and not (
-            await word_store.in_collection(c, paper_id)
+        # schedule on, which runs the jobs worker, and a taxonomy to sort it into.
+        processing = (
+            request.app.state.config.schedule.enabled
+            and not await word_store.in_collection(c, paper_id)
+            and await taxonomy_store.load(c) is not None
         )
         if processing:
             await jobs_store.process(c, paper_id)

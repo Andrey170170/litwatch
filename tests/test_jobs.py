@@ -175,6 +175,30 @@ async def test_a_failure_the_owner_clears_while_the_job_ends_still_settles_it(
     assert (await jobs_store.get(conn, job))["state"] == "queued"  # failed, then settled
 
 
+async def test_a_failed_job_put_back_by_a_settle_gives_its_passes_the_owners_priorities(
+    conn, models
+):
+    """The settle that clears the paper's last failure puts its job back first, then gives the
+    passes it queued the owner's priorities, in one go."""
+    models.decisions[A.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
+    models.fits = {(r, A.title): {"reason": "Core.", "fit": "central"} for r in ("judge", "check")}
+    await nightly.run(conn, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
+    job = await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "failed")
+    await conn.execute(
+        "INSERT INTO step_failures (paper_id, step, topic, paper_revision, failed_runs, last_error)"
+        " VALUES (%s, 'analysis', '', 1, 3, 'unusable')",
+        (A.id,),
+    )
+    async with word.change(conn, A.id, cause=Cause.OWNER):  # as Needs you's own retry does
+        await failures.succeeded(conn, A.id, "analysis")
+    assert (await jobs_store.get(conn, job))["state"] == "queued"
+    passes = await rows(conn, "SELECT * FROM fulltext_passes WHERE paper_id = %s", A.id)
+    assert {(p["kind"], p["priority"]) for p in passes} == {
+        ("brief", TEXT_REQUEST_PRIORITY),
+        ("deep", REQUEST_PRIORITY),
+    }
+
+
 async def test_a_failed_job_whose_paper_the_owner_dismisses_is_discarded(conn, models):
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
@@ -207,14 +231,6 @@ async def test_a_process_jobs_paper_the_nightly_took_first_still_goes_as_the_own
         ("brief", TEXT_REQUEST_PRIORITY),
         ("deep", REQUEST_PRIORITY),
     }
-
-
-async def test_a_job_without_a_taxonomy_fails_and_says_so(conn):
-    await papers_store.upsert(conn, [A])
-    job = await queued(conn, A.id)
-    assert await worker.Worker(conn, CONFIG, Scripted().gateway).step(AFTERNOON)
-    failed = await jobs_store.get(conn, job)
-    assert (failed["state"], failed["error"]) == ("failed", "no taxonomy yet")
 
 
 async def test_a_job_that_raises_fails_with_its_error_and_its_run_records_it(
@@ -510,6 +526,15 @@ async def test_the_paper_page_reads_the_job_before_the_paper(conn, models, monke
     async with api(conn) as http:
         page = (await http.get(f"/api/papers/{A.id}")).json()
     assert page["process"]["state"] == "running"
+
+
+async def test_process_without_a_taxonomy_is_refused_and_keeps_nothing(conn, monkeypatch):
+    elsewhere = paper("2610.09999", title="Elsewhere")
+    monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: [elsewhere]))
+    async with api(conn) as http:
+        refused = await http.post("/api/jobs/process", json={"paper_id": elsewhere.id})
+    assert (refused.status_code, refused.json()["detail"]) == (409, "no taxonomy yet")
+    assert await rows(conn, "SELECT 1 FROM jobs UNION ALL SELECT 1 FROM papers") == []
 
 
 async def test_with_the_schedule_off_process_only_fetches_the_paper_for_the_next_run(
