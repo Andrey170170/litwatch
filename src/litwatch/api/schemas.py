@@ -543,6 +543,10 @@ class Paper(BaseModel):
     # again" under a card.
     card_requestable: bool = False
     process: ProcessJob | None = None  # the paper's newest Process job, when it has one
+    # A paper litwatch holds, outside the collection: Process would queue its job now, since the
+    # schedule is on (it runs the jobs worker), a taxonomy is there, the next run would process
+    # it and no step of it waits on the owner. Off, a fetched paper waits for the next run.
+    process_now: bool = False
 
 
 # -- what the owner says ---------------------------------------------------------------------------

@@ -296,7 +296,9 @@ async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
     """The paper's page; for a paper litwatch has not fetched, the archive's record of it."""
     st = request.app.state
     try:
-        found = await paper_page(c, paper_id, st.archive, st.integrations)
+        found = await paper_page(
+            c, paper_id, st.archive, st.integrations, jobs_run=st.config.schedule.enabled
+        )
     except ArchiveDownError as exc:
         raise HTTPException(status_code=503, detail=ARCHIVE_DOWN) from exc
     if found is None:
@@ -314,9 +316,12 @@ async def paper_page(
     paper_id: str,
     archive: ArchiveClient | None,
     integrations: list[Integration],
+    *,
+    jobs_run: bool = False,
 ) -> s.Paper | None:
     """The paper's page, as /api and /mcp both show it; for a paper litwatch has not fetched,
-    the archive's record of it (`unfetched`); None when neither has it. Raises
+    the archive's record of it (`unfetched`); None when neither has it. `jobs_run`: a jobs
+    worker runs (`[schedule] enabled`), so Process can queue a job. Raises
     `ArchiveDownError`."""
     # The Process job before the paper: one read done after what it wrote, never before it,
     # so the page polls until it shows the job's results.
@@ -378,6 +383,7 @@ async def paper_page(
     published = await publications_store.get(c, paper_id)
     card, card_pass, card_requestable = await integrations_api.card(c, paper_id, integrations)
     unattached = next((r for r in found["reactions"] if r["topic"] is None), None)
+    waits = any(f["failed_runs"] >= FAILED_RUNS for f in found["failures"])  # on the owner
     return s.Paper(
         **{
             k: found[k]
@@ -421,11 +427,15 @@ async def paper_page(
             id=job["id"],
             state=job["state"],
             error=job["error"],
-            again=job["state"] == "failed"
-            and not any(f["failed_runs"] >= FAILED_RUNS for f in found["failures"]),
+            again=job["state"] == "failed" and not waits,
         )
         if job
         else None,
+        process_now=jobs_run
+        and tree is not None
+        and not found["in_collection"]
+        and found["next_run"]
+        and not waits,
     )
 
 

@@ -695,6 +695,24 @@ async def test_process_asked_again_while_its_job_runs_only_answers_with_it(conn,
     assert (await jobs_store.get(conn, job))["state"] == "done"
 
 
+async def test_a_paper_fetched_but_not_processed_can_be_processed_while_the_schedule_is_on(
+    conn, models
+):
+    """Stored by a lookup or a miss report, never processed: with the schedule on, Process
+    queues its job now; with it off, the paper waits for the next run; dismissed, neither."""
+    async with api(conn) as http:
+        on = (await http.get(f"/api/papers/{A.id}")).json()
+    async with api(conn, CONFIG) as http:
+        off = (await http.get(f"/api/papers/{A.id}")).json()
+    assert (on["stored"], on["in_collection"], on["process"]) == (True, False, None)
+    assert (on["process_now"], off["process_now"], off["next_run"]) == (True, False, True)
+
+    await papers_store.dismiss(conn, B.id)
+    async with api(conn) as http:
+        dismissed = (await http.get(f"/api/papers/{B.id}")).json()
+    assert (dismissed["process_now"], dismissed["next_run"]) == (False, False)
+
+
 async def test_process_holds_its_job_so_a_try_again_meanwhile_waits_and_is_refused(
     conn, models, monkeypatch
 ):

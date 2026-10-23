@@ -86,7 +86,9 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   client is regenerated.
 - **Deep read on a paper outside the collection** starts the same Process job, and its card is asked for as today.
 - **Built in P1 beyond the bullets above:** with the schedule off, Process only fetches the paper (no worker runs
-  it); without a taxonomy, Process answers 409 and keeps nothing; a failed Process job is queued again once its
+  it), and a paper fetched but never processed reads "Fetched · next run"; with the schedule on, that paper gets
+  Process, which queues its job now, as the API's `process_now` says (the owner's call, 2026-10-23). Asked again
+  while its job is queued or running, Process only answers with that job; without a taxonomy, Process answers 409 and keeps nothing; a failed Process job is queued again once its
   paper's failures are cleared, and discarded if the paper is dismissed; a card asked for shows as Failed by the
   rule Needs you uses. A failed Process job is tried again (Jobs' Try again, the paper's "Process again") only while
   no step of its paper waits on the owner; then it would find nothing due, so neither is offered and the API

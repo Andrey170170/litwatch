@@ -354,6 +354,27 @@ describe("a paper's page", () => {
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });
 
+  it("offers Process on a fetched paper never processed while the API says it would run now, else the next run", async () => {
+    viewport(true);
+    const fetched = { ...paper, id: "2409.01234", title: "Fetched one", in_collection: false, stored: true, next_run: true, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
+    const calls = scriptFetch({
+      "GET /api/status": status,
+      "GET /api/topics": [],
+      "GET /api/papers/2409.01234": { ...fetched, process_now: true },
+      "GET /api/papers/2409.01235": { ...fetched, id: "2409.01235", title: "Waiting one", process_now: false },
+      "POST /api/jobs/process": json({ id: 4, state: "queued", error: null }, 202),
+    });
+    renderApp("/paper/2409.01234");
+    await screen.findByRole("heading", { name: "Fetched one" });
+    expect(screen.queryByRole("button", { name: /next run/ })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Process" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ paper_id: "2409.01234" }));
+
+    renderApp("/paper/2409.01235");
+    await screen.findByRole("heading", { name: "Waiting one" });
+    expect(screen.getByRole("button", { name: "Fetched · next run" })).toBeDisabled();
+  });
+
   it("says a fetched paper no run will process is fetched, without promising the next run", async () => {
     viewport(true);
     const dismissed = { ...paper, id: "2409.01234", title: "Dismissed one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };

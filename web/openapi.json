@@ -3023,7 +3023,7 @@
     "/api/jobs/process": {
       "post": {
         "summary": "Process",
-        "description": "Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks\nit, with no transaction open, then store it and queue its Process job in one. Asked again,\nit answers with the job already queued or running, and puts a failed one back in the\nqueue, unless a step of the paper waits on the owner (409: it would find nothing due, and\nthe owner's action on Needs you settles the job). Without a taxonomy there is nothing to sort\nthe paper into: 409, nothing kept. With the schedule off no worker runs jobs: the paper is\nfetched only, for the next run, and the answer is null.",
+        "description": "Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks\nit, with no transaction open, then store it and queue its Process job in one. Asked again,\nit answers with the job already queued or running, changing nothing (its paper classified\nmeanwhile included), and puts a failed one back in the queue, unless a step of the paper\nwaits on the owner (409: it would find nothing due, and the owner's action on Needs you\nsettles the job). Without a taxonomy there is nothing to sort the paper into: 409, nothing\nkept. With the schedule off no worker runs jobs: the paper is\nfetched only, for the next run, and the answer is null.",
         "operationId": "process_api_jobs_process_post",
         "requestBody": {
           "content": {
@@ -5990,6 +5990,11 @@
                 "type": "null"
               }
             ]
+          },
+          "process_now": {
+            "type": "boolean",
+            "title": "Process Now",
+            "default": false
           }
         },
         "type": "object",

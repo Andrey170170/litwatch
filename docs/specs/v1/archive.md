@@ -77,7 +77,7 @@ same, then a Deep card). Reporting it as a miss does the same with the owner's w
 
 A paper litwatch has not fetched gets its page from the archive's record (N5b); Process and Deep read fetch it from
 arXiv first and start a job that processes it at once ([DESIGN.md](DESIGN.md), Jobs); its page says so until the job
-ends. The search
+ends. With the schedule off, which runs no jobs, they only fetch it, and the next run processes it. The search
 box names how many papers the archive's search index holds ("Search the collection and the archive (3.1M papers)").
 
 litwatch keeps only the papers it processed, each with the text exactly as it was judged. That copy is a record of

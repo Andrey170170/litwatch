@@ -1044,10 +1044,11 @@ export interface paths {
          * Process
          * @description Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks
          *     it, with no transaction open, then store it and queue its Process job in one. Asked again,
-         *     it answers with the job already queued or running, and puts a failed one back in the
-         *     queue, unless a step of the paper waits on the owner (409: it would find nothing due, and
-         *     the owner's action on Needs you settles the job). Without a taxonomy there is nothing to sort
-         *     the paper into: 409, nothing kept. With the schedule off no worker runs jobs: the paper is
+         *     it answers with the job already queued or running, changing nothing (its paper classified
+         *     meanwhile included), and puts a failed one back in the queue, unless a step of the paper
+         *     waits on the owner (409: it would find nothing due, and the owner's action on Needs you
+         *     settles the job). Without a taxonomy there is nothing to sort the paper into: 409, nothing
+         *     kept. With the schedule off no worker runs jobs: the paper is
          *     fetched only, for the next run, and the answer is null.
          */
         post: operations["process_api_jobs_process_post"];
@@ -2237,6 +2238,11 @@ export interface components {
              */
             card_requestable: boolean;
             process?: components["schemas"]["ProcessJob"] | null;
+            /**
+             * Process Now
+             * @default false
+             */
+            process_now: boolean;
         };
         /**
          * PaperClass

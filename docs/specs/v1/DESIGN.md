@@ -183,7 +183,9 @@ collection" in place of a rarity.
   read, 3 adjacent"). It opens closed on every paper; a note's Label opens it when its topic is folded.
 - The quick actions as a 2×2 grid: Save, BibTeX ⧉, arXiv ↗, PDF ↗, with Deep read across the full width while the
   paper has no card. For a paper outside the collection: Process, BibTeX, Deep read, Report as a miss. Process
-  fetches it and starts a job that processes it now (Jobs); the button reads "Processing" while it runs.
+  fetches it and starts a job that processes it now (Jobs); the button reads "Processing" while it runs. A paper
+  litwatch fetched but never processed (a lookup, a miss report) gets the same Process. While the schedule is off,
+  which runs no jobs, Process only fetches the paper, and a fetched one reads "Fetched · next run" instead.
 
 **On the phone** the page is one column: the header and the ladder without its last rung. The bottom bar: ☆ Save, 👍,
 the paper's place in its list ("3/22"), 👎, and ⋯. ⋯ opens the paper sheet: a label per topic (the topic's name, its
