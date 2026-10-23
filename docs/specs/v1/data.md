@@ -77,12 +77,14 @@ evaluation calls the same functions and writes only to evaluation tables.
   done | failed, priority, queued at, tried at, text arrived at, arXiv version read, text source latex | pdf, text
   hash, paper's update read for, lease until, failed runs, unusable runs (how far down `brief`'s list the next try
   starts: a run that found no text counts a failed run, not one of these), retry text, use the PDF (the owner's, for LaTeX that reads
-  badly), last error, refused throughout, acknowledged at, as for `step_failures`): one Brief or Weight re-check open per paper revision, and one
+  badly), last error, refused throughout, acknowledged at, as for `step_failures`, job): one Brief or Weight re-check open per paper revision, and one
   Deep pass open per paper (reason request | focus | pick; its revision is the one it read); a worker takes the least recently
-  tried first. `weights` and `gists` name the pass a full-text row came from.
-- `jobs` (kind process, scope (a Process job's: its paper), state offered | stopped | tonight | queued | running |
-  failed | done | discarded, papers, done (how many of them its chunks worked), counts, error, created at, queued at,
-  changed at, backend pid and start (the session running it, as a run's)): the owner's queue outside the nightly run
+  tried first. A text pass a topic re-run queued names that job, which alone works it until it ends. `weights` and `gists` name the pass a full-text row came from.
+- `jobs` (kind process | rerun, scope (a Process job's: its paper; a re-run's: its topic, the topic's revision, its
+  scopes, date range and papers), state offered | stopped | tonight | queued | running | failed | done | discarded,
+  papers, done (how many of them its chunks worked), counts, error (a stopped one's: where its ceiling stopped it),
+  ceiling and estimate in USD (a re-run's), wake at (not claimed before), created at, queued at, changed at, backend
+  pid and start (the session running it, as a run's)): the owner's queue outside the nightly run
   ([`docs/plans/jobs.md`](../../plans/jobs.md)); one Process job not done per paper. `runs.job_id` names the job a run
   of kind `job` worked; each time the worker runs a job, from claim to stop, is one run.
 - What a digest still has to cover is not stored: a paper is due for a topic while it is eligible there, was announced

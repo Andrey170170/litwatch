@@ -101,6 +101,30 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
   so its steps take what that action left due; a Process job taken back starts over from its paper for the same
   reason.
 
+- **Built in P2 beyond the bullets above:**
+  - *The four scopes, read one way:* labelled papers and reported misses for the topic; its members as its page and
+    the Taxonomy's counts show them (its class and those under it); papers its keywords match over the editor's 90
+    days, counted as the editor counts them; papers published in the date range, both days included in the
+    schedule's zone, members or not (as the keyword scope). Dismissed papers are left out of each. The ticked scopes
+    together count a paper once, and their papers are fixed when the job is made.
+  - *The estimate is of grading:* calls per paper by the topic's depth (an Area's `check` by the share of its last
+    200 verdicts that escalated). The Briefs a re-run's verdicts bring are paid under its ceiling but not estimated.
+  - *A grading that fails in a re-run is the job's, not the paper's:* no `step_failures` row, so no nightly takes it
+    up; the job ends `failed` ("grading failed on 3"), Try again redoes what has no verdict under the version. A
+    re-run whose topic was paused or unfollowed fails, saying so; Run is refused (409) with the schedule off.
+  - *The worst case of a call:* its input bounded by the request's UTF-8 bytes plus 1,024 tokens of framing (a token
+    is at least a byte), its output by its cap. An OpenRouter route's bound is, per token type, the tightest charge
+    over tokens among its last 200 calls per serving provider, the highest across providers (a call with cached input
+    left out of the input price); a Decisions route is held to its input (`max_price` completion 0, models.md: it
+    bills input only); a chat route with no output cap of its own is sent 16,000, Anthropic's default. A call that
+    does not fit waits while others are in flight and stops the job only with none in flight. An answered provider
+    error frees its reservation; a timeout keeps it, as it may have been billed.
+  - *Where it stopped:* "stopped at the ceiling after 212 of 476" while grading, "with 3 full-text passes left"
+    after. Run now on a stopped re-run takes a new ceiling above what it spent; the ceiling is over the job's life.
+    Discarding it lets go of its text passes; a re-run that ends lets go of those it left (failed, or awaiting text
+    a week) to the regular queue. A re-run whose passes all await their text is not claimed again for 30 seconds.
+  - *The Jobs page* shows a running job's spend as its calls are journalled, and a re-run's as spent of its ceiling.
+
 ## Decisions
 
 - **D1. Process runs now.** Process fetches the paper and queues a Process job at once. The paper is classified,
@@ -164,12 +188,6 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | V6. A replay job writes only evaluation tables | pytest asserting that verdicts and the outbox are untouched (P3) |
 | V7. The Jobs page shows the four groups and their actions; Process, the re-run offer and Run replay start jobs | vitest; a browser walk on `serve` over a fresh `--production` sandbox, with screenshots per stage |
 | V8. It works end to end with real models | One sandbox Process and one small re-run with real providers, under the $5 evidence budget |
-
-## Left for P2
-
-Found while building P1: the Processing note says "in a minute or two" even for a `tonight` job (nothing creates an
-offered or `tonight` Process job before P2); the Jobs page's sub-line leaves out "Each stops at its ceiling" until
-ceilings exist.
 
 ## Scope
 
