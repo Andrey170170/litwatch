@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useJobAction } from "@/api/mutations";
+import { useJobAction, useWriteAgain } from "@/api/mutations";
 import { jobsQuery, qualityQuery, runsQuery, scheduleQuery } from "@/api/queries";
 import { useDesktop } from "@/hooks/useDesktop";
 import { dateTime, plural, rowDate } from "@/lib/format";
-import { ACTIONS, anyActive, ceilingOf, GROUPS, type Job, jobKind, jobMeta, jobStatus, jobTone, latestJobs, nextCeiling, rerunWhat } from "@/lib/jobs";
+import { ACTIONS, anyActive, ceilingOf, digestWhat, GROUPS, type Job, jobKind, jobMeta, jobStatus, jobTone, latestJobs, nextCeiling, rerunWhat } from "@/lib/jobs";
 import { digests, type Quality, runFailed, spendBar, type Spend, took, usd } from "@/lib/settings";
 import { Failed, Load, PageHead, PaperLink } from "./parts";
 
@@ -116,13 +116,26 @@ export function RunsPage() {
  * and on the Jobs page (`full`) the actions its state allows. */
 function JobRow({ job, zone, full }: { job: Job; zone?: string; full?: boolean }) {
   const act = useJobAction();
+  const write = useWriteAgain(); // Try again on a digest is its Write again, followed to its end
   const bar = job.state === "running" && job.papers > 1;
-  // A re-run its ceiling stopped runs on under a new one, above what it spent.
+  // A re-run or replay its ceiling stopped runs on under a new one, above what it spent.
   const stopped = job.state === "stopped" && job.ceiling != null;
   const [typed, setTyped] = useState(() => usd(nextCeiling(job)));
   const ceiling = ceilingOf(typed);
   const above = ceiling != null && ceiling > (job.cost ?? 0);
-  const what = job.paper ? <PaperLink id={job.paper.id}>{job.paper.title}</PaperLink> : (rerunWhat(job) ?? plural(job.papers, "paper"));
+  const what = job.paper ? (
+    <PaperLink id={job.paper.id}>{job.paper.title}</PaperLink>
+  ) : job.digest ? (
+    <Link to="/digests/$id" params={{ id: String(job.digest.id) }}>
+      {digestWhat(job)}
+    </Link>
+  ) : job.kind === "replay" ? (
+    <Link to="/settings/$page" params={{ page: "overview" }}>
+      Every cohort's labels
+    </Link>
+  ) : (
+    (rerunWhat(job) ?? plural(job.papers, "paper"))
+  );
   return (
     <div className={`job ${jobTone(job.state)}`}>
       <div className="jh">
@@ -154,9 +167,9 @@ function JobRow({ job, zone, full }: { job: Job; zone?: string; full?: boolean }
               <button
                 key={a}
                 className={`btn${a === "run" ? " pri" : ""}`}
-                disabled={act.isPending || (continues && !above)}
+                disabled={act.isPending || write.isPending || (continues && !above)}
                 title={continues && !above ? `The ceiling must be above what it spent, ${usd(job.cost ?? 0)}` : undefined}
-                onClick={() => act.mutate({ job, action: a, ceiling: continues ? ceiling! : undefined })}
+                onClick={() => (job.digest && a === "again" ? write.mutate(job.digest.id) : act.mutate({ job, action: a, ceiling: continues ? ceiling! : undefined }))}
               >
                 {ACTIONS[a]}
               </button>
@@ -175,7 +188,7 @@ export function JobsPage() {
   const shown = jobs.data ? GROUPS.filter(([g]) => jobs.data[g].length) : [];
   return (
     <div className="setpg">
-      <PageHead title="Jobs" sub="Work outside the nightly run: re-runs after a topic edit, papers processed now and Deep cards asked for. Each re-run stops at its ceiling." deeper />
+      <PageHead title="Jobs" sub="Work outside the nightly run: re-runs after a topic edit, replays, papers processed now, digests written again and Deep cards asked for. Re-runs and replays stop at their ceiling." deeper />
       <Load q={jobs} />
       {shown.map(([g, label]) => (
         <div key={g}>
@@ -187,7 +200,7 @@ export function JobsPage() {
           ))}
         </div>
       ))}
-      {jobs.data && !shown.length && <div className="empty">No job yet. Process on a paper outside the collection starts one, as does a re-run after a topic edit.</div>}
+      {jobs.data && !shown.length && <div className="empty">No job yet. Process on a paper outside the collection starts one, as do a re-run after a topic edit, Run replay on Overview and Write again on a failed digest.</div>}
     </div>
   );
 }

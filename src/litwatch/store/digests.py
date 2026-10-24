@@ -31,6 +31,7 @@ from litwatch.core.digests import (
 from litwatch.core.fulltext import AWAITING_TOO_LONG
 from litwatch.core.grading import GRADES, NO_WEIGHT
 from litwatch.core.rules import REACTION_WORDS
+from litwatch.store import jobs
 from litwatch.store.analyses import CURRENT_GIST
 from litwatch.store.reading import SCOPE, STANDING, _rank, _scope
 
@@ -537,8 +538,8 @@ class Outcome:
 
 async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) -> int | None:
     """Store the outcome, in place of a failed digest of the same topic and period; a published
-    one stays as it is (None). Publishing emits `digest.written` with it. Returns the digest's
-    id."""
+    one stays as it is (None). Publishing emits `digest.written` with it and settles a failed
+    job that wrote it again. Returns the digest's id."""
     async with conn.transaction():
         row = await (
             await conn.execute(
@@ -600,6 +601,7 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
                 ],
             )
         if o.state in PUBLISHED:
+            await jobs.settle_digest(conn, row["id"])
             await events.emit(
                 conn,
                 events.DIGEST_WRITTEN,
@@ -671,9 +673,14 @@ async def acknowledge(conn: psycopg.AsyncConnection, ids: list[int]) -> list[int
     return [r["id"] for r in rows]
 
 
-async def get(conn: psycopg.AsyncConnection, digest_id: int) -> dict[str, Any] | None:
+async def get(
+    conn: psycopg.AsyncConnection, digest_id: int, *, lock: bool = False
+) -> dict[str, Any] | None:
+    """The digest; with `lock`, its row locked to the end of the transaction."""
     return await (
-        await conn.execute("SELECT * FROM digests WHERE id = %s", (digest_id,))
+        await conn.execute(
+            "SELECT * FROM digests WHERE id = %s" + (" FOR UPDATE" if lock else ""), (digest_id,)
+        )
     ).fetchone()
 
 

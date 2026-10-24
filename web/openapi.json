@@ -1545,7 +1545,7 @@
     "/api/digests/{digest_id}": {
       "get": {
         "summary": "Digest",
-        "description": "A digest in full: its text and its papers by role, each as it was shown.",
+        "description": "A digest in full: its text and its papers by role, each as it was shown, and its newest\njob writing it again.",
         "operationId": "digest_api_digests__digest_id__get",
         "parameters": [
           {
@@ -1594,7 +1594,7 @@
     "/api/digests/{digest_id}/write": {
       "post": {
         "summary": "Write Again",
-        "description": "Write a failed digest again now, over the papers due for it now, as a run of its own.\nIt may fail again. 409 when it is not failed (written meanwhile), its topic is paused, or\nanother job holds the run lock.",
+        "description": "Write a failed digest again, as a job (DESIGN.md, Jobs): queued now, and written by the\njobs worker as soon as the run lock is free (a nightly run or another job's chunk may hold\nit), over the papers due for it then; it may fail again. Asked again while its job is\nqueued or running, it answers with that job; a failed one goes back in the queue. 409 when\nit is not failed (written meanwhile) or its topic is not active, checked under the digest's\nrow lock, or when the schedule is off (no worker runs jobs). Answers with the digest and its\njob.",
         "operationId": "write_again_api_digests__digest_id__write_post",
         "parameters": [
           {
@@ -1608,7 +1608,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -1628,7 +1628,7 @@
             "description": "No such digest, or its topic is no longer shown"
           },
           "409": {
-            "description": "The digest is not failed, its topic is not active, or a job runs"
+            "description": "The digest is not failed, its topic is not active, or no worker runs"
           },
           "422": {
             "description": "Validation Error",
@@ -3238,10 +3238,86 @@
         }
       }
     },
+    "/api/jobs/replays/offer": {
+      "get": {
+        "summary": "Replay Offer",
+        "description": "What Overview's Run replay would do: answer with the replay already running, go on with\none its ceiling stopped, or start a new one of every cohort's labels, with what it would\ncost.",
+        "operationId": "replay_offer_api_jobs_replays_offer_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayOffer"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "409": {
+            "description": "No taxonomy, no labelled paper in the database, or no worker runs"
+          }
+        }
+      }
+    },
+    "/api/jobs/replays": {
+      "post": {
+        "summary": "Run Replay",
+        "description": "Run replay under the ceiling given: a dry run that writes the evaluation tables only.\nAsked again while a replay is queued or running, it answers with it, changing nothing; a\nreplay its ceiling stopped goes on, under a ceiling above what it spent; else a new replay\nfreezes every cohort's labels now and is queued (one not run that no longer resumes under\nthe configuration now is discarded). Needs the schedule on, whose worker runs jobs. Answers\nwith the Jobs page's groups.",
+        "operationId": "run_replay_api_jobs_replays_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Jobs"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "409": {
+            "description": "No taxonomy, no labelled paper in the database, or no worker runs"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/jobs/{job_id}/{action}": {
       "post": {
         "summary": "Act",
-        "description": "Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,\na Process job only while no step of its paper waits on the owner, checked under the paper's\nsettle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its\nceiling stopped needs above what it spent; a re-run runs only with the schedule on, as in\n`rerun`. A discarded re-run lets go of its text passes. Answers with the page's groups as\nthey stand after it.",
+        "description": "Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,\na Process job only while no step of its paper waits on the owner, checked under the paper's\nsettle lock. Run now and With tonight's run take a re-run's or a replay's new ceiling,\nwhich a job its ceiling stopped needs above what it spent; a job other than Process runs\nonly with the schedule on, as in `rerun`, and a replay only while no other is under way. A\ndiscarded re-run lets go of its text passes.\nAnswers with the page's groups as they stand after it.",
         "operationId": "act_api_jobs__job_id___action__post",
         "parameters": [
           {
@@ -4284,6 +4360,16 @@
             },
             "type": "array",
             "title": "Papers"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -4298,7 +4384,7 @@
           "papers"
         ],
         "title": "Digest",
-        "description": "A digest in full: its text, which marks each paper it names as [the name](its arXiv\nid), and every paper by role; why it failed, when it did."
+        "description": "A digest in full: its text, which marks each paper it names as [the name](its arXiv\nid), and every paper by role; why it failed, when it did. `job` is its newest job writing it\nagain, on /api (Write again; DESIGN.md, Jobs)."
       },
       "DigestCard": {
         "properties": {
@@ -5281,6 +5367,8 @@
             "enum": [
               "process",
               "rerun",
+              "replay",
+              "digest",
               "deep"
             ],
             "title": "Kind"
@@ -5334,6 +5422,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/JobTopic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobDigest"
               },
               {
                 "type": "null"
@@ -5447,7 +5545,31 @@
           "at"
         ],
         "title": "Job",
-        "description": "One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked\nfor (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready\nis queued). `papers` and `done` say how far it got (a re-run's `graded` how many it graded);\n`cost` is what its runs spent so far, None before any and for a card, which runs on the\nsubscription. `at` is when it last changed state. A re-run has its topic, `scopes`, the\n`estimate` it was offered with and its `ceiling`; stopped by the ceiling, `error` says where.\n`actions` are those its state allows: Run now, With tonight's run and Discard while it is\nnot run; Try again once it failed, for a card only once it waits for the owner (a card that\nfailed fewer runs is tried again by the next nightly run)."
+        "description": "One row of the Jobs page (DESIGN.md, Jobs): a job (`id`), or a Deep card the owner asked\nfor (`pass_id`), read from its pass with the pass's state as a job's (awaiting text or ready\nis queued). `papers` and `done` say how far it got (a re-run's `graded` how many it graded);\n`cost` is what its runs spent so far, None before any and for a card, which runs on the\nsubscription. `at` is when it last changed state. A re-run has its topic, `scopes`, the\n`estimate` it was offered with and its `ceiling`, a replay its estimate and ceiling;\nstopped by the ceiling, `error` says where. A digest written again has its `digest` and\ntopic.\n`actions` are those its state allows: Run now, With tonight's run and Discard while it is\nnot run; Try again once it failed, for a card only once it waits for the owner (a card that\nfailed fewer runs is tried again by the next nightly run)."
+      },
+      "JobDigest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "period": {
+            "$ref": "#/components/schemas/DigestPeriod"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "period",
+          "day"
+        ],
+        "title": "JobDigest",
+        "description": "The digest a job writes again."
       },
       "JobPaper": {
         "properties": {
@@ -5466,6 +5588,45 @@
           "title"
         ],
         "title": "JobPaper"
+      },
+      "JobRef": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "offered",
+              "stopped",
+              "tonight",
+              "queued",
+              "running",
+              "failed",
+              "done"
+            ],
+            "title": "State"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "state"
+        ],
+        "title": "JobRef",
+        "description": "A job as the thing it works on names it: where it stands, and why it failed or stopped."
       },
       "JobRun": {
         "properties": {
@@ -6991,6 +7152,97 @@
           "down"
         ],
         "title": "ReactionValue"
+      },
+      "ReplayIn": {
+        "properties": {
+          "ceiling": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Ceiling"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ceiling"
+        ],
+        "title": "ReplayIn",
+        "description": "Run replay under a ceiling, in USD; a stopped replay goes on only above what it spent."
+      },
+      "ReplayOffer": {
+        "properties": {
+          "running": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "continues": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continues"
+          },
+          "spent": {
+            "type": "number",
+            "title": "Spent",
+            "default": 0.0
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Labels",
+            "default": {}
+          },
+          "papers": {
+            "type": "integer",
+            "title": "Papers",
+            "default": 0
+          },
+          "pairs": {
+            "type": "integer",
+            "title": "Pairs",
+            "default": 0
+          },
+          "left_out": {
+            "type": "integer",
+            "title": "Left Out",
+            "default": 0
+          },
+          "estimate": {
+            "type": "number",
+            "title": "Estimate",
+            "default": 0.0
+          },
+          "unpriced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unpriced",
+            "default": []
+          },
+          "ceiling": {
+            "type": "number",
+            "title": "Ceiling"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ceiling"
+        ],
+        "title": "ReplayOffer",
+        "description": "Overview's Run replay (DESIGN.md, Overview): what Run would do. `running`: a replay\nqueued or running already, which Run only answers with. Else `continues`, a replay its\nceiling stopped that Run goes on with, having spent `spent`; else a new replay of every\ncohort's labels. `labels` counts its labels by cohort, `papers` and `pairs` what is left to\nclassify and to grade (paper and topic), `left_out` the labelled papers the database lacks;\n`estimate` what is left would cost, `unpriced` the models (`role: model`) with no price\nbound, whose calls a replay does not send, and `ceiling` the one offered, in USD."
       },
       "RerunIn": {
         "properties": {

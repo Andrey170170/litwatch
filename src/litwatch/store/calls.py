@@ -335,8 +335,8 @@ async def observations(conn: psycopg.AsyncConnection) -> dict[str, dict[str, Any
 async def outcomes(conn: psycopg.AsyncConnection, run: dict[str, Any]) -> dict[str, dict[str, int]]:
     """Per provider, the run's calls that failed without an answer (provider errors and
     timeouts), and the replies it sent while the run went on, whichever run's calls they
-    settled (a dead run's batch, read in this one; reused replies and evaluation runs' calls
-    left out)."""
+    settled (a dead run's batch, read in this one; reused replies and evaluation runs' calls, a
+    replay job's included, left out)."""
     rows = await (
         await conn.execute(
             "SELECT provider, sum(failed)::int AS failed, sum(replied)::int AS replied FROM ("

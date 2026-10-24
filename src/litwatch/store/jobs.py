@@ -19,6 +19,9 @@ from litwatch.store.runs import ALIVE
 NOT_RUN = ("offered", "stopped")
 ACTIVE = ("tonight", "queued", "running")
 
+# The kinds the owner waits on, which go first: each is one short chunk, keeping no run open.
+FIRST = ("process", "digest")
+
 # The session that runs a job, as `runs.start` records a run's.
 _ME = "pg_backend_pid(), (SELECT backend_start FROM pg_stat_activity WHERE pid = pg_backend_pid())"
 
@@ -174,11 +177,12 @@ async def take_back(conn: psycopg.AsyncConnection) -> list[int]:
 
 async def claim(conn: psycopg.AsyncConnection, *, fresh: bool = True) -> dict[str, Any] | None:
     """The most urgent job this session may run now, marked running in its name: Process jobs
-    first (the owner waits on them), then the oldest in the queue. Runnable are the queued
-    jobs, those this session already runs, and those on tonight's run once a nightly run has
-    finished after they were put there, none before its `wake_at`; without `fresh`, only
-    Process jobs and those this session runs (it holds as many runs open as it may). Another
-    session's claim in progress is skipped, so two workers never take one job."""
+    and digests written again first (`FIRST`: the owner waits on them), then the oldest in the
+    queue. Runnable are the queued jobs, those this session already runs, and those on
+    tonight's run once a nightly run has finished after they were put there, none before its
+    `wake_at`; without `fresh`, only the `FIRST` kinds and those this session runs (it holds as
+    many runs open as it may). Another session's claim in progress is skipped, so two workers
+    never take one job."""
     return await (
         await conn.execute(
             f"""
@@ -190,15 +194,15 @@ async def claim(conn: psycopg.AsyncConnection, *, fresh: bool = True) -> dict[st
                    OR (j.state = 'tonight' AND EXISTS (
                            SELECT 1 FROM runs n WHERE n.kind = 'nightly'
                            AND n.finished_at >= j.queued_at)))
-                  AND (%(fresh)s OR j.kind = 'process' OR j.state = 'running')
-                ORDER BY j.kind = 'process' DESC, j.queued_at, j.id
+                  AND (%(fresh)s OR j.kind = ANY(%(first)s) OR j.state = 'running')
+                ORDER BY j.kind = ANY(%(first)s) DESC, j.queued_at, j.id
                 LIMIT 1 FOR UPDATE SKIP LOCKED
             )
             UPDATE jobs j SET state = 'running', (backend_pid, backend_start) = ({_ME}),
                    changed_at = CASE WHEN j.state = 'running' THEN j.changed_at ELSE now() END
             FROM chosen WHERE j.id = chosen.id RETURNING j.*
             """,
-            {"fresh": fresh},
+            {"fresh": fresh, "first": list(FIRST)},
         )
     ).fetchone()
 
@@ -279,7 +283,8 @@ async def listing(
     as Needs you lists it, after `runs` failed runs or a long wait for its text). A dismissed
     paper's card is left out unless done or its attempt is open: nothing else runs it. Only the
     newest `done_limit` of those done. A re-run comes with its topic, scopes, revision, ceiling
-    and estimate."""
+    and estimate; a replay with its ceiling and estimate; a digest written again with the
+    digest's topic, period and day."""
     return await (
         await conn.execute(
             f"""
@@ -290,6 +295,7 @@ async def listing(
                        j.scope ->> 'revision' AS revision,
                        CASE WHEN j.kind = 'process' THEN j.scope -> 'papers' ->> 0 END
                            AS paper_id,
+                       (j.scope ->> 'digest')::bigint AS digest_id,
                        j.kind = 'process' AND EXISTS (
                            SELECT 1 FROM step_failures f JOIN papers p ON p.id = f.paper_id
                            WHERE f.paper_id = j.scope -> 'papers' ->> 0
@@ -304,7 +310,8 @@ async def listing(
                             ELSE f.state END,
                        1, CASE WHEN f.state = 'done' THEN 1 ELSE 0 END, '{{}}'::jsonb,
                        f.last_error, coalesce(f.finished_at, f.tried_at, f.queued_at),
-                       f.queued_at, NULL, NULL, NULL, NULL, NULL, f.paper_id, {STUCK}, NULL
+                       f.queued_at, NULL, NULL, NULL, NULL, NULL, f.paper_id, NULL, {STUCK},
+                       NULL
                 FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
                 WHERE f.kind = 'deep' AND f.reason = %(requested)s
                   AND (p.dismissed_at IS NULL OR f.state = 'done' OR {STARTED})
@@ -313,8 +320,11 @@ async def listing(
                           AS newest
                 FROM found
             )
-            SELECT x.*, p.title, k.name AS topic_name FROM ranked x
-            LEFT JOIN papers p ON p.id = x.paper_id LEFT JOIN classes k ON k.slug = x.topic
+            SELECT x.*, p.title, d.topic AS digest_topic, d.period, d.day,
+                   k.name AS topic_name
+            FROM ranked x
+            LEFT JOIN papers p ON p.id = x.paper_id LEFT JOIN digests d ON d.id = x.digest_id
+            LEFT JOIN classes k ON k.slug = coalesce(x.topic, d.topic)
             WHERE x.state <> 'done' OR x.newest <= %(done)s
             ORDER BY x.at DESC, x.id DESC
             """,
@@ -346,6 +356,64 @@ async def open_rerun(conn: psycopg.AsyncConnection, scope: dict[str, Any]) -> di
             ([*NOT_RUN, *ACTIVE], Jsonb(same)),
         )
     ).fetchone()
+
+
+# The advisory lock making replays is taken under (`open_replay`).
+REPLAY_LOCK = 7213917
+
+
+async def open_replay(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
+    """The newest replay not ended (not run, on tonight's run, queued or running), its row
+    locked. The replay lock is held to the transaction's end, so two asking at once make one."""
+    await conn.execute("SELECT pg_advisory_xact_lock(%s)", (REPLAY_LOCK,))
+    return await (
+        await conn.execute(
+            "SELECT * FROM jobs WHERE kind = 'replay' AND state = ANY(%s) "
+            "ORDER BY id DESC LIMIT 1 FOR UPDATE",
+            ([*NOT_RUN, *ACTIVE],),
+        )
+    ).fetchone()
+
+
+async def digest_job(
+    conn: psycopg.AsyncConnection, digest_id: int, *, lock: bool = False
+) -> dict[str, Any] | None:
+    """The digest's newest write job not discarded; with `lock`, its row locked to the end of
+    the transaction."""
+    return await (
+        await conn.execute(
+            "SELECT * FROM jobs WHERE kind = 'digest' AND scope -> 'digest' = %s "
+            "AND state <> 'discarded' ORDER BY id DESC LIMIT 1" + (" FOR UPDATE" if lock else ""),
+            (Jsonb(digest_id),),
+        )
+    ).fetchone()
+
+
+async def write_digest(conn: psycopg.AsyncConnection, digest_id: int) -> dict[str, Any]:
+    """Queue the failed digest's write job: the one already queued or running, the failed one
+    put back in the queue, or a new one. Asked again after a lost reply, it finds the job the
+    first asking queued. Call it with the digest's row locked, so two asking at once make
+    one."""
+    found = await digest_job(conn, digest_id, lock=True)
+    if found is not None and found["state"] in ACTIVE:
+        return found
+    if found is not None and found["state"] == "failed":
+        moved = await move(conn, found["id"], ("failed",), "queued")
+        assert moved is not None  # its row is locked: nothing moved it meanwhile
+        return moved
+    job = await get(conn, await create(conn, "digest", {"digest": digest_id}, 1, "queued"))
+    assert job is not None
+    return job
+
+
+async def settle_digest(conn: psycopg.AsyncConnection, digest_id: int) -> None:
+    """The digest is published (by the nightly run, say): a failed job writing it again settles
+    with it, done, as its Needs you item does (DESIGN.md, Jobs)."""
+    await conn.execute(
+        "UPDATE jobs SET state = 'done', error = NULL, changed_at = now() "
+        "WHERE kind = 'digest' AND state = 'failed' AND scope -> 'digest' = %s",
+        (Jsonb(digest_id),),
+    )
 
 
 # -- a topic re-run's scopes (pipeline.md, section 10) ----------------------------------------

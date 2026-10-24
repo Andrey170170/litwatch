@@ -268,10 +268,11 @@ function TextPass({ s }: { s: TextPassStuck }) {
   );
 }
 
-/** A failed digest: which one and why; Write it again runs the writer now. A digest still failed after it (the
- * writer failed again, or a job holds the run lock) stays on the page with the reason (`note`), still to be
- * written, as the server still counts it; one the API says is no longer one to write again (written meanwhile, its
- * topic paused) settles with that reason, as the server no longer counts it. */
+/** A failed digest: which one and why; Write it again queues a job that writes it as soon as the run lock is free,
+ * and the row notes where the job is (`note`) until it ends. A digest still failed after it (the writer failed
+ * again, or no worker runs jobs) stays on the page with the reason, still to be written, as the server still counts
+ * it; one written settles, and one the API says is no longer one to write again (written meanwhile, its topic
+ * paused) settles with that reason, as the server no longer counts it. */
 function FailedDigest({ d, badge }: { d: FailedDigestRow; badge: React.ReactNode }) {
   const write = useWriteAgain();
   const when = d.period === "day" ? `Daily digest · ${rowDate(d.day)}` : `Weekly digest · the week of ${rowDate(d.day)}`;

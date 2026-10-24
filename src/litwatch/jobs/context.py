@@ -4,6 +4,7 @@ gateway."""
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -106,6 +107,11 @@ class ModelRun:
 
     def add(self, name: str, n: int = 1) -> None:
         self.record.add(name, n)
+
+    def tally(self) -> Counter[str]:
+        """What the run has counted so far, its numbers alone: a job adds what a chunk counted
+        (`tally()` after it less before) to its own counts."""
+        return Counter({k: v for k, v in self.counts.items() if isinstance(v, int)})
 
 
 @asynccontextmanager

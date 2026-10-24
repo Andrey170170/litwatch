@@ -30,8 +30,8 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
 - **A job is a row in a new `jobs` table:** its kind, its scope (paper ids, a topic and its version, cohorts, a
   digest), its state, the paper count and estimate when it was offered, its ceiling, what it has spent, how far it
   got, its error, and the run records it made. Each time the worker runs a job (from claim to stop, done or failure)
-  is one `runs` row of kind `job`, however many chunks it takes, so its cost reaches the month's spend as every
-  run's does. The Nights table and Overview's latest night read nightly runs only (`store.quality.runs` filtered by
+  is one `runs` row of kind `job` (`eval` for a replay, P3), however many chunks it takes, so its cost reaches the
+  month's spend as every run's does. The Nights table and Overview's latest night read nightly runs only (`store.quality.runs` filtered by
   kind; today it takes the newest 30 of any kind), so jobs never push nights out of it.
 - **States:** `offered` and `stopped` (Not run); `tonight`, `queued` and `running` (Running and queued); `failed`;
   `done`; `discarded` (hidden). Each of the page's four groups is one set of states. `stopped` is a job its ceiling
@@ -146,6 +146,38 @@ card passes (reason request) → GET /api/jobs, read alongside → Jobs page, Ru
     their text is not claimed again for 30 seconds; it keeps its run, a database connection, open meanwhile, so a
     worker holding four open starts only Process jobs until one ends.
   - *The Jobs page* shows a running job's spend as its calls are journalled, and a re-run's as spent of its ceiling.
+
+- **Built in P3 beyond the bullets above:**
+  - *Run replay* replays every cohort's labels (`litwatch eval replay`'s defaults) on the papers the database holds,
+    its labels frozen in a new evaluation run when it is made, so the latest replay, and Overview's recall, is the
+    new one from then on, counting what has concluded. Its estimate is `replay.estimate` (the journal's mean cost per
+    role, or the fallback costs), its ceiling $5.00 until the owner changes it. One replay is under way at a time:
+    asked again while one is queued or running, Run replay only answers with it; one its ceiling stopped goes on, as
+    Run now on Jobs does, under a ceiling above what it spent; one not run that no longer resumes (the configuration
+    or taxonomy changed) is discarded for a new one; Try again or Run now on Jobs puts a replay back only while no
+    other is under way (409 otherwise). Run replay needs the schedule on (409 otherwise).
+  - *A replay job's runs* are evaluation runs (kind `eval`, carrying the job's id), as the CLI's are: they observe
+    nothing of the providers and the status document's reply counts leave their calls out, while their cost counts
+    in the job's and the month's spend as any run's does. Each run goes over
+    what is left once, as `--resume` does: what has not concluded or failed in an earlier run, a chunk of papers at
+    a time; an attempt the ceiling cut short is not recorded, so it is left to do, and a paper whose text changed
+    since it concluded is done again. A replay whose configuration or taxonomy changed since it was made fails at its
+    next chunk, saying to start a new one. Its gateway, as the CLI's, leaves a batch a dead nightly left to the next
+    run that accounts for it, where a Process or re-run job's answers from it.
+  - *The evaluation labels ship in the image* (`/app/evals/labels`, read through `quality.replay.LABELS`, which the
+    CLI's `--labels` now defaults to as well), since Run replay runs inside `litwatch serve`.
+  - *A digest's Write again* is refused (409) with the schedule off, or when the digest is not failed or its topic
+    not active; else it queues the digest's job and answers 202 with the digest and its job. Asked again while that
+    job is queued or running, it answers with it; a failed one goes back in the queue. The job writes on its own
+    run under the worker's run lock and ends done once the digest is published (by it, or by another run
+    meanwhile), else failed saying why (the writer failed again, the topic is no longer active). A failed write job
+    settles done when a run publishes its digest, in that write's transaction. Digests written again go first with
+    Process jobs, as the owner waits on them; neither keeps a run open.
+  - *The web* reads the digest until its write job ends, noting the Needs you row "Queued" or "Being written" in
+    the meantime, then settles it as before, or with the reason once its topic is paused or no longer shown; a
+    digest opened while its job is under way is read until it ends. Try again on a failed digest job in Jobs is the
+    same Write again. Overview reads the replay offer and recall every 10 s while a replay is queued or running,
+    and recall once more after it ends; Run replay, and a replay's action on Jobs, read both again.
 
 ## Decisions
 

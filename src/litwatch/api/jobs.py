@@ -1,11 +1,13 @@
 """The jobs API (docs/plans/jobs.md; DESIGN.md, Jobs): the owner's queue in four groups, with
 the Deep cards they asked for read alongside from their passes; the actions on a job; Process,
-which fetches a paper and queues the job that processes it now (D1); and the re-run offer after
-a topic edit, which starts a re-run or keeps it under Not run."""
+which fetches a paper and queues the job that processes it now (D1); the re-run offer after a
+topic edit, which starts a re-run or keeps it under Not run; and Overview's Run replay. A failed
+digest's Write again queues its job from the digests' routes."""
 
 from __future__ import annotations
 
 import math
+from collections import Counter
 from datetime import date
 from typing import Annotated, Any
 
@@ -17,7 +19,7 @@ from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Cause, Topic
 from litwatch.feedback import misses, word
 from litwatch.intake.search import NoAnswerError
-from litwatch.jobs import reruns
+from litwatch.jobs import replays, reruns
 from litwatch.store import failures, quality
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
@@ -85,6 +87,11 @@ def _job(row: dict[str, Any]) -> s.Job:
             revision=None if row["revision"] is None else int(row["revision"]),
         )
         if rerun
+        else s.JobTopic(slug=row["digest_topic"], name=row["topic_name"] or row["digest_topic"])
+        if row["digest_topic"] is not None
+        else None,
+        digest=s.JobDigest(id=row["digest_id"], period=row["period"], day=row["day"])
+        if row["digest_topic"] is not None
         else None,
         scopes=row["scopes"] or [],
         papers=row["papers"],
@@ -234,7 +241,7 @@ async def _offered(
         papers=len(chosen),
         estimate=cost(len(chosen)),
         missing=missing,
-        unpriced=await reruns.unpriced(c, config, topic),
+        unpriced=await reruns.unpriced(c, config, reruns.roles(topic)),
         ceiling=reruns.CEILING,
     )
     return topic, offer, chosen
@@ -310,6 +317,74 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
     return await _listing(c)
 
 
+# -- Overview's Run replay -----------------------------------------------------------------------
+
+REPLAY_REFUSED = {
+    409: {"description": "No taxonomy, no labelled paper in the database, or no worker runs"}
+}
+
+
+def _replay_offer(o: replays.Offer) -> s.ReplayOffer:
+    if o.running is not None:
+        return s.ReplayOffer(running=s.JobRef.model_validate(o.running), ceiling=replays.CEILING)
+    assert o.replay is not None
+    return s.ReplayOffer(
+        continues=o.job["id"] if o.job else None,
+        spent=o.spent,
+        labels=dict(Counter(x.cohort for x in o.replay.labels)),
+        papers=len(o.replay.to_classify),
+        pairs=len(o.replay.to_grade),
+        left_out=len(o.replay.left_out),
+        estimate=o.estimate,
+        unpriced=o.unpriced,
+        ceiling=replays.CEILING,
+    )
+
+
+async def _offer(c: Conn, config: Config) -> replays.Offer:
+    try:
+        return await replays.offer(c, config)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/replays/offer", responses=REPLAY_REFUSED)
+async def replay_offer(request: Request, c: Conn) -> s.ReplayOffer:
+    """What Overview's Run replay would do: answer with the replay already running, go on with
+    one its ceiling stopped, or start a new one of every cohort's labels, with what it would
+    cost."""
+    async with c.transaction():
+        o = await _offer(c, request.app.state.config)
+    return _replay_offer(o)
+
+
+@router.post("/replays", status_code=201, responses=REPLAY_REFUSED)
+async def run_replay(body: s.ReplayIn, request: Request, c: Conn) -> s.Jobs:
+    """Run replay under the ceiling given: a dry run that writes the evaluation tables only.
+    Asked again while a replay is queued or running, it answers with it, changing nothing; a
+    replay its ceiling stopped goes on, under a ceiling above what it spent; else a new replay
+    freezes every cohort's labels now and is queued (one not run that no longer resumes under
+    the configuration now is discarded). Needs the schedule on, whose worker runs jobs. Answers
+    with the Jobs page's groups."""
+    config = request.app.state.config
+    if not config.schedule.enabled:
+        raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
+    async with c.transaction():
+        o = await _offer(c, config)
+        if o.running is None:
+            if o.job is not None and body.ceiling <= o.spent:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"the ceiling must be above what it spent, ${o.spent:.2f}",
+                )
+            assert o.replay is not None
+            if not o.replay.papers:
+                raise HTTPException(status_code=409, detail="no labelled paper in the database")
+            await replays.make(c, config, o, body.ceiling)
+    request.app.state.jobs_wake.set()
+    return await _listing(c)
+
+
 async def _above_spent(c: Conn, job: dict[str, Any], ceiling: float | None) -> None:
     """A stopped re-run goes on only under a ceiling above what it spent."""
     if job["state"] != "stopped":
@@ -327,10 +402,11 @@ async def act(
 ) -> s.Jobs:
     """Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
     a Process job only while no step of its paper waits on the owner, checked under the paper's
-    settle lock. Run now and With tonight's run take a re-run's new ceiling, which a job its
-    ceiling stopped needs above what it spent; a re-run runs only with the schedule on, as in
-    `rerun`. A discarded re-run lets go of its text passes. Answers with the page's groups as
-    they stand after it."""
+    settle lock. Run now and With tonight's run take a re-run's or a replay's new ceiling,
+    which a job its ceiling stopped needs above what it spent; a job other than Process runs
+    only with the schedule on, as in `rerun`, and a replay only while no other is under way. A
+    discarded re-run lets go of its text passes.
+    Answers with the page's groups as they stand after it."""
     sources, to = MOVES[action]
     ceiling = body.ceiling if body else None
     schedule_on = request.app.state.config.schedule.enabled
@@ -340,17 +416,23 @@ async def act(
             await word.lock_many(c, job["scope"]["papers"])
             if await failures.waits_on_owner(c, job["scope"]["papers"], FAILED_RUNS):
                 raise HTTPException(status_code=409, detail=WAITS)
+        if job is not None and job["kind"] == "replay" and to in ("queued", "tonight"):
+            # One replay under way at a time: the replay lock before the row, as Run replay.
+            found = await jobs_store.open_replay(c)
+            if found is not None and found["id"] != job_id:
+                raise HTTPException(status_code=409, detail="another replay is under way")
         # The job's row after its paper's settle lock, the order a settle takes them in.
         job = await jobs_store.get(c, job_id, lock=True)
         if job is None:
             raise HTTPException(status_code=404, detail="no such job")
         if job["state"] not in sources:
             raise HTTPException(status_code=409, detail=f"the job is {job['state']} now")
-        if job["kind"] == "rerun" and to in ("queued", "tonight") and not schedule_on:
+        if job["kind"] != "process" and to in ("queued", "tonight") and not schedule_on:
             raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
         if to in ("queued", "tonight"):
             await _above_spent(c, job, ceiling)
-        await jobs_store.move(c, job_id, sources, to, ceiling if job["kind"] == "rerun" else None)
+        held = ceiling if job["ceiling"] is not None else None  # a re-run's or a replay's
+        await jobs_store.move(c, job_id, sources, to, held)
         if to == "discarded":
             await fulltext_store.release_job(c, job_id)
     if to == "queued":

@@ -8,7 +8,8 @@ and writes what they concluded to the evaluation tables alone (`eval_runs`, `eva
 topic runs on every labelled paper of that topic, whatever classification said, so grading is
 measured on its own. The labels are frozen with the run, so `report` reads its numbers again
 without calls; a run cut short resumes under its id, redoing only what has not concluded or
-failed.
+failed. It runs from the command line (`litwatch eval replay`) or as a job (`jobs.replays`), a
+chunk of papers at a time (`work`).
 
 The cohorts, each with its own positives and never pooled (evals/labels/README.md):
 `owner` and `provisional` from fit.csv (positive: central or related), `legacy` and `silver`
@@ -23,18 +24,20 @@ import hashlib
 import importlib
 import json
 import random
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import psycopg
 
+import litwatch
 from litwatch import classification, grading
 from litwatch.config import Config, RoleConfig
 from litwatch.core import Depth, Fit, Paper, Status, Taxonomy
 from litwatch.core.classification import Source, keyword, with_ancestors
 from litwatch.core.evaluation import Outcome, Recall, Share
-from litwatch.jobs.context import GatewayFactory, default_gateway, model_run
+from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.llm.decisions import chat_request
 from litwatch.llm.gateway import VALIDATION_VERSION
 from litwatch.llm.openrouter import DEFAULT_ROUTING
@@ -44,6 +47,8 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 
 KIND = "replay"
+# The evaluation labels: in the checkout, and where the image puts them.
+LABELS = Path(litwatch.__file__).parents[2] / "evals" / "labels"
 SEED = 20261014
 COHORTS = ("owner", "provisional", "legacy", "silver", "miss")
 ROLES = (classification.ROLE, "judge", "check")  # Focus grading asks both labs
@@ -195,6 +200,13 @@ class Replay:
     def to_grade(self) -> list[tuple[str, str]]:
         return [x for x in self.pairs if x not in self.graded]
 
+    @property
+    def left(self) -> list[str]:
+        """The papers with a stage left to conclude, in the run's order."""
+        grade = {p for p, _ in self.to_grade}
+        ids = dict.fromkeys(p for p, _ in self.pairs)
+        return [p for p in ids if p not in self.classified or p in grade]
+
 
 async def _tree(conn: psycopg.AsyncConnection) -> Taxonomy:
     tree = await taxonomy_store.load(conn)
@@ -326,50 +338,78 @@ async def run(
     *,
     gateway: GatewayFactory = default_gateway,
 ) -> dict[str, Any]:
-    """Classify the papers and grade the pairs left to do, recording each as it concludes.
-    Returns the run record's counts."""
+    """Classify the papers and grade the pairs left to do, recording each as it concludes, as a
+    run of its own. Returns the run record's counts."""
+    assert r.eval_run_id is not None, "start the replay first"
+    async with model_run(conn, config, calls.EVAL, gateway=gateway) as mr:
+        await work(conn, config, r, mr)
+        await store.finish(conn, r.eval_run_id)
+        return mr.counts
+
+
+async def work(
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    r: Replay,
+    mr: ModelRun,
+    ids: Collection[str] | None = None,
+) -> None:
+    """Classify and grade what is left of the papers `ids` (all by default) on the run `mr`,
+    which the evaluation then carries, recording each stage as it concludes; what a paper whose
+    text changed concluded is forgotten first. Under a ceiling, an attempt it cut short is not
+    recorded: it is left to do."""
     assert r.eval_run_id is not None, "start the replay first"
     tree, eval_run_id = r.tree, r.eval_run_id
+    chosen = set(r.papers) if ids is None else set(ids)
     topics_of: dict[str, list[str]] = {}
     for p, t in r.pairs:
         topics_of.setdefault(p, []).append(t)
     by_slug = {t.slug: t for t in tree.topics}
-    async with model_run(conn, config, calls.EVAL, gateway=gateway) as mr:
-        await store.ran_under(conn, eval_run_id, mr.run_id)
-        if r.stale:
-            await store.forget(conn, eval_run_id, sorted(r.stale))
-        thresholds = config.classification.thresholds
-        async with classification.classify(r.to_classify, tree, mr.gateway, thresholds) as found:
-            async for c in found:
-                mr.add("classified" if c.error is None else "classification_failed")
-                for topic in topics_of[c.paper.id]:
-                    await store.put_classified(
-                        conn, eval_run_id, c.paper, topic, **_concluded(tree, c, topic)
-                    )
-                r.classified.add(c.paper.id)
-        due = [
-            grading.Due(r.papers[p], by_slug[t], tree.get(t).name)
-            for p, t in r.to_grade
-            if t in by_slug
-        ]
-        async with grading.grade(due, mr.gateway, config.grading) as found:
-            async for g in found:
-                mr.add("graded" if g.verdict is not None else "grading_failed")
-                v = g.verdict
-                await store.put_graded(
-                    conn,
-                    eval_run_id,
-                    g.due.paper.id,
-                    g.due.paper.revision,
-                    g.due.topic.slug,
-                    fit=v.fit.value if v else None,
-                    opinions=v.opinions if v else {},
-                    split=v.split if v else None,
-                    error=None if v else (g.error or "no answer"),
+
+    def cut() -> bool:
+        return mr.gateway.ceiling is not None and mr.gateway.ceiling.reached
+
+    await store.ran_under(conn, eval_run_id, mr.run_id)
+    if stale := sorted(r.stale & chosen):
+        await store.forget(conn, eval_run_id, stale)
+        r.stale -= set(stale)
+    thresholds = config.classification.thresholds
+    papers = [p for p in r.to_classify if p.id in chosen]
+    async with classification.classify(papers, tree, mr.gateway, thresholds) as found:
+        async for c in found:
+            if c.error is not None and cut():
+                continue
+            mr.add("classified" if c.error is None else "classification_failed")
+            for topic in topics_of[c.paper.id]:
+                await store.put_classified(
+                    conn, eval_run_id, c.paper, topic, **_concluded(tree, c, topic)
                 )
+            if c.error is None:
+                r.classified.add(c.paper.id)
+    due = [
+        grading.Due(r.papers[p], by_slug[t], tree.get(t).name)
+        for p, t in r.to_grade
+        if p in chosen and t in by_slug
+    ]
+    async with grading.grade(due, mr.gateway, config.grading) as found:
+        async for g in found:
+            v = g.verdict
+            if v is None and cut():
+                continue
+            mr.add("graded" if v is not None else "grading_failed")
+            await store.put_graded(
+                conn,
+                eval_run_id,
+                g.due.paper.id,
+                g.due.paper.revision,
+                g.due.topic.slug,
+                fit=v.fit.value if v else None,
+                opinions=v.opinions if v else {},
+                split=v.split if v else None,
+                error=None if v else (g.error or "no answer"),
+            )
+            if v is not None:
                 r.graded.add((g.due.paper.id, g.due.topic.slug))
-        await store.finish(conn, eval_run_id)
-        return mr.counts
 
 
 # -- the report -----------------------------------------------------------------------------------

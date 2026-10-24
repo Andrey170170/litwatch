@@ -145,7 +145,9 @@ research session on another machine, an agent given only a vague memory of a dig
 section asked for and shows a figure, without the web.
 
 **Jobs** ([`docs/plans/jobs.md`](../../plans/jobs.md), approved 2026-10-22): the jobs API and the Jobs page, deferred
-from W2, in three stages. What is specified and not built yet, and in what order, is in
+from W2, built in three stages: the queue, its worker, `/api/jobs`, the Jobs page and Process as a job (P1, #127);
+topic re-runs with their estimates and a hard ceiling (P2, #129); Overview's Run replay and a failed digest's Write
+again as jobs (P3, #130). What is specified and not built yet, and in what order, is in
 [`docs/backlog.md`](../../backlog.md).
 
 After v1: backfill of the archive's older papers (the owner's plan: a local decision-style model over several nights,
