@@ -146,13 +146,21 @@ export type Run = {
   kind: string;
   started_at: string;
   finished_at: string | null;
+  /** The day's spend outside jobs: the run's own and `after_cost`, other runs' until the next night. */
   cost: number | string;
+  after_cost: number | string;
   error: string | null;
   counts: { classified?: number; classification_failed?: number; analysed?: number; analysis_failed?: number; graded?: number; grading_failed?: number; digests_written?: number; digests_empty?: number; digests_failed?: number; calls?: Record<string, { cost: number; calls: number }> } | null;
   fetched: number;
   inserted: number;
   updated: number;
 };
+
+/** A night's cost split, for its hover; none when no run followed it. */
+export function nightCost(r: Run): string | undefined {
+  const after = Number(r.after_cost);
+  return after ? `${usd(Number(r.cost) - after)} in the run · ${usd(after)} after it` : undefined;
+}
 
 /** The digests a night wrote; null for a night that recorded none (before digests, or none due). */
 export function digests(r: Run): number | null {

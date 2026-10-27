@@ -292,7 +292,8 @@ hidden and long names are cut with "…".
 **Runs and cost.** Spend per provider as a bar: month to date solid, projected to the month's end lighter, the budget a
 tick, amber when projected over. Under them, Deep cards' month to date as a subscription estimate, with no budget
 and never amber, and "at least" with the count of attempts whose usage is unknown when there are any. Then the nights as a table (night, papers, graded, digests, took, cost, and what
-failed, red-edged), then the latest three jobs and "All jobs ›". **Jobs** holds the work outside the nightly run in
+failed, red-edged); a night's cost is the day's outside jobs, the run's and every other run's until the next night,
+the split on hover, then the latest three jobs and "All jobs ›". **Jobs** holds the work outside the nightly run in
 four groups: Not run (yellow; Run now, With tonight's run, Discard), Running and queued (cyan, with progress), Failed
 (red; Try again) and Done. A job that is also a Needs you item settles with it. A job its ceiling stopped waits under Not run with
 what is left. A job is a re-run, a replay, a paper processed by Process or a digest written again; Deep cards asked for show in the same groups, read from their passes
