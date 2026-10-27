@@ -8,7 +8,7 @@ import { jobsQuery, qualityQuery, runsQuery, scheduleQuery } from "@/api/queries
 import { useDesktop } from "@/hooks/useDesktop";
 import { dateTime, plural, rowDate } from "@/lib/format";
 import { ACTIONS, anyActive, ceilingOf, digestWhat, GROUPS, type Job, jobKind, jobMeta, jobStatus, jobTone, latestJobs, nextCeiling, rerunWhat } from "@/lib/jobs";
-import { digests, type Quality, runFailed, spendBar, type Spend, took, usd } from "@/lib/settings";
+import { digests, nightCost, type Quality, runFailed, spendBar, type Spend, took, usd } from "@/lib/settings";
 import { Failed, Load, PageHead, PaperLink } from "./parts";
 
 function SpendRow({ s }: { s: Spend }) {
@@ -91,7 +91,9 @@ export function RunsPage() {
                 {desktop && <span className="mono">{r.counts?.graded ?? 0}</span>}
                 {desktop && (digests(r) === null ? <span className="mono faint">–</span> : <span className="mono">{digests(r)}</span>)}
                 {desktop && <span className="mono">{took(r.started_at, r.finished_at) || "running"}</span>}
-                <span className="mono">{usd(r.cost)}</span>
+                <span className="mono" title={nightCost(r)}>
+                  {usd(r.cost)}
+                </span>
                 <span>{bad ? <span className="badt">{desktop ? bad : "failed"}</span> : ""}</span>
               </div>
             );

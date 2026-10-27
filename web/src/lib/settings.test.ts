@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { ACKNOWLEDGEABLE, acknowledged, acknowledgedCount, answerOf, any, differs, labelled, level, noted, openSplits, runFailed, savedLine, sessionRow, settle, settleFromPaper, spendBar, spendTotals, toAcknowledge, toToml, took, waiting, type Quality, type Seen, type Session, type SessionItem } from "./settings";
+import { ACKNOWLEDGEABLE, acknowledged, acknowledgedCount, answerOf, any, differs, labelled, level, nightCost, noted, openSplits, runFailed, savedLine, sessionRow, settle, settleFromPaper, spendBar, spendTotals, toAcknowledge, toToml, took, waiting, type Quality, type Seen, type Session, type SessionItem } from "./settings";
 
 const night: Quality["night"] = { run: 1, error: null, splits: [], awaiting_classification: [], analysis_failed: [], ungraded: [], fulltext: [], digests: [], deep_notes: [] };
 const pass = { id: 7, paper_id: "3", revision: 1, title: "t", kind: "brief", state: "failed", failed_runs: 3, last_error: null, queued_at: "2026-10-01", since: "2026-10-03T03:00:00Z" } as const;
@@ -242,7 +242,7 @@ describe("labelled and noted", () => {
 });
 
 describe("runFailed", () => {
-  const run = { id: 1, kind: "nightly", started_at: "", finished_at: "", cost: 0, error: null, counts: null, fetched: 0, inserted: 0, updated: 0 };
+  const run = { id: 1, kind: "nightly", started_at: "", finished_at: "", cost: 0, after_cost: 0, error: null, counts: null, fetched: 0, inserted: 0, updated: 0 };
   it("names the error, else the steps that failed on some papers, else nothing", () => {
     expect(runFailed({ ...run, error: "boom" })).toBe("boom");
     expect(runFailed({ ...run, counts: { grading_failed: 20, digests_failed: 2 } })).toBe("20 grading, 2 digests failed");
@@ -319,5 +319,15 @@ describe("toToml", () => {
   });
   it("writes an array of tables as repeated headers", () => {
     expect(toToml({ schedule: { jobs: [{ kind: "night", cron: "0 3 * * *" }] } })).toBe('[[schedule.jobs]]\nkind = "night"\ncron = "0 3 * * *"\n');
+  });
+});
+
+describe("nightCost", () => {
+  const night = { id: 1, kind: "nightly", started_at: "", finished_at: null, error: null, counts: null, fetched: 0, inserted: 0, updated: 0 };
+  it("splits the run's cost from the runs after it", () => {
+    expect(nightCost({ ...night, cost: "10.8949", after_cost: "8.5946" })).toBe("$2.30 in the run · $8.59 after it");
+  });
+  it("has no split when nothing followed the run", () => {
+    expect(nightCost({ ...night, cost: "5.6097", after_cost: "0.0000" })).toBeUndefined();
   });
 });

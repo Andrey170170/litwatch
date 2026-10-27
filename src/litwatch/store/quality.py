@@ -79,11 +79,23 @@ async def collected_reactions(conn: psycopg.AsyncConnection, limit: int = 200) -
 
 async def runs(conn: psycopg.AsyncConnection, limit: int = 30) -> list[dict[str, Any]]:
     """The newest nightly runs, for the Nights table: jobs and other runs never push a night
-    out of it."""
+    out of it. A night's `cost` is the day's spend outside jobs: its own run's, and
+    `after_cost`, that of every other run outside a job started from its start until the next
+    night's (the Briefs the worker writes once the night's batches have closed, say). Jobs show
+    their own cost."""
     return await _all(
         conn,
-        "SELECT id, kind, started_at, finished_at, cost, error, counts, fetched, inserted, "
-        "updated FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT %s",
+        """
+        SELECT n.id, n.kind, n.started_at, n.finished_at, n.cost + a.cost AS cost,
+               a.cost AS after_cost, n.error, n.counts, n.fetched, n.inserted, n.updated
+        FROM (SELECT *, lead(started_at) OVER (ORDER BY id) AS next_at FROM runs
+              WHERE kind = 'nightly' ORDER BY id DESC LIMIT %s) n
+        CROSS JOIN LATERAL (
+            SELECT coalesce(sum(r.cost), 0) AS cost FROM runs r
+            WHERE r.kind <> 'nightly' AND r.job_id IS NULL AND r.started_at >= n.started_at
+              AND (n.next_at IS NULL OR r.started_at < n.next_at)) a
+        ORDER BY n.id DESC
+        """,
         (limit,),
     )
 

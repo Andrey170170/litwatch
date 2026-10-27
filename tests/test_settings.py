@@ -7,6 +7,7 @@ from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Cause, Fit, Opinion, Verdict
 from litwatch.feedback import word
+from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
@@ -359,6 +360,24 @@ async def test_a_miss_reads_the_verdict_as_its_depth_graded_it(client, conn):
         ("area_check", None, False),
         ("check", "none", None),
     ]
+
+
+async def test_a_nights_cost_takes_in_the_runs_outside_jobs_until_the_next_night(client, conn):
+    """The Briefs the worker writes after a night (its batches closed) are that day's spend, on
+    that night's row; a job's run shows on its job, and the next night starts a new day."""
+    job = await jobs_store.create(conn, "process", {"papers": [P.id]}, 1, "queued")
+    await conn.execute(
+        "INSERT INTO runs (kind, started_at, finished_at, cost, job_id) VALUES "
+        "('nightly', now() - interval '30 hours', now() - interval '25 hours', 2, NULL), "
+        "('fulltext', now() - interval '25 hours', now() - interval '25 hours', 3, NULL), "
+        "('job', now() - interval '24 hours', now() - interval '24 hours', 7, %s), "
+        "('nightly', now() - interval '6 hours', now() - interval '1 hour', 5, NULL), "
+        "('fulltext', now() - interval '1 hour', now(), 0.5, NULL)",
+        (job,),
+    )
+    nights = (await client.get("/api/settings/runs")).json()
+    costs = [(float(n["cost"]), float(n["after_cost"])) for n in nights]
+    assert costs == [(5.5, 0.5), (5.0, 3.0)]
 
 
 async def test_a_split_on_an_older_text_no_longer_waits(client, conn):
