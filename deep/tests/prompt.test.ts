@@ -14,6 +14,7 @@ test("the system prompt names each selection with subject and rubric", () => {
   assert.ok(p.includes("sae-methods: Sparse autoencoder methodology"));
   assert.ok(p.includes("Budget: 40 cells"));
   assert.ok(p.includes("process_notes say what you could not do because of your tools, access or budget"));
+  assert.ok(p.includes("is what the paper offers, not something you could not do"), "a 404 or an empty repository is no process note");
   assert.ok(p.includes('"process_notes"'), "the schema offers them");
 });
 

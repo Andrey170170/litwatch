@@ -245,7 +245,8 @@ and Area escalations (yellow, settled with the Fit control, the standing Fit und
 again, Use the PDF) and digests (Write it again), red; and Deep notes, neutral (a paper whose Deep card carries
 process notes: its title, then the notes, one line each), which says nothing waits: it counts in neither the run status nor
 the page's count. It has Acknowledge, joins "Acknowledge all" and moves to Acknowledged like the red groups;
-Acknowledge holds for the card it was given for, so a newer card's notes come back. A red item says why it stopped (refused by every model, or the
+Acknowledge holds for the card it was given for, so a newer card's notes come back. Acknowledged Deep notes leave
+Needs you 14 days after, since a note never recovers; they stay on the card and in `litwatch deep notes`. A red item says why it stopped (refused by every model, or the
 last error). A title opens its paper, where the same item shows (Paper, open states). Each red group has Acknowledge,
 and the page "Acknowledge all": the owner has seen them and they stop counting in the run status. Acknowledged items
 move to a folded "Acknowledged" section at the foot, grouped as above and keeping their buttons; one that recovers and
