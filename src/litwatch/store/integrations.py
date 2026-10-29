@@ -294,16 +294,25 @@ _NOTED = (
 )
 
 
+# How long acknowledged Deep notes stay in Needs you's Acknowledged section: a note never
+# recovers as a failure does, so without a limit the section would only grow.
+NOTES_KEPT_DAYS = 14
+
+
 async def deep_notes(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
     """Needs you's Deep notes: each card with process notes, oldest first, with its paper's
     title, when it was written, which names the card, and when the owner acknowledged its
-    notes. They wait on nothing, and count in no run status."""
+    notes; acknowledged ones only for `NOTES_KEPT_DAYS` after. They wait on nothing, and count
+    in no run status."""
     return await (
         await conn.execute(
             "SELECT c.paper_id, p.title, c.written_at, c.card->'process_notes' AS notes, "
             "c.notes_acknowledged_at AS acknowledged_at "
             f"FROM deep_cards c JOIN papers p ON p.id = c.paper_id WHERE {_NOTED} "
-            "ORDER BY c.written_at, c.paper_id"
+            "AND (c.notes_acknowledged_at IS NULL "
+            "OR c.notes_acknowledged_at > now() - make_interval(days => %s)) "
+            "ORDER BY c.written_at, c.paper_id",
+            (NOTES_KEPT_DAYS,),
         )
     ).fetchall()
 

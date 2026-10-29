@@ -318,6 +318,20 @@ async def test_deep_notes_count_nowhere_and_are_acknowledged_for_the_card_shown(
     assert row["acknowledged_at"] == first
     assert await status(client) == before
 
+    # Acknowledged notes stay on Needs you for 14 days, then leave it.
+    async def listed(days_ago: int) -> int:
+        await conn.execute(
+            "UPDATE deep_cards SET notes_acknowledged_at = now() - make_interval(days => %s) "
+            "WHERE paper_id = %s",
+            (days_ago, P.id),
+        )
+        return len((await client.get("/api/settings/quality")).json()["night"]["deep_notes"])
+
+    assert (await listed(13), await listed(15)) == (1, 0)
+    await conn.execute(
+        "UPDATE deep_cards SET notes_acknowledged_at = %s WHERE paper_id = %s", (first, P.id)
+    )
+
     # A card that fails to be written again keeps its notes and their mark; a remade one clears it.
     await cards.card_failed(conn, P.id, "the model stopped without submitting")
     (row,) = (await client.get("/api/settings/quality")).json()["night"]["deep_notes"]
