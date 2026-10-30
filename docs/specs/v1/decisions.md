@@ -268,6 +268,18 @@ The spec is [mcp.md](mcp.md): the owner's research agents find and read papers t
     the owner's dotfiles.
 87. **Lexical search for now**, the web app's; semantic search stays the archive's later work.
 
+## Decided 2026-10-30, all of arXiv's metadata
+
+The plan is [archive-catalog-pass.md](../../plans/archive-catalog-pass.md): the archive's seed ended at 2026-08-27, and
+since then it gained only intake's categories, so a cs.CV paper was in neither litwatch nor archive search.
+
+88. **Intake keeps the archive's metadata whole, in a catalog pass.** An OAI harvest of all of arXiv, after the
+    category passes, on intake's checkpoints and run record; not a timer of the archive's own, which the fold would
+    have to port.
+89. **Off by default.** A fresh archive starts empty and fills from intake; the owner's config turns the pass on.
+90. **Metadata only, registered one paper at a time** with the existing PUT; a bulk PUT only if the backfill measures
+    over an hour.
+
 ## Open
 
 - The grade table and rarity offsets are starting points, tuned in N2.

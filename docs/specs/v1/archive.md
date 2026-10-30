@@ -21,7 +21,9 @@ stops being an optional integration and becomes **part of the stack**: litwatch 
 
 The template's compose file runs litwatch, its Postgres, the archive and, optionally, `deep`. A fresh archive starts
 **empty** and fills from litwatch's intake; the owner's instance was seeded with almost all of arXiv (3.17M papers),
-which a lab mate does not need.
+which a lab mate does not need. The owner's instance stays almost all of arXiv through intake's catalog pass
+(`harvest`, off by default; [pipeline.md](pipeline.md), section 1), which registers every new or revised paper outside
+intake's categories as metadata.
 
 ### Storage policy
 
