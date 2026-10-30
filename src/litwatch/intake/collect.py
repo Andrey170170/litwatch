@@ -11,8 +11,9 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from litwatch.archive import ArchiveClient
 from litwatch.core import Paper
-from litwatch.intake import atom, batch, oai
+from litwatch.intake import atom, batch, catalog, oai
 from litwatch.intake.http import SourceError, XmlClient
 from litwatch.intake.source import PaperSource
 
@@ -72,10 +73,13 @@ async def collect(
     since: datetime,
     run_id: int,
     source: PaperSource = oai,
+    archive: ArchiveClient | None = None,
 ) -> IntakeResult:
     """Store each complete category, then move its checkpoint; keep failed categories open.
     A category's papers commit a page at a time (`batch.store`) and its checkpoint only after
     the last, so an interrupted category is read again, and storing it again changes nothing.
+    Given `archive`, the catalog pass (`intake.catalog`) follows, its outcome under `catalog`
+    in the details; it leaves the status as the categories made it.
 
     Feeds are archived before OAI harvesting so today's announcements survive even
     an interrupted harvest. Only new/cross announcements insert fallback candidates.
@@ -179,6 +183,10 @@ async def collect(
         stored = await batch.store(conn, list(fallback.values()), source="atom", listed=listed)
         result.inserted += stored.inserted
         seen.update(fallback)
+        if archive is not None:
+            result.details["catalog"] = await catalog.run(
+                conn, archive, categories, since.date(), run_id, client, source=source
+            )
     result.fetched = len(seen)
     if not all(info["complete"] for info in result.details["categories"].values()):
         result.details["status"] = "partial"

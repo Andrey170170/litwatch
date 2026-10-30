@@ -16,7 +16,12 @@ NS = {
     "a": "http://arxiv.org/OAI/arXiv/",
     "r": "http://arxiv.org/OAI/arXivRaw/",
 }
+ALL = "*"  # every archive and category: a harvest with no set
 _ID = re.compile(r"(?:\d{4}\.\d{4,5}|[a-zA-Z][a-zA-Z.-]*/\d{7})(?:v\d+)?\Z")
+
+
+class OverBudget(SourceError):  # noqa: N818 - a harvest too large for one call
+    """A harvest needed more than its pages or its time; a smaller window may fit."""
 
 
 @dataclass
@@ -81,21 +86,32 @@ def _paper(record: ET.Element) -> Paper | None:
     )
 
 
-def _harvest(category: str, since: date, client: XmlClient, *, raw: bool = False) -> OaiBatch:
-    """Return only complete harvests; `since` addresses metadata modification dates.
+def _harvest(
+    category: str,
+    since: date,
+    client: XmlClient,
+    *,
+    raw: bool = False,
+    until: date | None = None,
+) -> OaiBatch:
+    """Return only complete harvests; `since` and `until` (both inclusive) address metadata
+    modification dates, and `ALL` harvests every category.
 
     Reuse the checkpoint's UTC date inclusively on the next harvest. This overlaps
     the first response day, avoiding gaps from records modified during pagination.
     """
-    if not re.fullmatch(r"[a-z-]+\.[A-Za-z]+", category):
-        raise SourceError(f"Unsupported OAI category: {category}")
-    archive, subject = category.split(".", 1)
     original = {
         "verb": "ListRecords",
         "metadataPrefix": "arXivRaw" if raw else "arXiv",
         "from": since.isoformat(),
-        "set": f"{archive}:{archive}:{subject}",
     }
+    if until is not None:
+        original["until"] = until.isoformat()
+    if category != ALL:
+        if not re.fullmatch(r"[a-z-]+\.[A-Za-z]+", category):
+            raise SourceError(f"Unsupported OAI category: {category}")
+        archive, subject = category.split(".", 1)
+        original["set"] = f"{archive}:{archive}:{subject}"
     params = original.copy()
     papers: dict[str, Paper] = {}
     checkpoint = None
@@ -104,7 +120,7 @@ def _harvest(category: str, since: date, client: XmlClient, *, raw: bool = False
     deadline = time.monotonic() + 15 * 60
     for _ in range(200):
         if time.monotonic() > deadline:
-            raise SourceError("OAI exceeded its 15-minute category budget")
+            raise OverBudget("OAI exceeded its 15-minute harvest budget")
         try:
             root = ET.fromstring(client.get(URL, params=params))
         except ET.ParseError as exc:
@@ -148,7 +164,7 @@ def _harvest(category: str, since: date, client: XmlClient, *, raw: bool = False
             raise SourceError("OAI repeated a resumption token")
         seen_tokens.add(token)
         params = {"verb": "ListRecords", "resumptionToken": token}
-    raise SourceError("OAI exceeded the 200-page harvest bound")
+    raise OverBudget("OAI exceeded the 200-page harvest bound")
 
 
 def _raw_paper(record: ET.Element) -> Paper | None:
@@ -262,18 +278,24 @@ def fetch_versions(paper_id: str, client: XmlClient) -> dict:
 
 
 def fetch_category(
-    category: str, since: date, client: XmlClient, *, include_versions: bool = False
+    category: str,
+    since: date,
+    client: XmlClient,
+    *,
+    include_versions: bool = False,
+    until: date | None = None,
 ) -> OaiBatch:
-    """Canonical author/date metadata plus optional raw revision history.
+    """Canonical author/date metadata plus optional raw revision history, of one category or
+    of `ALL`, changed from `since` to `until` (open when None).
 
     A raw endpoint failure leaves actionable unknown-version intents. It must not
     prevent successful canonical intake or erase its durable category coverage.
     """
-    batch = _harvest(category, since, client)
+    batch = _harvest(category, since, client, until=until)
     if not include_versions:
         return batch
     try:
-        raw = _harvest(category, since, client, raw=True)
+        raw = _harvest(category, since, client, raw=True, until=until)
         histories = {p.id: p for p in raw.papers}
         missing, unresolved = [], []
         for paper in batch.papers:
