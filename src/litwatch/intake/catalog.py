@@ -39,7 +39,7 @@ async def lower(conn: psycopg.AsyncConnection, day: date) -> None:
 
 async def run(
     conn: psycopg.AsyncConnection,
-    archive: ArchiveClient,
+    open_archive: Callable[[], ArchiveClient],
     categories: Iterable[str],
     since: date,
     run_id: int,
@@ -55,7 +55,8 @@ async def run(
     today, to the day of the OAI response. A window that does not complete (over the harvest's
     budget, or with revisions it could not resolve) is halved, down to one day; a day that
     still does not complete stops the pass, to be harvested again from the checkpoint.
-    `report` is called with the outcome after each window."""
+    `open_archive` gives the client it registers with, closed at the end; `report` is called
+    with the outcome after each window."""
     skip = set(categories)
     start = await checkpoints.start(conn, oai.ALL, since)
     info: dict[str, Any] = {
@@ -66,7 +67,9 @@ async def run(
         "registered": 0,
     }
     width = WEEK
+    archive = None
     try:
+        archive = open_archive()
         while True:
             today = datetime.now(UTC).date()
             last = start + timedelta(days=width - 1)
@@ -113,3 +116,6 @@ async def run(
         info["error"] = f"{type(exc).__name__}: {exc}"
         log.warning("catalog pass stopped from %s: %s", start, info["error"])
         return info
+    finally:
+        if archive is not None:
+            await archive.aclose()

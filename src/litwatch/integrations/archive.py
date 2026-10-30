@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -90,13 +91,14 @@ def reader(config: Config) -> ArchiveClient | None:
     return client(section) if section is not None else None
 
 
-def harvester(config: Config) -> ArchiveClient | None:
-    """A client for intake's catalog pass: the enabled archive section's, when it has `harvest`
-    on and registers; None otherwise."""
+def harvester(config: Config) -> Callable[[], ArchiveClient] | None:
+    """What opens the client of intake's catalog pass, from the enabled archive section, when
+    it has `harvest` on and registers; None otherwise. The pass opens it, so a client that
+    cannot be made fails the pass, not intake."""
     section = enabled_using(config, "archive")
     if section is None or section.get("harvest") is not True or section.get("register") is False:
         return None
-    return client(section)
+    return lambda: client(section)
 
 
 def switched_off(config: Config) -> bool:

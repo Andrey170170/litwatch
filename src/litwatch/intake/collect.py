@@ -4,6 +4,7 @@ emits events; it judges nothing, so its success is independent of every later st
 import asyncio
 import hashlib
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -73,13 +74,14 @@ async def collect(
     since: datetime,
     run_id: int,
     source: PaperSource = oai,
-    archive: ArchiveClient | None = None,
+    archive: Callable[[], ArchiveClient] | None = None,
 ) -> IntakeResult:
     """Store each complete category, then move its checkpoint; keep failed categories open.
     A category's papers commit a page at a time (`batch.store`) and its checkpoint only after
     the last, so an interrupted category is read again, and storing it again changes nothing.
-    Given `archive`, the catalog pass (`intake.catalog`) follows, its outcome under `catalog`
-    in the details; it leaves the status as the categories made it.
+    Given `archive` (what opens its archive client), the catalog pass (`intake.catalog`)
+    follows, its outcome under `catalog` in the details; it leaves the status as the categories
+    made it.
 
     Feeds are archived before OAI harvesting so today's announcements survive even
     an interrupted harvest. Only new/cross announcements insert fallback candidates.

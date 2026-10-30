@@ -39,16 +39,15 @@ async def run(
     error: the gap stays open in the checkpoints and the next run retries it."""
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
-    archive = archive_integration.harvester(config)
-    try:
-        async with run_record(conn, "intake", window=(since, until)) as record:
-            result = await intake.collect(
-                conn, config.intake.categories, since, record.run_id, archive=archive
-            )
-            _record(record, result)
-    finally:
-        if archive is not None:
-            await archive.aclose()
+    async with run_record(conn, "intake", window=(since, until)) as record:
+        result = await intake.collect(
+            conn,
+            config.intake.categories,
+            since,
+            record.run_id,
+            archive=archive_integration.harvester(config),
+        )
+        _record(record, result)
     log.info(
         "run %s intake %s: %s papers (%s new, %s updated)",
         record.run_id,
@@ -72,22 +71,13 @@ async def catalog_from(
     if archive is None:
         raise ValueError("the catalog pass is off: set harvest = true under [integrations.archive]")
     window = (datetime.combine(since, time.min, UTC), datetime.now(UTC))
-    try:
-        async with run_record(conn, "intake", window=window) as record:
-            await catalog.lower(conn, since)
-            with XmlClient() as client:
-                done = await catalog.run(
-                    conn,
-                    archive,
-                    config.intake.categories,
-                    since,
-                    record.run_id,
-                    client,
-                    report=report,
-                )
-            record.fields["intake"] = {"catalog": done}
-    finally:
-        await archive.aclose()
+    async with run_record(conn, "intake", window=window) as record:
+        await catalog.lower(conn, since)
+        with XmlClient() as client:
+            done = await catalog.run(
+                conn, archive, config.intake.categories, since, record.run_id, client, report=report
+            )
+        record.fields["intake"] = {"catalog": done}
     return done
 
 

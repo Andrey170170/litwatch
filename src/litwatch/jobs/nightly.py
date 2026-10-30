@@ -206,14 +206,13 @@ async def run(
         model_run(conn, config, "nightly", window=(since, until), gateway=gateway) as run,
     ):
         if fetch:
-            archive = archive_integration.harvester(config)
-            try:
-                result = await intake.collect(
-                    conn, config.intake.categories, since, run.run_id, archive=archive
-                )
-            finally:
-                if archive is not None:
-                    await archive.aclose()
+            result = await intake.collect(
+                conn,
+                config.intake.categories,
+                since,
+                run.run_id,
+                archive=archive_integration.harvester(config),
+            )
             await runs.update(
                 conn,
                 run.run_id,

@@ -78,14 +78,14 @@ async def checkpoint(conn) -> date | None:
 
 async def collect(conn, fake: FakeArchive, categories=("cs.CL",)):
     run_id = await runs.start(conn, "intake", SINCE, NOW)
-    return await intake.collect(conn, categories, SINCE, run_id, archive=archive(fake))
+    return await intake.collect(conn, categories, SINCE, run_id, archive=lambda: archive(fake))
 
 
 async def walk(conn, arxiv: Arxiv, fake: FakeArchive, since: date):
     run_id = await runs.start(conn, "intake", SINCE, NOW)
     with XmlClient() as client:
         return await catalog.run(
-            conn, archive(fake), ("cs.CL",), since, run_id, client, source=arxiv
+            conn, lambda: archive(fake), ("cs.CL",), since, run_id, client, source=arxiv
         )
 
 
@@ -239,3 +239,20 @@ def test_harvest_must_be_true_or_false(monkeypatch):
     monkeypatch.setenv("LITWATCH_ARCHIVE_TOKEN", "archive-token")
     with pytest.raises(IntegrationError, match="harvest"):
         archive_integration.load("archive", {"url": "http://a", "harvest": "yes"}, Config())
+
+
+async def test_an_archive_client_that_cannot_be_made_fails_only_the_pass(conn, monkeypatch):
+    monkeypatch.setattr(atom, "fetch_category", unavailable)
+    monkeypatch.setattr(
+        oai, "fetch_category", Arxiv(listed=[paper("2610.00001", ["cs.CL"])]).fetch_category
+    )
+    monkeypatch.setenv("LITWATCH_ARCHIVE_URL", "http://archive.test")
+    monkeypatch.setenv("LITWATCH_ARCHIVE_TOKEN_FILE", "/nonexistent/archive-token")
+    monkeypatch.delenv("LITWATCH_ARCHIVE_TOKEN", raising=False)
+    opener = archive_integration.harvester(Config(integrations={"archive": {"harvest": True}}))
+    run_id = await runs.start(conn, "intake", SINCE, NOW)
+
+    result = await intake.collect(conn, ("cs.CL",), SINCE, run_id, archive=opener)
+
+    assert result.details["status"] == "complete" and result.inserted == 1
+    assert result.details["catalog"]["error"].startswith("FileNotFoundError")
