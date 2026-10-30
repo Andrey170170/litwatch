@@ -7,8 +7,9 @@ plan's notes or a `Later` placeholder in the web app.
 
 ## Now
 
-Nothing: Jobs ([`plans/jobs.md`](plans/jobs.md)) is built (#127, #129, #130) and left this list. The next is the
-first of v1's unbuilt parts below.
+**The archive takes every new or revised arXiv paper's metadata**, with a backfill since its seed: intake's catalog pass.
+Approved plan: [`plans/archive-catalog-pass.md`](plans/archive-catalog-pass.md). Then the first of v1's unbuilt parts
+below.
 
 ## v1's unbuilt parts
 

@@ -203,6 +203,7 @@ uncertain_floor = 0.1
 
 [integrations.archive]     # registers papers and wanted PDFs; its URL and token come from
                            # LITWATCH_ARCHIVE_URL and LITWATCH_ARCHIVE_TOKEN(_FILE)
+harvest = false            # true: intake's catalog pass registers all of arXiv's metadata
 
 [grading]
 area_check_min_confidence = 0.7

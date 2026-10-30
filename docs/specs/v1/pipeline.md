@@ -20,6 +20,12 @@ policy, its PDF (see [archive.md](archive.md)). Registration is delivered throug
 work (durable, retried with backoff, idempotent on the archive's side), so an archive outage delays registration and
 never loses it; intake's checkpoint does not wait for it. Intake emits `paper.added` and `paper.revised`.
 
+With `harvest` on (decisions 88–90), intake also runs a **catalog pass** after its categories: an OAI-PMH harvest
+of all of arXiv from its own checkpoint (category `*`), which registers each record outside the configured categories
+with the archive as metadata only, requesting no files. Those papers are not stored in the collection; archive search
+and the paper page find them, and Process takes one in. A failed catalog pass leaves intake's status as the category
+passes made it, and is harvested again from its checkpoint the next night. `litwatch intake --catalog-from DATE` runs only the pass, from that date.
+
 A second intake source reads the papers of a date window and the configured categories from the archive instead of
 arXiv, and stores them as the nightly source does (they are already registered there). The restart, the sandbox and
 later the backfill use it.
