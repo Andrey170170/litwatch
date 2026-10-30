@@ -59,7 +59,8 @@ arXiv's API compared with downloads.
   the harvest's budget (200 pages, 15 minutes) is halved and tried again, down to one day; a day still over budget
   stops the pass with the checkpoint before it, and the budget is raised for the catalog pass. It prints progress,
   can be stopped and resumed, and leaves the cursor where the nightly pass continues. It runs once at deploy, inside
-  the `litwatch` container, from 2026-08-20: a week of overlap with the seed's end.
+  the `litwatch` container, from 2026-08-20: a week of overlap with the seed's end. Like `litwatch intake` now, it
+  holds the run lock (`jobs/lock.py`) for the whole pass, so it never overlaps a night's intake on the `*` checkpoint.
 - **The setting:** `harvest = true` under `[integrations.archive]`. It does nothing while `register = false` (a
   litwatch running beside another one) or while the archive is off.
 - **Unchanged:** the restart and the sandbox read from the archive (`intake/archive.py`) by intake's categories, so

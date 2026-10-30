@@ -8,7 +8,7 @@ stops being an optional integration and becomes **part of the stack**: litwatch 
 - **The only downloader.** litwatch never fetches a paper's files from arXiv itself. The archive downloads them under
   one shared arXiv pacing (at least 3 seconds between connections; one paper is a source and a PDF, about 6 seconds),
   so the limit is respected in one place. litwatch's current direct-arXiv fallback for PDFs is removed.
-- **Priorities.** Intake registers each new paper it stores at background priority. A full-text pass asks for the paper's
+- **Priorities.** Intake registers each paper it stores at background priority. A full-text pass asks for the paper's
   source at urgent priority ([pipeline.md](pipeline.md), section 6), so the 10–30 papers a night that matter arrive
   within minutes while the rest of the night's 1,000 trail behind.
 - **Full text.** The archive serves the text of a paper's LaTeX source (its text-only filter keeps the LaTeX and

@@ -7,7 +7,7 @@ plan's notes or a `Later` placeholder in the web app.
 
 ## Now
 
-**The archive takes every new arXiv paper's metadata**, with a backfill since its seed: intake's catalog pass.
+**The archive takes every new or revised arXiv paper's metadata**, with a backfill since its seed: intake's catalog pass.
 Approved plan: [`plans/archive-catalog-pass.md`](plans/archive-catalog-pass.md). Then the first of v1's unbuilt parts
 below.
 

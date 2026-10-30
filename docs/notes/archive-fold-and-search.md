@@ -26,7 +26,7 @@ catalog would share litwatch's database. So it folds into litwatch.
 - **Everything runs in Docker,** the owner's instance included: its `paper-archive*` systemd units move into the
   compose stack with `/srv/arxiv-work` mounted.
 - **The archive stays required;** what varies between installs is its size. A fresh install's catalog fills from
-  intake; the owner's holds 3.17M papers and, since intake's catalog pass (decision 88), every new paper's metadata.
+  intake; the owner's holds 3.17M papers and, since intake's catalog pass (decision 88), every new or revised paper's metadata.
   One code path serves both.
 - **Order: the fold first, to the point where current behaviour is reproduced; then search on top.**
 - **Search stays lexical,** fast, and much better with partial words, word forms and typos; indexes may be rebuilt.
