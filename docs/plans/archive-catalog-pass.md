@@ -45,15 +45,21 @@ arXiv's API compared with downloads.
 - **Registration through the existing `ArchiveClient.upsert_paper`**, one paper at a time (D3). The catalog's merge
   already keeps the higher version and the newer metadata, so revisions of seeded papers outside intake's categories
   are applied too. Deleted OAI records are ignored.
-- **Its cursor** is a row in `intake_checkpoints` with category `*`. Intake's own checkpoint logic moves it, only
-  after a complete window, with intake's inclusive overlap of one day. There is no Atom fallback: a failed night is
-  harvested again from the checkpoint the next night.
-- **Its outcome goes in the run's intake details, under its own key.** A failed catalog pass leaves the collection's
-  intake `complete` and never fails the run. It adds a few pages and 1–3k registrations to the night's intake.
+- **Its cursor** is a row in `intake_checkpoints` with category `*`, with intake's inclusive overlap of one day. It
+  moves only after a complete window: both harvests complete, the raw one included (a `versions_error` leaves the
+  window open, since a record without its version would not replace a seeded paper's), and every registration made.
+  A window bounded by `until` moves it to `until`; only the open-ended last window moves it to the OAI response's
+  date, as intake's category passes do. There is no Atom fallback: a failed night is harvested again from the
+  checkpoint the next night.
+- **Its outcome goes in the run's intake details, under its own key.** The intake status stays what the category
+  passes made it (`complete` or `partial`), whatever the catalog pass does, and a failed pass never fails the run. It
+  adds a few pages and 1–3k registrations to the night's intake.
 - **The backfill is the same code.** `litwatch intake --catalog-from DATE` lowers the `*` checkpoint and runs only the
-  catalog pass. It walks one-week OAI windows up to today and moves the checkpoint after each one. It prints
-  progress, can be stopped and resumed, and leaves the cursor where the nightly pass continues. It runs once at
-  deploy, inside the `litwatch` container, from 2026-08-20: a week of overlap with the seed's end.
+  catalog pass. It walks one-week OAI windows up to today and moves the checkpoint after each one. A window that hits
+  the harvest's budget (200 pages, 15 minutes) is halved and tried again, down to one day; a day still over budget
+  stops the pass with the checkpoint before it, and the budget is raised for the catalog pass. It prints progress,
+  can be stopped and resumed, and leaves the cursor where the nightly pass continues. It runs once at deploy, inside
+  the `litwatch` container, from 2026-08-20: a week of overlap with the seed's end.
 - **The setting:** `harvest = true` under `[integrations.archive]`. It does nothing while `register = false` (a
   litwatch running beside another one) or while the archive is off.
 - **Unchanged:** the restart and the sandbox read from the archive (`intake/archive.py`) by intake's categories, so
@@ -86,11 +92,12 @@ intake: category passes → catalog pass (* checkpoint → today)
 - **R1. The backfill's size is unknown.** OAI's `from` is a metadata-change date, so the window also returns every
   older paper revised or re-stamped since 2026-08-20. arXiv's OAI reports no list size. Its pages are 1,300 records
   (measured 2026-10-30), and the total may be about 70k, or several times that if arXiv re-stamped records in bulk.
-  The one-week windows, a checkpoint per window and printed progress make it stoppable and resumable. A larger total
-  costs time, not correctness, because the upserts are idempotent.
+  The one-week windows, halved when over budget, a checkpoint per window and printed progress make it stoppable and
+  resumable. A larger total costs time, not correctness, because the upserts are idempotent.
 - **R2. The backfill shares the arXiv pacer with the archive's downloads.** The effect is small: even 300k records is
-  about 230 paced requests, roughly 15–25 minutes of slots shared with the worker. It runs by day, and urgent fetches
-  wait at most one slot. The registrations, not arXiv, are the slow part (D3).
+  about 460 paced requests (canonical and raw), roughly 30–45 minutes of slots shared with the worker, whose
+  downloads wait their turn at the pacer meanwhile. It runs by day. The registrations, not arXiv, are the slow part
+  (D3).
 - **R3. It writes tens of thousands of records to the live catalog.** The catalog is backed up first (the archive's
   backup, a fresh export generation). Records only merge, so the worst case is redundant metadata on papers the
   archive already holds.
@@ -109,8 +116,8 @@ intake: category passes → catalog pass (* checkpoint → today)
 
 | Claim | Evidence |
 |---|---|
-| V1. The catalog pass registers a record outside intake's categories as metadata only, with its version. It skips intake-category and deleted records, and moves the `*` checkpoint only after a complete window. The category passes and the collection are unchanged. | pytest through `intake.collect` with a fake `PaperSource` and a faked archive client: the PUTs made, no job requests, the checkpoint before and after a mid-window failure. |
-| V2. A failing catalog pass leaves intake `complete` and does not fail the night. | pytest: the pass raises, intake's status stays complete, the run finishes with its digests, and the failure is in its intake details. |
+| V1. The catalog pass registers a record outside intake's categories as metadata only, with its version. It skips intake-category and deleted records, and moves the `*` checkpoint only after a complete window: to `until` for a bounded one, never past a window with a `versions_error` or a failed registration. The category passes and the collection are unchanged. | pytest through `intake.collect` with a fake `PaperSource` and a faked archive client: the PUTs made, no job requests, the checkpoint after a bounded window, after a mid-window failure and after a `versions_error`. |
+| V2. A failing catalog pass leaves intake's status as the category passes made it and does not fail the night. | pytest: the pass raises, intake's status is unchanged (`complete`, and `partial` when a category also failed), the run finishes with its digests, and the failure is in its intake details. |
 | V3. It works against real arXiv. | One real day harvested into a disposable archive (`scripts/disposable-archive.sh`): the count registered, an empty job queue, a cs.CV paper of that day found through the archive's search, and the time per 1,000 registrations (D3). |
 | V4. The gap is closed on production. | After the backfill, the 2609 and 2610 ids hold about as many papers outside intake's categories as 2607 and 2608 (about 20k a month). 2610.35823 is found by MCP `search_papers` and `get_paper`. The archive's queue has no jobs from the pass. A revised seeded paper outside intake's categories shows its new version. |
 | V5. The nightly intake keeps it current. | The next night's run record shows the catalog pass complete and the `*` checkpoint at that day, and a paper outside intake's categories from that day is in the archive. |

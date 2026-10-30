@@ -8,7 +8,7 @@ stops being an optional integration and becomes **part of the stack**: litwatch 
 - **The only downloader.** litwatch never fetches a paper's files from arXiv itself. The archive downloads them under
   one shared arXiv pacing (at least 3 seconds between connections; one paper is a source and a PDF, about 6 seconds),
   so the limit is respected in one place. litwatch's current direct-arXiv fallback for PDFs is removed.
-- **Priorities.** Intake registers each new paper at background priority. A full-text pass asks for the paper's
+- **Priorities.** Intake registers each new paper it stores at background priority. A full-text pass asks for the paper's
   source at urgent priority ([pipeline.md](pipeline.md), section 6), so the 10–30 papers a night that matter arrive
   within minutes while the rest of the night's 1,000 trail behind.
 - **Full text.** The archive serves the text of a paper's LaTeX source (its text-only filter keeps the LaTeX and
@@ -23,14 +23,14 @@ The template's compose file runs litwatch, its Postgres, the archive and, option
 **empty** and fills from litwatch's intake; the owner's instance was seeded with almost all of arXiv (3.17M papers),
 which a lab mate does not need. The owner's instance stays almost all of arXiv through intake's catalog pass
 (`harvest`, off by default; [pipeline.md](pipeline.md), section 1), which registers every new or revised paper outside
-intake's categories as metadata.
+intake's categories as metadata only: no file is requested for them until one is read.
 
 ### Storage policy
 
 PDFs are about 4 GB a day at the owner's intake; LaTeX text is a few MB per paper. The policy, for a fresh instance
 and for the owner's (whose payload disk has 2.0 TB free):
 
-- **LaTeX text** for every paper intake registers;
+- **LaTeX text** for every paper intake stores (not those of the catalog pass, fetched when read);
 - **PDFs** only for papers that are members of a followed topic's subtree with a grade of relevant or above, or
   saved, or opened by the owner, or with a full-text pass queued and no LaTeX source; others are fetched when
   opened.
