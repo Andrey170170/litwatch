@@ -19,6 +19,7 @@ from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Cause
 from litwatch.core.fulltext import LEASE, RECONCILE_LOOKBACK
 from litwatch.feedback import word
+from litwatch.integrations import archive as archive_integration
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.jobs.lock import run_lock
 from litwatch.store import analyses as analyses_store
@@ -205,7 +206,13 @@ async def run(
         model_run(conn, config, "nightly", window=(since, until), gateway=gateway) as run,
     ):
         if fetch:
-            result = await intake.collect(conn, config.intake.categories, since, run.run_id)
+            result = await intake.collect(
+                conn,
+                config.intake.categories,
+                since,
+                run.run_id,
+                archive=archive_integration.harvester(config),
+            )
             await runs.update(
                 conn,
                 run.run_id,

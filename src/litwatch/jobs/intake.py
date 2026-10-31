@@ -4,7 +4,9 @@ or read a window's papers from the archive."""
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Any
 
 import psycopg
 
@@ -12,6 +14,9 @@ from litwatch import intake
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.intake import archive as archive_intake
+from litwatch.intake import catalog
+from litwatch.intake.http import XmlClient
+from litwatch.integrations import archive as archive_integration
 from litwatch.jobs.context import RunRecord, run_record
 
 log = logging.getLogger(__name__)
@@ -35,7 +40,13 @@ async def run(
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
     async with run_record(conn, "intake", window=(since, until)) as record:
-        result = await intake.collect(conn, config.intake.categories, since, record.run_id)
+        result = await intake.collect(
+            conn,
+            config.intake.categories,
+            since,
+            record.run_id,
+            archive=archive_integration.harvester(config),
+        )
         _record(record, result)
     log.info(
         "run %s intake %s: %s papers (%s new, %s updated)",
@@ -46,6 +57,28 @@ async def run(
         result.updated,
     )
     return result
+
+
+async def catalog_from(
+    conn: psycopg.AsyncConnection,
+    config: Config,
+    since: date,
+    report: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Run only the catalog pass (`intake.catalog`), from `since` at the latest, and record the
+    run; its outcome is under `catalog` in the run's intake details."""
+    archive = archive_integration.harvester(config)
+    if archive is None:
+        raise ValueError("the catalog pass is off: set harvest = true under [integrations.archive]")
+    window = (datetime.combine(since, time.min, UTC), datetime.now(UTC))
+    async with run_record(conn, "intake", window=window) as record:
+        await catalog.lower(conn, since)
+        with XmlClient() as client:
+            done = await catalog.run(
+                conn, archive, config.intake.categories, since, record.run_id, client, report=report
+            )
+        record.fields["intake"] = {"catalog": done}
+    return done
 
 
 async def from_archive(

@@ -7,7 +7,7 @@ import contextlib
 import math
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -93,12 +93,25 @@ def db_migrate() -> None:
 def intake(
     ctx: typer.Context,
     days: Annotated[int | None, typer.Option(help="Look back this many days.")] = None,
+    catalog_from: Annotated[
+        datetime | None,
+        typer.Option(
+            formats=["%Y-%m-%d"],
+            help="Run only the catalog pass, which registers the rest of arXiv with the "
+            "archive, from this day.",
+        ),
+    ] = None,
     config: ConfigPath = None,
 ) -> None:
     """Fetch new and revised papers for the configured categories from arXiv."""
     if ctx.invoked_subcommand is not None:
         return
     cfg = configuration.load(config)
+    if catalog_from is not None:
+        if days is not None:
+            raise typer.BadParameter("--days and --catalog-from do not go together")
+        _catalog_from(cfg, catalog_from.date())
+        return
 
     async def work(conn: psycopg.AsyncConnection) -> Any:
         async with run_lock(conn):
@@ -109,6 +122,26 @@ def intake(
         f"intake {result.details['status']}: {result.fetched} papers, "
         f"{result.inserted} new, {result.updated} updated"
     )
+
+
+def _catalog_from(cfg: configuration.Config, since: date) -> None:
+    def report(done: dict[str, Any]) -> None:
+        console.print(
+            f"catalog through {done['through']}: {done['records']} records, "
+            f"{done['registered']} registered"
+        )
+
+    async def work(conn: psycopg.AsyncConnection) -> Any:
+        async with run_lock(conn):
+            return await intake_job.catalog_from(conn, cfg, since, report)
+
+    try:
+        done = _run(work)
+    except (ValueError, IntegrationError) as exc:
+        raise SystemExit(f"catalog pass: {exc}") from exc
+    if not done["complete"]:
+        raise SystemExit(f"catalog pass stopped: {done['error']}")
+    console.print(f"catalog pass complete through {done['through']}")
 
 
 @intake_app.command("archive")

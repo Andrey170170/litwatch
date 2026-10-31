@@ -25,13 +25,16 @@ Options: `url` (or $LITWATCH_ARCHIVE_URL), the bearer token in $LITWATCH_ARCHIVE
 `search_timeout_seconds` (4, kept below search's own wait for a provider, so the archive's
 request gives up first and frees its thread) and `register` (true; false registers nothing,
 neither metadata nor PDF and source, leaving search and PDF reads: for running beside another
-litwatch that registers the same papers).
+litwatch that registers the same papers) and `harvest` (false; true has intake's catalog pass
+register every new or revised arXiv paper outside intake's categories, as metadata only,
+`intake.catalog`; it does nothing while `register` is false).
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -86,6 +89,16 @@ def reader(config: Config) -> ArchiveClient | None:
     section possibly empty (the stack gives its URL and token in the environment)."""
     section = enabled_using(config, "archive")
     return client(section) if section is not None else None
+
+
+def harvester(config: Config) -> Callable[[], ArchiveClient] | None:
+    """What opens the client of intake's catalog pass, from the enabled archive section, when
+    it has `harvest` on and registers; None otherwise. The pass opens it, so a client that
+    cannot be made fails the pass, not intake."""
+    section = enabled_using(config, "archive")
+    if section is None or section.get("harvest") is not True or section.get("register") is False:
+        return None
+    return lambda: client(section)
 
 
 def switched_off(config: Config) -> bool:
@@ -211,4 +224,6 @@ def load(name: str, options: dict[str, Any], config: Config) -> Archive:
     register = options.get("register", True)
     if not isinstance(register, bool):
         raise IntegrationError("register must be true or false")
+    if not isinstance(options.get("harvest", False), bool):
+        raise IntegrationError("harvest must be true or false")
     return Archive(client(options), name=name, search_timeout=timeout, register=register)
