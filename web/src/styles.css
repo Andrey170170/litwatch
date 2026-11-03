@@ -172,7 +172,7 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 .st.running { color: var(--warn); }
 .st.running::before { animation: lw-pulse 1.2s ease-in-out infinite; }
 .st.failed { color: var(--sig); }
-.st.over { color: var(--warn); }
+.st.budget { color: var(--warn); }
 @keyframes lw-pulse { 50% { opacity: 0.25; } }
 .nav .it { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; font: 600 15px var(--font-name); color: var(--fg2); text-align: left; }
 .nav .it.tab { text-transform: uppercase; letter-spacing: 0.1em; }

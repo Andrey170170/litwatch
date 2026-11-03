@@ -29,7 +29,7 @@ describe("statusLine", () => {
     expect(statusLine({ ...base, state: "running", papers: 47, waiting: 165 })).toMatchObject({ text: "47/212", tone: "running" });
   });
   it("names over budget after a quiet run", () => {
-    expect(statusLine({ ...base, over_budget: ["deep"] })).toMatchObject({ text: "212 · $ over", tone: "over", page: "runs" });
+    expect(statusLine({ ...base, over_budget: ["deep"] })).toMatchObject({ text: "212 · $ over", tone: "budget", page: "runs" });
   });
   it("a failed run outranks everything", () => {
     expect(statusLine({ ...base, state: "failed", ungraded: 4, error: "boom" })).toMatchObject({ text: "run failed", tone: "failed" });

@@ -2,7 +2,8 @@
 import type { Schemas } from "@/api/client";
 
 export type RunStatus = Schemas["RunStatus"];
-export type StatusLine = { text: string; tone: "ok" | "running" | "failed" | "over"; page: "overview" | "needs" | "runs"; title: string };
+/** `tone` is also the link's class beside `.st`: a name no other rule in styles.css uses (`.over` is the slide-over). */
+export type StatusLine = { text: string; tone: "ok" | "running" | "failed" | "budget"; page: "overview" | "needs" | "runs"; title: string };
 
 /** Papers, text passes and digests waiting on the owner after a failure: counted on the status line. */
 export function problems(s: RunStatus): number {
@@ -22,6 +23,6 @@ export function statusLine(s: RunStatus): StatusLine | null {
     return { text: `${s.papers}/${total}`, tone: "running", page: "overview", title: `Tonight's run: ${s.papers} of ${total} papers read` };
   }
   if ((s.over_budget ?? []).length)
-    return { text: `${s.papers} · $ over`, tone: "over", page: "runs", title: `${(s.over_budget ?? []).join(", ")} projected over budget · open Runs and cost` };
+    return { text: `${s.papers} · $ over`, tone: "budget", page: "runs", title: `${(s.over_budget ?? []).join(", ")} projected over budget · open Runs and cost` };
   return { text: String(s.papers), tone: "ok", page: "overview", title: `${s.papers} papers read last night · all quiet` };
 }
