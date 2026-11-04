@@ -41,7 +41,8 @@ is journalled under the role's name, with the model it went to.
   past the last model goes on to the top, but the next attempt still starts lower), and the last model in the list is
   kept until a digest of the topic is published. A digest every model refused is failed like any other. An invalid
   answer is the one exception to one call per run: the model that gave it is asked once more, told what was wrong,
-  and the digest fails only when that answer is unusable too ([digests.md](digests.md), writing).
+  and the digest fails when that ask brings no usable answer either; one that brings no answer at all still leaves
+  the first's unusable answer to move the next attempt down ([digests.md](digests.md), writing).
 
 A fallback may come from the same lab as the role's model (refusals follow a lab's policy, but a lab's models differ:
 Sonnet 5.5 answered all three papers Opus 5.5 refused,

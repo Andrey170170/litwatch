@@ -11,7 +11,6 @@ is due as updated by rules of its own (`due_updated`), found the same way."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
@@ -441,16 +440,14 @@ async def earlier_central(
     return _rows(rows)
 
 
-async def carried(
-    conn: psycopg.AsyncConnection, topic: str, monday: date, taken: Sequence[str]
-) -> list[Due]:
-    """The papers the topic's written daily digests of the week from `monday` covered that
-    are not among its weekly's own (`taken`), each as its daily showed it: late papers the
-    Monday daily listed, which the week before's weekly took, written after it. The weekly
-    reads that daily, so its writer is given them too (digests.md, writing)."""
+async def carried(conn: psycopg.AsyncConnection, topic: str, monday: date) -> list[Due]:
+    """The papers the topic's written daily digests of the week from `monday` covered that an
+    earlier published weekly of the topic already has, each as its daily showed it: late
+    papers the Monday daily listed, which the week before's weekly took, written after it.
+    The weekly reads that daily, so its writer is given them too (digests.md, writing)."""
     rows = await (
         await conn.execute(
-            """
+            f"""
             SELECT paper_id, revision, title, announced, gist, fit, grade, rarity, graded_on,
                    NULL AS fit_reason, NULL AS brief FROM (
                 SELECT DISTINCT ON (dp.paper_id) dp.paper_id, dp.paper_revision AS revision,
@@ -458,13 +455,17 @@ async def carried(
                        d.day
                 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
                 JOIN papers p ON p.id = dp.paper_id
-                WHERE d.topic = %s AND d.period = 'day' AND d.state = 'written'
-                  AND d.day BETWEEN %s AND %s AND dp.role <> 'updated'
-                  AND NOT dp.paper_id = ANY(%s)
+                WHERE d.topic = %(topic)s AND d.period = 'day' AND d.state = 'written'
+                  AND d.day BETWEEN %(monday)s AND %(sunday)s AND dp.role <> 'updated'
+                  AND EXISTS (
+                    SELECT 1 FROM digest_papers wp JOIN digests w ON w.id = wp.digest_id
+                    WHERE wp.paper_id = dp.paper_id AND w.topic = %(topic)s
+                      AND w.period = 'week' AND w.day < %(monday)s
+                      AND w.state IN {_PUBLISHED} AND wp.role <> 'updated')
                 ORDER BY dp.paper_id, d.day) x
             ORDER BY day, paper_id
             """,
-            (topic, monday, monday + timedelta(days=6), list(taken)),
+            {"topic": topic, "monday": monday, "sunday": monday + timedelta(days=6)},
         )
     ).fetchall()
     return _rows(rows)

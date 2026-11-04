@@ -107,7 +107,13 @@ class _Writer:
             log.info("%s's digest answer was rejected, asking again: %s", exc.model, exc.detail)
             again = self.labels.index(exc.model) if exc.model in self.labels else self.start
             request = writer.again(request, exc.detail or exc.kind)
-            answer = await self.run.gateway.ask(writer.ROLE, request, start=again)
+            try:
+                answer = await self.run.gateway.ask(writer.ROLE, request, start=again)
+            except CallError as second:
+                if second.unusable:
+                    raise
+                raise exc from second  # no answer this time: the first still moves the list
+
         self.model = answer.model
         return answer.value
 
@@ -168,7 +174,7 @@ async def compose(
             dailies = await store_.daily_texts(conn, topic.slug, day)
             ids = {d.paper_id for d in found}
             if recap:
-                carried = await store_.carried(conn, topic.slug, day, list(ids))
+                carried = await store_.carried(conn, topic.slug, day)
                 ids |= {c.paper_id for c in carried}
             if topic.depth == Depth.FOCUS:
                 earlier = [

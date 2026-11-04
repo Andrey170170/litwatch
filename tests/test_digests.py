@@ -579,6 +579,20 @@ async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_
     assert asked.index(P.id) < asked.index("Earlier papers") < asked.index(R.id)
 
 
+async def test_a_daily_paper_no_weekly_has_and_no_longer_due_is_not_given_to_the_weekly(db):
+    w = Writer()
+    await focus(db, P, "central")
+    await focus(db, Q, "central")
+    await listed(db, TUE, P)
+    await listed(db, THU, Q)
+    await day(db, w, TUE)
+    await day(db, w, THU)
+    await grade(db, P, "adjacent")  # out of the topic before its weekly
+    await week(db, w, MON)
+    assert (await shown(db, FAITH.slug, "week", MON))[1] == [(Q.id, "listed")]
+    assert "Also in the week's daily digests" not in w.asked[-1]
+
+
 # -- updated papers --------------------------------------------------------------------------------
 
 MAY = "2026-05-04T15:00:00+00:00"  # first out on Tue 5 May
@@ -1187,6 +1201,32 @@ async def test_a_rejected_answer_is_asked_again_once_saying_what_was_wrong(db):
     assert said in w.asked[1]
     errors = await db.execute("SELECT error FROM inference_calls ORDER BY id")
     assert [r["error"] is None for r in await errors.fetchall()] == [False, True]
+
+
+async def test_a_second_ask_with_no_answer_still_moves_the_next_attempt_down(db):
+    class Scripted(Writer):
+        def __init__(self, script: list) -> None:
+            super().__init__()
+            self.script, self.models = script, []
+
+        def respond(self, role, request) -> str:
+            self.models.append(role.model)
+            said = self.script.pop(0) if self.script else None
+            if isinstance(said, Exception):
+                raise said
+            return said if said is not None else super().respond(role, request)
+
+    opus, sonnet, _ = [m.model for m in Config().models.writer.models]
+    w = Scripted(["{not json", ProviderError("down")])
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    row = await digest_row(db, FAITH.slug, "day", TUE)
+    assert (row["state"], row["error"]) == ("failed", "invalid: not JSON")
+    tree = await taxonomy_store.load(db)
+    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+        await digests.retry_failed(db, run, tree)
+    assert w.models == [opus, opus, sonnet]
 
 
 async def test_an_answer_naming_a_paper_that_is_not_a_candidate_fails_the_digest(db):
