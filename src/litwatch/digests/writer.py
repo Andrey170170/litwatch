@@ -9,6 +9,8 @@ read from its marks."""
 
 from __future__ import annotations
 
+import dataclasses
+import re
 from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import Any, ClassVar
@@ -54,7 +56,7 @@ def _words(text: str, bounds: tuple[int, int], what: str) -> str:
     text = text.strip()
     n = len(text.split())
     if not bounds[0] <= n <= bounds[1]:
-        raise ValueError(f"a {what} of {n} words")
+        raise ValueError(f"a {what} of {n} words, not {bounds[0]} to {bounds[1]}")
     return text
 
 
@@ -83,8 +85,8 @@ class Written(BaseModel):
     @model_validator(mode="after")
     def _text(self) -> Written:
         self.text = _words(self.text, self.text_words, "text")
-        if not set(marked(self.text)) <= self.papers:
-            raise ValueError("a paper named that is not one of the digest's")
+        if strangers := [m for m in marked(self.text) if m not in self.papers]:
+            raise ValueError(f"marks {', '.join(strangers)}, not among the papers given")
         return self
 
 
@@ -110,8 +112,12 @@ class Picked(Written):
     @model_validator(mode="after")
     def _picked(self) -> Picked:
         ids = [p.paper for p in self.picks]
-        if len(set(ids)) != len(ids) or not set(ids) <= self.candidates:
-            raise ValueError("a pick that is not one of the candidates, or picked twice")
+        if strangers := [p for p in ids if p not in self.candidates]:
+            # An id is named; anything else the model put there is not kept in the error.
+            named = [p if re.fullmatch(r"[\w./-]{1,32}", p) else "a non-id" for p in strangers]
+            raise ValueError(f"picks {', '.join(named)}, not among the candidates")
+        if len(set(ids)) != len(ids):
+            raise ValueError("a paper picked twice")
         low, high = self.picks_range
         if not low <= len(ids) <= high:
             raise ValueError(f"{len(ids)} picks, not {low} to {high}")
@@ -130,8 +136,8 @@ class FocusWeek(Written):
 
     @model_validator(mode="after")
     def _one_back(self) -> FocusWeek:
-        if len([m for m in marked(self.text) if m in self.earlier]) > 1:
-            raise ValueError("more than one earlier paper brought back")
+        if len(back := [m for m in marked(self.text) if m in self.earlier]) > 1:
+            raise ValueError(f"brings back {', '.join(back)}: one earlier paper at most")
         return self
 
 
@@ -189,10 +195,11 @@ def _topic(topic: Topic, name: str) -> str:
 
 FOCUS_DAY = f"""\
 You write the daily digest of one narrow research topic for litwatch, which reads every new \
-arXiv paper. The digest lists the day's papers itself; you write a few sentences on what the day \
-brought: what the central papers do and find, how they relate, and, when there are only related \
-papers, that the day brought nothing central and what touched the topic. Answer with the \
-structured output only.
+arXiv paper. The digest lists the day's papers itself; you write a few sentences, 40 to 120 \
+words, on what the day brought: what the central papers do and find, how they relate, and, when \
+there are only related papers, that the day brought nothing central and what touched the topic. \
+On a busy day say less about each paper rather than more words. Answer with the structured \
+output only.
 
 {VOICE}"""
 
@@ -254,6 +261,18 @@ def _dailies(texts: Sequence[dict[str, Any]]) -> str:
     return "\n\n".join(f"{_day(t['day'])}: {plain(t['text'])}" for t in texts) or "none written"
 
 
+def _carried(carried: Sequence[Due]) -> list[str]:
+    """The block of the papers the week's dailies covered that the week before's weekly took:
+    the dailies speak of them, so the writer may mark them like the week's own."""
+    if not carried:
+        return []
+    text, _ = _papers(carried)
+    return [
+        "Also in the week's daily digests, listed late and already in the week before's digest "
+        f"(name and mark them like the week's papers where they matter; never pick them):\n\n{text}"
+    ]
+
+
 def focus_week(
     topic: Topic,
     name: str,
@@ -261,6 +280,7 @@ def focus_week(
     found: Sequence[Due],
     dailies: Sequence[dict[str, Any]],
     earlier: Sequence[Due],
+    carried: Sequence[Due] = (),
 ) -> Request:
     text, shown = _papers(found)
     back = "\n".join(
@@ -271,10 +291,12 @@ def focus_week(
         f"Week: {_week(monday)}",
         f"The week's daily digests:\n\n{_dailies(dailies)}",
         f"The week's papers ({len(found)}):\n\n{text}",
+        *_carried(carried),
         f"Earlier papers of the topic:\n\n{back or 'none'}",
     ]
     ids = frozenset(e.paper_id for e in earlier)
-    output = _answer(FocusWeek, papers=frozenset(d.paper_id for d in shown) | ids, earlier=ids)
+    own = frozenset(d.paper_id for d in [*shown, *carried])
+    output = _answer(FocusWeek, papers=own | ids, earlier=ids)
     return Request(system=FOCUS_WEEK, user="\n\n".join(parts), output=output)
 
 
@@ -294,9 +316,11 @@ def week(
     monday: date,
     found: Sequence[Due],
     dailies: Sequence[dict[str, Any]],
+    carried: Sequence[Due] = (),
 ) -> Request:
     """An Area's weekly digest (the week's main trends, 5 picks) or a Field's (a high-level
-    overview, 3 picks)."""
+    overview, 3 picks). An Area's text may also mark the `carried` papers; it picks from its
+    own."""
     text, shown = _papers(found)
     picks = min(WEEKLY_PICKS[topic.depth], len(shown))
     if topic.depth == Depth.AREA:
@@ -307,6 +331,15 @@ def week(
     if topic.depth == Depth.AREA:
         parts.append(f"The week's daily digests:\n\n{_dailies(dailies)}")
     parts.append(f"The week's papers ({len(found)}):\n\n{text}")
+    parts += _carried(carried)
     ids = frozenset(d.paper_id for d in shown)
-    output = _answer(Picked, papers=ids, candidates=ids, picks_range=(picks, picks))
+    marks = ids | {d.paper_id for d in carried}
+    output = _answer(Picked, papers=marks, candidates=ids, picks_range=(picks, picks))
     return Request(system=system, user="\n\n".join(parts), output=output)
+
+
+def again(request: Request, rejected: str) -> Request:
+    """`request` asked once more after its answer was rejected, saying what was wrong. It is a
+    question of its own, so neither a batch nor the journal hands back the rejected answer."""
+    said = f"An earlier answer to this was rejected ({rejected}). Answer again within every limit."
+    return dataclasses.replace(request, user=f"{request.user}\n\n{said}")

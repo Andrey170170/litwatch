@@ -98,7 +98,12 @@ async def test_haiku_charges_a_long_prompt_five_times_and_an_unlisted_model_has_
     [
         (anthropic_message(GOOD, stop_reason="max_tokens"), "truncated", None),
         (anthropic_message("", stop_reason="refusal", category="cyber"), "refused", "cyber"),
-        (anthropic_message('{"yes": "maybe"}'), "invalid", "2 validation errors: why, yes"),
+        (
+            anthropic_message('{"yes": "maybe"}'),
+            "invalid",
+            "2 validation errors: yes: Input should be a valid boolean, unable to interpret input; "
+            "why: Field required",
+        ),
     ],
 )
 async def test_an_unusable_reply_is_an_error_that_says_which_kind(reply, kind, detail):
@@ -531,7 +536,7 @@ async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, jou
 INVALID = '{"yes": "maybe"}'
 
 
-async def test_in_debug_mode_a_failed_reply_is_kept_with_what_the_validator_said(conn, journal):
+async def test_in_debug_mode_a_failed_reply_is_kept(conn, journal):
     gw = gateway(MODELS, SdkClient(anthropic_message(INVALID)), journal=journal, debug=True)
     with pytest.raises(CallError) as raised:
         await gw.ask("writer", REQUEST)
@@ -557,13 +562,14 @@ async def test_in_debug_mode_an_openrouter_refusal_keeps_what_the_model_said(con
     assert (await calls(conn))[-1]["reply"] == "I cannot help with that"
 
 
-async def test_out_of_debug_mode_a_failed_reply_is_not_kept(conn, journal):
-    with pytest.raises(CallError):
+async def test_out_of_debug_mode_a_failed_reply_is_not_kept_but_what_was_wrong_is(conn, journal):
+    with pytest.raises(CallError) as raised:
         await gateway(MODELS, SdkClient(anthropic_message(INVALID)), journal=journal).ask(
             "writer", REQUEST
         )
     (row,) = await calls(conn)
-    assert (row["reply"], row["error"]) == (None, "invalid: 2 validation errors: why, yes")
+    assert (row["reply"], row["error"]) == (None, str(raised.value))
+    assert "yes: Input should be a valid boolean" in row["error"]
 
 
 async def test_in_debug_mode_a_kept_failed_reply_is_still_never_reused(conn, journal):

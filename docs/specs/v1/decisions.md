@@ -280,6 +280,19 @@ since then it gained only intake's categories, so a cs.CV paper was in neither l
 90. **Metadata only, registered one paper at a time** with the existing PUT; a bulk PUT only if the backfill measures
     over an hour.
 
+## Decided 2026-11-04, digest answers that break a rule
+
+From 2 to 4 November, one to three digests a night failed: Opus 5.5 ran past a Focus daily's 220 words, copied an id
+wrong, or marked two earlier papers in a Focus weekly whose dailies spoke of a late paper the week before's weekly had
+taken.
+
+91. **A rejected writer answer is asked for once more in the same run**, of the model that gave it, with what was
+    wrong added to the question, so a batch or the journal cannot hand back the same answer.
+92. **An invalid reply's error always says what the validator said**, not only where; the reply's text stays debug
+    mode's.
+93. **A weekly's writer is given every paper its dailies covered**: those the week before's weekly took are named and
+    marked like the week's own, never picked nor counted, and never offered as earlier papers.
+
 ## Open
 
 - The grade table and rarity offsets are starting points, tuned in N2.

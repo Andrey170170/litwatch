@@ -121,8 +121,8 @@ class DecisionProvider(Provider, Protocol):
 
 class Gateway:
     """`ask(role, request)` and `decide(role, request)` are the whole interface the pipeline
-    uses. In `debug` mode a reply that could not be used is journalled with the call, and an
-    invalid one's error carries what the validator said. After `batch_until`, the calls on a
+    uses. An invalid reply's error carries what the validator said; in `debug` mode a reply
+    that could not be used is also journalled with the call. After `batch_until`, the calls on a
     provider that batches go in its batches; the caller does not know."""
 
     def __init__(
@@ -407,12 +407,9 @@ class Gateway:
             except json.JSONDecodeError as exc:
                 raise CallError("invalid", "not JSON", reply.usage) from exc
             except ValidationError as exc:
-                # Where it failed; in debug mode what the validator said there too.
+                # Where it failed and what the validator said there; never the reply's text.
                 errors = [(".".join(map(str, e["loc"])) or "reply", e["msg"]) for e in exc.errors()]
-                if self.debug:
-                    said = "; ".join(f"{where}: {msg}" for where, msg in errors)
-                else:
-                    said = ", ".join(sorted({where for where, _ in errors}))
+                said = "; ".join(f"{where}: {msg}" for where, msg in errors)
                 detail = f"{exc.error_count()} validation errors: {said}"
                 raise CallError("invalid", detail, reply.usage) from exc
         except CallError as exc:
