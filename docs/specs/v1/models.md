@@ -39,7 +39,9 @@ is journalled under the role's name, with the model it went to.
   ([digests.md](digests.md), a digest is a record). A refusal goes down the list at once, as above. Each failed digest of
   the topic in a row starts the next attempt one model further down from where the failed one started (a refusal
   past the last model goes on to the top, but the next attempt still starts lower), and the last model in the list is
-  kept until a digest of the topic is published. A digest every model refused is failed like any other.
+  kept until a digest of the topic is published. A digest every model refused is failed like any other. An invalid
+  answer is the one exception to one call per run: the model that gave it is asked once more, told what was wrong,
+  and the digest fails only when that answer is unusable too ([digests.md](digests.md), writing).
 
 A fallback may come from the same lab as the role's model (refusals follow a lab's policy, but a lab's models differ:
 Sonnet 5.5 answered all three papers Opus 5.5 refused,
@@ -63,10 +65,10 @@ the request's content: a moderation flag, a guardrail's block, a filter's `conte
 category; a budget used up or a permission denied is the account's, and so is a 403 that can't be told apart, which
 shows on the status document rather than passing quietly down the list.
 
+An invalid reply's error names where the validator failed it and what it said there, never the reply's text.
 Debug mode (`debug = true` in `litwatch.toml`, or `LITWATCH_DEBUG=1`; off by default) is for catching problems over a
-stretch of nights. A call whose reply could not be used (invalid, truncated or refused) keeps the reply's text in
-`inference_calls.reply`, and an invalid one's error names what the validator said, not only where. Out of debug mode
-neither is kept. Either way only validated outputs are reused.
+stretch of nights: a call whose reply could not be used (invalid, truncated or refused) also keeps the reply's text in
+`inference_calls.reply`. Either way only validated outputs are reused.
 
 New: a second request shape for decision models. `Gateway.decide(role, decision_request, *, paper_id)` sends content
 plus a list of questions, each a predicate (yes/no) or a choice among given options, and returns per predicate the

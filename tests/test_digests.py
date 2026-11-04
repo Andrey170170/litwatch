@@ -512,8 +512,8 @@ async def test_a_version_history_corrects_a_guessed_first_day_either_way(db):
 
 async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
     """P's re-check finishes on Saturday, after Friday's digest: Monday's daily covers it,
-    and the weekly of P's week, written after it, has it; the next weekly does not, and the
-    weekly before does not take Monday's own paper."""
+    and the weekly of P's week, written after it, has it; the next weekly does not list it,
+    and the weekly before does not take Monday's own paper."""
     w = Writer()
     fri, mon2 = date(2026, 10, 9), date(2026, 10, 12)
     await area(db, P, "central")  # must read: waits for its re-check
@@ -531,6 +531,52 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
     await listed(db, date(2026, 10, 19), S)
     await week(db, w, mon2)
     assert {p for p, _ in (await shown(db, INTERP.slug, "week", mon2))[1]} == {R.id}
+    # Its writer read Monday's daily, so it is given P too, to name but not to pick.
+    asked = w.asked[-1]
+    assert asked.index("Also in the week's daily digests") < asked.index(P.id)
+
+
+async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_own(db):
+    """P is listed late, in Monday's daily; the weekly before takes it. The next weekly reads
+    that daily, so its writer is given P as one of the week's, not as an earlier paper: its
+    text may name P and still bring back one earlier paper, R."""
+
+    class Both(Writer):
+        def respond(self, role, request) -> str:
+            answer = json.loads(super().respond(role, request))
+            out = request.output
+            if issubclass(out, writer.FocusWeek) and {P.id, R.id} <= out.papers:
+                answer["text"] = (
+                    " ".join(["Probes recover hidden steps."] * 20)
+                    + f" [Late]({P.id}) and [an earlier one]({R.id}) agree."
+                )
+            return json.dumps(answer)
+
+    w = Both()
+    fri, mon2 = date(2026, 10, 9), date(2026, 10, 12)
+    await focus(db, R, "central")
+    await listed(db, date(2026, 9, 29), R)
+    await day(db, w, date(2026, 9, 29))
+    await week(db, w, date(2026, 9, 28))
+    await listed(db, fri, P)
+    await day(db, w, fri)  # P is not graded yet
+    await focus(db, P, "central")
+    await focus(db, Q, "central")
+    await listed(db, mon2, Q)
+    tree = await taxonomy_store.load(db)
+    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+        await digests.nightly(db, run, tree, mon2)
+    assert (P.id, "listed") in (await shown(db, FAITH.slug, "week", MON))[1]
+    await week(db, w, mon2)
+    state, papers = await shown(db, FAITH.slug, "week", mon2)
+    assert (state, papers) == (
+        "written",
+        [(Q.id, "listed"), (P.id, "mentioned"), (R.id, "mentioned")],
+    )
+    row = await digest_row(db, FAITH.slug, "week", mon2)
+    assert row["counts"]["papers"] == 1  # P was the week before's
+    asked = w.asked[-1]
+    assert asked.index(P.id) < asked.index("Earlier papers") < asked.index(R.id)
 
 
 # -- updated papers --------------------------------------------------------------------------------
@@ -1083,7 +1129,8 @@ async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db):
 
 async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each(db):
     # models.md, roles: an unusable answer moves the next attempt one model down, per failed
-    # digest of the topic; no answer moves nothing; the last model is kept.
+    # digest of the topic; no answer moves nothing; the last model is kept. An invalid answer is
+    # asked again once, of the model that gave it, before the digest fails.
     class Stepped(Writer):
         def __init__(self, script: list[Exception | Reply | str | None]) -> None:
             super().__init__()
@@ -1097,9 +1144,11 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
             return said if said is not None else super().respond(role, request)
 
     opus, sonnet, kimi = [m.model for m in Config().models.writer.models]
-    # Kimi refusing goes on to Opus, at the top, whose unusable answer still keeps Kimi next.
+    # Kimi refusing goes on to Opus, at the top, asked again itself; its unusable answers still
+    # keep Kimi next.
     kimi_refuses = Reply("", Stop.REFUSED, Usage(model=kimi), refusal="bio")
-    w = Stepped(["{not json", ProviderError("down"), "{not json", kimi_refuses, "{not json"])
+    bad = "{not json"
+    w = Stepped([bad, bad, ProviderError("down"), bad, bad, kimi_refuses, bad, bad])
     await focus(db, P, "central")
     await listed(db, TUE, P)
     await day(db, w, TUE)
@@ -1107,7 +1156,7 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
     for _ in range(4):
         async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
             await digests.retry_failed(db, run, tree)
-    assert w.models == [opus, sonnet, sonnet, kimi, opus, kimi]
+    assert w.models == [opus, opus, sonnet, sonnet, sonnet, kimi, opus, opus, kimi]
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "written"
     found = await db.execute("SELECT model FROM digests WHERE topic = %s", (FAITH.slug,))
     assert (await found.fetchone())["model"] == Config().models.writer.models[2].label
@@ -1116,6 +1165,28 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
     await listed(db, WED, Q)
     await day(db, w, WED)
     assert w.models[-1] == opus
+
+
+async def test_a_rejected_answer_is_asked_again_once_saying_what_was_wrong(db):
+    class Long(Writer):
+        """Its first answer runs over the Focus daily's words."""
+
+        def respond(self, role, request) -> str:
+            answer = json.loads(super().respond(role, request))
+            if len(self.asked) == 1:
+                answer["text"] = " ".join(["word"] * 300)
+            return json.dumps(answer)
+
+    w = Long()
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    assert (await shown(db, FAITH.slug, "day", TUE))[0] == "written"
+    assert len(w.asked) == 2
+    said = "rejected (1 validation errors: reply: Value error, a text of 300 words, not 15 to 220)"
+    assert said in w.asked[1]
+    errors = await db.execute("SELECT error FROM inference_calls ORDER BY id")
+    assert [r["error"] is None for r in await errors.fetchall()] == [False, True]
 
 
 async def test_an_answer_naming_a_paper_that_is_not_a_candidate_fails_the_digest(db):
@@ -1294,7 +1365,7 @@ def test_a_digest_mentions_the_papers_its_text_marks_besides_its_picks():
     assert out.gist.startswith("Traces words")  # a Gist names papers without marks
     assert plain(out.text).startswith("Traces and Hidden steps agree; Traces adds")
     for made_up in ("[Made up](2610.99999)", "[A [bracketed] one](2610.99999)"):
-        with pytest.raises(ValueError, match="not one of the digest's"):
+        with pytest.raises(ValueError, match="marks 2610.99999, not among the papers given"):
             answer(area, f"{made_up} {TEXT}", picks=[P.id])
     assert plain("[the code](https://github.com/x/y), [old](cs/9901001)") == (
         "[the code](https://github.com/x/y), old"  # only an arXiv id makes a mark
@@ -1307,7 +1378,7 @@ def test_a_focus_weekly_brings_back_the_one_earlier_paper_its_text_marks():
     )
     assert answer(weekly, f"[This week's]({P.id}) {TEXT}").recalled is None
     assert answer(weekly, f"[This week's]({P.id}) and [back]({Q.id}) {TEXT}").recalled == Q.id
-    with pytest.raises(ValueError, match="more than one"):
+    with pytest.raises(ValueError, match="one earlier paper at most"):
         answer(weekly, f"[One [a]]({Q.id}) and [two [b]]({R.id}) {TEXT}")
 
 

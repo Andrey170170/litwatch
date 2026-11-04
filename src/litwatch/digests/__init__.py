@@ -25,7 +25,7 @@ import psycopg
 
 from litwatch import store
 from litwatch.core import FAILED_RUNS, Cause, Depth, Rarity, Status, Taxonomy, Topic
-from litwatch.core.digests import DAILY, PUBLISHED, DigestPeriod, DigestRole, DigestState
+from litwatch.core.digests import DAILY, PUBLISHED, DigestPeriod, DigestRole, DigestState, marked
 from litwatch.digests import writer
 from litwatch.feedback import word
 from litwatch.jobs.context import ModelRun
@@ -97,7 +97,17 @@ class _Writer:
         self.model: str | None = None
 
     async def ask(self, request: Request) -> writer.Written:
-        answer = await self.run.gateway.ask(writer.ROLE, request, start=self.start)
+        """The answer; when it breaks a rule, the model that gave it is asked once more, told
+        what was wrong (digests.md, writing)."""
+        try:
+            answer = await self.run.gateway.ask(writer.ROLE, request, start=self.start)
+        except CallError as exc:
+            if exc.kind != "invalid":
+                raise
+            log.info("%s's digest answer was rejected, asking again: %s", exc.model, exc.detail)
+            again = self.labels.index(exc.model) if exc.model in self.labels else self.start
+            request = writer.again(request, exc.detail or exc.kind)
+            answer = await self.run.gateway.ask(writer.ROLE, request, start=again)
         self.model = answer.model
         return answer.value
 
@@ -151,39 +161,46 @@ async def compose(
                 updated=updated,
                 model=w.model,
             )
+        carried: list[Due] = []
         if not weekly:
             out = await w.ask(writer.area_day(topic, name, day, found))
         else:
             dailies = await store_.daily_texts(conn, topic.slug, day)
+            ids = {d.paper_id for d in found}
+            if recap:
+                carried = await store_.carried(conn, topic.slug, day, list(ids))
+                ids |= {c.paper_id for c in carried}
             if topic.depth == Depth.FOCUS:
-                ids = {d.paper_id for d in found}
                 earlier = [
                     e
                     for e in await store_.earlier_central(conn, topic.slug, day)
                     if e.paper_id not in ids
                 ]
-                request = writer.focus_week(topic, name, day, found, dailies, earlier)
+                request = writer.focus_week(topic, name, day, found, dailies, earlier, carried)
                 out = await w.ask(request)
-                recalled = [
+                named = set(marked(out.text))
+                extra = [Shown(c, DigestRole.MENTIONED) for c in carried if c.paper_id in named]
+                extra += [
                     Shown(e, DigestRole.MENTIONED) for e in earlier if e.paper_id == out.recalled
                 ]
-                covered = _covered(found)
                 return _outcome(
                     topic.slug,
                     period,
                     day,
-                    covered,
+                    _covered(found),
                     gist=out.gist,
                     text=out.text,
-                    extra=recalled,
+                    extra=extra,
                     updated=updated,
                     model=w.model,
                 )
-            out = await w.ask(writer.week(topic, name, day, found, dailies))
+            out = await w.ask(writer.week(topic, name, day, found, dailies, carried))
     except CallError as exc:
         failed = w.failure(exc)
         return Outcome(topic.slug, period, day, DigestState.FAILED, error=str(exc), model=failed)
-    covered = _covered(found, out.picks, out.mentioned)
+    late = {c.paper_id: c for c in carried}
+    covered = _covered(found, out.picks, [m for m in out.mentioned if m not in late])
+    extra = [Shown(late[m], DigestRole.MENTIONED) for m in out.mentioned if m in late]
     return _outcome(
         topic.slug,
         period,
@@ -191,6 +208,7 @@ async def compose(
         covered,
         gist=out.gist,
         text=out.text,
+        extra=extra,
         updated=updated,
         model=w.model,
     )

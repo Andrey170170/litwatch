@@ -96,7 +96,10 @@ best rarity, its picks or a Focus weekly's earlier papers. A day with updated pa
 ## Writing
 
 One call per digest to the `writer` role, Opus 5.5 by default (first v1, decision 21). The writer reads, per paper,
-its Gist, grade, Fit reason and Brief where one exists, and for a weekly digest the week's daily digests. It writes in
+its Gist, grade, Fit reason and Brief where one exists, and for a weekly digest the week's daily digests. A Focus or
+Area weekly's writer is also given the papers those dailies covered that the week before's weekly took (late papers a
+Monday daily listed, above), as their daily showed them: its text may name and mark them like the week's own, they are
+never picks nor a Focus weekly's earlier papers, and one it marks is shown as mentioned, outside its counts. It writes in
 litwatch's prose ([pipeline.md](pipeline.md), section 3): objective, never addressing the reader (no "for you", "for X
 builders", "required reading"), and clear to a reader who has not read the papers. Grades, model names,
 splits and other pipeline terms do not appear in digest text.
@@ -104,7 +107,9 @@ splits and other pipeline terms do not appear in digest text.
 The text names a paper by its title, shortened where it is long, and marks it where it first speaks of it, by its
 title or by what it does, as `[those words](its arXiv id)`; the Gist names papers without marks. The marks are how a digest knows the papers it
 mentions (and the earlier paper a Focus weekly brings back, one at most), so a mark of a paper the writer was not
-given fails the answer. The web app shows a marked name as the text runs, a link to the paper's page; whatever shows
+given fails the answer. An answer that breaks one of these rules, or runs past its length, is asked for once more in
+the same run, of the model that gave it, with what was wrong added to the question; a second such answer fails the
+digest ([models.md](models.md), roles). The web app shows a marked name as the text runs, a link to the paper's page; whatever shows
 the text elsewhere, or gives it to the writer again (a weekly reads its week's dailies), shows the name alone.
 
 Topics' digests are written concurrently, each topic on its own database connection and in its own order (its failed digests tried again, the day's
