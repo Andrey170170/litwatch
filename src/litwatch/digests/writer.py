@@ -10,6 +10,7 @@ read from its marks."""
 from __future__ import annotations
 
 import dataclasses
+import re
 from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import Any, ClassVar
@@ -112,7 +113,9 @@ class Picked(Written):
     def _picked(self) -> Picked:
         ids = [p.paper for p in self.picks]
         if strangers := [p for p in ids if p not in self.candidates]:
-            raise ValueError(f"picks {', '.join(strangers)}, not among the candidates")
+            # An id is named; anything else the model put there is not kept in the error.
+            named = [p if re.fullmatch(r"[\w./-]{1,32}", p) else "a non-id" for p in strangers]
+            raise ValueError(f"picks {', '.join(named)}, not among the candidates")
         if len(set(ids)) != len(ids):
             raise ValueError("a paper picked twice")
         low, high = self.picks_range

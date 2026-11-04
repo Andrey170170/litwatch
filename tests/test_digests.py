@@ -1407,6 +1407,10 @@ def test_a_digest_mentions_the_papers_its_text_marks_besides_its_picks():
     for made_up in ("[Made up](2610.99999)", "[A [bracketed] one](2610.99999)"):
         with pytest.raises(ValueError, match="marks 2610.99999, not among the papers given"):
             answer(area, f"{made_up} {TEXT}", picks=[P.id])
+    # A pick that is not an id is named as such: the error never keeps the model's prose.
+    with pytest.raises(ValueError) as raised:
+        answer(area, TEXT, picks=["A passage the model wrote instead"])
+    assert raised.value.errors()[0]["msg"].endswith("picks a non-id, not among the candidates")
     assert plain("[the code](https://github.com/x/y), [old](cs/9901001)") == (
         "[the code](https://github.com/x/y), old"  # only an arXiv id makes a mark
     )
