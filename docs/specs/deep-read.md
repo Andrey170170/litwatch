@@ -203,7 +203,8 @@ names the ones to remake, through "Write again" or an agent, so no remake path i
 
 ## Left to the build plan
 
-How figure images are stored and served; how the Deep read components are shared between `web/` and `deep/` and how
+How figure images are fetched, stored and served (the archive strips figures from the LaTeX source today, and its
+client reads only text and PDFs); how the Deep read components are shared between `web/` and `deep/` and how
 the `deep` image runs a headless browser for `render`; the block schema in full; the automatic layout library (ELK is
 the candidate); confirming end to end that the model accepts the screenshots (pi-ai declares image input for
 `gpt-6.1-sol` on the subscription route).
