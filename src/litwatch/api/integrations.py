@@ -18,6 +18,7 @@ from fastapi import HTTPException, Query, Request
 from litwatch import events
 from litwatch.api import schemas as s
 from litwatch.api.deps import Conn, protected
+from litwatch.api.jobs import DROPPED
 from litwatch.archive import ArchiveError
 from litwatch.core import FAILED_RUNS, Cause, SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
@@ -188,7 +189,7 @@ async def changes(
 # What `request_card` answers besides success, for the API schema.
 CARD_REFUSED = {
     404: {"description": "No such paper"},
-    409: {"description": "No card provider is configured, or the paper is dismissed"},
+    409: {"description": "No card provider is configured, or the paper is dismissed or withdrawn"},
     503: {"description": "arXiv did not answer in time; nothing was stored"},
 }
 
@@ -221,14 +222,14 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
             and open_pass["reason"] == REQUESTED
             and open_pass["state"] != "failed"
             and await jobs_store.processing(c, paper_id)
-            and await papers_store.dismissed_at(c, paper_id) is None
+            and not await papers_store.dropped(c, paper_id)
         ):
             return s.CardRequested(pass_id=open_pass["id"])
         async with word.change(c, paper_id, cause=Cause.OWNER):
             await misses.keep(c, paper_id, fetched)
             pass_id = await deep_passes.request(c, paper_id)
             if pass_id is None:
-                raise HTTPException(status_code=409, detail="the paper is dismissed")
+                raise HTTPException(status_code=409, detail=DROPPED)
             # Outside the collection, the paper is processed now too, as Process does: with the
             # schedule on, which runs the jobs worker, a taxonomy to sort it into, and no step of
             # the paper waiting on the owner.

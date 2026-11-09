@@ -119,7 +119,7 @@ async def settle_process(
         f"""
         UPDATE jobs j SET changed_at = now(), queued_at = now(), done = 0, counts = '{{}}',
                error = NULL,
-               state = CASE WHEN p.dismissed_at IS NULL THEN 'queued' ELSE 'discarded' END
+               state = CASE WHEN NOT p.dropped THEN 'queued' ELSE 'discarded' END
         FROM papers p
         WHERE p.id = %s AND j.kind = 'process' AND j.state = 'failed' AND j.scope -> 'papers' = %s
           AND NOT EXISTS (SELECT 1 FROM step_failures f WHERE f.paper_id = p.id AND {ACTIONABLE})
@@ -314,7 +314,7 @@ async def listing(
                        NULL
                 FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
                 WHERE f.kind = 'deep' AND f.reason = %(requested)s
-                  AND (p.dismissed_at IS NULL OR f.state = 'done' OR {STARTED})
+                  AND (NOT p.dropped OR f.state = 'done' OR {STARTED})
             ), ranked AS (
                 SELECT *, row_number() OVER (PARTITION BY state = 'done' ORDER BY at DESC, id DESC)
                           AS newest
@@ -423,7 +423,7 @@ async def labelled(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
     """The papers the owner labelled for the topic or reported missed there, not dismissed."""
     rows = await (
         await conn.execute(
-            "SELECT id FROM papers WHERE dismissed_at IS NULL AND id IN ("
+            "SELECT id FROM papers WHERE NOT dropped AND id IN ("
             "SELECT paper_id FROM labels WHERE topic = %(t)s "
             "UNION SELECT paper_id FROM misses WHERE topic = %(t)s) ORDER BY id",
             {"t": topic},
@@ -444,7 +444,7 @@ async def members(conn: psycopg.AsyncConnection, classes: list[str]) -> list[str
                 WHERE m.class = ANY(%(classes)s) AND {SHOWN_MEMBER}
                 UNION
                 SELECT g.paper_id FROM effective_grades g WHERE g.topic = ANY(%(classes)s)
-            ) x JOIN papers p USING (id) WHERE p.dismissed_at IS NULL ORDER BY id
+            ) x JOIN papers p USING (id) WHERE NOT p.dropped ORDER BY id
             """,
             {"classes": classes},
         )
@@ -458,7 +458,7 @@ async def published_between(
     """The papers published in [since, until), not dismissed."""
     rows = await (
         await conn.execute(
-            "SELECT id FROM papers WHERE dismissed_at IS NULL AND published >= %s "
+            "SELECT id FROM papers WHERE NOT dropped AND published >= %s "
             "AND published < %s ORDER BY id",
             (since, until),
         )

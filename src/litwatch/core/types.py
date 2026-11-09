@@ -33,6 +33,7 @@ class Paper(BaseModel):
     doi: str | None = None
     journal_ref: str | None = None
     license: str | None = None
+    comments: str | None = None  # arXiv's comments field: a withdrawal's reason, among others
 
 
 def keyword_patterns(value: Any) -> list[str]:

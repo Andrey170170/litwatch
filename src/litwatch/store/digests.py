@@ -226,7 +226,7 @@ def _focus(which: str, updated: bool = False) -> str:
                     AND v.paper_revision = p.revision
                   ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) v ON true
     {_NEWEST if updated else ""}
-    WHERE p.dismissed_at IS NULL AND g.fit IN ('central', 'related')
+    WHERE NOT p.dropped AND g.fit IN ('central', 'related')
       AND v.fit IN ('central', 'related') AND {which} AND {_FOCUS_LED}
     ORDER BY {_order(updated, "g.grade", rarity)}
     """
@@ -251,7 +251,7 @@ def _subtree(which: str, gates: str, updated: bool = False) -> str:
                        ORDER BY v.paper_revision DESC, v.recorded_at DESC, v.id DESC
                        LIMIT 1) v ON true
     {_NEWEST if updated else ""}
-    WHERE p.dismissed_at IS NULL AND {which} AND {_SUBTREE_LED}
+    WHERE NOT p.dropped AND {which} AND {_SUBTREE_LED}
       AND (g.fit IN ('adjacent', 'none') AND {_word("p.id", "g.topic")}) IS NOT TRUE {gates}
     ORDER BY {_order(updated, "s.grade", rarity)}
     """
@@ -724,7 +724,7 @@ async def waiting_passes(conn: psycopg.AsyncConnection, since: datetime) -> int:
         await conn.execute(
             "SELECT count(*) AS n FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
             "WHERE f.kind <> 'deep' AND f.reason IN ('focus', 'area') AND f.queued_at >= %s "
-            "AND f.paper_revision = p.revision AND p.dismissed_at IS NULL AND f.job_id IS NULL "
+            "AND f.paper_revision = p.revision AND NOT p.dropped AND f.job_id IS NULL "
             "AND f.state IN ('awaiting_text', 'ready', 'running')",
             (since,),
         )
@@ -762,7 +762,7 @@ async def digests_on(
 _SHOWN = f"""
     SELECT dp.digest_id, dp.paper_id, dp.role, dp.position, dp.why, dp.paper_revision, dp.gist,
            dp.fit, dp.grade, dp.rarity, dp.graded_on, dp.title, dp.version, p.announced,
-           p.published,
+           p.published, p.withdrawn_at,
            (g.grade NOT IN ('must_read', 'relevant')
             AND {_word("dp.paper_id", "dp.graded_on")}) IS TRUE AS set_aside
     FROM digest_papers dp JOIN papers p ON p.id = dp.paper_id

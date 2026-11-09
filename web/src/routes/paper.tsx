@@ -16,7 +16,7 @@ import { Failed } from "@/routes/settings/parts";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rc } from "@/lib/rarity";
 import { DeepReadCell, linkCells, MissPicker, ProcessCell, SaveCell, type Paper } from "@/components/paper/Actions";
-import { Header } from "@/components/paper/Header";
+import { Header, WithdrawnNote } from "@/components/paper/Header";
 import { Ladder } from "@/components/paper/Ladder";
 import { Notes } from "@/components/paper/Notes";
 import { PhoneBar } from "@/components/paper/Phone";
@@ -161,6 +161,7 @@ function PaperView({ id, under, miss }: { id: string; under: string | undefined;
       </Fill>
       <Back />
       <Header paper={paper} />
+      <WithdrawnNote paper={paper} />
       <Notes paper={paper} onLabel={onLabel} />
       <div className="pgcols">
         <Ladder paper={paper} asked={asked} deepRead={deepRead} onGistAway={onGistAway} />

@@ -11,13 +11,14 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch import events
-from litwatch.core import Paper, rewritten
+from litwatch.core import Paper, rewritten, withdrawn_at
 from litwatch.core.digests import announced, first_listing
 
 # What `row_to_paper` reads; the stored body of every match would be megabytes nobody looks at.
 COLUMNS = """
     p.id, p.title, p.abstract, p.authors, p.categories, p.primary_category, p.published,
-    p.updated, p.url, p.version, p.revision, p.version_history, p.doi, p.journal_ref, p.license
+    p.updated, p.url, p.version, p.revision, p.version_history, p.doi, p.journal_ref, p.license,
+    p.comments
 """
 
 
@@ -46,6 +47,7 @@ def row_to_paper(row: dict[str, Any]) -> Paper:
         doi=row.get("doi"),
         journal_ref=row.get("journal_ref"),
         license=row.get("license"),
+        comments=row.get("comments"),
     )
 
 
@@ -94,6 +96,9 @@ async def upsert(
     replaced by one guessed from other metadata: the version list can fail to load, leaving
     `<created>`, which can be a later version's date, and the stored history is then cleared,
     so the column keeps what it knew.
+
+    A paper is withdrawn (`withdrawn_at`) while its newest version is a withdrawal
+    (`core.withdrawn_at`); a later real version brings it back.
     """
     result = Upserted()
     async with conn.transaction():
@@ -113,11 +118,12 @@ async def upsert(
                     INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
                                         published, updated, url, metadata_source,
                                         version, version_history,
-                                        doi, journal_ref, license, announced, announced_known)
+                                        doi, journal_ref, license, comments, announced,
+                                        announced_known, withdrawn_at)
                     VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
                             %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
                             %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s,
-                            %(announced)s, %(known)s)
+                            %(comments)s, %(announced)s, %(known)s, %(withdrawn_at)s)
                     ON CONFLICT (id) DO UPDATE SET
                         -- Canonical metadata (Atom never updates) dates the first listing;
                         -- a feed's date stands only until it does. A day read from the
@@ -158,7 +164,13 @@ async def upsert(
                             ELSE papers.version_history END,
                         doi = coalesce(EXCLUDED.doi,papers.doi),
                         journal_ref = coalesce(EXCLUDED.journal_ref,papers.journal_ref),
-                        license = coalesce(EXCLUDED.license,papers.license)
+                        license = coalesce(EXCLUDED.license,papers.license),
+                        comments = coalesce(EXCLUDED.comments, papers.comments),
+                        -- Withdrawn as its version history says, kept while the history is not
+                        -- known, as the history is.
+                        withdrawn_at = CASE WHEN EXCLUDED.version_history <> '[]'::jsonb
+                                            THEN EXCLUDED.withdrawn_at
+                                            ELSE papers.withdrawn_at END
                     WHERE %(source)s <> 'atom'
                       AND (papers.version IS NULL OR EXCLUDED.version IS NULL
                            OR EXCLUDED.version >= papers.version)
@@ -185,6 +197,7 @@ async def upsert(
                         "version_history": Jsonb(p.version_history),
                         "announced": announced(p) or (listed or {}).get(p.id),
                         "known": first_listing(p) is not None,
+                        "withdrawn_at": withdrawn_at(p),
                         "source": source,
                         "by_day": source in _BY_DAY,
                         "by_day_sources": list(_BY_DAY),
@@ -266,14 +279,15 @@ async def revision(conn: psycopg.AsyncConnection, paper_id: str) -> int:
 
 async def still_current(conn: psycopg.AsyncConnection, paper: Paper) -> bool:
     """Whether a result about `paper` may still be recorded: the stored paper has the same text
-    (revision) and has not been dismissed. Call it inside the recording transaction: the share
-    lock waits for a correction or dismissal in progress, which update the row."""
+    (revision) and has not been dropped (dismissed or withdrawn). Call it inside the recording
+    transaction: the share lock waits for a correction, dismissal or intake in progress, which
+    update the row."""
     row = await (
         await conn.execute(
-            "SELECT revision, dismissed_at FROM papers WHERE id = %s FOR SHARE", (paper.id,)
+            "SELECT revision, dropped FROM papers WHERE id = %s FOR SHARE", (paper.id,)
         )
     ).fetchone()
-    return row is not None and row["dismissed_at"] is None and row["revision"] == paper.revision
+    return row is not None and not row["dropped"] and row["revision"] == paper.revision
 
 
 async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> Paper | None:
@@ -295,6 +309,15 @@ async def dismiss(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
         (paper_id,),
     )
     return cur.rowcount == 1
+
+
+async def dropped(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """Whether litwatch no longer processes the paper: the owner dismissed it, or arXiv
+    withdrew it (`papers.dropped`)."""
+    row = await (
+        await conn.execute("SELECT dropped FROM papers WHERE id = %s", (paper_id,))
+    ).fetchone()
+    return row is not None and row["dropped"]
 
 
 async def dismissed_at(conn: psycopg.AsyncConnection, paper_id: str) -> datetime | None:

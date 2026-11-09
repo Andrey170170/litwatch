@@ -95,7 +95,7 @@ async def candidates(
                            EXISTS (SELECT 1 FROM grading_passes g WHERE g.paper_id = p.id
                                    AND g.paper_revision = p.revision) AS passed
                     FROM papers p
-                    WHERE p.dismissed_at IS NULL
+                    WHERE NOT p.dropped
                       AND (%(ids)s::text[] IS NULL OR p.id = ANY(%(ids)s))
                       AND EXISTS (SELECT 1 FROM classifications c
                                   WHERE c.paper_id = p.id AND c.paper_revision = p.revision)
@@ -171,7 +171,7 @@ async def ungraded_under(
         await conn.execute(
             """
             SELECT p.id FROM unnest(%(ids)s::text[]) WITH ORDINALITY AS x (id, n)
-            JOIN papers p ON p.id = x.id AND p.dismissed_at IS NULL
+            JOIN papers p ON p.id = x.id AND NOT p.dropped
             WHERE (SELECT v.topic_version FROM verdicts v WHERE v.paper_id = p.id
                    AND v.topic = %(topic)s AND v.paper_revision = p.revision
                    ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) IS DISTINCT FROM %(version)s

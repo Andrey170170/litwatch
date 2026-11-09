@@ -425,6 +425,21 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
     assert no_id[1] is False and "No arXiv id" in no_id[0]
 
 
+async def test_get_paper_says_arxiv_withdrew_it_and_why(conn, shelves):
+    fake, *_ = shelves
+    await conn.execute(
+        "UPDATE papers SET withdrawn_at = '2026-10-21T06:28:10Z', comments = 'The proof is wrong' "
+        "WHERE id = %s",
+        (P.id,),
+    )
+    async with serving(_app(conn, fake)) as http:
+        held = await ok(http, "get_paper", paper_id=P.id)
+    assert (
+        "Withdrawn on arXiv 2026-10-21: litwatch no longer processes it. "
+        "Its authors' comment: The proof is wrong"
+    ) in held
+
+
 async def test_a_deep_card_from_an_older_text_says_which_text_it_read(conn, shelves):
     fake, *_ = shelves
     await conn.execute("UPDATE papers SET version = 1, revision = 1 WHERE id = %s", (P.id,))

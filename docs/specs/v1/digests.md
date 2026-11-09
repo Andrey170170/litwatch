@@ -46,7 +46,9 @@ wait) is in the next daily digest, shown with its announcement date. A **weekly 
 due for the topic during its week, and any paper a published daily digest covered that no weekly digest has yet (a
 daily digest written again after its week's weekly, the days before a recovery window's first Monday), so none is
 left out of every weekly; for a Field topic, which has no daily digest, writing the weekly is what clears
-them. The owner's word never makes a paper due: the owner already knows it. A paper announced more than three weeks
+them. The owner's word never makes a paper due: the owner already knows it. A dropped paper (dismissed, or withdrawn on arXiv:
+[pipeline.md](pipeline.md), section 8) is never due, new or updated; the digests that showed it before keep it, marked
+as withdrawn where it was. A paper announced more than three weeks
 before a digest's day is never due for it as new (it can come back once as updated, below): late papers arrive within days, and one the collection gains much later (a
 re-run after a topic edit, a reported miss, an old paper read on demand) was never news. A paper's day is the arXiv
 listing that first showed it, from its first version's submission time (before 14:00 US Eastern on a weekday, the

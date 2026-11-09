@@ -817,4 +817,7 @@ async def test_process_on_a_paper_dismissed_while_its_job_waits_is_refused(conn,
     await papers_store.dismiss(conn, A.id)
     async with api(conn) as http:
         refused = await http.post("/api/jobs/process", json={"paper_id": A.id})
-    assert (refused.status_code, refused.json()["detail"]) == (409, "the paper is dismissed")
+    assert (refused.status_code, refused.json()["detail"]) == (
+        409,
+        "the paper is dismissed or withdrawn",
+    )

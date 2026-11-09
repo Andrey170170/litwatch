@@ -608,6 +608,8 @@ def _papers_answer(
         out.append(
             f"{i}. **{r.title}** · arXiv:{r.id} · {_day(r.published)} · {_authors(r.authors)}"
         )
+        if r.withdrawn_at:
+            out.append(f"   Withdrawn on arXiv {_day(r.withdrawn_at)}.")
         if r.gist:
             out.append(f"   Gist: {r.gist}")
         facts = [f"Weight: {r.weight}" if r.weight else "", _grades(r.badges)]
@@ -719,6 +721,9 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
         out.append("Fetched by litwatch, not processed yet.")
     else:
         out.append("Only in the archive: litwatch has not processed it.")
+    if w := p.withdrawn:
+        reason = f" Its authors' comment: {w.reason}" if w.reason else ""
+        out.append(f"Withdrawn on arXiv {_day(w.at)}: litwatch no longer processes it.{reason}")
     if p.stored:
         out.append(_library(p))
     if p.weight:
@@ -836,6 +841,7 @@ def _digest_answer(d: s.Digest) -> str:
             said = [f"grade {_words(p.grade)}" if p.grade else "", f"Fit {p.fit}" if p.fit else ""]
             said += [f"v{p.version}" if p.version else ""]
             said += ["the owner has since set it aside" if p.set_aside else ""]
+            said += [f"withdrawn on arXiv {_day(p.withdrawn_at)}" if p.withdrawn_at else ""]
             facts = "; ".join(x for x in said if x)
             out.append(f"- **{p.title}** · arXiv:{p.id}" + (f" · {facts}" if facts else ""))
             if p.why:

@@ -189,7 +189,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
             SELECT count(*) AS n FROM papers p
             LEFT JOIN step_failures f ON f.paper_id = p.id AND f.step = 'classification'
                  AND f.paper_revision = p.revision
-            WHERE p.dismissed_at IS NULL AND coalesce(f.failed_runs, 0) < %s
+            WHERE NOT p.dropped AND coalesce(f.failed_runs, 0) < %s
               AND NOT EXISTS (SELECT 1 FROM classifications c
                               WHERE c.paper_id = p.id AND c.paper_revision = p.revision)
             """,
@@ -222,9 +222,14 @@ def _scope(tree: Taxonomy | None, topics: list[str]) -> dict[str, Any]:
 
 def _filters(query: Query) -> tuple[list[str], dict[str, Any]]:
     """Conditions on `papers p`, `rarities r` and `library l` for every filter but the levels."""
-    # A dismissed paper is out of every list, unless asked for by id.
-    where = ["p.dismissed_at IS NULL" if query.ids is None else "p.id = ANY(%(ids)s)"]
-    params: dict[str, Any] = {} if query.ids is None else {"ids": query.ids}
+    # A dropped paper (dismissed or withdrawn) is out of every list, unless asked for by id; a
+    # withdrawn one the owner saved stays on the saved list, marked.
+    params: dict[str, Any] = {}
+    if query.ids is not None:
+        where = ["p.id = ANY(%(ids)s)"]
+        params["ids"] = query.ids
+    else:
+        where = ["p.dismissed_at IS NULL" if query.saved else "NOT p.dropped"]
     if query.q:
         where.append("p.search @@ websearch_to_tsquery('english', %(q)s)")
         params["q"] = query.q
@@ -446,7 +451,8 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
                 FROM effective_grades e WHERE e.paper_id = p.id) AS grades,
                ARRAY(SELECT m.class FROM memberships m WHERE m.paper_id = p.id
                      AND {SHOWN_MEMBER}) AS members,
-               CASE WHEN p.dismissed_at IS NOT NULL THEN NULL  -- dismissal ended its work
+               p.withdrawn_at,
+               CASE WHEN p.dropped THEN NULL  -- dismissal or withdrawal ended its work
                     WHEN EXISTS (
                         SELECT 1 FROM (
                             SELECT DISTINCT ON (v.topic) v.topic, v.fit, v.split, v.escalated,
@@ -497,7 +503,7 @@ async def topic_cards(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[str
         SELECT st.topic, count(*) AS papers, count(*) FILTER (WHERE l.saved) AS saved, {by_level},
                (array_agg(p.id ORDER BY p.published DESC NULLS LAST, p.id)
                     FILTER (WHERE st.grade = 'must_read'))[1] AS newest
-        FROM standing st JOIN papers p ON p.id = st.paper_id AND p.dismissed_at IS NULL
+        FROM standing st JOIN papers p ON p.id = st.paper_id AND NOT p.dropped
         LEFT JOIN library l ON l.paper_id = p.id
         GROUP BY st.topic
         """,
@@ -537,12 +543,12 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         conn,
         f"""
         SELECT p.id, p.title, p.abstract, {AUTHORS} AS authors, p.published, p.updated,
-               p.version, p.revision, p.version_history,
+               p.version, p.revision, p.version_history, p.withdrawn_at, p.comments,
                coalesce(l.saved, false) AS saved, l.hand, r.level AS rarity,
                {CURRENT_GIST} AS gist, {CURRENT_GIST_SOURCE} AS gist_source,
                EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = p.id) AS in_collection,
                -- What the next run classifies (`classifications.due`).
-               (p.dismissed_at IS NULL
+               (NOT p.dropped
                 AND NOT EXISTS (SELECT 1 FROM classifications c
                                 WHERE c.paper_id = p.id AND c.paper_revision = p.revision)
                 AND coalesce((SELECT failed_runs FROM step_failures f

@@ -159,12 +159,13 @@ class Worker:
         """End the job: failed with `error`, or failed while a paper has a step left failed (one
         tried again with nothing due, since it waits for the owner, fails again), else done, or
         queued again when the owner acted on its paper while it ran (`store.jobs.finish`); a
-        Process job whose paper the owner dismissed meanwhile is discarded. Under the papers'
-        settle locks, so an owner's action on them meanwhile settles the job after this."""
+        Process job whose paper was dropped meanwhile (dismissed or withdrawn) is discarded.
+        Under the papers' settle locks, so an owner's action on them meanwhile settles the job
+        after this."""
         papers = job["scope"]["papers"]
         async with self.conn.transaction():
             await word.lock_many(self.conn, papers)
-            if job["kind"] == "process" and await papers_store.dismissed_at(self.conn, papers[0]):
+            if job["kind"] == "process" and await papers_store.dropped(self.conn, papers[0]):
                 state, why = "discarded", None
             else:
                 why = error or failure(await failures.open_on(self.conn, papers, FAILED_RUNS))

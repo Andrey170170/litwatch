@@ -34,6 +34,7 @@ from litwatch.core import (
     badge_order,
     owners_word,
     page_standing,
+    withdrawn_at,
 )
 from litwatch.core.classification import Membership, Source, standing
 from litwatch.core.digests import DAILY, DigestPeriod
@@ -165,6 +166,7 @@ def _row[R: s.Row](
         badges=_badges(looks, _standings(tree, r["members"], r["grades"], weight)),
         saved=r["saved"],
         state=r["state"],
+        withdrawn_at=r["withdrawn_at"],
         **extra,
     )
 
@@ -400,6 +402,9 @@ async def paper_page(
         source_url=f"https://arxiv.org/e-print/{paper_id}",
         in_collection=found["in_collection"],
         next_run=found["next_run"],
+        withdrawn=s.Withdrawn(at=found["withdrawn_at"], reason=found["comments"])
+        if found["withdrawn_at"]
+        else None,
         rarity=found["rarity"],
         badges=_badges(looks, standings),
         gist=s.Gist(text=found["gist"], source=found["gist_source"]) if found["gist"] else None,
@@ -422,7 +427,7 @@ async def paper_page(
         publication_by_owner=bool(published and published["by_owner"]),
         card=card,
         card_pass=card_pass,
-        card_requestable=card_requestable,
+        card_requestable=card_requestable and found["withdrawn_at"] is None,
         process=s.ProcessJob(
             id=job["id"],
             state=job["state"],
@@ -452,6 +457,7 @@ async def unfetched(
         raise ArchiveDownError from exc
     if found is None:
         return None
+    at = withdrawn_at(found)
     return s.Paper(
         **found.model_dump(include={"id", "title", "authors", "abstract", "published", "updated"}),
         version=found.version,
@@ -465,8 +471,10 @@ async def unfetched(
         source_url=f"https://arxiv.org/e-print/{found.id}",
         in_collection=False,
         stored=False,
+        withdrawn=s.Withdrawn(at=at, reason=found.comments) if at else None,
         topics=[],
-        card_requestable=integrations_api.answers_card_requests(integrations),
+        # A withdrawn paper gets no card (the request would fetch it, then refuse it).
+        card_requestable=at is None and integrations_api.answers_card_requests(integrations),
     )
 
 

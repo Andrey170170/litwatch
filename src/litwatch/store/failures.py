@@ -94,7 +94,7 @@ async def reset(conn: psycopg.AsyncConnection, paper_id: str, step: Step, topic:
 # (one paused, draft or unfollowed grades nothing, so nothing waits on it). Every view of the
 # failures (the lists, the counts, a paper's detail) and the guarded actions read this one rule.
 ACTIONABLE = (
-    "(f.paper_revision = p.revision AND p.dismissed_at IS NULL AND (f.topic = '' OR EXISTS "
+    "(f.paper_revision = p.revision AND NOT p.dropped AND (f.topic = '' OR EXISTS "
     "(SELECT 1 FROM topics t WHERE t.class = f.topic AND t.status = 'active')))"
 )
 

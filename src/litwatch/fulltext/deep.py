@@ -68,7 +68,7 @@ async def request(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
     not there or dismissed, whose passes are never worked."""
     async with word.change(conn, paper_id, cause=Cause.OWNER):
         found = await store_.deep_facts(conn, paper_id)
-        if found is None or found.dismissed:
+        if found is None or found.dropped:
             return None
         pass_id = await store_.request_card(conn, paper_id, found.revision)
         await events.emit(conn, events.CARD_REQUESTED, paper_id, pass_id=pass_id)

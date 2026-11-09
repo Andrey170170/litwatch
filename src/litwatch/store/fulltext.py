@@ -50,7 +50,7 @@ class Facts:
 
     revision: int
     version: int | None
-    dismissed: bool
+    dropped: bool  # dismissed or withdrawn (`papers.dropped`)
     last: TextPass | None  # the newest text pass queued for the current revision
     has_text_result: bool  # a text pass of any revision is done
 
@@ -59,7 +59,7 @@ async def facts(conn: psycopg.AsyncConnection, paper_id: str) -> Facts | None:
     row = await (
         await conn.execute(
             f"""
-            SELECT p.revision, p.version, p.dismissed_at IS NOT NULL AS dismissed,
+            SELECT p.revision, p.version, p.dropped,
                    f.id, f.kind, f.reason, f.state, f.arxiv_version,
                    NOT {COVERS_UPDATE} AS newer_update,
                    EXISTS (SELECT 1 FROM fulltext_passes d WHERE d.paper_id = p.id
@@ -89,7 +89,7 @@ async def facts(conn: psycopg.AsyncConnection, paper_id: str) -> Facts | None:
         if row["id"]
         else None
     )
-    return Facts(row["revision"], row["version"], row["dismissed"], last, row["has_text_result"])
+    return Facts(row["revision"], row["version"], row["dropped"], last, row["has_text_result"])
 
 
 @dataclass(frozen=True)
@@ -97,7 +97,7 @@ class DeepFacts:
     """What deciding a paper's Deep pass reads, under its settle lock."""
 
     revision: int
-    dismissed: bool
+    dropped: bool  # dismissed or withdrawn
     open_pass: DeepPass | None  # the one not done
     has_card: bool  # of any revision
     picked_by: frozenset[str]  # the topics whose published digests picked its current revision
@@ -106,7 +106,7 @@ class DeepFacts:
 async def deep_facts(conn: psycopg.AsyncConnection, paper_id: str) -> DeepFacts | None:
     row = await (
         await conn.execute(
-            "SELECT p.revision, p.dismissed_at IS NOT NULL AS dismissed, f.id, f.reason, f.state, "
+            "SELECT p.revision, p.dropped, f.id, f.reason, f.state, "
             "EXISTS (SELECT 1 FROM deep_cards c WHERE c.paper_id = p.id AND c.card IS NOT NULL) "
             f"AS has_card, {PICKED_BY} AS picked_by FROM papers p LEFT JOIN fulltext_passes f "
             "ON f.paper_id = p.id AND f.kind = 'deep' AND f.state <> 'done' WHERE p.id = %s",
@@ -117,7 +117,7 @@ async def deep_facts(conn: psycopg.AsyncConnection, paper_id: str) -> DeepFacts 
         return None
     found = DeepPass(row["id"], row["reason"], PassState(row["state"])) if row["id"] else None
     picked = frozenset(row["picked_by"])
-    return DeepFacts(row["revision"], row["dismissed"], found, row["has_card"], picked)
+    return DeepFacts(row["revision"], row["dropped"], found, row["has_card"], picked)
 
 
 async def request_card(conn: psycopg.AsyncConnection, paper_id: str, revision: int) -> int:
@@ -297,9 +297,9 @@ async def claim(
     Deep pass at a background priority but one whose job was submitted (a nightly is running
     or due, pipeline.md, section 10)."""
     which = (
-        f"f.kind = 'deep' AND ({STARTED} OR p.dismissed_at IS NULL)"
+        f"f.kind = 'deep' AND ({STARTED} OR NOT p.dropped)"
         if deep
-        else "f.kind <> 'deep' AND f.paper_revision = p.revision AND p.dismissed_at IS NULL "
+        else "f.kind <> 'deep' AND f.paper_revision = p.revision AND NOT p.dropped "
         "AND f.job_id IS NOT DISTINCT FROM %(job)s"
     )
     if not deep and owners is not None:
@@ -365,7 +365,7 @@ async def job_open(conn: psycopg.AsyncConnection, job_id: int) -> int:
     row = await (
         await conn.execute(
             "SELECT count(*) AS n FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
-            "WHERE f.job_id = %s AND f.paper_revision = p.revision AND p.dismissed_at IS NULL "
+            "WHERE f.job_id = %s AND f.paper_revision = p.revision AND NOT p.dropped "
             "AND (f.state IN ('ready', 'running') "
             "OR (f.state = 'awaiting_text' AND f.queued_at >= now() - %s))",
             (job_id, AWAITING_TOO_LONG),
@@ -456,16 +456,16 @@ async def retry_asked(conn: psycopg.AsyncConnection, c: Claimed) -> None:
     await conn.execute("UPDATE fulltext_passes SET retry_text = false WHERE id = %s", (c.id,))
 
 
-async def dismissed(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
-    """Whether the paper is dismissed, read with a share lock that waits for a dismissal in
-    progress (as `papers.still_current`)."""
+async def dropped(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+    """Whether the paper is dropped (dismissed or withdrawn), read with a share lock that waits
+    for a dismissal or intake in progress (as `papers.still_current`)."""
     row = await (
         await conn.execute(
-            "SELECT dismissed_at IS NOT NULL AS dismissed FROM papers WHERE id = %s FOR SHARE",
+            "SELECT dropped FROM papers WHERE id = %s FOR SHARE",
             (paper_id,),
         )
     ).fetchone()
-    return row is not None and row["dismissed"]
+    return row is not None and row["dropped"]
 
 
 async def awaiting(conn: psycopg.AsyncConnection, c: Claimed, error: str | None = None) -> None:
@@ -646,7 +646,7 @@ async def outdated(conn: psycopg.AsyncConnection) -> list[str]:
 OUTDATED = f"""
     SELECT DISTINCT p.id FROM fulltext_passes d JOIN papers p ON p.id = d.paper_id
     WHERE d.kind <> 'deep' AND (d.state = 'done' OR d.paper_revision < p.revision)
-      AND p.dismissed_at IS NULL
+      AND NOT p.dropped
       -- Unless the newest pass for the current revision, the one `facts` reads, is open or read
       -- the paper's version (its latest update, the version unknown).
       AND NOT coalesce((
@@ -715,7 +715,7 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
                 AND (topic IN (SELECT class FROM focus) OR topic IN (SELECT class FROM area))
             )
             SELECT p.id FROM papers p
-            WHERE p.dismissed_at IS NULL AND (
+            WHERE NOT p.dropped AND (
                 EXISTS (SELECT 1 FROM fulltext_passes f WHERE f.paper_id = p.id
                         AND f.state <> 'done')
                 OR (p.id IN (SELECT paper_id FROM qualifying)
@@ -765,7 +765,7 @@ async def retry_failed(conn: psycopg.AsyncConnection, runs: int) -> int:
 # revision. A Deep pass awaits text only once its worker has tried it: with no deep service
 # configured, nothing works it, and nothing waits on the owner.
 STUCK = (
-    "p.dismissed_at IS NULL AND (f.kind = 'deep' OR f.paper_revision = p.revision) "
+    "NOT p.dropped AND (f.kind = 'deep' OR f.paper_revision = p.revision) "
     "AND ((f.state = 'failed' AND f.failed_runs >= %(runs)s) "
     "OR (f.state = 'awaiting_text' AND f.queued_at < now() - %(long)s "
     "AND (f.kind <> 'deep' OR f.tried_at IS NOT NULL)))"

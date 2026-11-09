@@ -48,6 +48,14 @@ def test_complete_paging_and_canonical_metadata():
     ]
 
 
+def test_comments_are_kept_on_one_line():
+    """arXiv's comments, a withdrawal's reason among them, wrap across lines in OAI."""
+    extra = "<comments>Withdrawn: the proof\n    of Lemma 2 is wrong</comments>"
+    client = Client([page(record() + record("2609.12346", extra))])
+    found = fetch_category("cs.CL", date(2026, 9, 12), client).papers
+    assert [p.comments for p in found] == [None, "Withdrawn: the proof of Lemma 2 is wrong"]
+
+
 def test_expired_token_restarts_once_and_deduplicates():
     client = Client(
         [

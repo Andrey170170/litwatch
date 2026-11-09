@@ -125,6 +125,7 @@ class Row(BaseModel):
     badges: list[GradedBadge] = Field(default_factory=list)  # the highest level's topic first
     saved: bool = False
     state: RowState | None = None
+    withdrawn_at: datetime | None = None  # arXiv withdrew it: out of processing (Withdrawn)
 
 
 class TopicRow(Row):
@@ -281,6 +282,14 @@ class TopicPage(BaseModel):
 class Version(BaseModel):
     version: int
     date: datetime | None = None
+
+
+class Withdrawn(BaseModel):
+    """arXiv withdrew the paper: its newest version is a withdrawal, submitted `at`; `reason` is
+    the comments arXiv gives with it, when known. litwatch no longer processes it."""
+
+    at: datetime
+    reason: str | None = None
 
 
 class Gist(BaseModel):
@@ -525,7 +534,8 @@ class Paper(BaseModel):
     source_url: str  # the LaTeX source
     in_collection: bool
     stored: bool = True  # litwatch holds it: fetched
-    next_run: bool = False  # the next run classifies it: not dismissed, its text not yet classified
+    next_run: bool = False  # the next run classifies it: not dropped, its text not yet classified
+    withdrawn: Withdrawn | None = None
     rarity: Rarity | None = None
     badges: list[GradedBadge] = Field(default_factory=list)
     gist: Gist | None = None
@@ -657,9 +667,10 @@ class DigestMark(BaseModel):
 
 
 class DigestPaper(BaseModel):
-    """A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set
-    it below relevant where it was graded. An updated paper has the arXiv `version` it came
-    back with; its `announced` is when it first came out."""
+    """A paper as a digest showed it, frozen then; `set_aside` and `withdrawn_at` are live: the
+    owner has since set it below relevant where it was graded, arXiv has since withdrawn it. An
+    updated paper has the arXiv `version` it came back with; its `announced` is when it first
+    came out."""
 
     id: str
     title: str
@@ -673,6 +684,7 @@ class DigestPaper(BaseModel):
     grade: Grade | None = None
     rarity: Rarity
     set_aside: bool = False
+    withdrawn_at: datetime | None = None
 
 
 class DigestCard(DigestMark):

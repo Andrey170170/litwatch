@@ -172,6 +172,7 @@ def to_paper(result: arxiv.Result) -> Paper:
         ),
         doi=getattr(result, "doi", None),
         journal_ref=getattr(result, "journal_ref", None),
+        comments=getattr(result, "comment", None),
         title=" ".join(result.title.split()),
         abstract=" ".join(result.summary.split()),
         authors=[a.name for a in result.authors],

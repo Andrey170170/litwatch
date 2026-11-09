@@ -13,6 +13,7 @@ import { underWay } from "@/lib/jobs";
 import { dayQuery, digestQuery, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { Prose } from "@/components/Prose";
+import { RowDate } from "@/components/Rows";
 import { Sheet } from "@/components/Sheet";
 import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
@@ -100,7 +101,7 @@ type List = { key: string; ids: string[]; total: number };
 
 /** A paper as a digest lists it: the stripe and glow, the title, the date; with `gist`, its Gist and a pick's reason
  * under them. An updated paper is one line, its version and first-out month in place of the date. Set aside since,
- * it is struck through (digests.md). The row carries the list it is in, so the paper's page knows its place
+ * it is struck through (digests.md); withdrawn since, its date reads "Withdrawn". The row carries the list it is in, so the paper's page knows its place
  * (`listContext`). */
 function PaperRow({ p, topic, gist, list }: { p: DigestPaper; topic: string; gist?: boolean; list: List }) {
   const updated = p.role === "updated";
@@ -111,7 +112,7 @@ function PaperRow({ p, topic, gist, list }: { p: DigestPaper; topic: string; gis
   return (
     <Link to="/paper/$" params={{ _splat: p.id }} search={{ topic }} state={{ list: list.key }} className={`row dpr${gist ? " g" : ""}${updated ? " up" : ""}${p.set_aside ? " aside" : ""}`} style={rarityStyle(p.rarity)} onClick={onClick} title={p.set_aside ? "Set aside since" : updated ? p.title : undefined}>
       <span className="ti">{p.title}</span>
-      <span className="dt">{updated ? updatedLine(p) : rowDate(p.announced)}</span>
+      <RowDate date={updated ? updatedLine(p) : rowDate(p.announced)} withdrawn={p.withdrawn_at} />
       {gist && p.gist && <span className="gs">{p.gist}</span>}
       {gist && p.why && <span className="wy">{p.why}</span>}
     </Link>

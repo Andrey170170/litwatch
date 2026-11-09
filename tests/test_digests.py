@@ -768,6 +768,33 @@ async def test_no_updated_row_for_a_paper_shown_as_new_or_adjacent_or_undated(db
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(S.id, "listed")])
 
 
+def withdrawn(p):
+    """`p` as arXiv sends it once withdrawn: its newest version an empty one (0kb)."""
+    *kept, newest = p.version_history
+    return p.model_copy(update={"version_history": [*kept, {**newest, "size": "0kb"}]})
+
+
+async def test_a_withdrawn_paper_is_never_due_new_or_updated(db):
+    """arXiv withdraws a paper with an empty version: graded before it was, an old paper does not
+    come back as updated with it, and a new one is no longer listed."""
+    w = Writer()
+    old = updated("2605.00016", title="Withdrawn in October")
+    new = paper(
+        "2610.00031",
+        title="Withdrawn the next day",
+        version=2,
+        version_history=history(MAY.replace("05-04", "10-05"), FOR_TUE),
+    )
+    await papers_store.upsert(db, [old, new])
+    for p in (old, new):
+        await focus(db, p, "central")
+    await focus(db, S, "related")
+    await papers_store.upsert(db, [withdrawn(old), withdrawn(new)])
+    await listed(db, TUE, S, new)
+    await day(db, w, TUE)
+    assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(S.id, "listed")])
+
+
 async def test_the_three_weeks_of_an_update_are_exact_on_both_sides(db):
     """For Tuesday's daily, a v2 in Tuesday 15 Sep's listing is three weeks old and one in
     Monday 14 Sep's more. A paper first out on Tue 15 Sep, exactly three weeks before its v2 in

@@ -154,7 +154,7 @@ async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
         read = _read_of(a.text)
         if a.retry_asked:
             await store_.retry_asked(conn, c)
-        if a.waiting or await store_.dismissed(conn, c.paper.id):
+        if a.waiting or await store_.dropped(conn, c.paper.id):
             a.waiting = True  # a dismissed paper's pass writes nothing; `claim` leaves it alone
             await store_.awaiting(conn, c, a.error)
         elif a.stopped:
@@ -229,7 +229,7 @@ async def judged(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
     change's own settle then finds the pass running, or given back as judged, and leaves it."""
     if not await store_.held(conn, c):
         return "lost"
-    if await store_.dismissed(conn, c.paper.id):  # `settle` leaves its pass alone
+    if await store_.dropped(conn, c.paper.id):  # `settle` leaves its pass alone
         await store_.release(conn, c)
         return "fulltext_dismissed"
     await word.settle(conn, c.paper.id, cause=Cause.VERDICT, claimed=c.id, job=c.job)

@@ -290,7 +290,7 @@ async def process_notes(
 # not dismissed.
 _NOTED = (
     "jsonb_typeof(c.card->'process_notes') = 'array' "
-    "AND jsonb_array_length(c.card->'process_notes') > 0 AND p.dismissed_at IS NULL"
+    "AND jsonb_array_length(c.card->'process_notes') > 0 AND NOT p.dropped"
 )
 
 

@@ -13,6 +13,16 @@ The store of arXiv papers (metadata, LaTeX text, PDFs) that downloads, keeps and
 separate service that ships with litwatch and starts empty.
 _Avoid_: archived (for papers litwatch dropped; say "not processed")
 
+**Withdrawn**:
+A paper its authors withdrew on arXiv: its newest version is an empty one, whose comments give the reason. litwatch
+withdraws it too: it is dropped.
+
+**Dropped**:
+A paper litwatch no longer processes: the owner dismissed it, or arXiv withdrew it. It is never classified, analysed,
+graded or given a full-text pass or Deep card again, never due in a digest, and out of every list and search; its page,
+asked for by id, still shows it.
+_Avoid_: archived, removed
+
 ## Classes and topics
 
 **Taxonomy**:

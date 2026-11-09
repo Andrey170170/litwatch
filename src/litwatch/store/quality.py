@@ -191,7 +191,7 @@ async def class_members(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[s
         SELECT map.target, count(DISTINCT m.paper_id) AS n
         FROM memberships m
         JOIN unnest(%s::text[], %s::text[]) AS map (class, target) ON map.class = m.class
-        JOIN papers p ON p.id = m.paper_id AND p.dismissed_at IS NULL
+        JOIN papers p ON p.id = m.paper_id AND NOT p.dropped
         WHERE {SHOWN_MEMBER}
         GROUP BY map.target
         """,
@@ -218,7 +218,7 @@ async def _keyword_hits(
         return {}
     rows = await _all(
         conn,
-        "SELECT id, title, abstract FROM papers WHERE dismissed_at IS NULL "
+        "SELECT id, title, abstract FROM papers WHERE NOT dropped "
         "AND published >= now() - make_interval(days => %s) ORDER BY id",
         (days,),
     )

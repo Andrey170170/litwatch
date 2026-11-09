@@ -155,6 +155,12 @@ with ⧉ to copy it), the date, the version ("v2 of 2"), the kind (Analysis, Met
 knows one, and "⟨/⟩ code ↗" and "◆ weights ↗" when released. A paper outside the collection says "Not in the
 collection" in place of a rarity.
 
+**Withdrawn.** A paper arXiv withdrew ([pipeline.md](pipeline.md), section 8) has, under the header, a status panel as
+today's run has one, in `--sig`: the tag "Withdrawn", the day at the right, the line "Its authors withdrew it on arXiv.
+litwatch no longer processes it and leaves it out of lists, search and new digests.", and arXiv's comments under it in
+italics. It offers no Deep read. Where a row of it shows (a digest that listed it, the saved list), its date reads
+"Withdrawn" in `--sig` Mono caps.
+
 **The ladder**, in the reading column, each rung with its name in a narrow side column:
 1. **Gist**, with ✓ and ✗ to say whether it is accurate.
 2. **Brief**, with ✓ ✗. A Brief that found the abstract overstating says so first, in a red-edged callout. A Brief
