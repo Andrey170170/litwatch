@@ -143,7 +143,11 @@ today, with these additions:
 **The rubric.** Scores from 1 to 5, each with findings that point at blocks:
 
 - **Faithfulness**: numbers, claims and setups match the paper; nothing misread or invented.
-- **Clarity**: a lab member could follow the method without the paper; terms defined before use; no bloated sentences.
+- **Clarity**: a lab member could follow the method without the paper; terms defined before use; none of the three
+  prose faults below. Each clarity finding names its fault, quotes the sentence and gives a rewrite. A 5 means a lab
+  member never rereads a sentence; a 4 allows isolated faults, none hiding a method step or a result; a 3 or below
+  means faults recur across sections or hide one. A fault in an experiment's *Found* or *Means* or in the claims
+  ranks above one in the prose around them.
 - **Depth**: method and results come close to the paper's detail; the read goes past the Brief rather than restating
   it.
 - **Calibration**: verdicts and CARD notes are fair to the paper, neither credulous nor contrarian for show.
@@ -155,7 +159,19 @@ is 4 or above and every check passes.
 
 **The writer's standards** (its prompt): everything above under "What a Deep read is" and "The shape of a read";
 specific methods, numbers and model names; no restating of the Brief beyond At a glance; every statement about the
-paper from its text; prior work and code checked, not assumed.
+paper from its text; prior work and code checked, not assumed. And prose free of the three faults that make model
+writing hard to read (after Williams, *Style: The Basics of Clarity and Grace*, as measured in
+[Zonder Labs, "Why is AI slop so frustrating to read?"](https://zonderlabs.com/slop), 2026):
+
+- **Hidden actors and actions.** The one who acts is the subject and the action is the verb: "the authors ablate
+  head 4.3", not "an ablation of head 4.3 was performed". A sentence says whether the paper or the read is speaking.
+- **Vague wording.** The field's ordinary terms and the paper's own names, no coined pairings or stacked nouns, and
+  every "this", "it" or "the effect" pointing at one obvious thing.
+- **Empty statements and misplaced emphasis.** The point first, in the sentence and in the paragraph; a sentence that
+  only restates or sets up the next one is cut.
+
+The target is these faults, not a list of words: avoiding "AI-sounding" words while keeping the faults leaves the
+prose as hard to read.
 
 ## Beyond the web app
 
