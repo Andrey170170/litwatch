@@ -118,7 +118,7 @@ async def rewrite_properties(conn: psycopg.AsyncConnection, integration: str) ->
 async def papers(
     conn: psycopg.AsyncConnection, integration: str, topics: list[str], grades: list[str]
 ) -> list[str]:
-    """In id order, the papers not dismissed whose effective grade for one of `topics` is one of
+    """In id order, the papers not dropped whose effective grade for one of `topics` is one of
     `grades`, and every paper that has a page already."""
     rows = await (
         await conn.execute(

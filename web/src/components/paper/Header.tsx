@@ -6,7 +6,7 @@ import { CONTRIBUTION_NAME, RARITY_NAME, rc } from "@/lib/rarity";
 import { CopyMark, copyId, type Paper } from "./Actions";
 
 /** arXiv withdrew the paper: a status panel in the signal tone under the header, the day at the right, and the
- * authors' comment arXiv gives with the withdrawal (DESIGN.md, "Withdrawn"). */
+ * comment arXiv gives with the withdrawal, its authors' or arXiv's own (DESIGN.md, "Withdrawn"). */
 export function WithdrawnNote({ paper }: { paper: Paper }) {
   const w = paper.withdrawn;
   if (!w) return null;
@@ -16,7 +16,7 @@ export function WithdrawnNote({ paper }: { paper: Paper }) {
         <span className="tg">Withdrawn</span>
         <span className="at">{fullDate(w.at)}</span>
       </div>
-      <p>Its authors withdrew it on arXiv. litwatch no longer processes it and leaves it out of lists, search and new digests.</p>
+      <p>Withdrawn on arXiv. litwatch no longer processes it and leaves it out of lists, search and new digests.</p>
       {w.reason && <p className="why">{w.reason}</p>}
     </div>
   );

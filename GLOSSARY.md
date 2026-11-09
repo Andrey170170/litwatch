@@ -14,7 +14,8 @@ separate service that ships with litwatch and starts empty.
 _Avoid_: archived (for papers litwatch dropped; say "not processed")
 
 **Withdrawn**:
-A paper its authors withdrew on arXiv: its newest version is an empty one, whose comments give the reason. litwatch
+A paper withdrawn on arXiv, by its authors or by arXiv: its newest version is an empty one, whose comments give the
+reason. litwatch
 withdraws it too: it is dropped.
 
 **Dropped**:

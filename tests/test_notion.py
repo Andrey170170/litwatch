@@ -947,26 +947,39 @@ async def test_a_dismissed_paper_is_no_longer_listed_in_the_owners_words(world):
     assert fake.value(row, FAITHFUL) == "Must read" and fake.value(row, "Why") == off
 
 
-async def test_a_withdrawn_papers_page_stays_as_it_was_and_none_is_made(world):
-    """Withdrawn as stored, whatever version history later metadata leaves (integrations.md)."""
+async def test_a_withdrawn_paper_is_no_longer_listed_and_its_page_says_why(world):
+    """Withdrawn as stored, whatever version history later metadata leaves: every topic it was
+    listed for says so, its page opens with arXiv's date and comment, and a withdrawn paper
+    with no page gets none (integrations.md)."""
     conn, fake = world, FakeNotion(PARENT)
     await grade(conn, A, FAITH.slug, "must_read")
     await grade(conn, C, FAITH.slug, "must_read")
-    withdraw = "UPDATE papers SET withdrawn_at = now(), version_history = '[]' WHERE id = %s"
+    withdraw = (
+        "UPDATE papers SET withdrawn_at = '2026-11-01T10:00:00Z', version_history = '[]', "
+        "comments = 'The proof is wrong' WHERE id = %s"
+    )
     await conn.execute(withdraw, (C.id,))
     n = notion(fake)
     assert await start(conn, n)
-    row = fake.row(A.id)
-    await conn.execute(withdraw, (A.id,))
-
-    asked = len(fake.requests)
-    await say(conn, A, FAITH.slug, LabelValue.NONE)
-    await say(conn, C, FAITH.slug, LabelValue.RELATED)
-    await deliver(conn, n)
-    assert await start(conn, notion(fake))
-    assert not [r for r in fake.requests[asked:] if row["id"] in r[1]]
-    assert fake.value(row, "Grade") == "Must read"
     assert [fake.value(r, "arXiv id") for r in fake.rows()] == [A.id]
+
+    await conn.execute(withdraw, (A.id,))
+    assert await start(conn, notion(fake))
+    row = fake.row(A.id)
+    assert fake.value(row, "Grade") == "No longer listed"
+    assert fake.value(row, FAITHFUL) == "No longer listed"
+    assert fake.value(row, "Why") == f"{FAITHFUL}, 1 Nov 2026: withdrawn on arXiv."
+    (first, *_) = fake.body(row["id"])
+    said = "".join(t["text"]["content"] for t in first["callout"]["rich_text"])
+    assert said == "Withdrawn on arXiv, 1 Nov 2026.\nThe comment on arXiv: The proof is wrong"
+    assert [fake.value(r, "arXiv id") for r in fake.rows()] == [A.id]  # still none for C
+
+    # Brought back by a later version, the paper is listed again and the mark goes.
+    await conn.execute("UPDATE papers SET withdrawn_at = NULL WHERE id = %s", (A.id,))
+    assert await start(conn, notion(fake))
+    assert fake.value(row, FAITHFUL) == "Must read" and fake.value(row, "Why") == ""
+    icons = [b["callout"]["icon"]["emoji"] for b in fake.body(row["id"]) if "callout" in b]
+    assert "🚫" not in icons
 
 
 async def test_a_page_taken_away_in_notion_is_left_alone_and_never_made_again(world):

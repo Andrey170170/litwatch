@@ -436,7 +436,7 @@ async def test_get_paper_says_arxiv_withdrew_it_and_why(conn, shelves):
         held = await ok(http, "get_paper", paper_id=P.id)
     assert (
         "Withdrawn on arXiv 2026-10-21: litwatch no longer processes it. "
-        "Its authors' comment: The proof is wrong"
+        "The comment on arXiv: The proof is wrong"
     ) in held
 
 

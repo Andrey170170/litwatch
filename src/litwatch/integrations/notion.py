@@ -7,7 +7,9 @@ the grades, No longer listed for a paper that fell below them, TL;DR and Deep re
 and the Deep card; the Abstract is the paper's own. A page is never deleted: a paper that
 falls below the minimum for a topic says No longer listed there, with a dated Why line saying
 who took it off and why, from the `grade.changed` that did; a dismissed paper says it for every
-topic, the owner having set it aside. A paper's page someone moves to Notion's trash or deletes
+topic, the owner having set it aside, and a paper withdrawn on arXiv says so for every topic,
+with the date and arXiv's comment at the top of its page. A paper's page someone moves to
+Notion's trash or deletes
 is left alone and never made again; "How to read this" is litwatch's and is made again.
 
 `setup` reconciles on every start, idempotently: it makes what is missing under `parent_page`
@@ -79,6 +81,7 @@ EVENTS = {
 
 SHOWN = {Grade.MUST_READ: "Must read", Grade.RELEVANT: "Worth a look"}
 DROPPED = "No longer listed"
+ASIDE = ("dismissed", "withdrawn")  # what takes a paper off every topic at once (`_Aside.by`)
 TRASHED = "the database is in Notion's trash, or the page holding it is; restore it to go on"
 RANK = [SHOWN[Grade.MUST_READ], SHOWN[Grade.RELEVANT], DROPPED]  # best first
 GRADE_OPTIONS = [
@@ -177,6 +180,15 @@ class NotionClient:
             if not page.get("has_more"):
                 return found
             params["start_cursor"] = page["next_cursor"]
+
+
+@dataclass(frozen=True)
+class _Aside:
+    """Why a paper leaves every topic at once: the owner set it aside, or arXiv withdrew it."""
+
+    why: str
+    since: datetime
+    by: str  # one of ASIDE
 
 
 @dataclass(frozen=True)
@@ -508,25 +520,32 @@ class Notion:
 
     async def _write(self, conn: psycopg.AsyncConnection, paper_id: str) -> None:
         """Bring the paper's page in line with what litwatch holds now, writing nothing that did
-        not change. A page someone took away in Notion is left alone from then on, as is a
-        withdrawn paper's: kept as it was, or never made (integrations.md)."""
+        not change. A page someone took away in Notion is left alone from then on."""
         page = await state.page(conn, self.name, paper_id)
         if page is not None and page.gone_at is not None:
             return
         paper = await papers_store.get(conn, paper_id)
-        if paper is None or await papers_store.withdrawn(conn, paper_id):
+        if paper is None:
             return
+        withdrawn = await papers_store.withdrawal(conn, paper_id)
         dismissed = await papers_store.dismissed_at(conn, paper_id)
+        aside = (
+            _Aside("withdrawn on arXiv.", withdrawn, "withdrawn")
+            if withdrawn
+            else _Aside(f"{self.owner_name} set it aside.", dismissed, "dismissed")
+            if dismissed
+            else None
+        )
         effective = await word_store.effective_for(conn, paper_id)
         begun = page is not None and page.page_id is None
         topics = dict(page.topics) if page else {}
         history: list[Event] | None = None  # its grade changes, read when one may say why it left
         for slug in self.exported:
             grade = effective[slug].grade.value if slug in effective else None
-            if slug in topics and not self._qualifies(grade, dismissed) and history is None:
+            if slug in topics and not self._qualifies(grade, aside) and history is None:
                 history = await outbox.of_paper(conn, paper_id, events.GRADE_CHANGED)
             changes = [e for e in history or [] if e.payload.get("topic") == slug]
-            if (now := self._topic(topics.get(slug), grade, dismissed, changes)) is None:
+            if (now := self._topic(topics.get(slug), grade, aside, changes)) is None:
                 topics.pop(slug, None)
             else:
                 topics[slug] = now
@@ -538,7 +557,7 @@ class Notion:
         gist = await analyses_store.current_gist(conn, paper_id)
         card = await integrations_store.card(conn, paper_id)
         properties = self._properties(paper, gist, record, page.added, topics)
-        body = self._body(paper, gist, card, topics)
+        body = self._body(paper, gist, card, topics, withdrawn)
         written = (page.page_id, page.properties_hash, page.body_hash, page.topics)
         if page.page_id is None:
             page.topics = topics  # kept with the creation: a lost reply is then known listed
@@ -646,21 +665,21 @@ class Notion:
             raise NotionError(TRASHED)
         return True
 
-    def _qualifies(self, grade: str | None, dismissed: datetime | None) -> bool:
-        return dismissed is None and grade is not None and Grade(grade).at_least(self.minimum)
+    def _qualifies(self, grade: str | None, aside: _Aside | None) -> bool:
+        return aside is None and grade is not None and Grade(grade).at_least(self.minimum)
 
     def _topic(
         self,
         before: dict[str, Any] | None,
         grade: str | None,
-        dismissed: datetime | None,
+        aside: _Aside | None,
         changes: list[Event],
     ) -> dict[str, Any] | None:
-        """What the page says for one topic, from its effective grade now, whether the owner
-        dismissed the paper, what was written before and the topic's grade changes (oldest
-        first); None while it was never listed. A Why records the newest change it had seen
-        (`seen`): a change after that which takes the paper off again replaces it."""
-        if self._qualifies(grade, dismissed):
+        """What the page says for one topic, from its effective grade now, whether the paper is
+        set aside (dismissed or withdrawn), what was written before and the topic's grade
+        changes (oldest first); None while it was never listed. A Why records the newest change
+        it had seen (`seen`): a change after that which takes the paper off again replaces it."""
+        if self._qualifies(grade, aside):
             return {"grade": grade, "shown": SHOWN[Grade(grade)], "why": None, "since": None}
         if before is None:
             return None
@@ -680,13 +699,13 @@ class Notion:
                 "seen": seen,
             }
 
-        if dropped and before.get("by") == "dismissed":
-            if dismissed is not None:
+        if dropped and before.get("by") in ASIDE:
+            if aside is not None:
                 return {**before, "grade": grade}  # still set aside
         elif dropped and not newer:
             return {**before, "grade": grade}  # still why it is off
-        if dismissed is not None and not dropped:
-            return gone(f"{self.owner_name} set it aside.", dismissed, "dismissed")
+        if aside is not None and not dropped:
+            return gone(aside.why, aside.since, aside.by)
         if not dropped and grade == before["grade"]:  # listed at this grade, no longer: it rose
             return gone(
                 f"the list now shows only {SHOWN[self.minimum]} papers.", self.now(), "minimum"
@@ -774,8 +793,14 @@ class Notion:
         gist: str | None,
         card: dict[str, Any] | None,
         topics: dict[str, Any],
+        withdrawn: datetime | None,
     ) -> list[dict[str, Any]]:
         blocks = []
+        if withdrawn is not None:
+            day = withdrawn.astimezone(self.zone).date()
+            said = f"\nThe comment on arXiv: {paper.comments}" if paper.comments else ""
+            head = _rich(f"Withdrawn on arXiv, {day.day} {day:%b %Y}.", bold=True)
+            blocks.append(_callout("🚫", "red", [*head, *_rich(said)]))
         if self._shown(topics) == DROPPED:
             lines = "\n".join(self._why_lines(topics))
             blocks.append(
