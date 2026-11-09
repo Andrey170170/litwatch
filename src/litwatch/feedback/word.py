@@ -254,7 +254,7 @@ async def _text_pass(
     (section 8); relabel one not started that it now wants for another reason, and drop one it
     no longer qualifies for."""
     found = await fulltext_store.facts(conn, paper_id)
-    if found is None or found.dismissed:
+    if found is None or found.dropped:
         return
     last, ours = found.last, found.last is not None and found.last.id == claimed
     if ours and last.state == PassState.RUNNING:
@@ -305,7 +305,7 @@ async def _deep_pass(
     relabel one not started that it wants for the other reason now, and drop one it no longer
     wants (an Unsave, a paused topic). The owner's request is left alone."""
     found = await fulltext_store.deep_facts(conn, paper_id)
-    if found is None or found.dismissed:
+    if found is None or found.dropped:
         return
     open_pass = found.open_pass
     ours = open_pass is not None and open_pass.id == claimed

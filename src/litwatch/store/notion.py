@@ -123,7 +123,7 @@ async def papers(
     rows = await (
         await conn.execute(
             "SELECT g.paper_id FROM effective_grades g JOIN papers p ON p.id = g.paper_id "
-            "WHERE p.dismissed_at IS NULL AND g.topic = ANY(%s) AND g.grade = ANY(%s) "
+            "WHERE NOT p.dropped AND g.topic = ANY(%s) AND g.grade = ANY(%s) "
             "UNION SELECT paper_id FROM notion_pages WHERE integration = %s ORDER BY 1",
             (topics, grades, integration),
         )

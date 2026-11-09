@@ -65,10 +65,10 @@ async def request(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
     """The owner asks for a Deep card on the paper, whatever its grade, a card already made
     included ("Write again"): their request takes over the open Deep pass or queues one, with
     `card.requested`, under the paper's lock. Returns the pass's id; None for a paper that is
-    not there or dismissed, whose passes are never worked."""
+    not there or dropped, whose passes are never worked."""
     async with word.change(conn, paper_id, cause=Cause.OWNER):
         found = await store_.deep_facts(conn, paper_id)
-        if found is None or found.dismissed:
+        if found is None or found.dropped:
             return None
         pass_id = await store_.request_card(conn, paper_id, found.revision)
         await events.emit(conn, events.CARD_REQUESTED, paper_id, pass_id=pass_id)
@@ -162,7 +162,7 @@ async def _work_one(
         text = TextRead(a.text.version, a.text.source, a.text.sha256)
         async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
             # Under the paper's lock, judged again as at its claim: the paper may have been
-            # dismissed or unsaved during the read, and nothing is spent then. The owner's
+            # dropped or unsaved during the read, and nothing is spent then. The owner's
             # request may have taken the pass over since its claim, and then the submission and
             # its attempt are theirs.
             if why := await judged(conn, c):

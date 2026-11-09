@@ -287,10 +287,10 @@ async def process_notes(
 
 
 # A card with process notes, as Needs you's Deep notes list it: of `deep_cards c`, its paper (`p`)
-# not dismissed.
+# not dropped.
 _NOTED = (
     "jsonb_typeof(c.card->'process_notes') = 'array' "
-    "AND jsonb_array_length(c.card->'process_notes') > 0 AND p.dismissed_at IS NULL"
+    "AND jsonb_array_length(c.card->'process_notes') > 0 AND NOT p.dropped"
 )
 
 

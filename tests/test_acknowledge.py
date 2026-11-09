@@ -167,6 +167,16 @@ async def test_acknowledge_per_group_then_all_clears_the_run_status(client, conn
     assert all(len(night[k]) == 1 and night[k][0]["acknowledged_at"] for k in ALL)
 
 
+async def test_a_withdrawn_papers_failed_pass_leaves_needs_you(client, conn):
+    """arXiv has no text for a withdrawal, so a pass on its new version fails: once intake
+    learns the paper is withdrawn, it is dropped, and its failure is no longer the owner's."""
+    await stop_pass(conn)
+    assert (await status(client))["fulltext_failed"] == 1
+    await conn.execute("UPDATE papers SET withdrawn_at = now() WHERE id = %s", (R.id,))
+    assert (await status(client))["fulltext_failed"] == 0
+    assert (await shown(client, "fulltext"))["passes"] == []
+
+
 async def test_only_what_still_waits_as_shown_is_acknowledged(client, conn):
     await stop(conn, P, "analysis")
     (seen,) = (await shown(client, "analysis_failed"))["steps"]

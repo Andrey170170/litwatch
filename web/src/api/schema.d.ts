@@ -1697,9 +1697,10 @@ export interface components {
         };
         /**
          * DigestPaper
-         * @description A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set
-         *     it below relevant where it was graded. An updated paper has the arXiv `version` it came
-         *     back with; its `announced` is when it first came out.
+         * @description A paper as a digest showed it, frozen then; `set_aside` and `withdrawn_at` are live: the
+         *     owner has since set it below relevant where it was graded, arXiv has since withdrawn it. An
+         *     updated paper has the arXiv `version` it came back with; its `announced` is when it first
+         *     came out.
          */
         DigestPaper: {
             /** Id */
@@ -1725,6 +1726,8 @@ export interface components {
              * @default false
              */
             set_aside: boolean;
+            /** Withdrawn At */
+            withdrawn_at?: string | null;
         };
         /**
          * DigestPeriod
@@ -2374,6 +2377,7 @@ export interface components {
              * @default false
              */
             next_run: boolean;
+            withdrawn?: components["schemas"]["Withdrawn"] | null;
             rarity?: components["schemas"]["Rarity"] | null;
             /** Badges */
             badges?: components["schemas"]["GradedBadge"][];
@@ -2822,6 +2826,8 @@ export interface components {
              */
             saved: boolean;
             state?: components["schemas"]["RowState"] | null;
+            /** Withdrawn At */
+            withdrawn_at?: string | null;
         };
         /** @enum {string} */
         RowState: "word" | "failure";
@@ -3246,6 +3252,8 @@ export interface components {
              */
             saved: boolean;
             state?: components["schemas"]["RowState"] | null;
+            /** Withdrawn At */
+            withdrawn_at?: string | null;
             grade?: components["schemas"]["Grade"] | null;
             /** Via */
             via?: string | null;
@@ -3305,6 +3313,20 @@ export interface components {
              * @enum {string}
              */
             source: "abstract" | "full_text";
+        };
+        /**
+         * Withdrawn
+         * @description arXiv withdrew the paper: its newest version is a withdrawal, submitted `at`; `reason` is
+         *     the comments arXiv gives with it, when known. litwatch no longer processes it.
+         */
+        Withdrawn: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Reason */
+            reason?: string | null;
         };
     };
     responses: never;
@@ -5889,7 +5911,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description No card provider is configured, or the paper is dismissed */
+            /** @description No card provider is configured, or the paper is dismissed or withdrawn */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6059,7 +6081,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The paper is in the collection already, dismissed or waits on the owner, or no taxonomy */
+            /** @description The paper is in the collection already, dismissed or withdrawn, or waits on the owner, or no taxonomy */
             409: {
                 headers: {
                     [name: string]: unknown;

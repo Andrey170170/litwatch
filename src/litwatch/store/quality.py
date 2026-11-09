@@ -50,6 +50,7 @@ async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[s
                    (SELECT row_to_json(l) FROM (SELECT value FROM labels
                     WHERE paper_id = v.paper_id AND topic = v.topic) l) AS label
             FROM verdicts v JOIN papers p ON p.id = v.paper_id AND p.revision = v.paper_revision
+                 AND NOT p.dropped
             JOIN topics t ON t.class = v.topic
             WHERE v.paper_id IN (SELECT paper_id FROM verdicts WHERE recorded_at >= %s)
             ORDER BY v.paper_id, v.topic, v.paper_revision DESC, v.recorded_at DESC,
@@ -191,7 +192,7 @@ async def class_members(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[s
         SELECT map.target, count(DISTINCT m.paper_id) AS n
         FROM memberships m
         JOIN unnest(%s::text[], %s::text[]) AS map (class, target) ON map.class = m.class
-        JOIN papers p ON p.id = m.paper_id AND p.dismissed_at IS NULL
+        JOIN papers p ON p.id = m.paper_id AND NOT p.dropped
         WHERE {SHOWN_MEMBER}
         GROUP BY map.target
         """,
@@ -218,7 +219,7 @@ async def _keyword_hits(
         return {}
     rows = await _all(
         conn,
-        "SELECT id, title, abstract FROM papers WHERE dismissed_at IS NULL "
+        "SELECT id, title, abstract FROM papers WHERE NOT dropped "
         "AND published >= now() - make_interval(days => %s) ORDER BY id",
         (days,),
     )

@@ -25,6 +25,17 @@ export function Star({ id, saved, className = "sv" }: { id: string; saved: boole
   );
 }
 
+/** A row's date, or "Withdrawn" in the signal tone once arXiv withdrew the paper (DESIGN.md, "Withdrawn"). */
+export function RowDate({ date, withdrawn }: { date: string; withdrawn: string | null | undefined }) {
+  if (withdrawn)
+    return (
+      <span className="dt wd" title={`Withdrawn on arXiv on ${fullDate(withdrawn)}`}>
+        Withdrawn
+      </span>
+    );
+  return <span className="dt">{date}</span>;
+}
+
 export function Facets({ facets }: { facets: Schemas["Facets"] | null | undefined }) {
   if (!facets) return <span className="fx" />;
   return (
@@ -74,7 +85,7 @@ export function ReadingRow({ row, rarity, topic, list }: RowProps) {
         {row.facets && <span className="kd">{CONTRIBUTION_NAME[row.facets.contribution]}</span>}
         <Facets facets={row.facets} />
         <span className="sp" />
-        <span className="dt">{fullDate(row.published)}</span>
+        <RowDate date={fullDate(row.published)} withdrawn={row.withdrawn_at} />
       </div>
     </Link>
   );
@@ -93,7 +104,7 @@ export function TableRow({ row, rarity, topic, list }: RowProps) {
       )}
       <span className="kd">{row.facets ? CONTRIBUTION_NAME[row.facets.contribution] : ""}</span>
       <Facets facets={row.facets} />
-      <span className="dt">{fullDate(row.published)}</span>
+      <RowDate date={fullDate(row.published)} withdrawn={row.withdrawn_at} />
       <Star id={row.id} saved={row.saved} />
     </Link>
   );

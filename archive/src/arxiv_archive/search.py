@@ -193,7 +193,8 @@ def listing_item(paper_id: str, metadata: dict) -> dict:
             'published': published or None, 'updated': updated or None, 'version_history': history,
             'doi': _text(metadata.get('doi')) or None,
             'journal_ref': _text(metadata.get('journal_ref') or metadata.get('journal-ref')) or None,
-            'license': _text(metadata.get('license')) or None}
+            'license': _text(metadata.get('license')) or None,
+            'comments': _text(metadata.get('comments')) or None}
 
 
 def _decode(row: sqlite3.Row) -> dict:

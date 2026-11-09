@@ -508,12 +508,13 @@ class Notion:
 
     async def _write(self, conn: psycopg.AsyncConnection, paper_id: str) -> None:
         """Bring the paper's page in line with what litwatch holds now, writing nothing that did
-        not change. A page someone took away in Notion is left alone from then on."""
+        not change. A page someone took away in Notion is left alone from then on, as is a
+        withdrawn paper's: kept as it was, or never made (integrations.md)."""
         page = await state.page(conn, self.name, paper_id)
         if page is not None and page.gone_at is not None:
             return
         paper = await papers_store.get(conn, paper_id)
-        if paper is None:
+        if paper is None or await papers_store.withdrawn(conn, paper_id):
             return
         dismissed = await papers_store.dismissed_at(conn, paper_id)
         effective = await word_store.effective_for(conn, paper_id)

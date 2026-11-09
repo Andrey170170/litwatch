@@ -20,7 +20,8 @@ HF = {'title': 'Attention  is all you need', 'abstract': 'Transformers.',
 DISCOVERY = {'title': 'Raw', 'abstract': 'From arXivRaw.', 'authors': ['A. One, B. Two and C. Three'],
              'authors_raw': 'A. One, B. Two and C. Three', 'categories': ['cs.AI'],
              'published': '2026-10-02T23:30:00+00:00', 'updated': '2026-10-02T23:30:00+00:00',
-             'version_history': [{'version': 1, 'date': '2026-10-02T23:30:00+00:00', 'size': '1kb'}]}
+             'version_history': [{'version': 1, 'date': '2026-10-02T23:30:00+00:00', 'size': '1kb'}],
+             'comments': 'Withdrawn:  the proof is wrong'}
 LITWATCH = {'id': '2610.00003', 'title': 'Taken in', 'abstract': 'By litwatch.',
             'authors': ['Alice Smith'], 'categories': ['stat.ML', 'cs.LG'], 'primary_category': 'stat.ML',
             'published': '2026-10-03T00:00:00+00:00', 'updated': '2026-10-04T00:00:00+00:00'}
@@ -60,10 +61,12 @@ class ListingTests(unittest.TestCase):
         self.assertEqual(raw['authors'], ['A. One', 'B. Two', 'C. Three'])
         self.assertEqual((raw['published'], raw['version']), ('2026-10-02', 1))
         self.assertEqual(raw['version_history'][0]['size'], '1kb')
+        self.assertEqual(raw['comments'], 'Withdrawn: the proof is wrong')
         self.assertEqual(taken['primary_category'], 'stat.ML')
         self.assertEqual((taken['published'], taken['updated'], taken['version']),
                          ('2026-10-03', '2026-10-04', None))
         self.assertIsNone(taken['doi'])
+        self.assertIsNone(taken['comments'])
 
     def test_window_and_categories(self):
         self.db.upsert_paper('2610.00001', HF, 2)

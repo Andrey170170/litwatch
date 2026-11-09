@@ -36,7 +36,7 @@ async def due(
             JOIN classes k ON k.slug = c.primary_class
             LEFT JOIN step_failures f ON f.paper_id = p.id AND f.step = 'analysis'
                  AND f.paper_revision = p.revision
-            WHERE p.dismissed_at IS NULL AND coalesce(f.failed_runs, 0) < %s
+            WHERE NOT p.dropped AND coalesce(f.failed_runs, 0) < %s
               AND (%s::text[] IS NULL OR p.id = ANY(%s))
               AND NOT EXISTS (SELECT 1 FROM analyses a
                               WHERE a.paper_id = p.id AND a.paper_revision = p.revision)

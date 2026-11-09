@@ -2928,7 +2928,7 @@
             "description": "No such paper"
           },
           "409": {
-            "description": "No card provider is configured, or the paper is dismissed"
+            "description": "No card provider is configured, or the paper is dismissed or withdrawn"
           },
           "503": {
             "description": "arXiv did not answer in time; nothing was stored"
@@ -3064,7 +3064,7 @@
             "description": "No such paper"
           },
           "409": {
-            "description": "The paper is in the collection already, dismissed or waits on the owner, or no taxonomy"
+            "description": "The paper is in the collection already, dismissed or withdrawn, or waits on the owner, or no taxonomy"
           },
           "503": {
             "description": "arXiv did not answer in time; nothing was stored"
@@ -4628,6 +4628,18 @@
             "type": "boolean",
             "title": "Set Aside",
             "default": false
+          },
+          "withdrawn_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn At"
           }
         },
         "type": "object",
@@ -4639,7 +4651,7 @@
           "rarity"
         ],
         "title": "DigestPaper",
-        "description": "A paper as a digest showed it, frozen then; `set_aside` is live: the owner has since set\nit below relevant where it was graded. An updated paper has the arXiv `version` it came\nback with; its `announced` is when it first came out."
+        "description": "A paper as a digest showed it, frozen then; `set_aside` and `withdrawn_at` are live: the\nowner has since set it below relevant where it was graded, arXiv has since withdrawn it. An\nupdated paper has the arXiv `version` it came back with; its `announced` is when it first\ncame out."
       },
       "DigestPeriod": {
         "type": "string",
@@ -6259,6 +6271,16 @@
             "title": "Next Run",
             "default": false
           },
+          "withdrawn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Withdrawn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "rarity": {
             "anyOf": [
               {
@@ -7493,6 +7515,18 @@
                 "type": "null"
               }
             ]
+          },
+          "withdrawn_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn At"
           }
         },
         "type": "object",
@@ -8529,6 +8563,18 @@
               }
             ]
           },
+          "withdrawn_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn At"
+          },
           "grade": {
             "anyOf": [
               {
@@ -8717,6 +8763,32 @@
           "source"
         ],
         "title": "WeightState"
+      },
+      "Withdrawn": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "at"
+        ],
+        "title": "Withdrawn",
+        "description": "arXiv withdrew the paper: its newest version is a withdrawal, submitted `at`; `reason` is\nthe comments arXiv gives with it, when known. litwatch no longer processes it."
       }
     }
   }

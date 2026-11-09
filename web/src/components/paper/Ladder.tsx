@@ -112,6 +112,7 @@ type Props = { paper: Paper; asked: boolean; deepRead: ReactNode; onGistAway: (a
 /** The quiet line over the abstract when it stands in for the Brief: where the Brief is, or why there is none. A
  * pass waiting on the owner has its note above, with Run it now. */
 export function whyAbstract(paper: Paper): string {
+  if (paper.withdrawn) return "No Brief: its authors withdrew the paper on arXiv, so the abstract stands in.";
   const stuck = (paper.states ?? []).some((s) => s.kind === "fulltext_failed" || s.kind === "awaiting_text");
   switch (paper.text_pass?.state) {
     case "awaiting_text":

@@ -116,7 +116,8 @@ definition; and it was judged off-topic or less important (its Fit fell, or only
 the event: `grade.changed` gains a `cause` field (`verdict`, `weight`, `owner`, `taxonomy`), written by whatever
 changed the grade, while the integration still checks the present grade before writing. Pages are never deleted.
 A paper listed again for a topic loses that topic's line. A paper the owner dismisses is No longer listed for every
-topic it was listed for, with a line saying the owner set it aside; a dismissed paper with no page gets none. The integration keeps each topic's line in its own
+topic it was listed for, with a line saying the owner set it aside; a dismissed paper with no page gets none. A paper
+withdrawn on arXiv ([pipeline.md](pipeline.md), section 8) with no page gets none either; one with a page keeps it as it was. The integration keeps each topic's line in its own
 table, so a rewrite for another event or after a restart keeps it, and a `grade.changed` touches only its topic's line.
 
 **Who owns what.** The integration creates the database, its columns and its views once, when it is set up, under a

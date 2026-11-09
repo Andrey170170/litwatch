@@ -53,6 +53,8 @@ MOVES: dict[s.JobAction, tuple[tuple[str, ...], str]] = {
 # Why Process and Try again refuse a Process job whose paper waits on the owner: it would find
 # nothing due and fail at once, and the owner's action on Needs you settles it (DESIGN.md, Jobs).
 WAITS = "the paper waits on you on Needs you"
+# A paper litwatch no longer processes (`papers.dropped`).
+DROPPED = "the paper is dismissed or withdrawn"
 
 
 def _actions(row: dict[str, Any]) -> list[s.JobAction]:
@@ -126,8 +128,8 @@ async def jobs(c: Conn) -> s.Jobs:
 PROCESS_REFUSED = {
     404: {"description": "No such paper"},
     409: {
-        "description": "The paper is in the collection already, dismissed or waits on the owner, "
-        "or no taxonomy"
+        "description": "The paper is in the collection already, dismissed or withdrawn, or "
+        "waits on the owner, or no taxonomy"
     },
     503: {"description": "arXiv did not answer in time; nothing was stored"},
 }
@@ -159,7 +161,7 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
         if (
             found is not None
             and found["state"] in jobs_store.ACTIVE
-            and await papers_store.dismissed_at(c, paper_id) is None
+            and not await papers_store.dropped(c, paper_id)
         ):
             return s.ProcessJob(id=found["id"], state=found["state"], error=found["error"])
         async with word.change(c, paper_id, cause=Cause.OWNER):
@@ -168,8 +170,8 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
             await misses.keep(c, paper_id, fetched)
             if await word_store.in_collection(c, paper_id):
                 raise HTTPException(status_code=409, detail="already in the collection")
-            if await papers_store.dismissed_at(c, paper_id) is not None:
-                raise HTTPException(status_code=409, detail="the paper is dismissed")
+            if await papers_store.dropped(c, paper_id):
+                raise HTTPException(status_code=409, detail=DROPPED)
             if await failures.waits_on_owner(c, [paper_id], FAILED_RUNS):
                 raise HTTPException(status_code=409, detail=WAITS)
             if not request.app.state.config.schedule.enabled:

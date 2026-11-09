@@ -105,7 +105,7 @@ async def settle_process(
 ) -> None:
     """A failed Process job settles with its paper's failures (DESIGN.md, Jobs): once none is
     left (a later run did the step, the owner acted on Needs you), it goes back in the queue to
-    do what is left, or, the paper dismissed, it is discarded. A running one the `owner` acted
+    do what is left, or, the paper dropped, it is discarded. A running one the `owner` acted
     on meanwhile (a Try again on Needs you, say, which its steps may have passed already) is
     asked again: queued since it started, which `finish` reads. Call it under the paper's settle
     lock."""
@@ -119,7 +119,7 @@ async def settle_process(
         f"""
         UPDATE jobs j SET changed_at = now(), queued_at = now(), done = 0, counts = '{{}}',
                error = NULL,
-               state = CASE WHEN p.dismissed_at IS NULL THEN 'queued' ELSE 'discarded' END
+               state = CASE WHEN NOT p.dropped THEN 'queued' ELSE 'discarded' END
         FROM papers p
         WHERE p.id = %s AND j.kind = 'process' AND j.state = 'failed' AND j.scope -> 'papers' = %s
           AND NOT EXISTS (SELECT 1 FROM step_failures f WHERE f.paper_id = p.id AND {ACTIONABLE})
@@ -280,7 +280,7 @@ async def listing(
     (`stuck`, after `runs` failed runs), and what its runs' calls cost, a run whose process died
     included (a call of unknown cost counts nothing, as in the month's spend); a
     card with its pass's state, mapped onto a job's, failed once it waits on the owner (`stuck`,
-    as Needs you lists it, after `runs` failed runs or a long wait for its text). A dismissed
+    as Needs you lists it, after `runs` failed runs or a long wait for its text). A dropped
     paper's card is left out unless done or its attempt is open: nothing else runs it. Only the
     newest `done_limit` of those done. A re-run comes with its topic, scopes, revision, ceiling
     and estimate; a replay with its ceiling and estimate; a digest written again with the
@@ -314,7 +314,7 @@ async def listing(
                        NULL
                 FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
                 WHERE f.kind = 'deep' AND f.reason = %(requested)s
-                  AND (p.dismissed_at IS NULL OR f.state = 'done' OR {STARTED})
+                  AND (NOT p.dropped OR f.state = 'done' OR {STARTED})
             ), ranked AS (
                 SELECT *, row_number() OVER (PARTITION BY state = 'done' ORDER BY at DESC, id DESC)
                           AS newest
@@ -420,10 +420,10 @@ async def settle_digest(conn: psycopg.AsyncConnection, digest_id: int) -> None:
 
 
 async def labelled(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
-    """The papers the owner labelled for the topic or reported missed there, not dismissed."""
+    """The papers the owner labelled for the topic or reported missed there, not dropped."""
     rows = await (
         await conn.execute(
-            "SELECT id FROM papers WHERE dismissed_at IS NULL AND id IN ("
+            "SELECT id FROM papers WHERE NOT dropped AND id IN ("
             "SELECT paper_id FROM labels WHERE topic = %(t)s "
             "UNION SELECT paper_id FROM misses WHERE topic = %(t)s) ORDER BY id",
             {"t": topic},
@@ -433,7 +433,7 @@ async def labelled(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
 
 
 async def members(conn: psycopg.AsyncConnection, classes: list[str]) -> list[str]:
-    """The papers on a topic's page (`store.reading.SCOPE`), not dismissed: those standing in any
+    """The papers on a topic's page (`store.reading.SCOPE`), not dropped: those standing in any
     of `classes` (its class and those under it), and those with an effective grade for it or a
     followed topic under it (a keyword hit, a reported miss)."""
     rows = await (
@@ -444,7 +444,7 @@ async def members(conn: psycopg.AsyncConnection, classes: list[str]) -> list[str
                 WHERE m.class = ANY(%(classes)s) AND {SHOWN_MEMBER}
                 UNION
                 SELECT g.paper_id FROM effective_grades g WHERE g.topic = ANY(%(classes)s)
-            ) x JOIN papers p USING (id) WHERE p.dismissed_at IS NULL ORDER BY id
+            ) x JOIN papers p USING (id) WHERE NOT p.dropped ORDER BY id
             """,
             {"classes": classes},
         )
@@ -455,10 +455,10 @@ async def members(conn: psycopg.AsyncConnection, classes: list[str]) -> list[str
 async def published_between(
     conn: psycopg.AsyncConnection, since: datetime, until: datetime
 ) -> list[str]:
-    """The papers published in [since, until), not dismissed."""
+    """The papers published in [since, until), not dropped."""
     rows = await (
         await conn.execute(
-            "SELECT id FROM papers WHERE dismissed_at IS NULL AND published >= %s "
+            "SELECT id FROM papers WHERE NOT dropped AND published >= %s "
             "AND published < %s ORDER BY id",
             (since, until),
         )

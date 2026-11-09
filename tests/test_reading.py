@@ -192,6 +192,25 @@ async def test_papers_filter_by_topic_with_its_subtree_depth_grade_and_facts(cli
     assert await ids(client, since="2026-10-11") == []
 
 
+async def test_a_withdrawn_paper_leaves_lists_and_search_but_not_saved_or_its_page(
+    client, conn, shelves
+):
+    """Withdrawn on arXiv, a paper is out of every list and search; one the owner saved stays on
+    the saved list, marked, and its page says when and why."""
+    _, epic, rare, *_ = shelves  # epic is saved
+    await conn.execute(
+        "UPDATE papers SET withdrawn_at = '2026-10-21T06:28:10Z', comments = %s WHERE id = ANY(%s)",
+        ("The proof is wrong", [epic.id, rare.id]),
+    )
+    assert {epic.id, rare.id} & set(await ids(client)) == set()
+    assert {epic.id, rare.id} & set(await ids(client, topic=INTERP.slug)) == set()
+    assert await ids(client, q="hidden") == []
+    (row,) = (await client.get("/api/papers", params={"saved": True})).json()["rows"]
+    assert (row["id"], row["withdrawn_at"]) == (epic.id, "2026-10-21T06:28:10Z")
+    page = (await client.get(f"/api/papers/{rare.id}")).json()
+    assert page["withdrawn"] == {"at": "2026-10-21T06:28:10Z", "reason": "The proof is wrong"}
+
+
 async def test_a_keyword_or_band_membership_shows_a_paper_only_once_graded(client, conn):
     """The uncertain band and the keyword check are for grading only (pipeline.md, section 2)."""
     await classify(conn, Q, "other", keyword=[FAITH.slug])

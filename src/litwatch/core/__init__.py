@@ -22,6 +22,7 @@ from litwatch.core.rules import (
     in_library,
     owners_word,
     rewritten,
+    withdrawn_at,
 )
 from litwatch.core.search import (
     SEARCH_TIMEOUT_SECONDS,
@@ -88,4 +89,5 @@ __all__ = [
     "owners_word",
     "page_standing",
     "rewritten",
+    "withdrawn_at",
 ]

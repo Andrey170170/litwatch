@@ -74,6 +74,7 @@ def _paper(record: ET.Element) -> Paper | None:
         doi=node.findtext("a:doi", None, NS),
         journal_ref=node.findtext("a:journal-ref", None, NS),
         license=node.findtext("a:license", None, NS),
+        comments=" ".join(node.findtext("a:comments", "", NS).split()) or None,
         title=_required(node, "a:title"),
         abstract=_required(node, "a:abstract"),
         authors=authors,

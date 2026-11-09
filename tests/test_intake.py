@@ -204,6 +204,38 @@ async def test_revision_keeps_the_first_posting_and_is_rewritten_only_when_the_t
     ]
 
 
+async def test_a_withdrawal_drops_the_paper_until_a_real_version_follows(conn):
+    """arXiv withdraws with an empty version (0kb), its comments the reason: the paper is
+    withdrawn, so dropped, as of that version; metadata without a version history keeps that,
+    and a later real version brings the paper back. Either change is settled (`intake.batch`)."""
+    v1 = {"version": 1, "date": "2026-09-10T12:00:00+00:00", "size": "412kb"}
+    v2 = {"version": 2, "date": "2026-10-21T06:28:10+00:00", "size": "0kb", "source_type": "I"}
+    v3 = {"version": 3, "date": "2026-11-02T09:00:00+00:00", "size": "430kb"}
+    paper = canonical().model_copy(update={"version": 1, "version_history": [v1]})
+
+    async def stored():
+        found = await (
+            await conn.execute("SELECT withdrawn_at, dropped, comments FROM papers")
+        ).fetchone()
+        return found["withdrawn_at"], found["dropped"], found["comments"]
+
+    await papers.upsert(conn, [paper], source="oai")
+    assert await stored() == (None, False, None)
+    pulled = paper.model_copy(
+        update={"version": 2, "version_history": [v1, v2], "comments": "The proof is wrong"}
+    )
+    assert (await papers.upsert(conn, [pulled], source="oai")).withdrawn == [paper.id]
+    withdrawn = (datetime(2026, 10, 21, 6, 28, 10, tzinfo=UTC), True, "The proof is wrong")
+    assert await stored() == withdrawn
+    later = (NOW + timedelta(days=1)).isoformat()
+    unknown = pulled.model_copy(update={"version": None, "version_history": [], "updated": later})
+    assert (await papers.upsert(conn, [unknown], source="oai")).withdrawn == []
+    assert await stored() == withdrawn
+    back = unknown.model_copy(update={"version": 3, "version_history": [v1, v2, v3]})
+    assert (await papers.upsert(conn, [back], source="oai")).withdrawn == [paper.id]
+    assert await stored() == (None, False, "The proof is wrong")
+
+
 def revision(version, previous, source="oai"):
     return {"version": version, "previous_version": previous, "source": source}
 

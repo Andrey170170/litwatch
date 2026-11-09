@@ -6,8 +6,6 @@ from psycopg.types.json import Jsonb
 
 from litwatch import store
 from litwatch.store import db
-from litwatch.store import papers as papers_store
-from tests.conftest import paper
 
 
 async def tables(conn) -> set[str]:
@@ -54,7 +52,11 @@ async def before_traces(conn, monkeypatch):
     monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] < TRACES])
     await store.migrate(conn)
     monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] <= TRACES])
-    await papers_store.upsert(conn, [paper("2610.00001"), paper("2610.00002")])
+    # The schema of then, so not `papers_store.upsert`, which writes today's columns.
+    await conn.execute(
+        "INSERT INTO papers (id, title, abstract) VALUES "
+        "('2610.00001', 't', 'a'), ('2610.00002', 't', 'a')"
+    )
     return conn
 
 
@@ -119,3 +121,44 @@ async def test_a_trace_without_its_attempt_stops_the_whole_migration(before_trac
     assert await (await conn.execute(column)).fetchone() is None
     done = await (await conn.execute("SELECT max(version) AS v FROM schema_migrations")).fetchone()
     assert done["v"] == TRACES - 1
+
+
+# -- 0041: withdrawn papers ------------------------------------------------------------------------
+
+WITHDRAWN = 41
+
+
+async def test_papers_already_withdrawn_are_dropped_from_their_stored_histories(conn, monkeypatch):
+    """The migration reads each stored version history: a paper whose newest version is empty
+    (0kb) is withdrawn as of it, and dropped; an earlier empty version, or none, is not."""
+    for table in await tables(conn):
+        await conn.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
+    every = db._migrations()
+    monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] < WITHDRAWN])
+    await store.migrate(conn)
+    histories = {
+        "2610.00001": [
+            {"version": 2, "date": "2026-10-26T20:52:17+00:00", "size": "0kb"},
+            {"version": 1, "date": "2026-10-22T16:51:27+00:00", "size": "881kb"},
+        ],
+        "2610.00002": [
+            {"version": 1, "date": "2026-10-22T16:51:27+00:00", "size": "0kb"},
+            {"version": 2, "date": "2026-10-26T20:52:17+00:00", "size": "881kb"},
+        ],
+        "2610.00003": [],
+    }
+    for pid, found in histories.items():
+        await conn.execute(
+            "INSERT INTO papers (id, title, abstract, version_history) VALUES (%s, 't', 'a', %s)",
+            (pid, Jsonb(found)),
+        )
+    monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] <= WITHDRAWN])
+    assert await store.migrate(conn) == ["0041_withdrawn.sql"]
+    rows = await (
+        await conn.execute("SELECT id, withdrawn_at::text, dropped FROM papers ORDER BY id")
+    ).fetchall()
+    assert [(r["id"], r["withdrawn_at"] is not None, r["dropped"]) for r in rows] == [
+        ("2610.00001", True, True),
+        ("2610.00002", False, False),
+        ("2610.00003", False, False),
+    ]

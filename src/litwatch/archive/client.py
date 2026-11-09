@@ -91,6 +91,7 @@ def listed(item: dict[str, Any]) -> Paper:
             doi=item.get("doi"),
             journal_ref=item.get("journal_ref"),
             license=item.get("license"),
+            comments=item.get("comments"),
         )
     except (KeyError, TypeError, ValueError, ValidationError) as exc:
         raise ArchiveError("invalid archive listing item") from exc

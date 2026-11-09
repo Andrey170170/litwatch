@@ -73,3 +73,20 @@ def rewritten(title: str, abstract: str, new: Paper) -> bool:
         )
 
     return differs(title, new.title) or differs(abstract, new.abstract)
+
+
+# The size arXiv gives a withdrawal: a new version with no files, its comments the reason.
+WITHDRAWAL_SIZE = "0kb"
+
+
+def withdrawn_at(paper: Paper) -> datetime | None:
+    """When arXiv withdrew the paper: its newest version in the version history is a withdrawal
+    (`WITHDRAWAL_SIZE`), submitted then. None when it is not, or the history does not say."""
+    newest = max(paper.version_history, key=lambda v: v.get("version") or 0, default=None)
+    if newest is None or newest.get("size") != WITHDRAWAL_SIZE:
+        return None
+    try:
+        at = datetime.fromisoformat(str(newest.get("date")))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=UTC)
