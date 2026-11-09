@@ -6,8 +6,8 @@ cd "$(dirname "$0")"
 
 # prefix arXiv-id figure-names (each is figures/<name>.pdf in the e-print)
 papers=(
-  "icl 2611.05344 fig1_circuit fig2_slot fig3_law fig4_gate fig9_waterfall fig12_reader_rows fig23_scale"
-  "scarce 2610.21029 channel_util_s1 methodology_2 methodology_by_step pact_vs_bid performance_s1"
+  "icl 2611.05344v1 fig1_circuit fig2_slot fig3_law fig4_gate fig9_waterfall fig12_reader_rows fig23_scale"
+  "scarce 2610.21029v2 channel_util_s1 methodology_2 methodology_by_step pact_vs_bid performance_s1"
 )
 
 work=$(mktemp -d)

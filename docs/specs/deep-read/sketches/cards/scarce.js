@@ -14,7 +14,7 @@ window.CARDS.scarce = {
     claim: "When coding agents with private deadlines repeatedly bid for one shared sandbox, recent frontier models build their own persistent rules on top of the instructed auction (reciprocity debts, coalitions, tie-break conventions), while older and efficiency-tier models stick to scheduling conventions.",
     points: [
       "<b>SCARCE</b>: five workers rebuild ProgramBench programs they can only learn about by running them, under private budgets (1,000 credits) and 25-minute deadlines, bidding each round for windows on one sandbox.",
-      "In first-subrun rounds, <b>relational behaviour</b> (reciprocity, coalitions, reputation and the like) sums to 37–79% for four recent frontier models and 0–4% for Kimi-K2.6 and the efficiency tier.",
+      "In first-subrun rounds, <b>relational behaviour</b> (reciprocity, coalitions, reputation and the like) has category percentages summing to 37–79% for four recent frontier models and 0–4% for Kimi-K2.6 and the efficiency tier.",
       "It disappears when memory lasts a single round (GLM-5.3: coalitions 27% → 0), and it erodes into bidding wars late in a run.",
       "Whether these institutions help or hurt outcomes is <b>not measured</b>: every model completes 0% of tasks in the first subrun, and the labels come from LLM judges whose agreement is not reported.",
     ],
@@ -106,7 +106,7 @@ window.CARDS.scarce = {
     },
     {
       id: "who", k: "finding", title: "Finding 1 · Who builds institutions",
-      takeaway: "Four recent frontier models show relational behaviour in 37–79% of first-subrun rounds; Kimi-K2.6 and the efficiency tier show 0–4%.",
+      takeaway: "Relational categories sum to 37–79% of first-subrun rounds for four recent frontier models and 0–4% for Kimi-K2.6 and the efficiency tier (a round can carry several).",
       blocks: [
         { t: "table", heat: { max: 50, colour: "#e11d48", strength: 45 },
           cols: ["% of rounds · subrun 1", "Opus-5", "Kimi-k3", "GLM-5.3", "GLM-5.2", "Kimi-k2.6", "Luna", "Haiku-4.5", "gpt-oss"],

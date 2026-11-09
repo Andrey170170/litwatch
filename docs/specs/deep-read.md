@@ -128,7 +128,8 @@ today, with these additions:
   the paper's figures and PDF pages.
 - **Checks in code.** `submit` keeps validating the document against the schema, and adds checks a model need not
   judge: every number the read gives as the paper's (a result, a setting, a count) appears in the paper's text, the
-  read's own figures such as reading time aside; every figure and table cited exists, every claim verdict
+  read's own figures such as reading time aside, and values read off a plot (cited to its figure) left to the
+  reviewer; every figure and table cited exists, every claim verdict
   and CARD note carries a location in the paper. A failed check goes back to the agent as today's schema errors do.
   The same checks are available to it before it submits.
 - **A reviewer.** Once a submit passes the checks, a separate call on the same model reviews the read against the
@@ -177,7 +178,8 @@ prose as hard to read.
 
 - **Notion export.** The Deep read callouts become a short form that stands on its own: the key claim and points, the
   claims with their verdicts, and the limitations, with the arXiv link the page already has. No link to the web app,
-  which only the owner can open. The extension callouts (decision 74's Faithfulness and Monitoring) go. A paper with a Deep card from
+  which only the owner can open. The extension callouts (decision 74's Faithfulness and Monitoring) go. A read that
+  failed its review says so in a line above the short form. A paper with a Deep card from
   before keeps today's callouts. The export's reader is told the shape changed.
 - **Zotero.** The `litwatch:enrichment` note and the card's tags are no longer written; the ones already on items
   stay as they are. The item, its screen note, its grade tags and the inbox collection (which a ready Deep read still
