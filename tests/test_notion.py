@@ -947,6 +947,28 @@ async def test_a_dismissed_paper_is_no_longer_listed_in_the_owners_words(world):
     assert fake.value(row, FAITHFUL) == "Must read" and fake.value(row, "Why") == off
 
 
+async def test_a_withdrawn_papers_page_stays_as_it_was_and_none_is_made(world):
+    """Withdrawn as stored, whatever version history later metadata leaves (integrations.md)."""
+    conn, fake = world, FakeNotion(PARENT)
+    await grade(conn, A, FAITH.slug, "must_read")
+    await grade(conn, C, FAITH.slug, "must_read")
+    withdraw = "UPDATE papers SET withdrawn_at = now(), version_history = '[]' WHERE id = %s"
+    await conn.execute(withdraw, (C.id,))
+    n = notion(fake)
+    assert await start(conn, n)
+    row = fake.row(A.id)
+    await conn.execute(withdraw, (A.id,))
+
+    asked = len(fake.requests)
+    await say(conn, A, FAITH.slug, LabelValue.NONE)
+    await say(conn, C, FAITH.slug, LabelValue.RELATED)
+    await deliver(conn, n)
+    assert await start(conn, notion(fake))
+    assert not [r for r in fake.requests[asked:] if row["id"] in r[1]]
+    assert fake.value(row, "Grade") == "Must read"
+    assert [fake.value(r, "arXiv id") for r in fake.rows()] == [A.id]
+
+
 async def test_a_page_taken_away_in_notion_is_left_alone_and_never_made_again(world):
     conn, fake = world, FakeNotion(PARENT)
     await grade(conn, A, FAITH.slug, "must_read")

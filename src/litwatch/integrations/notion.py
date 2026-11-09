@@ -44,7 +44,7 @@ import psycopg
 
 from litwatch import events
 from litwatch.config import Config
-from litwatch.core import Cause, Depth, Event, Grade, Paper, Publication, Status, withdrawn_at
+from litwatch.core import Cause, Depth, Event, Grade, Paper, Publication, Status
 from litwatch.integrations import IntegrationError, required, required_secret
 from litwatch.store import analyses as analyses_store
 from litwatch.store import integrations as integrations_store
@@ -514,7 +514,7 @@ class Notion:
         if page is not None and page.gone_at is not None:
             return
         paper = await papers_store.get(conn, paper_id)
-        if paper is None or withdrawn_at(paper) is not None:
+        if paper is None or await papers_store.withdrawn(conn, paper_id):
             return
         dismissed = await papers_store.dismissed_at(conn, paper_id)
         effective = await word_store.effective_for(conn, paper_id)
