@@ -313,9 +313,10 @@ async def dismiss(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
 
 async def dropped(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
     """Whether litwatch no longer processes the paper: the owner dismissed it, or arXiv
-    withdrew it (`papers.dropped`)."""
+    withdrew it (`papers.dropped`). Read with a share lock that waits for a dismissal or intake
+    in progress, as `still_current`."""
     row = await (
-        await conn.execute("SELECT dropped FROM papers WHERE id = %s", (paper_id,))
+        await conn.execute("SELECT dropped FROM papers WHERE id = %s FOR SHARE", (paper_id,))
     ).fetchone()
     return row is not None and row["dropped"]
 

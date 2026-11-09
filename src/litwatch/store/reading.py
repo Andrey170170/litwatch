@@ -543,7 +543,7 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
         conn,
         f"""
         SELECT p.id, p.title, p.abstract, {AUTHORS} AS authors, p.published, p.updated,
-               p.version, p.revision, p.version_history, p.withdrawn_at, p.comments,
+               p.version, p.revision, p.version_history, p.withdrawn_at, p.comments, p.dropped,
                coalesce(l.saved, false) AS saved, l.hand, r.level AS rarity,
                {CURRENT_GIST} AS gist, {CURRENT_GIST_SOURCE} AS gist_source,
                EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = p.id) AS in_collection,

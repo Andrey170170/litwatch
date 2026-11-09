@@ -427,7 +427,7 @@ async def paper_page(
         publication_by_owner=bool(published and published["by_owner"]),
         card=card,
         card_pass=card_pass,
-        card_requestable=card_requestable and found["withdrawn_at"] is None,
+        card_requestable=card_requestable and not found["dropped"],
         process=s.ProcessJob(
             id=job["id"],
             state=job["state"],

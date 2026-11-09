@@ -21,3 +21,5 @@ FROM (
     WHERE newest.e ->> 'size' = '0kb' AND pg_input_is_valid(newest.e ->> 'date', 'timestamptz')
 ) w
 WHERE w.id = p.id;
+
+ANALYZE papers;

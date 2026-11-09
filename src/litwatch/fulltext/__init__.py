@@ -142,7 +142,7 @@ async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
     """Store one try's outcome. With an answer: the Brief, the Weight and the Gist from the full
     text, labelled with the revision the pass was queued for, with `brief.written` and, when
     that revision is still the paper's, `gist.written`. Without: the pass fails or waits for its
-    text, as one for a dismissed paper does whatever it got. Then settle the paper: its grades
+    text, as one for a dropped paper does whatever it got. Then settle the paper: its grades
     follow the Weight, its next pass may be queued (section 8), and a pass back in the queue
     that is no longer wanted (a topic paused while it ran) is dropped. A pass a re-run's
     ceiling stopped goes back unworked. Returns False when the worker no longer held the
@@ -154,8 +154,8 @@ async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
         read = _read_of(a.text)
         if a.retry_asked:
             await store_.retry_asked(conn, c)
-        if a.waiting or await store_.dropped(conn, c.paper.id):
-            a.waiting = True  # a dismissed paper's pass writes nothing; `claim` leaves it alone
+        if a.waiting or await papers_store.dropped(conn, c.paper.id):
+            a.waiting = True  # a dropped paper's pass writes nothing; `claim` leaves it alone
             await store_.awaiting(conn, c, a.error)
         elif a.stopped:
             await store_.wait_again(conn, c, a.error or "stopped at the ceiling")
@@ -217,7 +217,7 @@ async def still_wanted(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
     `word.settle` judges the database now, whatever trigger was missed: None when the pass
     still runs as claimed; else why not. One no longer wanted is dropped; one wanted for
     another reason is relabelled and given back, to run on its next claim; one for a paper
-    dismissed since its claim is given back, left for the owner's word as `record` leaves it."""
+    dropped since its claim is given back, left for the owner's word as `record` leaves it."""
     async with word.change(conn, c.paper.id, cause=Cause.VERDICT, job=c.job):
         return await judged(conn, c)
 
@@ -229,7 +229,7 @@ async def judged(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
     change's own settle then finds the pass running, or given back as judged, and leaves it."""
     if not await store_.held(conn, c):
         return "lost"
-    if await store_.dropped(conn, c.paper.id):  # `settle` leaves its pass alone
+    if await papers_store.dropped(conn, c.paper.id):  # `settle` leaves its pass alone
         await store_.release(conn, c)
         return "fulltext_dismissed"
     await word.settle(conn, c.paper.id, cause=Cause.VERDICT, claimed=c.id, job=c.job)

@@ -288,7 +288,7 @@ async def claim(
     """Take up to `limit` text passes to try, least recently tried first, `besides` those
     already tried: passes awaiting text, those to be tried again, and running ones whose lease
     ran out (the worker died). Each is held for `lease`. Only passes for their paper's current
-    revision are taken (`drop_stale` removes the others); a dismissed paper's are left alone.
+    revision are taken (`drop_stale` removes the others); a dropped paper's are left alone.
     With `deep`, Deep passes instead, the owner's requests first, of any revision (a Deep pass
     reads the text the paper has when it runs); one whose job was submitted is taken whatever a
     dismissal says, as following its job spends nothing new and ends its attempt. Text passes
@@ -454,18 +454,6 @@ async def wait_again(conn: psycopg.AsyncConnection, c: Claimed, error: str) -> N
 async def retry_asked(conn: psycopg.AsyncConnection, c: Claimed) -> None:
     """The archive was asked to retry what it gave up on for the pass."""
     await conn.execute("UPDATE fulltext_passes SET retry_text = false WHERE id = %s", (c.id,))
-
-
-async def dropped(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
-    """Whether the paper is dropped (dismissed or withdrawn), read with a share lock that waits
-    for a dismissal or intake in progress (as `papers.still_current`)."""
-    row = await (
-        await conn.execute(
-            "SELECT dropped FROM papers WHERE id = %s FOR SHARE",
-            (paper_id,),
-        )
-    ).fetchone()
-    return row is not None and row["dropped"]
 
 
 async def awaiting(conn: psycopg.AsyncConnection, c: Claimed, error: str | None = None) -> None:
@@ -634,7 +622,7 @@ async def read_of(conn: psycopg.AsyncConnection, pass_id: int) -> tuple[int, Tex
 
 
 async def outdated(conn: psycopg.AsyncConnection) -> list[str]:
-    """The papers, not dismissed, given a Brief or full-text Weight, or with a text pass for an
+    """The papers, not dropped, given a Brief or full-text Weight, or with a text pass for an
     older revision, whose newest text pass for its current revision is neither open nor done on
     its arXiv version (on its latest update, when the version is unknown): a new version or
     revision came after what was read or queued (`to_queue`'s rule, found from the
@@ -659,7 +647,7 @@ OUTDATED = f"""
 
 
 async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list[str]:
-    """The papers, not dismissed, whose passes the nightly run settles from the database
+    """The papers, not dropped, whose passes the nightly run settles from the database
     whatever triggered or missed it (pipeline.md, section 6): every paper with a
     pass open; every one without a text pass for its current revision that the rule may give one
     (an active Focus topic's central or related, an active Area's must read, its own or a
@@ -761,7 +749,7 @@ async def retry_failed(conn: psycopg.AsyncConnection, runs: int) -> int:
 
 
 # A pass that waits on the owner: failed `runs` runs in a row, or awaiting text too long. Of
-# `fulltext_passes f`; the paper (`p`) is not dismissed, and a text pass is for its current
+# `fulltext_passes f`; the paper (`p`) is not dropped, and a text pass is for its current
 # revision. A Deep pass awaits text only once its worker has tried it: with no deep service
 # configured, nothing works it, and nothing waits on the owner.
 STUCK = (
