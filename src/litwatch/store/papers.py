@@ -326,13 +326,13 @@ async def dropped(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
     return row is not None and row["dropped"]
 
 
-async def withdrawn(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
-    """Whether arXiv withdrew the paper, as stored (`withdrawn_at`): kept while metadata without
-    a version history leaves `core.withdrawn_at` nothing to read."""
+async def withdrawal(conn: psycopg.AsyncConnection, paper_id: str) -> datetime | None:
+    """When arXiv withdrew the paper, as stored (`withdrawn_at`): kept while metadata without
+    a version history leaves `core.withdrawn_at` nothing to read. None while it is not."""
     row = await (
         await conn.execute("SELECT withdrawn_at FROM papers WHERE id = %s", (paper_id,))
     ).fetchone()
-    return row is not None and row["withdrawn_at"] is not None
+    return row["withdrawn_at"] if row else None
 
 
 async def dismissed_at(conn: psycopg.AsyncConnection, paper_id: str) -> datetime | None:

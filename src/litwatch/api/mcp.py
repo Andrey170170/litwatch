@@ -722,7 +722,7 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
     else:
         out.append("Only in the archive: litwatch has not processed it.")
     if w := p.withdrawn:
-        reason = f" Its authors' comment: {w.reason}" if w.reason else ""
+        reason = f" The comment on arXiv: {w.reason}" if w.reason else ""
         out.append(f"Withdrawn on arXiv {_day(w.at)}: litwatch no longer processes it.{reason}")
     if p.stored:
         out.append(_library(p))

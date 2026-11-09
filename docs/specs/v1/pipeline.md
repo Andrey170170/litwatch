@@ -329,10 +329,10 @@ changed: a paper that has a Brief or a Weight from the full text gets those pass
 question turns out unchanged (the same text, title, abstract and area) costs nothing (section 6).
 A Deep card is labelled with the version it read and is remade only on request.
 
-**Withdrawals.** arXiv withdraws a paper with a version of its own, empty (size 0kb), whose comments give the authors'
-reason. A paper whose newest version is a withdrawal is **withdrawn**, as of that version's submission, and litwatch
-withdraws it too: like a paper the owner dismissed (section 9) it is **dropped**. No step runs on it again, its open
-full-text passes are never worked and none of its failures waits for the owner; it is never due in a digest
+**Withdrawals.** arXiv withdraws a paper with a version of its own, empty (size 0kb), whose comments give the reason,
+the authors' or arXiv's own. A paper whose newest version is a withdrawal is **withdrawn**, as of that version's
+submission, and litwatch withdraws it too: like a paper the owner dismissed (section 9) it is **dropped**. No step
+runs on it again, its open full-text passes are never worked and none of its failures waits for the owner; it is never due in a digest
 ([digests.md](digests.md)) and is out of every list and search, save the saved list, where one the owner saved stays,
 marked. Its page, asked for by id, says it was withdrawn, when, and arXiv's comments, which intake keeps for every
 paper. What litwatch made of it before stays: its grades, Brief, Deep card and the digests that showed it, which mark

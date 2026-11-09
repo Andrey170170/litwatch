@@ -117,7 +117,9 @@ the event: `grade.changed` gains a `cause` field (`verdict`, `weight`, `owner`, 
 changed the grade, while the integration still checks the present grade before writing. Pages are never deleted.
 A paper listed again for a topic loses that topic's line. A paper the owner dismisses is No longer listed for every
 topic it was listed for, with a line saying the owner set it aside; a dismissed paper with no page gets none. A paper
-withdrawn on arXiv ([pipeline.md](pipeline.md), section 8) with no page gets none either; one with a page keeps it as it was. The integration keeps each topic's line in its own
+withdrawn on arXiv ([pipeline.md](pipeline.md), section 8) is No longer listed in the same way, its line saying it was
+withdrawn on arXiv, and its page opens with the date and arXiv's comment; one with no page gets none either. The
+integration keeps each topic's line in its own
 table, so a rewrite for another event or after a restart keeps it, and a `grade.changed` touches only its topic's line.
 
 **Who owns what.** The integration creates the database, its columns and its views once, when it is set up, under a
