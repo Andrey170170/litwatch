@@ -700,8 +700,10 @@ class Notion:
             }
 
         if dropped and before.get("by") in ASIDE:
-            if aside is not None:
+            if aside is not None and aside.by == before["by"]:
                 return {**before, "grade": grade}  # still set aside
+            if aside is not None:
+                return gone(aside.why, aside.since, aside.by)  # set aside now for another reason
         elif dropped and not newer:
             return {**before, "grade": grade}  # still why it is off
         if aside is not None and not dropped:

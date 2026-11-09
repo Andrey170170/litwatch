@@ -981,6 +981,14 @@ async def test_a_withdrawn_paper_is_no_longer_listed_and_its_page_says_why(world
     icons = [b["callout"]["icon"]["emoji"] for b in fake.body(row["id"]) if "callout" in b]
     assert "🚫" not in icons
 
+    # Set aside by the owner first, then withdrawn: the line says what holds now.
+    await papers_store.dismiss(conn, A.id)
+    assert await start(conn, notion(fake))
+    assert fake.value(row, "Why").endswith("Andrei set it aside.")
+    await conn.execute(withdraw, (A.id,))
+    assert await start(conn, notion(fake))
+    assert fake.value(row, "Why") == f"{FAITHFUL}, 1 Nov 2026: withdrawn on arXiv."
+
 
 async def test_a_page_taken_away_in_notion_is_left_alone_and_never_made_again(world):
     conn, fake = world, FakeNotion(PARENT)
