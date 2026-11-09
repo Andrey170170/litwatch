@@ -100,7 +100,7 @@ data, models, compute, statistics. **Process notes** stay as they are (decisions
 The read is rung 3 of the ladder, named **Deep read**, with each of its sections as a rung of its own: the section's
 name in the ladder's side column with its colour square hanging to its left, the section's body beside it (R2,
 variant C). The side column is 128 px wide, so long section names wrap under themselves and keep the body's first
-line. The layout is open: every section is laid out in full, nothing folded but a claim's evidence.
+line. The layout is open: every section is laid out in full, nothing folded but a claim's evidence and the process notes.
 
 - A paper page with a Deep read is capped at 1200 px instead of 1080 px, so the reading column is wide enough for
   figures, tables and diagrams.
@@ -127,7 +127,8 @@ today, with these additions:
   to fix figure sizing, diagram layout, table width and wording that only shows when rendered. It can also look at
   the paper's figures and PDF pages.
 - **Checks in code.** `submit` keeps validating the document against the schema, and adds checks a model need not
-  judge: every number in the read appears in the paper's text, every figure and table cited exists, every claim verdict
+  judge: every number the read gives as the paper's (a result, a setting, a count) appears in the paper's text, the
+  read's own figures such as reading time aside; every figure and table cited exists, every claim verdict
   and CARD note carries a location in the paper. A failed check goes back to the agent as today's schema errors do.
   The same checks are available to it before it submits.
 - **A reviewer.** Once a submit passes the checks, a separate call on the same model reviews the read against the
@@ -136,7 +137,7 @@ today, with these additions:
   answer, most important first. The writer triages them: it fixes the real problems and leaves the nitpicks, and does
   not grow the read to answer every small point (models flooded with nitpicks lose the real fixes in them, in prose
   as in code). A read that still fails after the second revision is kept, with a process note that names the failing
-  scores, so it shows on Needs you. The reviews, scores and findings are kept with the attempt and read through
+  scores and checks, so it shows on Needs you. The reviews, scores and findings are kept with the attempt and read through
   `litwatch deep trace`; the web app shows nothing more.
 
 **The rubric.** Scores from 1 to 5, each with findings that point at blocks:
@@ -160,9 +161,11 @@ paper from its text; prior work and code checked, not assumed.
 
 - **Notion export.** The Deep read callouts become a short form that stands on its own: the key claim and points, the
   claims with their verdicts, and the limitations, with the arXiv link the page already has. No link to the web app,
-  which only the owner can open. The extension callouts (decision 74's Faithfulness and Monitoring) go. The export's
-  reader is told the shape changed.
-- **Zotero.** The item's note keeps the Gist and Brief and drops the Deep card. The item itself stays.
+  which only the owner can open. The extension callouts (decision 74's Faithfulness and Monitoring) go. A paper with a Deep card from
+  before keeps today's callouts. The export's reader is told the shape changed.
+- **Zotero.** The `litwatch:enrichment` note and the card's tags are no longer written; the ones already on items
+  stay as they are. The item, its screen note, its grade tags and the inbox collection (which a ready Deep read still
+  sets) stay.
 - **MCP.** `get_paper` gives the read's At a glance and its list of sections with one line each; a section's full text
   is read on request, as the paper's text is through its outline. Tables come as text, figures and diagrams as their
   captions and explanations.
