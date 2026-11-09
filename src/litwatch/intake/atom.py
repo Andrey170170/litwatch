@@ -23,8 +23,8 @@ class AtomBatch:
     raw: bytes
     generated_at: datetime
     announcements: dict[str, str]
-    # The listing date of each paper the feed announces as new; a cross-listing's first listing
-    # is not known.
+    # The listing date of each paper the feed announces as new, and of each cross-listing that is
+    # a new submission (`_fresh`); an older paper's cross-listing says nothing of its first.
     listed: dict[str, date] = field(default_factory=dict)
 
 
@@ -51,6 +51,16 @@ def _id(value: str) -> str:
     if not _ID.fullmatch(value):
         raise SourceError(f"Invalid Atom arXiv id: {value!r}")
     return re.sub(r"v\d+$", "", value)
+
+
+def _fresh(paper: Paper, day: date) -> bool:
+    """A cross-listed paper the listing on `day` is its first: a first version whose new-style
+    id is of that month or the one before (a paper whose primary category is not one intake
+    reads shows in its feeds only as a cross-listing)."""
+    if paper.version != 1 or not re.fullmatch(r"\d{4}\.\d{4,5}", paper.id):
+        return False
+    months = (day.year % 100 - int(paper.id[:2])) * 12 + day.month - int(paper.id[2:4])
+    return months in (0, 1)
 
 
 def parse_feed(raw: bytes) -> AtomBatch:
@@ -113,7 +123,11 @@ def parse_feed(raw: bytes) -> AtomBatch:
         raw=raw,
         generated_at=generated_at,
         announcements=announcements,
-        listed={i: d for i, d in dates.items() if announcements[i] == "new"},
+        listed={
+            i: d
+            for i, d in dates.items()
+            if announcements[i] == "new" or (announcements[i] == "cross" and _fresh(papers[i], d))
+        },
     )
 
 
