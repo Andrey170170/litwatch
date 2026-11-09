@@ -441,23 +441,36 @@ async def test_a_feed_without_submission_times_dates_a_paper_by_its_listing(db):
     assert row["announced"] == date(2026, 9, 14)
 
 
-async def test_a_cross_listing_is_not_dated_by_its_feed_and_canonical_metadata_corrects(db):
-    """A cross-listing's first listing is not the feed's day, so Atom leaves it undated; a new
-    paper's feed date stands until canonical metadata dates its first version."""
+async def test_a_cross_listing_is_dated_by_its_feed_only_when_new(db):
+    """An older paper's cross-listing is not its first listing, so Atom leaves it undated; a new
+    submission cross-listed from a category intake does not read (a first version, its id of the
+    feed's month or the one before) is dated by the feed like a new paper, and canonical metadata
+    corrects either."""
     from litwatch.intake.atom import parse_feed  # noqa: PLC0415
     from tests.test_intake_atom import entry, feed  # noqa: PLC0415
 
-    batch = parse_feed(feed(entry("2609.11999v1") + entry("2401.00001v3", "cross")))
+    entries = [
+        entry("2609.11999v1"),
+        entry("2609.11998v1", "cross"),
+        entry("2608.11997v1", "cross"),
+        entry("2607.11996v1", "cross"),
+        entry("2609.11995v2", "cross"),
+        entry("2401.00001v3", "cross"),
+    ]
+    batch = parse_feed(feed("".join(entries)))
     await papers_store.upsert(db, batch.papers, source="atom", listed=batch.listed)
     oai = paper("2609.11999", title="A paper", published="2026-09-10")
     await papers_store.upsert(db, [oai])
+    ids = [p.id for p in batch.papers]
     rows = await (
-        await db.execute(
-            "SELECT id, announced FROM papers WHERE id IN ('2609.11999', '2401.00001')"
-        )
+        await db.execute("SELECT id, announced FROM papers WHERE id = ANY(%s)", (ids,))
     ).fetchall()
     assert {r["id"]: r["announced"] for r in rows} == {
         "2609.11999": date(2026, 9, 11),
+        "2609.11998": date(2026, 9, 14),
+        "2608.11997": date(2026, 9, 14),
+        "2607.11996": None,
+        "2609.11995": None,
         "2401.00001": None,
     }
 

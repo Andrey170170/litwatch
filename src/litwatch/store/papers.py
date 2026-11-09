@@ -89,10 +89,11 @@ async def upsert(
 
     A paper's listing day (`announced`) comes from its first version's submission time
     (`core.digests.announced`) in canonical metadata; until that arrives, from `listed`, the
-    day a feed announced it as new (Atom carries no submission time). A day read from the
-    version history (`announced_known`) is never replaced by one guessed from other metadata:
-    the version list can fail to load, leaving `<created>`, which can be a later version's
-    date, and the stored history is then cleared, so the column keeps what it knew.
+    day a feed announced it as new or as a new submission's cross-listing (Atom carries no
+    submission time). A day read from the version history (`announced_known`) is never
+    replaced by one guessed from other metadata: the version list can fail to load, leaving
+    `<created>`, which can be a later version's date, and the stored history is then cleared,
+    so the column keeps what it knew.
     """
     result = Upserted()
     async with conn.transaction():
