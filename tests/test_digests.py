@@ -793,6 +793,15 @@ async def test_a_withdrawn_paper_is_never_due_new_or_updated(db):
     await listed(db, TUE, S, new)
     await day(db, w, TUE)
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(S.id, "listed")])
+    # Nor does a weekly bring back one a daily listed before arXiv withdrew it.
+    late = paper("2610.00032", title="Withdrawn after its daily", version_history=history(FOR_TUE))
+    await papers_store.upsert(db, [late])
+    await focus(db, late, "central")
+    await listed(db, WED, late)
+    await day(db, w, WED)
+    assert [d.paper_id for d in await store_.earlier_central(db, FAITH.slug, THU)] == [late.id]
+    await papers_store.upsert(db, [withdrawn(late)])
+    assert await store_.earlier_central(db, FAITH.slug, THU) == []
 
 
 async def test_the_three_weeks_of_an_update_are_exact_on_both_sides(db):

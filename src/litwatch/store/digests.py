@@ -428,7 +428,7 @@ async def earlier_central(
                        dp.title, p.announced, dp.gist, dp.fit, dp.grade, dp.rarity, dp.graded_on,
                        d.day
                 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
-                JOIN papers p ON p.id = dp.paper_id
+                JOIN papers p ON p.id = dp.paper_id AND NOT p.dropped
                 WHERE d.topic = %s AND d.state = 'written' AND d.day < %s AND dp.fit = 'central'
                   AND dp.role IN ('pick', 'listed')
                 ORDER BY dp.paper_id, d.day DESC) x
@@ -454,7 +454,7 @@ async def carried(conn: psycopg.AsyncConnection, topic: str, monday: date) -> li
                        dp.title, p.announced, dp.gist, dp.fit, dp.grade, dp.rarity, dp.graded_on,
                        d.day
                 FROM digest_papers dp JOIN digests d ON d.id = dp.digest_id
-                JOIN papers p ON p.id = dp.paper_id
+                JOIN papers p ON p.id = dp.paper_id AND NOT p.dropped
                 WHERE d.topic = %(topic)s AND d.period = 'day' AND d.state = 'written'
                   AND d.day BETWEEN %(monday)s AND %(sunday)s AND dp.role <> 'updated'
                   AND EXISTS (

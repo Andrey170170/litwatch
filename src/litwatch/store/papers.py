@@ -28,6 +28,8 @@ class Upserted:
     updated: int = 0
     # Ids whose title or abstract was rewritten: what was said about the old text is stale.
     rewritten: list[str] = field(default_factory=list)
+    # Ids withdrawn, or brought back by a later version: dropped or not from now on.
+    withdrawn: list[str] = field(default_factory=list)
 
 
 def row_to_paper(row: dict[str, Any]) -> Paper:
@@ -106,7 +108,8 @@ async def upsert(
             r["id"]: r
             for r in await (
                 await conn.execute(
-                    "SELECT id, title, abstract, version FROM papers WHERE id = ANY(%s)",
+                    "SELECT id, title, abstract, version, withdrawn_at FROM papers"
+                    " WHERE id = ANY(%s)",
                     ([p.id for p in papers],),
                 )
             ).fetchall()
@@ -189,7 +192,7 @@ async def upsert(
                            OR (papers.version IS NULL AND EXCLUDED.version IS NOT NULL)
                            OR (EXCLUDED.version = papers.version
                                AND EXCLUDED.updated::date > papers.updated::date))
-                    RETURNING (xmax = 0) AS inserted, version, title, abstract
+                    RETURNING (xmax = 0) AS inserted, version, title, abstract, withdrawn_at
                     """,
                     {
                         **p.model_dump(),
@@ -223,6 +226,8 @@ async def upsert(
                     await cur.execute(
                         "UPDATE papers SET revision = revision + 1 WHERE id = %s", (p.id,)
                     )
+                if (row["withdrawn_at"] is None) != (old["withdrawn_at"] is None):
+                    result.withdrawn.append(p.id)
                 if changed or row["version"] != old["version"]:
                     await events.emit(
                         conn,

@@ -50,6 +50,7 @@ async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[s
                    (SELECT row_to_json(l) FROM (SELECT value FROM labels
                     WHERE paper_id = v.paper_id AND topic = v.topic) l) AS label
             FROM verdicts v JOIN papers p ON p.id = v.paper_id AND p.revision = v.paper_revision
+                 AND NOT p.dropped
             JOIN topics t ON t.class = v.topic
             WHERE v.paper_id IN (SELECT paper_id FROM verdicts WHERE recorded_at >= %s)
             ORDER BY v.paper_id, v.topic, v.paper_revision DESC, v.recorded_at DESC,
