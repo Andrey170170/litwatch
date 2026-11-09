@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deep read · r1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Rajdhani:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<link rel="stylesheet" href="lib/deep.css">
+</head>
+<body>
+<div class="sk" id="sk">
+  <b>SKETCH R1</b>
+  <span class="grp"><span>Paper</span><button data-k="paper" data-v="icl">ICL circuit</button><button data-k="paper" data-v="scarce">SCARCE</button></span>
+  <span class="grp"><span>Layout</span><button data-k="layout" data-v="open">A · open</button><button data-k="layout" data-v="folded">B · folded</button></span>
+  <span class="grp"><span>Claims</span><button data-k="claims" data-v="all">all</button><button data-k="claims" data-v="doubtful">doubtful first</button></span>
+  <span class="grp"><span>Theme</span><button data-k="theme" data-v="auto">auto</button><button data-k="theme" data-v="light">light</button><button data-k="theme" data-v="dark">dark</button></span>
+</div>
+<div id="app"></div>
+<script src="lib/deep.js"></script>
+<script src="cards/icl.js"></script>
+<script src="cards/scarce.js"></script>
+<script>
+  const params = new URLSearchParams(location.search);
+  const state = { paper: params.get("paper") || "icl", layout: params.get("layout") || "open", claims: params.get("claims") || "all", theme: params.get("theme") || "auto" };
+  function apply(keepScroll) {
+    const y = window.scrollY;
+    document.documentElement.dataset.theme = state.theme === "auto" ? "" : state.theme;
+    if (state.theme === "auto") delete document.documentElement.dataset.theme;
+    document.querySelectorAll("#sk button").forEach((b) => b.classList.toggle("on", state[b.dataset.k] === b.dataset.v));
+    Deep.render(document.getElementById("app"), CARDS[state.paper], state);
+    history.replaceState(null, "", "?" + new URLSearchParams(state).toString() + location.hash);
+    if (keepScroll) window.scrollTo(0, y);
+  }
+  document.getElementById("sk").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    const paperChanged = b.dataset.k === "paper" && state.paper !== b.dataset.v;
+    state[b.dataset.k] = b.dataset.v;
+    apply(!paperChanged);
+    if (paperChanged) window.scrollTo(0, 0);
+  });
+  apply(false);
+  if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+</script>
+</body>
+</html>

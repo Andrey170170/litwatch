@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deep read · r2</title>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Rajdhani:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<link rel="stylesheet" href="lib/deep.css">
+<link rel="stylesheet" href="lib/page.css">
+</head>
+<body>
+<div class="sk" id="sk">
+  <b>SKETCH R2</b>
+  <span class="grp"><span>Paper</span><button data-k="paper" data-v="icl">ICL circuit</button><button data-k="paper" data-v="scarce">SCARCE</button></span>
+  <span class="grp"><span>Placement</span><button data-k="v" data-v="A">A · inline</button><button data-k="v" data-v="B">B · own page</button><button data-k="v" data-v="C">C · as rungs</button></span>
+  <span class="grp"><span>Theme</span><button data-k="theme" data-v="auto">auto</button><button data-k="theme" data-v="light">light</button><button data-k="theme" data-v="dark">dark</button></span>
+</div>
+<div class="p-app">
+  <aside class="p-side">
+    <div class="p-wm"><b>◢</b> litwatch</div>
+    <nav class="p-nav">
+      <a>Today</a><a>Watch</a><a>Radar</a><a class="on">Papers</a>
+      <div class="s">Topics</div><a>Circuits</a><a>CoT monitoring</a><a>CoT faithfulness</a><a>Interpretability</a><a>Agents</a>
+    </nav>
+  </aside>
+  <main class="p-main" id="main"></main>
+</div>
+<div class="p-pbar"><span>☆</span><span>👍</span><span class="pos">3/22</span><span>👎</span><span>⋯</span></div>
+<script src="lib/deep.js"></script>
+<script src="cards/icl.js"></script>
+<script src="cards/scarce.js"></script>
+<script>
+// The rest of each paper's page, from litwatch's record of it (get_paper, 9 Nov).
+const PAGE = {
+  icl: {
+    rarity: "Epic", rc: "var(--r-epic)",
+    au: "Andrew Gao, William Gao",
+    fx: ["2611.05344 ⧉", "3 Nov 2026", "v1 of 1", "Analysis", "⟨/⟩ code ↗"],
+    gist: "Models solve few-shot classification with arbitrary labels by storing each demonstration's class at its label token, matching the query's class against them; repeated labels switch the lookup on.",
+    overst: "The abstract overstates: the softmax law predicts only the regime with fewer slots per class and fails on longer prompts, and the duplicate-head link to the margin holds in Qwen only. The circuit-only result also needs a head set enlarged to 189 by later screens.",
+    brief: [
+      "The paper asks how a pretrained language model turns a few labelled demonstrations into an answer within one forward pass, when the labels are arbitrary tokens.",
+      "The authors find that each label token's residual stream works as a memory slot. Its value is the label's identity. Its key is the class of the preceding sentence, written in by about twenty middle-layer heads. At the query, about ninety upper-layer heads match the query's class against the keys and copy the matching labels. A repeat-detection signal opens this read by lowering the attention sink's logit. About two dozen \"brake\" heads write against the most recent label.",
+      "The evidence is patching between prompts that differ in one span, with random-head controls, mainly in Qwen3-4B. Knocking out twenty readers costs 0.74 nats against +0.02 for random heads, and removing the brakes raises the margin by 1.39. No single head is necessary, so the roles are populations. Sixty percent of a class flip passes through the readers. The scope is two classes, single-token labels and up to twelve demonstrations, in three 3-4B models plus Qwen3 sizes 0.6B to 8B.",
+    ],
+    topics: [
+      { c: "#0891b2", mono: "CI", depth: "focus", nm: "Circuits", gr: "must read · solid", rc: "var(--r-epic)", vd: "Fit <b>central</b> · Weight <b>solid</b>" },
+      { c: "#4f46e5", mono: "IN", depth: "area", nm: "Interpretability", gr: "must read · solid", rc: "var(--r-epic)", vd: "Fit <b>central</b> · Weight <b>solid</b>" },
+    ],
+    more: "+2 · 2 none",
+    saved: true,
+  },
+  scarce: {
+    rarity: "Uncommon", rc: "var(--r-uncommon)",
+    au: "Abhinav Kumar, Rediet Abebe, Eugene Bagdasarian <span class='faint'>+1</span>",
+    fx: ["2610.21029 ⧉", "15 Oct 2026", "v2 of 2", "Benchmark", "⟨/⟩ code ↗"],
+    gist: "SCARCE is a framework where coding agents negotiate access to a shared execution resource over long task sequences; agents spontaneously form persistent norms based on reputation, reciprocity and precedent.",
+    noBrief: "No Brief: briefs are written for Focus must reads and Area picks.",
+    abstract: "As autonomous agents become widely deployed, coordinating access to shared computing resources and services will become increasingly important. Recent incidents have already revealed unplanned coordination between agents, highlighting the safety implications of these interactions. Yet prior studies of agent negotiation often use stylized games and simulated bargaining, leaving open how these behaviors develop during sustained, long-horizon tasks. We propose SCARCE (Shared Compute ARena for Coding agEnts), a framework in which agents solve sequences of coding tasks under individual deadlines while negotiating access to a shared execution resource. We find that agents spontaneously develop informal institutions: persistent rules and commitments grounded in reputation, reciprocity, and precedent…",
+    topics: [
+      { c: "#ca8a04", mono: "AG", depth: "field", nm: "Agents and tool use", gr: "must read · solid", rc: "var(--r-uncommon)", vd: "Fit <b>central</b> · Weight <b>solid</b>" },
+      { c: "#0284c7", mono: "LM", depth: "field", nm: "Language models", gr: "must read", rc: "var(--r-uncommon)", vd: "from Agents" },
+    ],
+    more: null,
+    saved: false,
+  },
+};
+
+const params = new URLSearchParams(location.search);
+const state = { paper: params.get("paper") || "icl", v: params.get("v") || "A", theme: params.get("theme") || "auto", view: "page" };
+const { h } = Deep;
+let gistObs, deepObs;
+
+function rung(name, body, cls, sub) {
+  const r = h("div", { class: `p-rung ${cls || ""}` });
+  r.append(h("div", { class: "rl" }, `${name}${sub ? `<span class="sub">${sub}</span>` : ""}`));
+  const b = h("div");
+  if (typeof body === "string") b.innerHTML = body; else b.append(...[].concat(body));
+  r.append(b);
+  return r;
+}
+
+function header(P, card) {
+  return h("header", { class: "p-head", style: `--rc:${P.rc}` },
+    `<div class="mark"><span class="lvl">${P.rarity}</span>${card.topics.map((t) => `<span class="badge" data-depth="${t.depth}" style="--tc:${t.c}">${t.mono}</span>`).join("")}</div>
+     <h1>${card.title}</h1><div class="au">${P.au}</div>
+     <div class="fx">${P.fx.map((f, i) => i === 0 || f.includes("↗") ? `<a>${f}</a>` : `<span>${f}</span>`).join("")}</div>`);
+}
+
+function rail(P, secs) {
+  const r = h("aside", { class: "p-rail" });
+  const rg = h("div", { class: "p-rgist", style: `--rc:${P.rc}` }, `<div class="rl">Gist</div>${P.gist}`);
+  r.append(rg);
+  r.append(h("div", { class: "p-tp" }, P.topics.map((t) =>
+    `<div class="r" style="--rc:${t.rc}"><span class="badge" data-depth="${t.depth}" style="--tc:${t.c}">${t.mono}</span><span class="nm">${t.nm}</span><span class="gr">${t.gr}</span><span class="vd">${t.vd}</span><button class="th">👍</button><button class="th">👎</button><button class="lb">Label</button></div>`).join("") +
+    (P.more ? `<div class="more">${P.more}</div>` : "")));
+  r.append(h("div", { class: "p-grid" }, `<button class="${P.saved ? "on" : ""}">${P.saved ? "★ Saved" : "☆ Save"}</button><button>BibTeX ⧉</button><button>arXiv ↗</button><button>PDF ↗</button>`));
+  let toc = null;
+  if (secs) {
+    toc = h("nav", { class: "p-toc away" }, `<div class="rh">Deep read</div>`);
+    Deep.toc(secs, toc);
+    r.append(toc);
+  }
+  return { el: r, gist: rg, toc };
+}
+
+function cardFoot(card) {
+  return h("div", { class: "cfoot" }, `Written from the LaTeX source of arXiv v${card.arxiv === "2610.21029" ? 2 : 1}, 9 Nov, 04:12 · <button>Write again</button>`);
+}
+
+function renderPage() {
+  const card = CARDS[state.paper], P = PAGE[state.paper];
+  const main = document.getElementById("main");
+  main.innerHTML = "";
+  main.append(h("div", { class: "p-ptop" }, `<span>‹</span><span class="t">${card.title}</span>`));
+  main.append(h("span", { class: "p-back" }, "‹ Circuits"));
+  main.append(header(P, card));
+  const cols = h("div", { class: "p-cols" });
+  const ladder = h("div");
+  cols.append(ladder);
+  main.append(cols);
+
+  const gistR = rung("Gist", `<p class="gist">${P.gist}</p>`);
+  ladder.append(gistR);
+  if (P.brief) ladder.append(rung("Brief", `<div class="overst">${P.overst}</div>${P.brief.map((p) => `<p class="prose">${p}</p>`).join("")}`, "", "Brief | Abstract"));
+  else ladder.append(rung("Abstract", `<div class="why0">${P.noBrief}</div><p class="prose">${P.abstract}</p>`));
+
+  const secs = Deep.sections(card, { layout: "open", claims: "all" });
+  const strip = h("div", { class: "strip hidden" });
+  let deepBox;
+  if (state.v === "A") {
+    deepBox = h("div", { class: "open-doc" });
+    deepBox.append(strip);
+    secs.forEach((s) => deepBox.append(s.el));
+    deepBox.append(cardFoot(card));
+    ladder.append(rung("Deep read", deepBox, "deep", "≈ 15 min"));
+  } else if (state.v === "C") {
+    const head = rung("Deep read", strip, "", "≈ 15 min");
+    head.style.marginBottom = "4px";
+    deepBox = h("div");
+    deepBox.append(head);
+    secs.forEach((s) => {
+      const r = rung(s.title, s.el, "dsec");
+      r.style.setProperty("--sc", s.colour);
+      r.id = "r-" + s.id;
+      deepBox.append(r);
+    });
+    deepBox.append(rung("", cardFoot(card), ""));
+    ladder.append(deepBox);
+  } else {
+    const glance = secs[0].el;
+    const map = h("div", { class: "p-map" });
+    for (const s of secs.slice(1)) {
+      const a = h("a", { style: `--sc:${s.colour}`, href: "#" }, `<span class="sw"></span><span class="n">${s.title}</span>${s.takeaway ? `<span class="t">${s.takeaway}</span>` : ""}`);
+      a.addEventListener("click", (e) => { e.preventDefault(); openDeep(s.id); });
+      map.append(a);
+    }
+    const btn = h("button", { class: "p-open" }, "Open the Deep read · ≈ 15 min");
+    btn.addEventListener("click", () => openDeep());
+    deepBox = h("div");
+    deepBox.append(glance, map, btn);
+    ladder.append(rung("Deep read", deepBox, "deep"));
+  }
+  ladder.append(rung("The paper", `<div class="p-links"><a>arXiv page ↗</a><a>PDF ↗</a><a>LaTeX source ↗</a></div><div class="why0" style="margin-top:8px">Preprint only, as far as DBLP knows · Paste a DOI</div>`));
+
+  const R = rail(P, state.v === "B" ? null : secs);
+  cols.append(R.el);
+  if (state.v !== "B") Deep.toc(secs, strip);
+
+  // the rail's Gist moves in once the ladder's has scrolled away; the Deep read's contents light up while it is read
+  gistObs?.disconnect(); deepObs?.disconnect();
+  gistObs = new IntersectionObserver(([e]) => R.gist.classList.toggle("up", !e.isIntersecting && e.boundingClientRect.top < 0));
+  gistObs.observe(gistR);
+  if (state.v !== "B") {
+    deepObs = new IntersectionObserver(([e]) => {
+      R.toc?.classList.toggle("away", !e.isIntersecting);
+      strip.classList.toggle("hidden", !e.isIntersecting);
+    }, { rootMargin: "-40% 0px -40% 0px" });
+    deepObs.observe(deepBox);
+  }
+}
+
+function openDeep(at) {
+  state.view = "deep";
+  const card = CARDS[state.paper];
+  const main = document.getElementById("main");
+  main.innerHTML = "";
+  main.append(h("div", { class: "p-ptop" }, `<span>‹</span><span class="t">Deep read · ${card.title}</span>`));
+  const back = h("span", { class: "p-back" }, `‹ ${card.title}`);
+  back.addEventListener("click", () => { state.view = "page"; renderPage(); window.scrollTo(0, 0); });
+  main.append(back);
+  const root = h("div");
+  main.append(root);
+  Deep.render(root, card, { layout: "open", claims: "all" });
+  root.style.padding = "0";
+  root.querySelector(".crumb").textContent = "Deep read";
+  if (at) document.getElementById(at)?.scrollIntoView(); else window.scrollTo(0, 0);
+}
+
+function apply(keep) {
+  const y = window.scrollY;
+  if (state.theme === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = state.theme;
+  document.querySelectorAll("#sk button").forEach((b) => b.classList.toggle("on", state[b.dataset.k] === b.dataset.v));
+  state.view = "page";
+  renderPage();
+  history.replaceState(null, "", "?" + new URLSearchParams({ paper: state.paper, v: state.v, theme: state.theme }));
+  if (keep) window.scrollTo(0, y); else window.scrollTo(0, 0);
+}
+document.getElementById("sk").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  const keep = b.dataset.k === "theme";
+  state[b.dataset.k] = b.dataset.v;
+  apply(keep);
+});
+apply(false);
+</script>
+</body>
+</html>

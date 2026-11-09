@@ -20,7 +20,7 @@ withdraws it too: it is dropped.
 
 **Dropped**:
 A paper litwatch no longer processes: the owner dismissed it, or arXiv withdrew it. It is never classified, analysed,
-graded or given a full-text pass or Deep card again, never due in a digest, and out of every list and search; its page,
+graded or given a full-text pass or Deep read again, never due in a digest, and out of every list and search; its page,
 asked for by id, still shows it.
 _Avoid_: archived, removed
 
@@ -76,7 +76,7 @@ incremental. Judged from the abstract for every paper, and judged again from the
 re-check.
 
 **Full-text pass**:
-Any work that reads a paper's full text rather than its abstract (a Brief, a Weight re-check, a Deep card); it runs
+Any work that reads a paper's full text rather than its abstract (a Brief, a Weight re-check, a Deep read); it runs
 as soon as the text is available, and until then the paper is awaiting text.
 
 **Grade**:
@@ -127,7 +127,7 @@ _Avoid_: Saved list, reading list
 
 **Detail level**:
 One rung of the ladder of text about a paper or a digest, each answering "is it worth going one level deeper?" with
-more evidence than the last. A paper's: Mark, Gist, Brief, Deep card, then the paper itself. A digest's: Mark, Gist,
+more evidence than the last. A paper's: Mark, Gist, Brief, Deep read, then the paper itself. A digest's: Mark, Gist,
 then the digest itself. A rung's name is its role; its length depends on how many items are scanned at once.
 _Avoid_: LoD, summary level
 
@@ -147,13 +147,16 @@ the full text by a Brief pass or a Weight re-check (for a Focus paper at central
 candidate).
 _Avoid_: Semi-deep, summary
 
-**Deep card** (L3):
-An account of a paper thorough enough to stand in for reading most of it, placed among the papers around it; made
-for a selected few.
-_Avoid_: Deep, reading card
+**Deep read** (L3):
+An account of a paper thorough enough to stand in for reading it: its method and results at close to the paper's
+own detail, with the paper's reasons for its choices, a verdict on each of its claims, figures, tables and diagrams,
+and its place among the papers around it; made for a selected few ([specs/deep-read.md](docs/specs/deep-read.md)).
+Also the action that asks for one.
+_Avoid_: Deep, reading card. **Deep card** is only the earlier, shorter format, kept on the papers that have one until
+they are written again.
 
 **Process note**:
-A line on a Deep card saying what the Deep agent could not do because of its tools, access, budget or input (the
+A line on a Deep read saying what the Deep agent could not do because of its tools, access, budget or input (the
 text it was given was cut or unreadable), as against a limitation, which is the paper's own.
 _Avoid_: Process limitation, Deep note (Deep notes is only Needs you's group of them)
 
@@ -162,7 +165,6 @@ _Avoid_: Process limitation, Deep note (Deep notes is only Needs you's group of 
 **Notion export**:
 The Notion database the `notion` integration keeps for a reader who does not use litwatch. It uses its own plain
 words, and only there: **Must read** and **Worth a look** for the grades must read and relevant, **No longer
-listed** for a paper that fell below them, **TL;DR** for the Gist, **Deep read** for the Deep card; a page shows the
-abstract, not the Brief.
-_Avoid_: Worth a look, No longer listed and TL;DR anywhere else. Must read is the grade's own name everywhere; Deep
-read keeps its web-app meaning elsewhere: the action that asks for a Deep card.
+listed** for a paper that fell below them, **TL;DR** for the Gist; its **Deep read** is a short form of the Deep
+read. A page shows the abstract, not the Brief.
+_Avoid_: Worth a look, No longer listed and TL;DR anywhere else. Must read is the grade's own name everywhere.
