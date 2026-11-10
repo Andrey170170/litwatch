@@ -9,9 +9,10 @@ import httpx
 import pytest
 
 from litwatch import events, store
-from litwatch.api import create_app
+from litwatch.api import create_app, monitor
 from litwatch.config import Config
 from litwatch.core import SearchHit
+from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.integrations.webhook import Webhook
 from litwatch.store import integrations as state
 from litwatch.store import outbox
@@ -145,6 +146,20 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
     await deliver(conn, carder)
     cards = {c["name"]: c for c in (await client.get("/api/settings/integrations")).json()}
     assert cards["carder"]["failing"] is None and cards["carder"]["skipped"] == 1
+
+
+async def test_an_integration_that_reacts_to_no_event_is_never_shown_behind(conn, make):
+    # A cursor deep kept from when the dispatcher ran it, with events written since.
+    await outbox.cursor(conn, "deep")
+    await events.emit(conn, events.PAPER_SAVED, P.id)
+    await settled(conn)
+    healthy = httpx.MockTransport(lambda r: httpx.Response(200, json={"auth": {"state": "ok"}}))
+    deep = Deep(DeepClient("http://deep.test", http=httpx.AsyncClient(transport=healthy)))
+    client = await make([deep])
+    cards = (await client.get("/api/settings/integrations")).json()
+    assert [(c["name"], c["lag"], c["failing"]) for c in cards] == [("deep", 0, None)]
+    assert "deep" not in (await monitor.facts(conn, Config(), [deep], None)).cursors
+    await deep.aclose()
 
 
 async def test_a_card_request_needs_an_integration_that_answers_it(conn, make):

@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from litwatch import fulltext
+from litwatch import events, fulltext
 from litwatch.api import digests, jobs, mcp, reading, settings, summary
 from litwatch.api import integrations as integrations_api
 from litwatch.archive import ArchiveClient
@@ -36,8 +36,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start the scheduler and the jobs worker with the service when the configuration enables
     them, with the full-text worker when an archive is configured too (it calls models and has
     the archive fetch, so, like the schedule, it waits for cutover) and the Deep card worker
-    when a card provider is loaded as well, the integrations' dispatcher when any is loaded, and
-    the MCP server (its session manager and PDF executor) while `/mcp` is served."""
+    when a card provider is loaded as well, the integrations' dispatcher when any that reacts to
+    events is loaded, and the MCP server (its session manager and PDF executor) while `/mcp` is
+    served. Every integration is closed once all of them have stopped."""
     tasks = []
     enabled = app.state.config.schedule.enabled
     archive = app.state.archive if enabled else None
@@ -86,10 +87,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 )
             )
         )
-    if app.state.integrations:
-        tasks.append(
-            asyncio.create_task(dispatch.run_forever(app.state.dsn, app.state.integrations))
-        )
+    if reacting := events.reacting(app.state.integrations):
+        tasks.append(asyncio.create_task(dispatch.run_forever(app.state.dsn, reacting)))
     try:
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield
@@ -100,6 +99,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         app.state.search_pool.shutdown(wait=False, cancel_futures=True)
+        for integration in app.state.integrations:
+            if close := getattr(integration, "aclose", None):
+                with contextlib.suppress(Exception):
+                    await close()
         if app.state.archive is not None:
             await app.state.archive.aclose()
 
@@ -118,7 +121,8 @@ def create_app(
     """The app over one database. Every request but the health check and signing in needs
     the shared token, as a bearer header or the cookie set by `/api/session`; `read_token`,
     when given, may only read papers (`deps.READABLE`). `integrations` are the loaded ones:
-    the dispatcher delivers to them and search asks those that are search providers.
+    the dispatcher delivers to those that react to events, search asks those that are search
+    providers, and the app closes them all when it stops.
     `archive` serves the PDFs the owner opens, and the full-text queue's texts; the app
     closes it when it stops. `mcp_token`, when given, serves the MCP server at `/mcp`
     (`api.mcp`), which takes that token alone, as `/api` never does."""

@@ -5,7 +5,9 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 
 from litwatch import events, store
+from litwatch.api import create_app
 from litwatch.events import dispatch
+from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.store import outbox
 from tests.conftest import deliver, start
 
@@ -236,3 +238,28 @@ async def test_an_integration_with_nothing_to_handle_gets_its_idle_call(conn, mo
         with contextlib.suppress(asyncio.CancelledError):
             await task
     assert not await dispatch.idle(conn, Recorder())  # no hook, nothing to call
+
+
+async def test_the_app_dispatches_only_what_reacts_to_events_and_closes_every_integration(
+    monkeypatch,
+):
+    deep = Deep(DeepClient("http://deep.test"))
+    recorder = Recorder()
+    closed = []
+
+    async def aclose():
+        closed.append(recorder.name)
+
+    recorder.aclose = aclose
+    handed = []
+
+    async def run_forever(dsn, integrations):
+        handed.extend(integrations)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(dispatch, "run_forever", run_forever)
+    app = create_app("postgresql://unused", "t", integrations=[deep, recorder])
+    async with app.router.lifespan_context(app):
+        await asyncio.sleep(0)
+    assert handed == [recorder]
+    assert deep.client.http.is_closed and closed == ["recorder"]

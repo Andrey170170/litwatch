@@ -1,4 +1,5 @@
-"""Integrations: everything outside the core that reacts to events. Each is off unless
+"""Integrations: everything outside the core that reacts to events, and deep, which the
+full-text queue's Deep passes call. Each is off unless
 configured, and each is one module with a `load` function:
 
     def load(name: str, options: dict[str, Any], config: Config) -> Integration
