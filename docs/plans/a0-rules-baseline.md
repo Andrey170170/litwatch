@@ -18,8 +18,8 @@ Three stages, in order. The review's small fixes run alongside all three, one PR
   Policies, `store` Repositories, `llm` is the Model gate, `api` and `cli` are Entries, and every other package
   counts as Services (mixed today). Finer, per-module rules come as each milestone gives its modules role names (D1).
 - **Four rules in A0:**
-  - `core` imports nothing of litwatch;
-  - `store` imports only `core`;
+  - `core` imports nothing of litwatch outside `core`;
+  - `store` imports only `core` and itself;
   - a gate (`llm` today) imports no Service package and no Entry;
   - nothing imports an Entry (`cli` may import `api`, both being Entries).
 
