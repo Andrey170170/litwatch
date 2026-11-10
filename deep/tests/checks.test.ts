@@ -301,6 +301,23 @@ test("a place code does not look up is the reviewer's, by name: an equation, an 
   // a class that numbers its sections in Roman numerals: "Sec. IV" is a place, the reviewer's to look up
   const ieee = BODY.replace("\\documentclass{article}", "\\documentclass[journal]{IEEEtran}");
   assert.deepEqual(left("Sec. IV", { paper: ieee }), [[], ["§3", "§IV"]]);
+  // and its tables in Roman numerals
+  assert.deepEqual(left("Table II", { paper: ieee }), [[], ["§3", "Table II"]]);
+});
+
+test("the paper's places in prose are held as a location's are, and Related work's are other papers'", () => {
+  const prose = check(saying("See Section 9999 and Eq. 9999 for the setup."), ctx());
+  assert.deepEqual([prose.errors, prose.unverified], [["/sections/1/blocks/0/text: cites §9999, but the paper has no section 9999"], ["Eq. 9999"]]);
+  assert.deepEqual(check(saying("Section 2 sets it up."), ctx()), { errors: [], plots: [], unverified: [] });
+  const related = changed((d) => ((d.sections.find((s) => s.kind === "related") as unknown as { takeaway: string }).takeaway = "Their Section 9 and Eq. 4 differ."));
+  assert.deepEqual(check(related, ctx()), { errors: [], plots: [], unverified: [] });
+});
+
+test("a table ctable makes is one of the paper's", () => {
+  const ctable = BODY.replace(/\\begin\{table\}[\s\S]*?\\end\{table\}/g, "\\ctable[caption={Accuracy},label={tab:main}]{cc}{}{a & b \\\\}");
+  assert.ok(!/\\begin\{table/.test(ctable), "the fixture's tables are all ctable's");
+  const cited = check(saying("The totals are in Table 1."), ctx({ paper: ctable }));
+  assert.deepEqual([cited.errors, cited.unverified], [[], ["Table 1"]]);
 });
 
 test("a PDF's text refuses no section: a number a line opens with is there, and any other is the reviewer's", () => {

@@ -214,8 +214,8 @@ What submit checks beyond the schema:
 many cells as the table has columns; each edge between nodes the diagram has.
 - Places: a fig block's name is a figure figure() or crop() made in this session, and its number is the paper's ("Figure \
 6"). Every where names a place: a section or an appendix by its number as sections() gives it ("§3.2", "Appendix B.1") or \
-by its title, a figure or table, an equation, a page. A figure, table or section number that a LaTeX source's own numbering \
-rules out is refused; a place code cannot look up goes to the reviewer by name.
+by its title, a figure or table, an equation, a page. A figure, table or section number the read cites, in a where or in \
+prose, that a LaTeX source's own numbering rules out is refused; a place code cannot look up goes to the reviewer by name.
 - Numbers: every number written in digits that the read gives as the paper's (a result, a setting, a count) appears in the \
 paper's text, in any common form (0.34 or 34%, .95 or 0.95, 1,200 or 1.2k, rounded to fewer places): in prose, captions, \
 facts and their tags, tables and diagrams. A value read off a plot cites its figure in the same sentence ("about 0.7 at \
@@ -299,7 +299,7 @@ somewhere in the paper's text; and, where the paper's LaTeX source shows them, t
 exist.
 What code has not checked, which is yours:
 - The places the message lists as not confirmed. Code looks up no equation, algorithm, theorem, footnote, page or line, no \
-place of a paper read from its PDF that the text does not itself name, and no label under numbering the source sets itself: \
+figure or table numbered in Roman numerals, no place of a paper read from its PDF that the text does not itself name, and no label under numbering the source sets itself: \
 it names each for you to check against the paper.
 - These numbers, which the number check leaves out: whole numbers under ten; years; every number in Related work; an \
 equation's TeX; the reading time; a table caption's counts of the rows and columns the read kept; the read's own headings \

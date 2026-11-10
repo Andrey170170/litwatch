@@ -283,9 +283,9 @@ function inlineTex(text: string): string[] {
   return out;
 }
 
-/** A numbered place code does not look up: an equation, an algorithm, a theorem, a footnote, a page, a line. It
- * has the form of a place; whether the paper has it is the reviewer's to check, by name. */
-const OTHER_PLACE = /\b(?:Eqs?\.?|Equations?|Alg(?:orithm|\.)s?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|pp?\.|[Pp]ages?|[Ll]ines?)\s*\(?[A-Z]?\.?\d+(?:\.\d+)*[a-z]?\)?/g;
+/** A numbered place code does not look up: an equation, an algorithm, a theorem, a footnote, a page, a line, and a
+ * figure or table numbered in Roman numerals (IEEEtran's tables). It has the form of a place; whether the paper has it is the reviewer's to check, by name. */
+const OTHER_PLACE = /\b(?:Eqs?\.?|Equations?|Alg(?:orithm|\.)s?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|pp?\.|[Pp]ages?|[Ll]ines?)\s*\(?[A-Z]?\.?\d+(?:\.\d+)*[a-z]?\)?|\b(?:Fig(?:ure)?s?\.?|Tables?|Tabs?\.)\s*[IVX]{1,6}\b/g;
 /** How a table's caption says the read cut the paper's table, which the spec asks it to say: the rows and columns
  * kept, counted ("11 of its 12 rows", "the first 5 columns"). The counts are the read's own. */
 const CUT_COUNTS = /(?<![\d.,])\d+(?:\s+of\s+(?:(?:its|the|all)\s+)?\d+)?\s+(?:[a-z-]+\s+)?(?:rows?|columns?)\b/gi;
@@ -369,7 +369,8 @@ export function check(read: Draft, ctx: CheckContext): Checked {
       const text = plainText(unit.text);
       const cited = cites(text);
       for (const c of cited) settle(unit.path, `${c.kind === "figure" ? "Figure" : "Table"} ${c.label}`, index.float(c.kind, c.label));
-      if (unit.where) {
+      // the paper's places in a location and in prose given as the paper's (Related work cites other papers')
+      if (unit.where || unit.numbers) {
         const sections = sectionCites(text);
         for (const c of sections) {
           if (c.label !== undefined) settle(unit.path, c.appendix ? `Appendix ${c.label}` : `§${c.label}`, index.section(c.label));
@@ -377,9 +378,9 @@ export function check(read: Draft, ctx: CheckContext): Checked {
         }
         const others = [...text.matchAll(OTHER_PLACE)].map((m) => m[0].replace(/\s+/g, " "));
         for (const other of others) unverified.add(other);
-        // nothing in it has the form of a place, and no heading is named: no place where the paper's headings are
-        // all known, and the reviewer's to judge where they are not
-        if (cited.length + sections.length + others.length === 0 && !index.named(text)) {
+        // nothing in a location has the form of a place, and no heading is named: no place where the paper's
+        // headings are all known, and the reviewer's to judge where they are not
+        if (unit.where && cited.length + sections.length + others.length === 0 && !index.named(text)) {
           if (index.outlined) errors.push(`${unit.path}: "${unit.text}" names no place in the paper: give a numbered section, figure, table, appendix, equation or page of the paper, or a section by its title`);
           else unverified.add(`the location "${unit.text}"`);
         }

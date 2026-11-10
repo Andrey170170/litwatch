@@ -182,6 +182,8 @@ export class PaperIndex {
       add(m.index, (body.match(/\\caption\s*[[{]/g) ?? []).length, 1);
     }
     for (const m of this.text.matchAll(new RegExp(`\\\\captionof\\s*\\{${kind}\\}`, "g"))) add(m.index, 1, 1);
+    // ctable's table, captioned in its options or not at all
+    if (kind === "table") for (const m of this.text.matchAll(/\\ctable\b/g)) add(m.index, 0, 1);
     return { sure, most, plain: !ownFloatNumbering(this.text, kind) };
   }
 
