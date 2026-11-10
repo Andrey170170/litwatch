@@ -27,9 +27,10 @@
 
 /* ── sections as rungs ───────────────────────────────────────────────────────────────────────── */
 .dread > .rung.dr-head { margin-bottom: 4px; }
-.dread > .rung.dr-sec { margin: 0; padding: 12px 0 6px; border-top: 1px solid var(--line2); scroll-margin-top: 12px; }
+/* top-aligned, not on the first baseline: a section that opens with a diagram or a table keeps its name at its top */
+.dread > .rung.dr-sec { margin: 0; padding: 12px 0 6px; border-top: 1px solid var(--line2); scroll-margin-top: 12px; align-items: start; }
 /* the colour square hangs left of the name, so a long name wraps under itself and its first line keeps the body's */
-.dread > .rung.dr-sec > .rl { display: block; position: relative; padding-left: 14px; color: var(--sc); font-size: 11px; line-height: 1.45; letter-spacing: 0.1em; overflow-wrap: anywhere; }
+.dread > .rung.dr-sec > .rl { display: block; position: relative; margin-top: 4px; padding-left: 14px; color: var(--sc); font-size: 11px; line-height: 1.45; letter-spacing: 0.1em; overflow-wrap: anywhere; }
 .dread > .rung.dr-sec > .rl::before { content: ""; position: absolute; left: 0; top: 0.32em; width: 8px; height: 8px; background: var(--sc); }
 .dread .src { color: var(--fg3); font-size: 12px; }
 .dread code { font: 12.5px var(--font-mono); padding: 0 3px; background: var(--line2); }
@@ -161,8 +162,8 @@
 /* the claims ledger: holds is quiet, the other verdicts are filled */
 .dread .dr-claims { margin: 0 0 8px; }
 .dread .dr-cl { border-bottom: 1px solid var(--line2); }
-.dread .dr-cl > button { display: flex; width: 100%; gap: 10px; align-items: flex-start; text-align: left; padding: 7px 0; font-size: 14px; line-height: 1.45; }
-.dread .dr-cl > button:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.dread .dr-cl > .row { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; font-size: 14px; line-height: 1.45; cursor: pointer; }
+.dread .dr-cl > .row:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
 .dread .dr-cl .chip { flex: none; display: inline-flex; align-items: center; gap: 5px; min-width: 104px; padding: 1px 7px; font: 700 10.5px var(--font-name); letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid var(--vc); color: var(--vc); margin-top: 1px; white-space: nowrap; }
 /* each verdict's text keeps 4.5:1 against its chip: the light theme's green is darkened, and a filled chip's text
    is the page's ink unless the verdict sets its own */
@@ -173,7 +174,7 @@
 .dread .dr-cl[data-v="over"] { --vc: var(--sig); --vf: light-dark(#fff, var(--bg)); }
 .dread .dr-cl .ev { padding: 0 0 10px 114px; font-size: 13px; line-height: 1.55; color: var(--fg2); }
 @media (max-width: 55.99rem) {
-  .dread .dr-cl > button { min-height: 40px; flex-wrap: wrap; gap: 4px 10px; }
+  .dread .dr-cl > .row { min-height: 40px; flex-wrap: wrap; gap: 4px 10px; }
   .dread .dr-cl .chip { min-width: 0; }
   .dread .dr-cl .ev { padding-left: 0; }
 }

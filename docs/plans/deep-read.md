@@ -138,3 +138,15 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 - The archive keeping figures (D2).
 - A Deep quality harness, which goes to the backlog (D3).
 - Sharing the prose rules between Python and TypeScript, also backlog.
+
+## Notes for later stages
+
+Found while building, owned by the stage named.
+
+- **P3:** the figure endpoint answers 404 for a name the read doesn't have. litwatch checks a submitted read's format tag before storing it.
+- **P4:**
+  - `submit` validates against a variant of the read schema: process notes the model may write (no `review` kind, no `service` source), and diagram coordinates optional until elkjs lays the diagram out.
+  - The code checks also cover edges that name existing nodes, unique ids, each table row's cell count against its columns, and verdict anchors.
+  - Diagram nodes are at least 40 px tall, so they stay tappable on the phone.
+  - The exported schema is about 29 KB; mind it in the prompt.
+  - `renderRead()` resolves before a figure that fails to decode has swapped to its placeholder. Render only figures `figure()` or `crop()` produced, or wait for the image's error before the screenshot.

@@ -9,42 +9,70 @@ import { sectionMark, type Section } from "./types";
 /** A section rung's element id, by the section's own. */
 export const sectionId = (id: string) => `dr-${id}`;
 
-/** Which section of the read is being read, and whether the read is in view at all. A section is current while it
- * crosses a band a third of the way down the view; where two do (one ends, the next begins), the later one is.
- * Between sections the last one stays. */
+/** The nearest ancestor that scrolls (the app's `.main`, the phone's `.scroll`), or null for the page itself. */
+function scrollerOf(el: Element): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (/(auto|scroll)/.test(getComputedStyle(p).overflowY)) return p;
+  }
+  return null;
+}
+
+/** Which section of the read is being read, and whether the read is in view at all. The section being read is the
+ * last one whose top has passed the line a section lands on when its contents entry is clicked (its scroll margin
+ * under the scroller's top); between sections the last one stays. At the end of the scroll the last section is
+ * the one being read, if it is in sight, since it may never reach that line. A click's section stays lit until the
+ * reader scrolls on, even when the scroll could not bring it to the line. */
 export function useReadSpy(sections: Section[]): { current: string | null; inView: boolean; go: (id: string) => void } {
   const [current, setCurrent] = useState<string | null>(null);
   const [inView, setInView] = useState(false);
+  // where the scroller stood after a click, and so whether the reader has scrolled since
+  const pinned = useRef<number | null>(null);
+  const position = useRef<() => number>(() => 0);
   const ids = sections.map((s) => s.id).join(" ");
   useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") return;
-    const order = ids.split(" ");
-    const els = order.map((id) => document.getElementById(sectionId(id))).filter((el): el is HTMLElement => el !== null);
+    const els = ids
+      .split(" ")
+      .map((id) => document.getElementById(sectionId(id)))
+      .filter((el): el is HTMLElement => el !== null);
     const read = els[0]?.closest(".dread");
     if (!read) return;
-    const crossing = new Set<string>();
-    const spy = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          const id = (e.target as HTMLElement).dataset.section!;
-          if (e.isIntersecting) crossing.add(id);
-          else crossing.delete(id);
-        }
-        const last = order.findLast((id) => crossing.has(id));
-        if (last) setCurrent(last);
-      },
-      { rootMargin: "-30% 0px -60% 0px" },
-    );
-    els.forEach((el) => spy.observe(el));
-    const view = new IntersectionObserver(([e]) => e && setInView(e.isIntersecting), { rootMargin: "-40% 0px -40% 0px" });
-    view.observe(read);
+    const box = scrollerOf(read);
+    const pos = () => (box ? box.scrollTop : window.scrollY);
+    position.current = pos;
+    const pick = () => {
+      if (pinned.current !== null) {
+        if (Math.abs(pos() - pinned.current) < 4) return;
+        pinned.current = null;
+      }
+      const view = box ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      const end = box ? box.scrollHeight - box.clientHeight : document.documentElement.scrollHeight - window.innerHeight;
+      const last = els[els.length - 1]!;
+      if (pos() > 0 && pos() >= end - 2 && last.getBoundingClientRect().top < view.bottom) {
+        setCurrent(last.dataset.section!);
+        return;
+      }
+      const line = view.top + (parseFloat(getComputedStyle(els[0]!).scrollMarginTop) || 0) + 8;
+      const passed = els.findLast((el) => el.getBoundingClientRect().top <= line);
+      if (passed) setCurrent(passed.dataset.section!);
+    };
+    const target = box ?? window;
+    target.addEventListener("scroll", pick, { passive: true });
+    window.addEventListener("resize", pick);
+    pick();
+    let view: IntersectionObserver | undefined;
+    if (typeof IntersectionObserver !== "undefined") {
+      view = new IntersectionObserver(([e]) => e && setInView(e.isIntersecting), { rootMargin: "-40% 0px -40% 0px" });
+      view.observe(read);
+    }
     return () => {
-      spy.disconnect();
-      view.disconnect();
+      target.removeEventListener("scroll", pick);
+      window.removeEventListener("resize", pick);
+      view?.disconnect();
     };
   }, [ids]);
   const go = (id: string) => {
     document.getElementById(sectionId(id))?.scrollIntoView({ block: "start" });
+    pinned.current = position.current();
     setCurrent(id);
   };
   return { current, inView, go };

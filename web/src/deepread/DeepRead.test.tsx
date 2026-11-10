@@ -60,12 +60,22 @@ class Observer {
     act(() => this.callback([{ target: el, isIntersecting, boundingClientRect: { top: 0 } as DOMRectReadOnly }]));
   }
 }
-/** Scroll a section's rung into, or out of, the band the contents watch; `.dread` for the read as a whole. */
+/** Scroll the read in or out of view (`inView`), as the contents' dimming sees it. */
 function see(selector: string, inView = true) {
   const el = document.querySelector(selector)!;
   const watching = Observer.all.filter((o) => o.watched.has(el));
   expect(watching).toHaveLength(1);
   watching[0]!.see(el, inView);
+}
+/** Scroll the page with its sections laid out as jsdom cannot: each named section's top in the view, every other
+ * one far below; `end` stands the page at the end of its scroll. */
+function layout(tops: Record<string, number>, end = false) {
+  for (const el of document.querySelectorAll<HTMLElement>(".dread > .rung.dr-sec")) {
+    el.getBoundingClientRect = () => ({ top: tops[el.dataset.section!] ?? 5000 }) as DOMRect;
+  }
+  Object.defineProperty(window, "scrollY", { value: end ? 4000 : 100 + Object.keys(tops).length, configurable: true });
+  Object.defineProperty(document.documentElement, "scrollHeight", { value: end ? 4000 + window.innerHeight : 99999, configurable: true });
+  act(() => window.dispatchEvent(new Event("scroll")));
 }
 const scrolled = vi.fn();
 
@@ -75,6 +85,12 @@ beforeEach(() => {
   scrolled.mockClear();
   Element.prototype.scrollIntoView = function (this: Element) {
     scrolled(this.id);
+  };
+  // the page at its top, every section below the view, until a test lays them out
+  Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
+  delete (document.documentElement as { scrollHeight?: number }).scrollHeight;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    return { top: this.classList.contains("dr-sec") ? 5000 : 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 } as DOMRect;
   };
 });
 
@@ -140,19 +156,23 @@ describe("a paper's Deep read", () => {
     expect(toc).toHaveClass("away");
     see(".dread");
     expect(toc).not.toHaveClass("away");
-    see("#dr-env");
+    // the section being read is the last whose top has passed the line a click lands one on
+    layout({ glance: -900, problem: -300, env: 5 });
     expect(current()).toEqual(["The environment"]);
-    // where one section ends and the next begins, the later one is the one being read
-    see("#dr-taxonomy");
+    layout({ glance: -900, problem: -300, env: -200, taxonomy: 20 });
+    expect(current()).toEqual(["The environment"]);
+    layout({ glance: -900, problem: -300, env: -400, taxonomy: 6 });
     expect(current()).toEqual(["The taxonomy"]);
-    see("#dr-taxonomy", false);
-    expect(current()).toEqual(["The environment"]);
-    // between sections the last one stays
-    see("#dr-env", false);
-    expect(current()).toEqual(["The environment"]);
+    // a click lights its section even where the scroll can't bring it to the line, until the reader scrolls on
     await userEvent.click(within(toc).getByRole("button", { name: "Claims" }));
     expect(scrolled).toHaveBeenCalledWith("dr-claims");
     expect(current()).toEqual(["Claims"]);
+    act(() => window.dispatchEvent(new Event("scroll")));
+    expect(current()).toEqual(["Claims"]);
+    // at the end of the scroll the last section is the one being read, though it never reached the line
+    const last = scarce.sections.at(-1)!;
+    layout({ ...Object.fromEntries(scarce.sections.map((s) => [s.id, -500])), [last.id]: 400 }, true);
+    expect(current()).toEqual([last.title]);
     see(".dread", false);
     expect(toc).toHaveClass("away");
     // the phone's strip is not on the desktop
@@ -170,7 +190,7 @@ describe("a paper's Deep read", () => {
     expect(chips.map((c) => c.textContent)).toEqual(scarce.sections.map((s) => s.title));
     expect(strip.querySelector(".cur")).toBeNull();
     scrollTo.mockClear();
-    see("#dr-who");
+    layout({ glance: -900, problem: -600, env: -400, taxonomy: -200, who: 4 });
     expect(within(strip).getByRole("button", { current: "location" })).toHaveTextContent("Finding 1 · Who builds institutions");
     expect(scrollTo.mock.contexts).toContain(strip);
     await userEvent.click(within(strip).getByRole("button", { name: "Limitations" }));
@@ -182,11 +202,11 @@ describe("a paper's Deep read", () => {
   it("shows every claim on one line, its verdict first, holds quiet and the rest filled, the evidence opening on a click", async () => {
     await open();
     const ledger = within(rung("claims"));
-    const rows = ledger.getAllByRole("button");
-    expect(rows).toHaveLength(8);
-    expect(rows.map((r) => r.querySelector(".chip")!.textContent!.replace(/^\S+\s/, ""))).toEqual(["holds", "partly", "not shown", "holds", "partly", "holds", "holds", "partly"]);
-    for (const row of rows) expect(row.querySelector(".chip")!.classList.contains("solid")).toBe(!row.textContent!.includes("holds"));
-    const claim = ledger.getByRole("button", { name: /These arrangements carry across tasks/ });
+    const chips = ledger.getAllByRole("button");
+    expect(chips).toHaveLength(8);
+    expect(chips.map((c) => c.textContent!.replace(/^\S+\s/, ""))).toEqual(["holds", "partly", "not shown", "holds", "partly", "holds", "holds", "partly"]);
+    for (const chip of chips) expect(chip.classList.contains("solid")).toBe(!chip.textContent!.includes("holds"));
+    const claim = chips.find((c) => /These arrangements carry across tasks/.test(document.getElementById(c.getAttribute("aria-describedby")!)!.textContent!))!;
     expect(claim).toHaveAttribute("aria-expanded", "false");
     expect(ledger.queryByText(/before memory across subruns exists/)).toBeNull();
     await userEvent.click(claim);
@@ -195,8 +215,19 @@ describe("a paper's Deep read", () => {
     expect(ledger.getByText("· Abstract; §5.3, Tables 1–2")).toBeInTheDocument();
     // one open claim opens no other
     expect(ledger.queryByText(/no measure ties institutional behaviour/)).toBeNull();
-    await userEvent.click(claim);
+    // a click on the claim's line closes it too, and a link in a claim only follows the link
+    await userEvent.click(ledger.getByText(/These arrangements carry across tasks/));
     expect(ledger.queryByText(/before memory across subruns exists/)).toBeNull();
+  });
+
+  it("keeps a link in a claim out of the claim's toggle", async () => {
+    const sections = scarce.sections.map((s) => (s.kind === "claims" ? { ...s, claims: [{ ...s.claims![0]!, text: "Released as [the code](https://example.org/code)." }] } : s));
+    await open({ ...paper, card: { card: { ...scarce, sections }, ...written, among } });
+    const ledger = within(rung("claims"));
+    const link = ledger.getByRole("link", { name: "the code" });
+    expect(link.closest("button")).toBeNull();
+    fireEvent.click(link);
+    expect(ledger.getByRole("button", { name: /holds/ })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("shows a table cell's note on hover and on tap, lights the column under the pointer, and colours a heat table by value", async () => {
