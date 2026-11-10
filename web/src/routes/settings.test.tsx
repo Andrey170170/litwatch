@@ -156,16 +156,18 @@ describe("Settings", () => {
     await screen.findByText("Updating…");
     expect(fetched("/api/settings/quality")).toBe(2);
     // To the paper and back before the read lands: still the cached rows, still updating; then they update in place.
+    // The read left behind was aborted with the page, and the way back asks again.
     await userEvent.click(screen.getByRole("link", { name: "A stuck paper" }));
     await screen.findByRole("heading", { name: "A stuck paper" });
     router.history.back();
     expect((await screen.findByRole("link", { name: "A stuck paper" })).closest(".need")).toHaveClass("settled");
     expect(screen.queryByText("Loading…")).toBeNull();
+    const asked = fetched("/api/settings/quality");
     land();
     await waitFor(() => expect(screen.queryByRole("link", { name: "A stuck paper" })).toBeNull());
     expect(screen.getByText("2 things wait on the owner. Each also shows on its paper's page.")).toBeInTheDocument();
     expect(screen.queryByText("Updating…")).toBeNull();
-    expect(fetched("/api/settings/quality")).toBe(2);
+    expect(fetched("/api/settings/quality")).toBe(asked);
     // Through all of it the sidebar read the summary once more, after the write, and did not render again.
     expect(fetched("/api/summary")).toBe(2);
     expect(within(needs).getByText("3")).toBe(count);

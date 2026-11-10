@@ -67,7 +67,9 @@ const loaded = (pages: { rows: unknown[] }[]) => pages.reduce((n, p) => n + p.ro
 
 /** A list keeps its order for the visit (DESIGN.md, "Positions stay put"): never refetched on its own, not on focus,
  * reconnect or the way back from a paper, and kept half an hour after the reader leaves it. Actions patch rows in
- * place or invalidate on purpose; a page load starts afresh. */
+ * place or invalidate on purpose; a page load starts afresh. Every read hands React Query's `signal` to its fetch,
+ * so a read nobody shows any more (an outdated search, a page left before its read landed) is aborted, and asked
+ * again only if its page is shown again. */
 const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
 /** A page reached going forward (a link, not Back) is a fresh visit: its cached reads are marked stale, so the page
