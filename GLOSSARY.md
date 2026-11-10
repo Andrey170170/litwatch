@@ -172,8 +172,9 @@ full-text wave, an evaluation.
 
 **Work item**:
 One unit of work submitted to the Work gate, with a record of how it went; jobs, the nightly's steps, full-text
-passes, integration deliveries and downloads are all work items. From the rework's A2
-([specs/architecture.md](docs/specs/architecture.md)); the Jobs page then shows every work item, not only jobs.
+passes, integration deliveries and downloads are all work items. Work items and their records arrive with the
+rework's A2 ([specs/architecture.md](docs/specs/architecture.md)); from A4 the Jobs page shows every work item, not
+only jobs.
 _Avoid_: task, background job
 
 ## The Notion export
