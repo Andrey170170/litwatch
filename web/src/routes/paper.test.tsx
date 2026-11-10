@@ -31,7 +31,6 @@ const paper = {
   publication_by_owner: false,
   card_requestable: true,
 };
-const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
 /** Whether a text is on the page and not in the hidden half of the Brief rung's switch. */
 const shown = (text: string) => screen.queryAllByText(text).some((el) => !el.closest('[aria-hidden="true"]'));
 const brief = { id: 1, text: "The brief, from the full text.", overstatement: "The abstract overstates: the gain holds only for 7B models.", revision: 1, arxiv_version: 1, source: "latex", written_at: "2026-10-14T03:00:00Z" };

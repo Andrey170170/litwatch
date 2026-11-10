@@ -17,7 +17,6 @@ const row = (id: string, title: string) => ({
   saved: false,
   facets: null,
 });
-const status = { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 };
 
 afterEach(() => sessionStorage.clear());
 

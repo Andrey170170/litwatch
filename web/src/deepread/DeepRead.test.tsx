@@ -31,7 +31,6 @@ const paper = {
   publication_by_owner: false,
   card_requestable: true,
 };
-const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
 const among = [{ id: "2610.31985", title: "The Helpful Agent Problem", relation: "agrees", note: "Both see cooperation exceed what operators intended.", rarity: "rare", in_collection: true }];
 const written = { model: "gpt-6.1-sol", written_at: "2026-11-09T04:12:00Z", revision: 1, arxiv_version: 2, source: "latex" };
 const withRead = { ...paper, card: { card: scarce, ...written, among } };
