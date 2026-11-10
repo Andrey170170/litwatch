@@ -50,8 +50,8 @@ against a paper and Deep cards without a cap (#98), and a status document that s
 job (#102). Updated papers ([`docs/plans/updated-papers.md`](../../plans/updated-papers.md), decisions 77–79) are
 built and live since 2026-10-20: an old paper back with a new arXiv version is listed once per topic, folded under a
 digest's papers (#112, #115), and Needs you's groups fold (#106); follow-ups in
-[`docs/notes/updated-papers-follow-ups.md`](../../notes/updated-papers-follow-ups.md). Next: Deep's open web, traces
-and process notes ([`docs/plans/deep-open-web.md`](../../plans/deep-open-web.md), decisions 80–82), in three stages:
+[`docs/notes/updated-papers-follow-ups.md`](../../notes/updated-papers-follow-ups.md). Deep's open web, traces
+and process notes ([`docs/plans/deep-open-web.md`](../../plans/deep-open-web.md), decisions 80–82) are built, in three stages:
 the open web (#111) live since 2026-10-20, then traces (#119) and process notes (#121), deployed together the same
 day. The plan's R3 review, a week on (2026-10-27): 5 of 35 cards carried notes, all the model's, and no run met a
 service trigger. Two notes reported a 404 page and an empty repository, what the paper lacks, so the prompt now says
@@ -66,7 +66,7 @@ Code session given only a vague memory found the paper, read the sections asked 
 the milestone's check from another machine, with Claude Code and with Codex, through the dotfiles' client
 configuration.
 
-On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner reads 0.14 until the
+On 2026-10-14 the first v1's deployment was stopped (its database dumped first); the owner read 0.14 until the
 restart (decision 56).
 
 **N0 · Taxonomy, topics and evaluation labels.** [taxonomy.md](taxonomy.md) becomes the seed tree with its followed

@@ -52,7 +52,7 @@ graph (they belong to the archive, later). Sources other than arXiv. Mobile apps
 | [publications.md](publications.md) | Published versions on DBLP and BibTeX (carried over) |
 | [data.md](data.md) | Modules, data model, configuration |
 | [taxonomy.md](taxonomy.md) | The draft class tree |
-| [milestones.md](milestones.md) | Build order and checks; what changes for M7 and M8 |
+| [milestones.md](milestones.md) | Build order and checks; what is built and what comes next |
 | [decisions.md](decisions.md) | Numbered decisions, old and new, and what is still open |
 
 The web app's pages, look and components are not in this spec. They are [`DESIGN.md`](DESIGN.md), the second
