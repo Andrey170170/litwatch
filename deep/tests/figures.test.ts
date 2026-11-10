@@ -38,6 +38,15 @@ test("with no version from litwatch the figures come from the latest e-print, an
       assert.equal(figures.usedLatest, true);
       await figures.dispose();
     }
+    // the PDF litwatch holds, when it can't say the text's version, is no more the text's
+    const { figures, hosts } = session(url, null);
+    try {
+      await hosts.pdfPage!([1]);
+      assert.equal(asked.at(-1), "/api/papers/2610.00001/pdf Bearer secret");
+      assert.equal(figures.usedLatest, true);
+    } finally {
+      await figures.dispose();
+    }
   });
 });
 

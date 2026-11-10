@@ -147,7 +147,7 @@ export function serviceNotes(seen: ReadonlyMap<Held, { count: number; url?: stri
     budget: (n) => ({ kind: "budget", note: `The fetch budget of ${hostCfg.maxFetches} per paper was used up; ${times(n, "one more fetch was", "more fetches were")} refused.` }),
     timeout: () => ({ kind: "tool", note: `A cell ran past its ${opts.cellTimeoutMs / 1000} s limit, which ended the session and lost its state.` }),
     imaging: (n) => ({ kind: "tool", note: `${times(n, "An image", "images")} could not be made: the browser or litwatch's render page was not available, so the writer could not look at a figure or at what it drew.` }),
-    latest: () => ({ kind: "input", note: "litwatch could not say which arXiv version its text is of, so the figures were taken from the paper's latest version on arXiv." }),
+    latest: () => ({ kind: "input", note: "litwatch could not say which arXiv version its text is of, so the figures were taken from the latest version arXiv or litwatch had, which may not be the text's." }),
   };
   return [...seen].map(([held, { count, url }]) => ({ ...text[held](count), source: "service", ...(url ? { url } : {}) }));
 }

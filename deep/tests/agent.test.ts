@@ -562,7 +562,7 @@ test("figures from the latest e-print, and a render that could not be made, are 
     assert.deepEqual(asked, ["/e-print/2610.00001"], "no version to ask for");
     assert.deepEqual(outcome.result?.process_notes, [
       { kind: "tool", source: "service", note: "An image could not be made: the browser or litwatch's render page was not available, so the writer could not look at a figure or at what it drew." },
-      { kind: "input", source: "service", note: "litwatch could not say which arXiv version its text is of, so the figures were taken from the paper's latest version on arXiv." },
+      { kind: "input", source: "service", note: "litwatch could not say which arXiv version its text is of, so the figures were taken from the latest version arXiv or litwatch had, which may not be the text's." },
     ]);
   });
 });

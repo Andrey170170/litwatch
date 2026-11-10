@@ -48,8 +48,8 @@ export interface Made {
 export class Figures {
   /** The figures made so far, by name. */
   readonly made = new Map<string, Made>();
-  /** True once the e-print or the PDF was taken at arXiv's latest version because litwatch could not say which
-   * version its text is of. */
+  /** True once the e-print or the PDF was taken without a version, arXiv's latest or the one litwatch holds,
+   * because litwatch could not say which version its text is of. */
   usedLatest = false;
 
   private eprint: Promise<EprintFile[]> | undefined;
@@ -135,6 +135,7 @@ export class Figures {
         const read = await readCapped(resp.body as Parameters<typeof readCapped>[0], MAX_DOWNLOAD_BYTES);
         if (read.cut) throw new Error(`the paper's PDF is larger than ${MAX_DOWNLOAD_BYTES} bytes`);
         bytes = read.bytes;
+        if (!version) this.usedLatest = true;
       }
       const file = path.join(await this.scratch(), "paper.pdf");
       await writeFile(file, bytes);

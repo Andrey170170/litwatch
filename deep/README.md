@@ -132,7 +132,7 @@ validation, so the model can neither forge nor drop them, and what happened afte
 per kind of event, with how many times and the first URL concerned, for a fetch the network guard refused, a fetch
 failed on the network (DNS, the connection, a timeout, a body cut off; never an HTTP status, which is an answer),
 the fetch budget used up, a cell timeout, an image the browser or the render page was not there to make, and
-figures taken from arXiv's latest version; and the review's notes above. litwatch shows them folded on the read and in Needs you's Deep
+figures taken without the text's version; and the review's notes above. litwatch shows them folded on the read and in Needs you's Deep
 notes, and `litwatch deep notes` lists them; they go to neither Zotero nor Notion.
 
 The read places the paper among litwatch's collection (`among_collection`): papers it agrees with,
