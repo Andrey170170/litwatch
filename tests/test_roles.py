@@ -10,6 +10,7 @@ from functools import cache
 from pathlib import Path
 
 import grimp
+import pytest
 
 PYPROJECT = Path(__file__).parent.parent / "pyproject.toml"
 
@@ -124,4 +125,5 @@ def test_services_form_no_cycle():
         f"{a} -> {b} is no longer on a cycle; take it off CYCLES_BEFORE_THE_RULE"
         for a, b in sorted(CYCLES_BEFORE_THE_RULE - on_cycle.keys())
     ]
-    assert not problems, "\n".join(problems)
+    if problems:
+        pytest.fail("\n".join(problems), pytrace=False)
