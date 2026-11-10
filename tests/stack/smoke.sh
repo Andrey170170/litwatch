@@ -2,8 +2,9 @@
 # The stack smoke test (docs/agents/verification.md): a fresh stack from deploy/compose.yaml with
 # its own volumes, an empty archive seeded with real papers (papers.json) and their text, the
 # day's papers read into litwatch from the archive and classified by hand into the collection,
-# then pages.py: every page at both widths, and a Deep card from a fake deep service that
-# searched litwatch with the read token; then touch.py: the phone's gestures under real touch.
+# then pages.py: a Deep read with its figures, and a Deep card in the format from before, from a
+# fake deep service that searched litwatch with the read token, and every page at both widths;
+# then touch.py: the phone's gestures under real touch.
 #
 #   tests/stack/smoke.sh [OUT]    OUT keeps the screenshots and the stack's logs (./smoke-out)
 #

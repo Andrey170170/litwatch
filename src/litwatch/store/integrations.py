@@ -1,12 +1,16 @@
-"""The state the built-in integrations keep of their own: Zotero items, stored PDFs, deep cards."""
+"""The state the built-in integrations keep of their own: Zotero items, stored PDFs, deep cards
+(Deep reads among them, with their figures)."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
 import psycopg
 from psycopg.types.json import Jsonb
+
+from litwatch.core.deepread import Figure
 
 # -- zotero ----------------------------------------------------------------------------------------
 
@@ -83,24 +87,53 @@ async def put_card(
     version: int | None,
     source: str,
     pass_id: int | None,
+    figures: Sequence[Figure] = (),
 ) -> None:
-    """Store the card, replacing any earlier one ("Write again"), labelled with the text it was
-    written from. A card written again has its process notes unseen: the owner's Acknowledge was
-    for the card it replaces."""
-    await conn.execute(
-        """
-        INSERT INTO deep_cards (paper_id, card, model, stats, written_at, paper_revision,
-                                arxiv_version, text_source, pass_id)
-        VALUES (%s, %s, %s, %s, now(), %s, %s, %s, %s)
-        ON CONFLICT (paper_id) DO UPDATE SET
-            card = EXCLUDED.card, model = EXCLUDED.model, stats = EXCLUDED.stats,
-            error = NULL, written_at = now(),
-            paper_revision = EXCLUDED.paper_revision, arxiv_version = EXCLUDED.arxiv_version,
-            text_source = EXCLUDED.text_source, pass_id = EXCLUDED.pass_id,
-            notes_acknowledged_at = NULL
-        """,
-        (paper_id, Jsonb(card), model, Jsonb(stats), revision, version, source, pass_id),
-    )  # fmt: skip
+    """Store the card, a Deep read or a Deep card, replacing any earlier one ("Write again"),
+    labelled with the text it was written from, and with it the paper's `figures`, which
+    replace the earlier card's: both or neither. A card written again has its process notes
+    unseen: the owner's Acknowledge was for the card it replaces."""
+    async with conn.transaction():
+        await conn.execute(
+            """
+            INSERT INTO deep_cards (paper_id, card, model, stats, written_at, paper_revision,
+                                    arxiv_version, text_source, pass_id)
+            VALUES (%s, %s, %s, %s, now(), %s, %s, %s, %s)
+            ON CONFLICT (paper_id) DO UPDATE SET
+                card = EXCLUDED.card, model = EXCLUDED.model, stats = EXCLUDED.stats,
+                error = NULL, written_at = now(),
+                paper_revision = EXCLUDED.paper_revision, arxiv_version = EXCLUDED.arxiv_version,
+                text_source = EXCLUDED.text_source, pass_id = EXCLUDED.pass_id,
+                notes_acknowledged_at = NULL
+            """,
+            (paper_id, Jsonb(card), model, Jsonb(stats), revision, version, source, pass_id),
+        )  # fmt: skip
+        await conn.execute("DELETE FROM deep_figures WHERE paper_id = %s", (paper_id,))
+        for f in figures:
+            await conn.execute(
+                "INSERT INTO deep_figures (paper_id, name, mime, data) VALUES (%s, %s, %s, %s)",
+                (paper_id, f.name, f.mime, f.data),
+            )
+
+
+async def figure(
+    conn: psycopg.AsyncConnection, paper_id: str, name: str, written: datetime | None = None
+) -> Figure | None:
+    """One of the figures stored with the paper's Deep read, by the name the read cites. With
+    `written`, only while the read stored is the one written then: a read written again has its
+    own figures, and an old one's are gone."""
+    row = await (
+        await conn.execute(
+            """
+            SELECT f.name, f.mime, f.data
+            FROM deep_figures f JOIN deep_cards c USING (paper_id)
+            WHERE f.paper_id = %(p)s AND f.name = %(n)s
+              AND (%(w)s::timestamptz IS NULL OR c.written_at = %(w)s)
+            """,
+            {"p": paper_id, "n": name, "w": written},
+        )
+    ).fetchone()
+    return Figure(row["name"], row["mime"], bytes(row["data"])) if row else None
 
 
 async def card_failed(
@@ -167,13 +200,16 @@ async def attempt_ended(
     error: str | None,
     failure: Literal["paper", "service"] | None = None,
     trace: list[Any] | None = None,
+    reviews: list[Any] | None = None,
 ) -> None:
     """The attempt's job ended, with a card or failed, and whose `failure` it was: its usage,
-    or None when it is unknown (never zero for that), and its trace, kept for good, or None
-    when there is none (its job never ran, was lost or never ended)."""
+    or None when it is unknown (never zero for that), its trace, kept for good, or None when
+    there is none (its job never ran, was lost or never ended), and its review rounds as the
+    service returned them, or None when no review ran."""
     await conn.execute(
         "UPDATE deep_attempts SET ended_at = now(), usage = %(usage)s, error = %(error)s, "
-        "failure = %(failure)s, trace = %(trace)s, service_failed_at = CASE "
+        "failure = %(failure)s, trace = %(trace)s, reviews = %(reviews)s, "
+        "service_failed_at = CASE "
         "WHEN %(failure)s = 'service' THEN now() ELSE service_failed_at END "
         "WHERE id = %(id)s AND ended_at IS NULL",
         {
@@ -181,6 +217,7 @@ async def attempt_ended(
             "error": error and error[:2000],
             "failure": failure,
             "trace": Jsonb(trace) if trace is not None else None,
+            "reviews": Jsonb(reviews) if reviews is not None else None,
             "id": attempt_id,
         },
     )
@@ -264,6 +301,14 @@ async def attempt_trace(conn: psycopg.AsyncConnection, attempt_id: int) -> list[
         await conn.execute("SELECT trace FROM deep_attempts WHERE id = %s", (attempt_id,))
     ).fetchone()
     return row["trace"] if row else None
+
+
+async def attempt_reviews(conn: psycopg.AsyncConnection, attempt_id: int) -> list[Any] | None:
+    """The attempt's review rounds, as the service returned them; None when no review ran."""
+    row = await (
+        await conn.execute("SELECT reviews FROM deep_attempts WHERE id = %s", (attempt_id,))
+    ).fetchone()
+    return row["reviews"] if row else None
 
 
 async def process_notes(

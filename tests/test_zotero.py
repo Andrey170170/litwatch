@@ -28,7 +28,7 @@ from litwatch.store import integrations as state
 from litwatch.store import outbox, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import FAITH, TREE, deliver, paper, start
+from tests.conftest import FAITH, TREE, deliver, fixture_read, paper, start
 from tests.fakes_http import PDF, FakeArxiv, FakeDAV, FakeZotero, mock
 
 P = paper(
@@ -230,6 +230,49 @@ async def test_grades_published_versions_and_cards_reach_the_notes(world):
     assert NOTED not in json.dumps(fake.items)  # every item and note it holds
     assert {"litwatch:processed", "litwatch:kind:method", "litwatch:code"} <= fake.tags(key)
     assert "INBOX" in fake.items[key]["data"]["collections"]
+
+
+@pytest.mark.parametrize("name", ["scarce", "icl"])
+async def test_a_deep_read_gets_no_note_and_no_card_tags_and_still_sets_the_inbox(world, name):
+    """A read has none of the fields a Deep card's note and tags were built from (R5): its
+    `card.ready` is handled all the same, and a ready read counts for the inbox."""
+    conn, fake = world, FakeZotero()
+    z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await run(conn, z)
+    (item,) = fake.tops()
+    key = item["key"]
+    assert "INBOX" not in fake.items[key]["data"]["collections"]  # no card yet
+
+    await state.put_card(conn, P.id, fixture_read(name), "deep-model", {"cells": 3}, **LABEL)
+    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await run(conn, z)
+    assert (await outbox.cursor(conn, z.name)).failing is None
+    (note,) = fake.notes(key)  # the screen note alone
+    assert "litwatch:screen" in note and "litwatch:enrichment" not in json.dumps(fake.items)
+    assert fake.tags(key) == {"litwatch:watch:cot-faithfulness:must_read"}
+    assert "INBOX" in fake.items[key]["data"]["collections"]
+
+
+async def test_a_card_written_again_as_a_read_leaves_its_note_and_tags_on_the_item(world):
+    conn, fake = world, FakeZotero()
+    z = zotero(fake)
+    await start(conn, z)
+    await grade(conn, "must_read")
+    await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, **LABEL)
+    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await run(conn, z)
+    (item,) = fake.tops()
+    key = item["key"]
+    before = (sorted(fake.notes(key)), fake.tags(key))
+    assert len(before[0]) == 2 and "litwatch:kind:method" in before[1]
+
+    await state.put_card(conn, P.id, fixture_read("scarce"), "deep-model", {}, **LABEL)
+    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await run(conn, z)
+    assert (await outbox.cursor(conn, z.name)).failing is None
+    assert (sorted(fake.notes(key)), fake.tags(key)) == before  # what is on the item stays
 
 
 async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(world):

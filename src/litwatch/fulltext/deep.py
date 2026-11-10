@@ -11,19 +11,22 @@ twice. A submission carries its attempt as a key, by which the service finds the
 started for it: one whose answer never came is followed if the service has its job, and
 otherwise ends, its pass tried again as a first try is. When a
 job ends, with a card or failed, the attempt records the job's usage, or that it is unknown
-(the job was lost before it reported), and whose failure it was.
+(the job was lost before it reported), whose failure it was, its trace and its review rounds.
+A card is stored with its figures, which replace the paper's earlier ones, in one transaction
+with the pass's end and `card.ready`.
 
 A job that failed because of the paper (no card within its budget, an invalid card) fails the
 pass: it is tried again on the next nightly run, and after `FAILED_RUNS` failed runs it waits
 for the owner on Quality, as every pass does. One that failed because of the service (the
-service tagged it so, lost it, or never ended it) counts against nothing: the pass goes back in
-the queue. Nor does an error submitting or following a job, after which the attempt and the
-pass stay as they are: the job is followed, found by its key if its submission's answer was
-lost, or, when the service has none, the attempt ends and the pass is tried afresh. A job not
-ended by its deadline is kept too and followed again after each pause until it ends; one
-running past the deadline by the service's own clock, which is shorter, is given up on as
-the service's failure. Any
-service failure pauses the whole queue for `PAUSE`. There is no daily cap; the owner's
+service tagged it so, lost it, never ended it, or returned a result litwatch cannot store: an
+unknown format, figures that are not what the contract says) counts against nothing: the pass
+goes back in the queue. Nor does an error submitting or following a job, after which the
+attempt and the pass stay as they are: the job is followed, found by its key if its
+submission's answer was lost, or, when the service has none, the attempt ends and the pass is
+tried afresh. A job not ended by its deadline is kept too and followed again after each pause
+until it ends; one running past the deadline by the service's own clock, which is shorter, is
+given up on as the service's failure. Any service failure pauses the whole queue for `PAUSE`.
+There is no daily cap; the owner's
 requests go first.
 """
 
@@ -203,13 +206,16 @@ async def _work_one(
             outcome.error or "no card",
             "service" if outcome.failure == "service" else "paper",
             outcome.trace,
+            outcome.reviews,
         )
     async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
         if not await store_.held(conn, c):
             return "lost"
         revision, text = await store_.read_of(conn, c.id)
         assert text is not None  # recorded before the job was submitted
-        await cards.attempt_ended(conn, attempt["id"], outcome.usage, None, trace=outcome.trace)
+        await cards.attempt_ended(
+            conn, attempt["id"], outcome.usage, None, trace=outcome.trace, reviews=outcome.reviews
+        )
         await cards.put_card(
             conn,
             c.paper.id,
@@ -220,6 +226,7 @@ async def _work_one(
             version=text.version,
             source=text.source,
             pass_id=c.id,
+            figures=outcome.figures,
         )
         await store_.done(conn, c, text)
         await events.emit(conn, events.CARD_READY, c.paper.id, model=outcome.model, pass_id=c.id)
@@ -247,16 +254,17 @@ async def _ended(
     error: str,
     failure: Literal["paper", "service"],
     trace: list | None = None,
+    reviews: list | None = None,
     *,
     ran: bool = True,
 ) -> str:
     """An attempt that made no card: its usage (None, unknown), the error, whose `failure` it
-    was and its trace (None, there is none). The paper's fails the pass for this run, a run
-    that counts; the service's puts it back in the queue, which pauses. A job that never `ran`
-    leaves the card's last stats as they were."""
+    was, its trace (None, there is none) and its review rounds (None, none ran). The paper's
+    fails the pass for this run, a run that counts; the service's puts it back in the queue,
+    which pauses. A job that never `ran` leaves the card's last stats as they were."""
     log.warning("%s: deep card failed (%s): %s", c.paper.id, failure, error)
     async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
-        await cards.attempt_ended(conn, attempt_id, usage, error, failure, trace)
+        await cards.attempt_ended(conn, attempt_id, usage, error, failure, trace, reviews)
         if not await store_.held(conn, c):
             return "lost"
         await cards.card_failed(conn, c.paper.id, error, usage if ran else None)

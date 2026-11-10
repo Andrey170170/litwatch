@@ -20,5 +20,8 @@ services:
     environment:
       LITWATCH_URL: http://litwatch:8080
       LITWATCH_TOKEN: ${LITWATCH_READ_TOKEN}
+      READ_FIXTURE: /reads/read-scarce.json
     volumes:
       - ../tests/stack:/smoke:ro
+      # the web app's fixture reads, one of which the fake returns
+      - ../web/src/deepread/fixtures:/reads:ro

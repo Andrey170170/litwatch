@@ -1,7 +1,8 @@
 """Deep card passes: which papers get one and when (the owner's request, Unsave and Area picks
 included), working one against the archive and a fake deep service, the usage each attempt
 records, the lease and a worker that dies mid-job, the service's failures and the paper's, no
-daily cap, revisions, and what the API shows."""
+daily cap, revisions, and what the API shows. A Deep read: its format tag, its figures and
+their endpoint, its reviews in the trace, its `review` note on Needs you."""
 
 import asyncio
 import contextlib
@@ -51,7 +52,18 @@ from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, answering, paper
+from tests.conftest import (
+    AGENTS,
+    BLUE,
+    FAITH,
+    INTERP,
+    RUST,
+    TREE,
+    answering,
+    fixture_read,
+    paper,
+    sent_figure,
+)
 from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.test_digests import MON, TUE, Writer, area, day, listed, week
 from tests.test_reading import analyse, classify
@@ -279,6 +291,7 @@ async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db):
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     (sent,) = fake.requests
     assert sent["paper"]["body"] == BODY and sent["paper"]["body_source"] == "latex"
+    assert sent["paper"]["body_version"] == 2  # the text's arXiv version, for its figures
     assert sent["extensions"] == ["faithfulness"]
     assert [s["name"] for s in sent["selections"]] == ["Chain-of-thought faithfulness"]
     stored = await cards.card(db, P.id)
@@ -484,6 +497,323 @@ async def test_the_deep_commands_read_each_attempts_trace_and_the_cards_notes(
     assert "<https://anonymous.4open.science/r/x>" in notes
     tomorrow = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
     assert await run("notes", "--since", tomorrow) == "No process notes.\n"
+
+
+# -- a Deep read -----------------------------------------------------------------------------------
+
+READ = fixture_read("scarce")
+FIGURES = [
+    sent_figure("methodology_by_step"),
+    sent_figure("channel_util_s1", RUST),
+    sent_figure("pact_vs_bid"),
+]
+
+
+def citing(read: dict, names: set[str]) -> dict:
+    """The read with only the figures named, so what it cites is what is sent with it."""
+    keep = lambda b: b["type"] != "fig" or b["name"] in names  # noqa: E731
+    return read | {
+        "sections": [
+            s | {"blocks": [b for b in s["blocks"] if keep(b)]} if "blocks" in s else s
+            for s in read["sections"]
+        ]
+    }
+
+
+# Two review rounds as the service returns them (docs/integrations.md): the first sends the
+# read back, the second passes it.
+REVIEWS = [
+    {
+        "round": 1,
+        "passed": False,
+        "scores": {"faithfulness": 4, "clarity": 3, "depth": 5, "calibration": 4},
+        "checks": {"anchors": True, "voice": False},
+        "findings": [
+            {
+                "about": "clarity",
+                "where": "who/1",
+                "text": "The sentence hides who ran the ablation.",
+                "rewrite": "The authors ablate the memory module.",
+            },
+            {"about": "voice", "where": "glance", "text": "Says 'for you'."},
+        ],
+    },
+    {
+        "round": 2,
+        "passed": True,
+        "scores": {"faithfulness": 5, "clarity": 4, "depth": 5, "calibration": 4},
+        "checks": {"anchors": True, "voice": True},
+        "findings": [],
+    },
+]
+WROTE_READ = DONE | {"result": READ, "figures": FIGURES, "reviews": REVIEWS}
+
+
+async def figures(conn, pid: str = P.id) -> dict[str, tuple[str, bytes]]:
+    rows = await (
+        await conn.execute("SELECT name, mime, data FROM deep_figures WHERE paper_id = %s", (pid,))
+    ).fetchall()
+    return {r["name"]: (r["mime"], bytes(r["data"])) for r in rows}
+
+
+async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_replaces_them(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(WROTE_READ)
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    stored = await cards.card(db, P.id)
+    assert stored["card"] == READ and stored["card"]["format"] == "read"
+    assert await figures(db) == {
+        "methodology_by_step": ("image/webp", BLUE),
+        "channel_util_s1": ("image/webp", RUST),
+        "pact_vs_bid": ("image/webp", BLUE),
+    }
+    (attempt,) = await attempts(db)
+    assert attempt["reviews"] == REVIEWS and attempt["error"] is None
+    assert await outbox_of(db, events.CARD_READY) == [
+        {"paper": P.id, "model": "deep-model", "pass_id": attempt["pass_id"]}
+    ]
+
+    # Written again: the new read's figures are the paper's, the old ones gone with their read.
+    fake.outcome = WROTE_READ | {
+        "result": citing(READ, {"pact_vs_bid"}),
+        "figures": [sent_figure("pact_vs_bid", RUST)],
+        "reviews": [],
+    }
+    await deep_passes.request(db, P.id)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    assert await figures(db) == {"pact_vs_bid": ("image/webp", RUST)}
+    assert [a["reviews"] for a in await attempts(db)] == [REVIEWS, []]
+
+    # A Deep card, from a service that writes none yet: no format, no figures, no review ran.
+    fake.outcome = DONE
+    await deep_passes.request(db, P.id)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    assert (await cards.card(db, P.id))["card"] == CARD and await figures(db) == {}
+    assert (await attempts(db))[-1]["reviews"] is None
+
+
+@pytest.mark.parametrize(
+    ("sent", "said"),
+    [
+        ({"result": READ | {"format": "essay"}}, "unknown format 'essay'"),
+        ({"result": READ | {"format": None}}, "unknown format None"),
+        ({"result": ["not", "a", "card"]}, "the result is not an object"),
+        ({"figures": [sent_figure("f", mime="image/svg+xml")]}, "figure f is 'image/svg+xml'"),
+        ({"figures": [sent_figure("f", b"<svg/>")]}, "figure f is not a WebP image"),
+        ({"figures": [{"name": "f", "mime": "image/webp", "data": "%%%"}]}, "is not base64"),
+        ({"figures": [sent_figure("../f")]}, "a figure's name is not one: '../f'"),
+        ({"figures": [sent_figure("f"), sent_figure("f")]}, "two figures are named f"),
+        ({"figures": {"f": "x"}}, "`figures` is not a list"),
+        ({"reviews": "passed"}, "`reviews` is not a list"),
+    ],
+    ids=[
+        "format", "null-format", "no-object", "mime", "not-webp", "base64", "name", "twice",
+        "figures-shape", "reviews-shape",
+    ],
+)  # fmt: skip
+async def test_a_result_litwatch_cannot_store_is_the_services_failure_and_stores_nothing(
+    db, sent, said
+):
+    """An unknown format, or figures and reviews that are not the contract's: an error with
+    the job's usage and trace kept, never a card with something missing (P14)."""
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(WROTE_READ | {"trace": trace("wrote")} | sent)
+    assert await work(db, with_text(P), make(fake)) == {"card_service_failed": 1}
+    stored = await cards.card(db, P.id)
+    assert stored["card"] is None and said in stored["error"]
+    assert await figures(db) == {} and await outbox_of(db, events.CARD_READY) == []
+    (attempt,) = await attempts(db)
+    assert attempt["failure"] == "service" and said in attempt["error"]
+    assert attempt["usage"] == USAGE and attempt["trace"] == trace("wrote")
+    # The service's failure counts against nothing: the pass is back in the queue, which pauses.
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["failed_runs"]) == ("ready", 0)
+    assert await cards.paused_until(db, deep_passes.PAUSE) is not None
+
+
+async def test_a_failed_read_keeps_the_figures_of_the_read_before_it(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(WROTE_READ)
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    fake.outcome = {"error": "no valid read", "failure": "paper", "stats": USAGE}
+    fake.outcome["reviews"] = REVIEWS[:1]
+    await deep_passes.request(db, P.id)
+    assert await work(db, with_text(P), d) == {"card_failed": 1}
+    assert (await cards.card(db, P.id))["card"] == READ and len(await figures(db)) == len(FIGURES)
+    assert (await attempts(db))[-1]["reviews"] == REVIEWS[:1]  # what ran is kept with the failure
+
+
+async def test_a_text_of_unknown_version_is_submitted_as_such(db):
+    """A paper of no known arXiv version is read from the archive's historical LaTeX, of no
+    known version either: the submission says so, and the service takes the latest figures."""
+    old = paper("2610.00003", title="A paper of no known version", version=None)
+    await papers_store.upsert(db, [old])
+    await deep_passes.request(db, old.id)
+    held = FakeArchive()
+    held.texts[old.id] = (None, BODY)
+    fake = FakeDeep(DONE)
+    assert await work(db, held, make(fake)) == {"cards_written": 1}
+    (sent,) = fake.requests
+    assert "body_version" in sent["paper"] and sent["paper"]["body_version"] is None
+
+
+async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(db):
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(WROTE_READ)
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    app = create_app(dsn, TOKEN, Config(), integrations=[d], read_token="r3ad")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as http:
+        base = f"/api/papers/{P.id}/deep/figures"
+        assert (await http.get(f"{base}/methodology_by_step")).status_code == 401
+        read_token = {"Authorization": "Bearer r3ad"}
+        assert (
+            await http.get(f"{base}/methodology_by_step", headers=read_token)
+        ).status_code == 403
+        # As the paper page's <img> asks: the session cookie, and when the read was written.
+        http.cookies.set("litwatch_token", TOKEN)
+        written = (await http.get(f"/api/papers/{P.id}")).json()["card"]["written_at"]
+        shown = await http.get(f"{base}/methodology_by_step", params={"v": written})
+        assert shown.status_code == 200 and shown.content == BLUE
+        assert shown.headers["content-type"] == "image/webp"
+        assert shown.headers["cache-control"] == "private, max-age=31536000, immutable"
+        assert shown.headers["x-content-type-options"] == "nosniff"
+        # Without the time, an empty one included, nothing says which read's figure it is.
+        for unversioned in ({}, {"v": ""}):
+            other = await http.get(f"{base}/channel_util_s1", params=unversioned)
+            assert other.content == RUST
+            assert other.headers["cache-control"] == "private, no-cache"
+        # A name the read does not have, a figure of another paper's, and the page still its own.
+        assert (await http.get(f"{base}/no_such_figure", params={"v": written})).status_code == 404
+        assert (
+            await http.get(f"/api/papers/{Q.id}/deep/figures/methodology_by_step")
+        ).status_code == 404
+        assert (await http.get(f"/api/papers/{P.id}")).json()["card"]["card"]["format"] == "read"
+        # Written again: a tab still on the old read gets none of the new read's figures under
+        # the old address, which it would keep for good; the new address has them. A figure
+        # named "pdf" is the read's, never the paper's PDF.
+        again = [sent_figure(f["name"], RUST) for f in FIGURES] + [sent_figure("pdf")]
+        fake.outcome = WROTE_READ | {"figures": again}
+        await deep_passes.request(db, P.id)
+        assert await work(db, with_text(P), d) == {"cards_written": 1}
+        stale = await http.get(f"{base}/methodology_by_step", params={"v": written})
+        assert stale.status_code == 404
+        now = (await http.get(f"/api/papers/{P.id}")).json()["card"]["written_at"]
+        assert now != written
+        fresh = await http.get(f"{base}/methodology_by_step", params={"v": now})
+        assert fresh.status_code == 200 and fresh.content == RUST
+        assert (
+            await http.get(f"{base}/methodology_by_step", params={"v": "soon"})
+        ).status_code == 404
+        named_pdf = await http.get(f"{base}/pdf", params={"v": now})
+        assert named_pdf.status_code == 200 and named_pdf.content == BLUE
+        assert named_pdf.headers["content-type"] == "image/webp"
+        assert (await http.get(f"{base}/pdf", params={"v": written})).status_code == 404
+        http.cookies.clear()
+        assert (await http.get(f"{base}/pdf", headers=read_token)).status_code == 403
+
+
+async def test_the_read_token_fetches_a_papers_pdf(db):
+    """The deep service cuts a PDF-only paper's figures from its pages (plans/deep-read.md, D2)."""
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    fake = FakeArchive(records={P.id: 2})
+    fake.pdfs[P.id] = b"%PDF-1.7 the paper"
+    app = create_app(dsn, TOKEN, Config(), read_token="r3ad", archive=archive(fake))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as http:
+        got = await http.get(f"/api/papers/{P.id}/pdf", headers={"Authorization": "Bearer r3ad"})
+        assert got.status_code == 200 and got.content == b"%PDF-1.7 the paper"
+        assert got.headers["content-type"] == "application/pdf"
+        # Reading still, and nothing else: the token asks for no card.
+        asked = await http.post(
+            f"/api/papers/{P.id}/card", headers={"Authorization": "Bearer r3ad"}
+        )
+        assert asked.status_code == 403
+
+
+REVIEW_NOTE = {
+    "kind": "review",
+    "source": "service",
+    "note": "Still failing after two revisions: clarity 3; the check on an objective voice.",
+}
+
+
+async def test_deep_trace_prints_the_review_rounds_and_needs_you_shows_the_review_note(
+    db, tmp_path, monkeypatch
+):
+    from typer.testing import CliRunner  # noqa: PLC0415
+
+    from litwatch import cli  # noqa: PLC0415
+
+    await grade(db, Fit.CENTRAL)
+    failed = READ | {"process_notes": [*READ["process_notes"], REVIEW_NOTE]}
+    fake = FakeDeep(WROTE_READ | {"result": failed, "reviews": REVIEWS[:1], "trace": RICH})
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+
+    monkeypatch.chdir(tmp_path)  # every command loads ./.env
+    monkeypatch.setenv(
+        "LITWATCH_DATABASE_URL", f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    )
+    config = tmp_path / "litwatch.toml"
+    config.write_text('[schedule]\ntimezone = "UTC"\n')
+
+    async def run(*args: str) -> str:
+        argv = ["deep", *args, "--config", str(config)]
+        result = await asyncio.to_thread(CliRunner().invoke, cli.app, argv)
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    shown = await run("trace", P.id)
+    assert "Reviews: 1 round" in shown
+    assert "round 1 · failed · faithfulness 4, clarity 3, depth 5, calibration 4" in shown
+    assert "checks failed: voice" in shown
+    assert "- [clarity] who/1: The sentence hides who ran the ablation." in shown
+    assert "rewrite: The authors ablate the memory module." in shown
+    assert "- [voice] glance: Says 'for you'." in shown
+    assert f"review (service): {REVIEW_NOTE['note']}" in shown
+    whole = json.loads(await run("trace", P.id, "--json"))
+    assert whole["reviews"] == REVIEWS[:1] and whole["process_notes"][-1] == REVIEW_NOTE
+    assert f"review (service): {REVIEW_NOTE['note']}" in await run("notes")
+
+    # Needs you lists the read under Deep notes, its review note among the others, until the
+    # owner acknowledges it.
+    _, http = client(db, [d])
+    async with http:
+        (noted,) = (await http.get("/api/settings/quality")).json()["night"]["deep_notes"]
+        assert noted["paper_id"] == P.id and noted["acknowledged_at"] is None
+        assert [n["kind"] for n in noted["notes"]] == ["access", "review"]
+        assert noted["notes"][-1] == REVIEW_NOTE
+        seen = {"cards": [{"paper_id": P.id, "written_at": noted["written_at"]}]}
+        marked = await http.post("/api/settings/acknowledge", json=seen)
+        assert [c["paper_id"] for c in marked.json()["cards"]] == [P.id]
+
+
+async def test_an_attempt_no_review_ran_for_prints_none(db, tmp_path, monkeypatch):
+    from typer.testing import CliRunner  # noqa: PLC0415
+
+    from litwatch import cli  # noqa: PLC0415
+
+    await grade(db, Fit.CENTRAL)
+    assert await work(db, with_text(P), make(FakeDeep(DONE | {"trace": RICH}))) == {
+        "cards_written": 1
+    }
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        "LITWATCH_DATABASE_URL", f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    )
+    config = tmp_path / "litwatch.toml"
+    config.write_text('[schedule]\ntimezone = "UTC"\n')
+    result = await asyncio.to_thread(
+        CliRunner().invoke, cli.app, ["deep", "trace", P.id, "--config", str(config)]
+    )
+    assert result.exit_code == 0 and "Reviews" not in result.output
 
 
 async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_queue(db):

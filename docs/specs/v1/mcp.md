@@ -23,9 +23,14 @@ asking the archive for a paper's files at urgent priority, as opening a PDF in t
   filters: a date range, which applies to both, and from litwatch a topic, papers litwatch processed, a minimum grade,
   a Weight, the owner's reaction (a thumb up or down); any of these searches litwatch's index alone. A result gives a paper's id,
   title, authors and date and, where litwatch processed it, its Gist, Weight and grade per topic.
-- **A paper.** Its metadata and abstract, and what litwatch has on it: Gist, Brief and Deep card where they exist,
+- **A paper.** Its metadata and abstract, and what litwatch has on it: Gist, Brief and Deep read where they exist,
   its Weight, the effective Fit and grade per topic, the owner's word and reactions, and its citation (the published
-  version where litwatch found one).
+  version where litwatch found one). Of a Deep read ([deep-read.md](../deep-read.md)) it gives the At a glance and
+  the list of sections, each with its id and takeaway, and the read's process notes; a Deep card from before Deep
+  reads is given whole.
+- **A Deep read's section.** One section in full, by its id from the paper's list, as text: its tables as Markdown,
+  a figure as its caption and a diagram as its nodes with their notes. So an agent after one claim's evidence does
+  not spend its context on the whole read.
 - **Digests.** A topic's digests over a date range, and one digest read in full: its text, the papers it puts
   forward and the updated papers listed under them.
 - **Reading.** Outline first (decision 85): the paper's sections with their sizes and where the text comes from

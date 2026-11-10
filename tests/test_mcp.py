@@ -28,7 +28,7 @@ from litwatch.store import digests as digests_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, fixture_read, paper
 from tests.fakes_http import FakeArchive, mock
 from tests.test_archive_text import a_pdf
 from tests.test_reading import P, Q, analyse, classify, grade
@@ -37,9 +37,9 @@ TOKEN, READ_TOKEN, MCP_TOKEN = "s3cret", "r3ad", "m-token"
 HOST = "litwatch.andrei-homelab.com"  # production's name, which the SDK's host check must let in
 AUTH = {"authorization": f"Bearer {TOKEN}"}
 ONLY = paper("2610.07777", title="Hidden steps in the archive", authors=["Ada Lovelace"])
-SEVEN = [
-    "get_paper", "list_digests", "paper_outline", "read_digest", "read_paper", "search_papers",
-    "view_pdf_page",
+TOOLS = [
+    "get_paper", "list_digests", "paper_outline", "read_deep", "read_digest", "read_paper",
+    "search_papers", "view_pdf_page",
 ]  # fmt: skip
 INIT = {
     "protocolVersion": "2025-06-18",
@@ -146,7 +146,7 @@ async def test_only_the_mcp_token_opens_mcp_and_it_opens_nothing_else(conn):
         # Stateless: no stream to open, no session to end.
         assert (await http.get("/mcp", headers=mcp)).status_code == 405
         tools = (await rpc(http, "tools/list")).json()["result"]["tools"]
-    assert sorted(t["name"] for t in tools) == SEVEN
+    assert sorted(t["name"] for t in tools) == TOOLS
     assert all(t["annotations"]["readOnlyHint"] for t in tools)
 
 
@@ -186,7 +186,7 @@ async def test_the_sdks_own_client_initializes_lists_and_calls_through_create_ap
             tools = await session.list_tools()
             found = await session.call_tool("search_papers", {"query": "hide"})
     assert opened.server_info.name == "litwatch" and "before the web" in opened.instructions
-    assert sorted(t.name for t in tools.tools) == SEVEN
+    assert sorted(t.name for t in tools.tools) == TOOLS
     assert "call paper_outline first" in opened.instructions
     assert not found.is_error and ids(found.content[0].text) == [P.id]
 
@@ -314,7 +314,7 @@ def _shown(p, role: DigestRole, *, why=None, version=None, fit="central", grade=
 
 
 async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, shelves):
-    """V3, for all seven tools: the only effect is the archive's, asked for a paper's files."""
+    """V3, for all eight tools: the only effect is the archive's, asked for a paper's files."""
     fake, *_ = shelves
     fake.texts[P.id] = (None, "\\section{Probes} Hidden steps.")  # its historical LaTeX
     fake.records[ONLY.id]["item"]["version"] = 1
@@ -326,12 +326,16 @@ async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, s
         assert (await papers_store.get(c, P.id)).id == P.id
         with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
             await papers_store.upsert(c, [paper("2610.09998")])
+    await integrations_store.put_card(
+        conn, P.id, READ, "deep-model", {}, revision=1, version=2, source="latex", pass_id=None
+    )
     outbox = "SELECT count(*) AS n, max(id) AS last FROM outbox"
     before = await (await conn.execute(outbox)).fetchone()
     seen: list[tuple[str, str]] = []
     async with serving(_app(conn, fake, seen)) as http:
         await ok(http, "search_papers", query="hidden")
         await ok(http, "get_paper", paper_id=P.id)
+        await ok(http, "read_deep", paper_id=P.id, section="glance")
         await ok(http, "get_paper", paper_id=ONLY.id)  # only the archive's
         await ok(http, "list_digests", since="2026-10-01", until="2026-10-20")
         await ok(http, "read_digest", digest_id=digest)
@@ -345,7 +349,7 @@ async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, s
     assert await (await conn.execute(outbox)).fetchone() == before
     assert await papers_store.get(conn, ONLY.id) is None
     assert ("GET", "/v1/search") in seen and ("GET", f"/v1/papers/{ONLY.id}") in seen
-    assert {method for method, _ in seen[:found]} == {"GET"}  # the first four only read
+    assert {method for method, _ in seen[:found]} == {"GET"}  # the first five only read
     # Reading asks the archive for a paper's files, its one effect; no record is written.
     asked = [path for method, path in seen if method != "GET"]
     assert asked and set(asked) == {"/v1/jobs"}
@@ -453,6 +457,105 @@ async def test_a_deep_card_from_an_older_text_says_which_text_it_read(conn, shel
     for page in (current, older):
         assert "## Deep card (latex, read arXiv v1, revision 1" in page
     assert mcp_api.OLDER_CARD not in current and mcp_api.OLDER_CARD in older
+
+
+# -- a Deep read: its glance and sections in get_paper, a section in read_deep ---------------------
+
+READ = fixture_read("scarce")
+REVIEW_NOTE = {"kind": "review", "source": "service", "note": "Still failing: clarity 3."}
+
+
+async def test_get_paper_gives_a_reads_glance_and_its_sections_with_their_takeaways(conn, shelves):
+    fake, *_ = shelves
+    failed = READ | {"process_notes": [*READ["process_notes"], REVIEW_NOTE]}
+    await integrations_store.put_card(
+        conn, P.id, failed, "deep-model", {}, revision=1, version=2, source="latex", pass_id=None
+    )
+    async with serving(_app(conn, fake)) as http:
+        held = await ok(http, "get_paper", paper_id=P.id)
+    read = {s["id"]: s for s in READ["sections"]}
+    assert "## Deep read (latex, read arXiv v2, revision 1" in held and "## Deep card" not in held
+    deep = held.split("## Deep read (")[1].split("\n## Citation")[0]
+    assert "It did not pass its review" in deep
+    glance = deep.split("### At a glance\n")[1].split("\n\n### Sections")[0]
+    assert glance.startswith(
+        f"Key claim: {read['glance']['claim']}\n- {read['glance']['points'][0]}"
+    )
+    assert "\nFacts:\n- Kind: benchmark and behavioural audit\n- Models: frontier: Opus 5" in glance
+    # Every section by its id, one line each: its title and its takeaway.
+    listed = deep.split("### Sections")[1].split("\n\n")[0].splitlines()[1:]
+    assert [line.split("`")[1] for line in listed] == [s["id"] for s in READ["sections"]]
+    assert f"- `who` · {read['who']['title']}: {read['who']['takeaway']}" in listed
+    assert "- `glance` · At a glance" in listed  # it has no takeaway: it is given above
+    assert "read_deep(paper_id, section=its id)" in deep
+    # The sections' bodies are read on request, not dumped; the process notes are short.
+    assert read["who"]["blocks"][1]["text"] not in held and "| Category |" not in held
+    assert "- access (model): The repository's history could not be listed" in deep
+    assert f"- review (service): {REVIEW_NOTE['note']}" in deep
+    assert f"Code: {READ['code_url']}" in deep
+
+
+async def test_read_deep_gives_one_section_as_text_with_its_tables_as_markdown(conn, shelves):
+    fake, *_ = shelves
+    await integrations_store.put_card(
+        conn, P.id, READ, "deep-model", {}, revision=1, version=2, source="latex", pass_id=None
+    )
+    await integrations_store.put_card(
+        conn, Q.id, CARD, "deep-model", {}, revision=1, version=1, source="latex", pass_id=None
+    )
+    read = {s["id"]: s for s in READ["sections"]}
+    async with serving(_app(conn, fake)) as http:
+        taxonomy = await ok(http, "read_deep", paper_id=P.id, section="taxonomy")
+        who = await ok(http, "read_deep", paper_id=f"https://arxiv.org/abs/{P.id}", section="who")
+        env = await ok(http, "read_deep", paper_id=P.id, section="env")
+        claims = await ok(http, "read_deep", paper_id=P.id, section="claims")
+        limits = await ok(http, "read_deep", paper_id=P.id, section="limits")
+        related = await ok(http, "read_deep", paper_id=P.id, section="related")
+        glance = await ok(http, "read_deep", paper_id=P.id, section="glance")
+        unknown = await call(http, "read_deep", paper_id=P.id, section="conclusion")
+        card = await call(http, "read_deep", paper_id=Q.id, section="glance")
+        none = await call(http, "read_deep", paper_id="2610.00003", section="glance")
+        absent = await call(http, "read_deep", paper_id="2610.05555", section="glance")
+
+    # A section opens with the paper, its title and kind, and its takeaway.
+    head = f"# {P.title}\nDeep read of arXiv:{P.id}\n\n## The taxonomy (method)\n"
+    assert taxonomy.startswith(head + f"In one line: {read['taxonomy']['takeaway']}\n")
+    # A table is a Markdown table: its header, a rule, a group heading as a row, its cells.
+    assert "| Category | What it looks like |\n| --- | --- |\n" in taxonomy
+    assert "| **institutional · relational** |  |\n| Reciprocity | a concession now" in taxonomy
+    rows = [line for line in who.splitlines() if line.startswith("|")]
+    assert len(rows) == 19 and {line.count(" | ") for line in rows} == {8}  # nine columns each
+    assert "| **Σ relational [2]** | **79** | **37** |" in who  # a totals row, in bold
+    # A cell's note follows its table under the cell's mark; a caption says where it is from.
+    assert "| <1 [1] |" in who and "\n[1] The only divide-and-conquer in the table." in who
+    assert "\nTable: Rebuilt from Table 1 (eleven of its 22 rows)." in who
+    # A figure is its number in the paper and the read's caption; a CARD note says where.
+    assert "[Figure 2: The round: queue with bids, private messages, ballots, scheduler.]" in env
+    assert "> **Note (the read's own, on " in who
+    # A diagram is what its nodes and edges do, by name, with where the paper shows it.
+    assert "Diagram: " in env and "- **Worker ×5** (solver + negotiator): Two cooperating" in env
+    assert "(§3.2–3.3)" in env and " → " in env
+    assert "> **Why (the paper's reason):** " in env
+    # The anchors, each in its own shape.
+    first = read["claims"]["claims"][0]
+    assert f"- **holds**: {first['text']}\n  Evidence ({first['where']}): " in claims
+    assert (
+        "- (the paper's own) Whether institutions improve" in limits and "- (the read's) " in limits
+    )
+    assert "(arXiv:2605.03546): Supplies the executable-to-source tasks" in related
+    assert "Among litwatch's collection:\n- The Helpful Agent Problem" in related
+    assert "(arXiv:2610.31985), agrees: " in related
+    assert f"Key claim: {read['glance']['claim']}" in glance and "Facts:" in glance
+
+    assert unknown[1] and "No section 'conclusion'" in unknown[0]
+    assert all(s["id"] in unknown[0] for s in READ["sections"])
+    assert card == (
+        f"arXiv:{Q.id} has a Deep card from before Deep reads, which has no sections: "
+        "get_paper shows it whole.",
+        False,
+    )
+    assert none == ("arXiv:2610.00003 has no Deep read.", False)
+    assert absent == ("litwatch has no paper 2610.05555.", False)
 
 
 def _owners(page: str) -> dict[str, list[str]]:

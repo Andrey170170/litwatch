@@ -1,6 +1,7 @@
 """What `litwatch deep trace` and `deep notes` print: a paper's Deep attempts and one attempt's
-trace, as the `deep` service recorded it (deep/README.md), and the cards' process notes. For the
-agent reading what Deep did, not for the owner. Long text is cut; `--json` gives it whole.
+trace, as the `deep` service recorded it (deep/README.md), its review rounds (a Deep read's,
+docs/integrations.md), and the cards' process notes. For the agent reading what Deep did, not
+for the owner. Long text is cut; `--json` gives it whole.
 
 A trace written before P2 of docs/plans/deep-open-web.md has no failed call's reason, no fetch
 record and no cell timeout mark; they print only where the trace has them.
@@ -128,6 +129,47 @@ def event_lines(trace: list[dict[str, Any]]) -> Iterator[str]:
             yield f"{at}  {kind}: {cut(str(e), TEXT_CHARS)}"
 
 
+# A review's scores, in the rubric's order (docs/specs/deep-read.md); any other follows by name.
+SCORES = ("faithfulness", "clarity", "depth", "calibration")
+
+
+def _scores(scores: Any) -> str:
+    """A review's scores, each by its name. Stored JSON keeps no order of its own."""
+    if not isinstance(scores, dict):
+        return str(scores)
+    names = [n for n in SCORES if n in scores] + sorted(n for n in scores if n not in SCORES)
+    return ", ".join(f"{name} {scores[name]}" for name in names)
+
+
+def review_lines(reviews: list[Any]) -> Iterator[str]:
+    """The attempt's review rounds in order: each one's verdict, scores and failed checks, then
+    its findings, most important first as the reviewer gave them. A round is printed by the
+    fields it has (docs/integrations.md gives the shape), and whole when it is not an object."""
+    for n, review in enumerate(reviews, 1):
+        if not isinstance(review, dict):
+            yield f"  round {n}: {cut(str(review), TEXT_CHARS)}"
+            continue
+        verdict = {True: "passed", False: "failed"}.get(review.get("passed"), "no verdict")
+        scores = f" · {_scores(review['scores'])}" if "scores" in review else ""
+        yield f"  round {review.get('round', n)} · {verdict}{scores}"
+        checks = review.get("checks")
+        if isinstance(checks, dict):
+            if failed := sorted(name for name, ok in checks.items() if ok is False):
+                yield f"{INDENT}checks failed: {', '.join(failed)}"
+        elif checks is not None:
+            yield f"{INDENT}checks: {cut(str(checks), TEXT_CHARS)}"
+        for finding in review.get("findings") or []:
+            if not isinstance(finding, dict):
+                yield f"{INDENT}- {cut(str(finding), TEXT_CHARS)}"
+                continue
+            about = finding.get("about")
+            where = finding.get("where")
+            head = " ".join(x for x in (f"[{about}]" if about else "", where or "") if x)
+            said = cut(str(finding.get("text", "")), TEXT_CHARS)
+            yield f"{INDENT}- {head}: {said}" if head else f"{INDENT}- {said}"
+            yield from _block("rewrite", str(finding.get("rewrite") or ""), TEXT_CHARS)
+
+
 def note_lines(notes: list[dict[str, Any]], indent: str = "  ") -> Iterator[str]:
     """Process notes, one line each: kind, source, the note and its URL."""
     for note in notes:
@@ -144,9 +186,11 @@ def trace_text(
     trace: list[dict[str, Any]] | None,
     notes: list[dict[str, Any]],
     zone: tzinfo,
+    reviews: list[Any] | None = None,
 ) -> str:
-    """The paper's attempts, then attempt `chosen` (numbered from 1): its trace, and `notes`,
-    the card's process notes, which the caller gives only when this attempt wrote the card."""
+    """The paper's attempts, then attempt `chosen` (numbered from 1): its trace, its `reviews`
+    (None: no review ran), and `notes`, the card's process notes, which the caller gives only
+    when this attempt wrote the card."""
     a = attempts[chosen - 1]
     lines = [f"{paper_id} · {title or '(not in the collection)'}", "Attempts, oldest first:"]
     lines += attempt_lines(attempts, zone)
@@ -161,6 +205,9 @@ def trace_text(
         lines.append("  Its trace is empty.")
     else:
         lines += event_lines(trace)
+    if reviews is not None:
+        lines += ["", f"Reviews: {len(reviews)} round" + ("" if len(reviews) == 1 else "s")]
+        lines += review_lines(reviews)
     if notes:
         lines += ["", "Process notes on the card:", *note_lines(notes)]
     return "\n".join(lines) + "\n"

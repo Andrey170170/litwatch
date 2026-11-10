@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Annotated, Any
 
 import psycopg
@@ -48,6 +49,7 @@ from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import digests as digests_store
 from litwatch.store import feedback as feedback_store
+from litwatch.store import integrations as integrations_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
@@ -248,6 +250,48 @@ async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query(
             st.search_stats,
         )
     return answer
+
+
+# A figure's address carries `v`, when its read was written: the read written again has other
+# figures under the same names, at another address, so one fetched with it is kept for good.
+FIGURE_KEPT = "private, max-age=31536000, immutable"
+
+
+# Declared before the PDF and the paper's page, whose paths would take a figure's address (one
+# named "pdf" too) as part of the id.
+@router.get(
+    "/papers/{paper_id:path}/deep/figures/{name}",
+    response_class=Response,
+    responses={
+        200: {"content": {"image/webp": {}}, "description": "The figure, as stored with the read"},
+        404: {
+            "description": "The paper's Deep read has no figure of that name, or `v` names a "
+            "read written over since"
+        },
+    },
+)
+async def deep_figure(paper_id: str, name: str, c: Conn, v: str | None = None) -> Response:
+    """One of the paper's figures its Deep read shows, by the name the read's `fig` block
+    cites. With `v` (when the read was written, as the paper page asks) it is that read's figure
+    or none, and the answer may be kept; without it, the current read's, fetched again each
+    time."""
+    written = None
+    if v:
+        try:
+            written = datetime.fromisoformat(v)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="no such figure") from None
+    found = await integrations_store.figure(c, paper_id, name, written)
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such figure")
+    return Response(
+        found.data,
+        media_type=found.mime,
+        headers={
+            "Cache-Control": FIGURE_KEPT if v else "private, no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 # Declared before the paper's page, whose path would take "/pdf" as part of the id.

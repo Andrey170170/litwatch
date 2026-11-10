@@ -18,8 +18,9 @@ from litwatch.store import calls
 
 COOKIE = "litwatch_token"
 
-# What the read token may do: search and read papers, as the deep service's agent does.
-READABLE = {"/api/papers", "/api/papers/{paper_id:path}"}
+# What the read token may do: search and read papers and fetch a paper's PDF, as the deep
+# service's agent does (its figures for a PDF-only paper are cut from the PDF's pages).
+READABLE = {"/api/papers", "/api/papers/{paper_id:path}", "/api/papers/{paper_id:path}/pdf"}
 
 
 async def _conn(request: Request) -> AsyncIterator[psycopg.AsyncConnection]:

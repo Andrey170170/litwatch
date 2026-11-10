@@ -31,7 +31,7 @@ from litwatch.core import (
 )
 from litwatch.events import dispatch
 from litwatch.feedback import word
-from litwatch.integrations.notion import Notion, NotionClient
+from litwatch.integrations.notion import FAILED_REVIEW, Notion, NotionClient, _hash
 from litwatch.jobs.publications import store_record
 from litwatch.store import integrations as integrations_store
 from litwatch.store import notion as state
@@ -40,7 +40,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, deliver, paper, settled
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, deliver, fixture_read, paper, settled
 from tests.fakes_http import FakeNotion, mock
 
 PARENT = "11111111-1111-1111-1111-111111111111"
@@ -265,6 +265,123 @@ async def test_a_must_read_with_a_deep_card_gets_every_column_and_its_deep_read(
     assert "Andrei" in words and FAITHFUL in words and MONITORING in words
     assert "Must read" in words and "Worth a look" in words and "No longer listed" in words
     assert not INTERNAL.search(words)
+
+
+# -- a Deep read: its short form, and a Deep card from before left as it was ---------------------
+
+READ = fixture_read("scarce")
+LABEL = {"revision": 1, "version": 1, "source": "latex", "pass_id": None}
+# What `main` wrote under "Deep read" for `CARD` before the Deep read (63d09be), as the page's
+# body hash counts it: a Deep card's callouts must stay these bytes, or `setup` would rewrite
+# every page that has one.
+CARD_AS_BEFORE = "2226698b82fad0d5eaf8e23d073acaba"
+
+
+async def deep_read(conn, fake: FakeNotion, card: dict) -> list[dict]:
+    """What the page of A, a must read with `card`, holds under its Deep read heading."""
+    await integrations_store.put_card(conn, A.id, card, "deep", {}, **LABEL)
+    await grade(conn, A, FAITH.slug, "must_read")
+    assert await start(conn, notion(fake))
+    body = created(fake, A.id)["children"]
+    assert plain(body[-1]["heading_2"]["rich_text"]) == "Deep read"
+    assert body[-1]["heading_2"]["is_toggleable"]
+    return body[-1]["heading_2"]["children"]
+
+
+def said(block: dict) -> str:
+    return plain(block[block["type"]]["rich_text"])
+
+
+async def test_a_deep_read_is_exported_as_its_short_form(world):
+    conn, fake = world, FakeNotion(PARENT)
+    children = await deep_read(conn, fake, READ)
+    kinds = [b["type"] for b in children]
+    by_kind = {k: [said(b) for b in children if b["type"] == k] for k in set(kinds)}
+    read = {s["kind"]: s for s in READ["sections"]}
+
+    # The key claim, then its points; the claims, verdict first; the limitations, each marked.
+    (claim,) = by_kind["callout"]
+    assert claim == f"Key claim\n{read['glance']['claim']}"
+    assert by_kind["paragraph"] == ["Claims", "Limitations"]
+    points, claims, limits = len(read["glance"]["points"]), 8, 7
+    assert kinds == [
+        "callout",
+        *["bulleted_list_item"] * points,
+        "paragraph",
+        *["bulleted_list_item"] * claims,
+        "paragraph",
+        *["bulleted_list_item"] * limits,
+    ]
+    bullets = by_kind["bulleted_list_item"]
+    assert bullets[points] == f"Holds. {read['claims']['claims'][0]['text']}"
+    assert [b.split(". ")[0] for b in bullets[points : points + claims]] == [
+        "Holds", "Partly", "Not shown", "Holds", "Partly", "Holds", "Holds", "Partly",
+    ]  # fmt: skip
+    first, last = read["limits"]["limitations"][0], read["limits"]["limitations"][-1]
+    assert bullets[points + claims] == f"{first['text']} (the paper's own)"
+    assert bullets[-1] == f"{last['text']} (the read's)"
+
+    # Its inline marks are Notion's, not asterisks: the first point opens with **SCARCE**.
+    lead = children[1]["bulleted_list_item"]["rich_text"][0]
+    assert lead["text"]["content"] == "SCARCE" and lead["annotations"] == {"bold": True}
+    assert "**" not in " ".join(bullets)
+
+    # It stands on its own: no section of the read's body, no process note, no way into the
+    # web app, and none of a Deep card's callouts.
+    sent = json.dumps(fake.requests)
+    assert READ["process_notes"][0]["note"] not in sent and "/paper/" not in sent
+    assert read["problem"]["takeaway"] not in sent and FAILED_REVIEW not in sent
+    assert "Closest prior work" not in sent and "Evaluation" not in sent
+
+    words = " ".join(said(b) for b in fake.body((await state.database(conn, "notion")).guide_page))
+    assert "Holds, Partly, Not shown or Overclaimed" in words and "written earlier" in words
+    assert not INTERNAL.search(words)
+
+
+async def test_a_read_that_failed_its_review_says_so_above_its_short_form(world):
+    conn, fake = world, FakeNotion(PARENT)
+    note = {"kind": "review", "source": "service", "note": "Still failing: clarity 3."}
+    failed = READ | {"process_notes": [*READ["process_notes"], note]}
+    children = await deep_read(conn, fake, failed)
+    assert children[0]["type"] == "callout" and said(children[0]) == FAILED_REVIEW
+    assert said(children[1]).startswith("Key claim\n")
+    assert note["note"] not in json.dumps(fake.requests)  # which scores failed stays in litwatch
+
+
+async def test_a_tex_formula_and_a_link_in_a_read_become_notions_own(world):
+    conn, fake = world, FakeNotion(PARENT)
+    marked = json.loads(json.dumps(READ))
+    marked["sections"][0]["claim"] = (
+        "The law $p = \\sigma(a x)$ fits; see [the repo](https://example.org/r) and `run.py`."
+    )
+    children = await deep_read(conn, fake, marked)
+    rich = children[0]["callout"]["rich_text"]
+    assert {"type": "equation", "equation": {"expression": "p = \\sigma(a x)"}} in rich
+    assert [t["text"]["link"] for t in rich if t.get("text", {}).get("content") == "the repo"] == [
+        {"url": "https://example.org/r"}
+    ]
+    assert [t["annotations"] for t in rich if t.get("text", {}).get("content") == "run.py"] == [
+        {"code": True}
+    ]
+
+
+async def test_a_deep_card_from_before_keeps_its_callouts_and_its_page_is_not_rewritten(world):
+    conn, fake = world, FakeNotion(PARENT)
+    children = await deep_read(conn, fake, CARD)
+    assert _hash(children) == CARD_AS_BEFORE
+    asked = len(fake.requests)
+    assert await start(conn, notion(fake))  # a restart reconciles: the page is as it should be
+    assert {r[0] for r in fake.requests[asked:]} == {"GET"}
+
+    # Written again as a read, the page's Deep read becomes the short form.
+    await integrations_store.put_card(conn, A.id, READ, "deep", {}, **LABEL)
+    n = notion(fake)
+    assert await start(conn, n)
+    deep = fake.body(fake.row(A.id)["id"])[-1]
+    assert deep["type"] == "heading_2" and plain(deep["heading_2"]["rich_text"]) == "Deep read"
+    inside = fake.body(deep["id"])
+    assert inside[0]["type"] == "callout" and said(inside[0]).startswith("Key claim\n")
+    assert "bulleted_list_item" in {b["type"] for b in inside}
 
 
 async def test_a_worth_a_look_without_a_gist_shows_its_abstract(world):

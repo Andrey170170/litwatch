@@ -2,9 +2,13 @@
 arXiv that stays slow."""
 
 import asyncio
+import base64
+import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import arxiv
@@ -54,6 +58,23 @@ TREE = Taxonomy(
     ],
     topics=TOPICS,
 )
+
+
+# The Deep read's fixtures, the web app's own (`deep/src/read.ts` is their schema).
+READS = Path(__file__).parent.parent / "web" / "src" / "deepread" / "fixtures"
+# Two WebP images, 8 by 6 pixels, of different colours.
+BLUE = base64.b64decode("UklGRiIAAABXRUJQVlA4TBYAAAAvB0ABAAdQt6IUuf8BgCD8b5uI6H8I")
+RUST = base64.b64decode("UklGRiIAAABXRUJQVlA4TBYAAAAvB0ABAAdQrSIXpf8BgCD8b5uI6H8I")
+
+
+def fixture_read(name: str) -> dict[str, Any]:
+    """One of the web app's fixture reads: `icl` or `scarce` (which carries a process note)."""
+    return json.loads((READS / f"read-{name}.json").read_text())
+
+
+def sent_figure(name: str, image: bytes = BLUE, mime: str = "image/webp") -> dict[str, str]:
+    """A figure as the deep service sends it with a read (docs/integrations.md)."""
+    return {"name": name, "mime": mime, "data": base64.b64encode(image).decode()}
 
 
 def paper(id: str = "2609.11934", **fields) -> Paper:

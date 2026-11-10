@@ -6,8 +6,10 @@ handling an event twice, or in a different order, ends in the same place:
 - a library paper gets a preprint item (found by arXiv id or title before one is made) in
   the `Litwatch` collection, and in a subcollection for its best Focus grade;
 - tags `litwatch:watch:<topic>:<grade>` for each Focus topic at `relevant` or above;
-- a `litwatch:screen` note with the Focus grades and the published version, and a
-  `litwatch:enrichment` note and tags from the deep card when one is stored;
+- a `litwatch:screen` note with the Focus grades and the published version; and, while the
+  paper's card is a Deep card from before, a `litwatch:enrichment` note and tags from it. A
+  Deep read gets neither (docs/specs/deep-read.md, Beyond the web app): the note and tags
+  an item already has stay as they are;
 - a paper the owner unsaved, or that left the library, is taken out of the collections and
   tagged `litwatch:dropped`. Its item is never deleted.
 
@@ -17,9 +19,9 @@ other (by arXiv id or title) and updated, not made again.
 
 Options: `user_id` (or $LITWATCH_ZOTERO_USER_ID), the API key in $ZOTERO_API_KEY,
 `subcollections` ({grade: name}, default 0.x's "Tier 1" and "Tier 2"), and `inbox_collection`
-with `inbox_topics`: a paper whose card is ready and that is `must_read` for one of those
-topics is in that collection too (a reading app picks it up there), and leaves it when that no
-longer holds or the paper leaves the library.
+with `inbox_topics`: a paper whose Deep read (or Deep card) is ready and that is `must_read`
+for one of those topics is in that collection too (a reading app picks it up there), and
+leaves it when that no longer holds or the paper leaves the library.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ import psycopg
 
 from litwatch import events
 from litwatch.config import Config
-from litwatch.core import Event, Grade, Paper, Publication
+from litwatch.core import Event, Grade, Paper, Publication, deepread
 from litwatch.integrations import required, required_secret
 from litwatch.store import integrations as state
 from litwatch.store import papers as papers_store
@@ -422,7 +424,7 @@ class Zotero:
     name = "zotero"
     description = (
         "Keeps a Zotero item for every library paper, with its grades as tags and its "
-        "published version and deep card as notes. Never deletes an item."
+        "published version as a note. Never deletes an item."
     )
 
     def __init__(
@@ -472,7 +474,9 @@ class Zotero:
         note = screen_note(paper, focus, record)
         await self.zotero.upsert_note(key, note, NOTE_FIND, NOTE_TAG, attempt)
         card = await state.card(conn, paper_id)
-        if card and card["card"]:
+        # A Deep card's note and tags only: a read has none of the fields they are built from,
+        # and what a card left on the item before stays.
+        if card and card["card"] and not deepread.is_read(card["card"]):
             await self.zotero.upsert_note(
                 key,
                 enrichment_note(paper, card["card"], card["model"], card["stats"]),
@@ -482,8 +486,8 @@ class Zotero:
             )
             await self.zotero.set_tags(key, enrichment_tags(card["card"]), CARD_PREFIXES)
         if self.inbox_collection:
-            # In the inbox exactly while its card is ready and it is `must_read` for an inbox
-            # topic: a paper that drops below that leaves the inbox again.
+            # In the inbox exactly while its card, a read or not, is ready and it is `must_read`
+            # for an inbox topic: a paper that drops below that leaves the inbox again.
             inbox = bool(card and card["card"]) and any(
                 t["grade"] == Grade.MUST_READ and t["slug"] in self.inbox_topics for t in focus
             )
