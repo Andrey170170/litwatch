@@ -199,6 +199,7 @@ export class PaperIndex {
     if (most === 0) return { no: `the paper's source has no ${kind}` };
     // numbers the source sets itself, and A.1, S2, 3.4: an appendix's or a section's own, which it does not carry
     if (!plain || !/^\d+$/.test(key)) return "unknown";
+    if (Number(key) < 1) return { no: `the paper's source numbers its ${kind}s from 1` };
     if (Number(key) > most) return { no: `the paper's source has ${sure === most ? "" : "at most "}${most} ${kind}${most === 1 ? "" : "s"}` };
     return Number(key) <= sure ? "there" : "unknown";
   }

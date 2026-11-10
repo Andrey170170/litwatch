@@ -228,6 +228,9 @@ test("a LaTeX source with no table has none: every cite of one is rejected, an a
   const cited = errors(draft(), { paper: none });
   assert.ok(has(cited, "/sections/2/blocks/1/caption: cites Table 1, but the paper's source has no table"), cited.join("\n"));
   assert.ok(has(cited, "/sections/3/claims/0/where: cites Table 1, but the paper's source has no table"));
+  // nor a Figure 0 or Table 0, which default numbering never gives
+  assert.deepEqual(errors(resting("Table 0")), ["/sections/3/claims/0/where: cites Table 0, but the paper's source numbers its tables from 1"]);
+  assert.deepEqual(errors(resting("Figure 0")), ["/sections/3/claims/0/where: cites Figure 0, but the paper's source numbers its figures from 1"]);
   // the space LaTeX allows after \begin hides no table
   const spaced = BODY.replace("\\begin{table}", "\\begin {table}").replace("\\end{table}", "\\end {table}");
   assert.deepEqual(errors(resting("Table 1"), { paper: spaced }), []);
