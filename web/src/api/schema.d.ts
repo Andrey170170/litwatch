@@ -4,23 +4,6 @@
  */
 
 export interface paths {
-    "/api/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Status */
-        get: operations["status_api_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/papers": {
         parameters: {
             query?: never;
@@ -128,11 +111,7 @@ export interface paths {
          */
         put: operations["set_publication_api_papers__paper_id__publication_put"];
         post?: never;
-        /**
-         * Forget Publication
-         * @description Drop the stored version, the owner's choice included; the paper is looked up again.
-         */
-        delete: operations["forget_publication_api_papers__paper_id__publication_delete"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -145,11 +124,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Bibtex Filter
-         * @description BibTeX for every collection paper a Papers filter matches.
-         */
-        get: operations["bibtex_filter_api_bibtex_get"];
+        get?: never;
         put?: never;
         /**
          * Bibtex Selection
@@ -159,26 +134,6 @@ export interface paths {
          *     what the hit carries, with no fetch, no lookup and nothing written.
          */
         post: operations["bibtex_selection_api_bibtex_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/lookup": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Lookup
-         * @description Find a paper by arXiv id or link, fetching it when the collection lacks it.
-         */
-        post: operations["lookup_api_lookup_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2197,20 +2152,6 @@ export interface components {
          * @enum {string}
          */
         LabelValue: "central" | "related" | "adjacent" | "none" | "unsure";
-        /** Lookup */
-        Lookup: {
-            row: components["schemas"]["Row"];
-            /** Fetched */
-            fetched: boolean;
-        };
-        /** LookupIn */
-        LookupIn: {
-            /**
-             * Q
-             * @description An arXiv id or link
-             */
-            q: string;
-        };
         /** Miss */
         Miss: {
             /** Id */
@@ -3363,40 +3304,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    status_api_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RunStatus"];
-                };
-            };
-            /** @description Missing or wrong token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The read token, outside reading papers */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     papers_api_papers_get: {
         parameters: {
             query?: {
@@ -3695,113 +3602,6 @@ export interface operations {
             };
         };
     };
-    forget_publication_api_papers__paper_id__publication_delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                paper_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing or wrong token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The read token, outside reading papers */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    bibtex_filter_api_bibtex_get: {
-        parameters: {
-            query?: {
-                q?: string | null;
-                rarity?: components["schemas"]["Rarity"][];
-                grade?: components["schemas"]["GradeLevel"][];
-                saved?: boolean | null;
-                code?: boolean | null;
-                weight?: components["schemas"]["Weight"][];
-                since?: string | null;
-                until?: string | null;
-                /** @description Omitted: `best` (search rank) while `q` is given, else `rarest`. */
-                sort?: components["schemas"]["Sort"] | null;
-                topic?: string[];
-                depth?: components["schemas"]["Depth"] | null;
-                source?: ("collection" | "outside") | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/plain": string;
-                };
-            };
-            /** @description Missing or wrong token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The read token, outside reading papers */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description No such paper or topic */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     bibtex_selection_api_bibtex_post: {
         parameters: {
             query?: never;
@@ -3853,67 +3653,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
-            };
-        };
-    };
-    lookup_api_lookup_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LookupIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Lookup"];
-                };
-            };
-            /** @description Missing or wrong token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The read token, outside reading papers */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description No such paper or topic */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description arXiv did not answer in time; nothing was stored */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

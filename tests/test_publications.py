@@ -238,12 +238,10 @@ async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db):
         page = (await c.get(f"/api/papers/{Q.id}")).json()
         assert page["publication"]["venue"] == "NIPS" and page["publication_by_owner"]
         assert await store.due(db, 10) == []
-        # "None" is a choice too; forgetting it makes the paper due again.
+        # "None" is a choice too.
         r = await c.put(f"/api/papers/{Q.id}/publication", json={"none": True})
         assert r.status_code == 200 and r.json() is None
         assert (await c.post("/api/bibtex", json={"ids": [Q.id]})).text.startswith("@misc{")
-        assert (await c.delete(f"/api/papers/{Q.id}/publication")).status_code == 204
-        assert await store.due(db, 10) == [Q.id]
         # Exactly one of key, DOI or none; an unknown key is a 404.
         bad = await c.put(f"/api/papers/{Q.id}/publication", json={"doi": "10.1/x", "none": True})
         assert bad.status_code == 422

@@ -249,7 +249,7 @@ async def test_an_unusable_answer_is_no_verdict_and_three_leave_it_for_the_owner
     assert ("judge", B.title) not in models.asked  # it waits for the owner now
 
     async with api(conn, models) as client:
-        status = (await client.get("/api/status")).json()
+        status = (await client.get("/api/summary")).json()["status"]
         assert status["state"] == "attention" and status["ungraded"] == 1
         quality = (await client.get("/api/settings/quality")).json()
         (listed,) = quality["night"]["ungraded"]
@@ -322,7 +322,7 @@ async def test_a_paused_topic_is_not_graded_now_nor_waits_for_the_owner(conn, mo
     await word.save_taxonomy(conn, paused())
     async with api(conn, models) as client:
         assert (await client.post(NOW, json={"revision": 1})).status_code == 409
-        status = (await client.get("/api/status")).json()
+        status = (await client.get("/api/summary")).json()["status"]
         quality = (await client.get("/api/settings/quality")).json()
     assert status["ungraded"] == 0 and quality["night"]["ungraded"] == []
     (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")

@@ -11,7 +11,6 @@ describe("Topics", () => {
     let fail = true;
     const status = { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 };
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/summary": { status, topics: [], settings: { waiting: 0, last_session: null, misses: 0, topics: 0, classes: 0, spent: 0, budget: null, failing: [] } },
       "GET /api/topics": () => (fail ? json({ detail: "gone" }, 500) : [{ depth: "focus", topics: [card] }]),
     });

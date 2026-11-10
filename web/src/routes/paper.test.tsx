@@ -31,7 +31,6 @@ const paper = {
   publication_by_owner: false,
   card_requestable: true,
 };
-const status = { state: "quiet", papers: 1, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
 /** Whether a text is on the page and not in the hidden half of the Brief rung's switch. */
 const shown = (text: string) => screen.queryAllByText(text).some((el) => !el.closest('[aria-hidden="true"]'));
 const brief = { id: 1, text: "The brief, from the full text.", overstatement: "The abstract overstates: the gain holds only for 7B models.", revision: 1, arxiv_version: 1, source: "latex", written_at: "2026-10-14T03:00:00Z" };
@@ -39,7 +38,7 @@ const brief = { id: 1, text: "The brief, from the full text.", overstatement: "T
 describe("a paper's page", () => {
   it("shows the Brief in the abstract's place, its overstatement first, and the abstract only without one", async () => {
     viewport(true);
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, brief } });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, brief } });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.getByText("The brief, from the full text.")).toBeInTheDocument();
@@ -54,7 +53,6 @@ describe("a paper's page", () => {
     viewport(true);
     const gist = { text: "The gist.", source: "full_text" };
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": { ...paper, gist, brief: { ...brief, source: "pdf" } },
       "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", gist, brief },
@@ -71,7 +69,6 @@ describe("a paper's page", () => {
   it("says which revision an older Brief read, and why the abstract stands in without one", async () => {
     viewport(true);
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": { ...paper, revision: 2, brief },
       "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", text_pass: { id: 7, kind: "brief", state: "awaiting_text", queued_at: "2026-10-14T03:00:00Z" } },
@@ -91,7 +88,6 @@ describe("a paper's page", () => {
       { kind: "awaiting_text", revision: 1, error: null, pass_id: 8 },
     ];
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       // Each run drops its pass from the page: the first on success, the second on a 409 (the page was behind).
       "GET /api/papers/2610.00002": () => ({ ...paper, states: states.slice(calls.filter((c) => c.method === "POST").length), text_pass: { id: 7, kind: "brief", state: "failed", queued_at: "2026-10-14T03:00:00Z" } }),
@@ -129,7 +125,6 @@ describe("a paper's page", () => {
   it("records a thumb only once a reason is picked, on the topic's row", async () => {
     viewport(true);
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": paper,
       "PUT /api/reactions/2610.00002": { message: "Overrated on Mech interp: central became related", saved: false, grades: { mi: "relevant" } },
@@ -148,7 +143,6 @@ describe("a paper's page", () => {
   it("labels the Fit from the control and removes the label by tapping it again", async () => {
     viewport(true);
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": () => (calls.some((c) => c.method === "PUT") ? { ...paper, topics: [{ ...paper.topics[0], label: { value: "related" } }] } : paper),
       "PUT /api/labels/mi/2610.00002": { saved: false },
@@ -170,7 +164,6 @@ describe("a paper's page", () => {
     viewport(true);
     const other = { ...paper, id: "2610.00003", title: "Epic two", arxiv_url: "https://arxiv.org/abs/2610.00003" };
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": paper,
       "GET /api/papers/2610.00003": other,
@@ -195,7 +188,6 @@ describe("a paper's page", () => {
     let release = () => {};
     const held = new Promise<void>((r) => (release = r));
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": paper,
       "POST /api/papers/2610.00002/card": async () => {
@@ -218,7 +210,6 @@ describe("a paper's page", () => {
   it("says when a paper is not in the collection", async () => {
     viewport(true);
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/9999.99999": () => new Response(JSON.stringify({ detail: "not found" }), { status: 404 }),
     });
@@ -230,7 +221,6 @@ describe("a paper's page", () => {
     viewport(true);
     let down = true;
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": () => (down ? json({ detail: "The archive did not answer" }, 503) : paper),
     });
@@ -248,7 +238,6 @@ describe("a paper's page", () => {
     let held = true;
     const job = { id: 4, state: "queued", error: null };
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2409.01234": () => (held ? json({ detail: "no such paper" }, 404) : { ...paper, id: "2409.01234", title: "Fetched one", in_collection: false, topics: [], badges: [], rarity: null, gist: null, process: job }),
       "POST /api/jobs/process": () => {
@@ -269,7 +258,6 @@ describe("a paper's page", () => {
     let job: { id: number; state: string; error: null } | null = null;
     const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2409.01234": () => (job?.state === "done" ? paper : { ...outside, stored: !!job, next_run: !!job, process: job }),
       "POST /api/jobs/process": () => {
@@ -298,7 +286,7 @@ describe("a paper's page", () => {
   it("offers Process again once a paper's job failed, with why", async () => {
     viewport(true);
     const failed = { ...paper, id: "2409.01234", title: "Failed one", in_collection: false, stored: true, next_run: true, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, process: { id: 4, state: "failed", error: "classification failed on 1", again: true } };
-    const calls = scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": failed, "POST /api/jobs/process": json({ id: 4, state: "queued", error: null }, 202) });
+    const calls = scriptFetch({ "GET /api/topics": [], "GET /api/papers/2409.01234": failed, "POST /api/jobs/process": json({ id: 4, state: "queued", error: null }, 202) });
     renderApp("/paper/2409.01234");
     const again = await screen.findByRole("button", { name: "Process again" });
     expect(again).toHaveAttribute("title", "Processing failed: classification failed on 1");
@@ -310,7 +298,7 @@ describe("a paper's page", () => {
     viewport(true);
     const waits = { kind: "awaiting_classification", revision: 1, error: "no usable answer", refused: false };
     const stuck = { ...paper, id: "2409.01234", title: "Stuck one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null, states: [waits], process: { id: 4, state: "failed", error: "classification failed on 1 (waits on Needs you)", again: false } };
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": stuck });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2409.01234": stuck });
     renderApp("/paper/2409.01234");
     const failed = await screen.findByRole("button", { name: "Failed" });
     expect(failed).toBeDisabled();
@@ -322,7 +310,7 @@ describe("a paper's page", () => {
   it("keeps saying Processing once the classified paper is in the collection, until its job is done", async () => {
     viewport(false);
     let state = "running";
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": () => ({ ...paper, id: "2409.01234", title: "Classified one", process: { id: 4, state, error: null } }) });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2409.01234": () => ({ ...paper, id: "2409.01234", title: "Classified one", process: { id: 4, state, error: null } }) });
     const qc = freshClient();
     renderApp("/paper/2409.01234", qc);
     await screen.findByRole("heading", { name: "Classified one" });
@@ -342,7 +330,6 @@ describe("a paper's page", () => {
     viewport(true);
     let job: { id: number; state: string; error: string | null; again: boolean } = { id: 4, state: "failed", error: "analysis failed on 1", again: true };
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2409.01234": () => ({ ...paper, id: "2409.01234", title: "Half done", states: [], process: job }),
       "POST /api/jobs/4/again": () => {
@@ -363,7 +350,6 @@ describe("a paper's page", () => {
     viewport(true);
     const fetched = { ...paper, id: "2409.01234", title: "Fetched one", in_collection: false, stored: true, next_run: true, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2409.01234": { ...fetched, process_now: true },
       "GET /api/papers/2409.01235": { ...fetched, id: "2409.01235", title: "Waiting one", process_now: false },
@@ -383,7 +369,7 @@ describe("a paper's page", () => {
   it("says a fetched paper no run will process is fetched, without promising the next run", async () => {
     viewport(true);
     const dismissed = { ...paper, id: "2409.01234", title: "Dismissed one", in_collection: false, stored: true, next_run: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2409.01234": dismissed });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2409.01234": dismissed });
     renderApp("/paper/2409.01234");
     expect(await screen.findByRole("button", { name: "Fetched" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /next run/ })).toBeNull();
@@ -393,7 +379,6 @@ describe("a paper's page", () => {
     viewport(false);
     const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, stored: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2409.01234": outside,
       "POST /api/bibtex": () => new Response("@misc{author2026archive}", { headers: { "content-type": "text/plain" } }),
@@ -412,7 +397,6 @@ describe("a paper's page", () => {
     viewport(true);
     const outside = { ...paper, id: "2409.01234", title: "Archive one", in_collection: false, stored: false, topics: [], badges: [], rarity: null, gist: null, weight: null, facets: null };
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2409.01234": outside,
       "POST /api/bibtex": () => new Response("@misc{author2026archive}", { headers: { "content-type": "text/plain" } }),
@@ -442,7 +426,6 @@ describe("a paper's page", () => {
     viewport(true);
     const failed = { kind: "fulltext_failed", revision: 1, error: "LaTeX reads badly", pass_id: 7 };
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": () => ({ ...paper, states: calls.some((c) => c.method === "POST") ? [] : [failed] }),
       "POST /api/settings/fulltext/7/pdf": () => new Response(null, { status: 204 }),
@@ -467,7 +450,7 @@ describe("a paper's page", () => {
         { topic: other, fit: "related", grade: "relevant", rarity: "rare", verdict: null, missed: false, reaction: { value: "down", reason: "overrated" } },
       ],
     };
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": two });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": two });
     renderApp("/paper/2610.00002?topic=mi");
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.getByRole("button", { name: "Thumbs down" })).toHaveClass("dim");
@@ -478,7 +461,7 @@ describe("a paper's page", () => {
 
   it("gives focus back to the control that opened a sheet", async () => {
     viewport(false);
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     const more = screen.getByRole("button", { name: "More" });
@@ -504,7 +487,7 @@ describe("a paper's page", () => {
     };
     let reads = 0;
     const pass = { id: 74, reason: "request", state: "ready", queued_at: "2026-10-15T21:20:00Z", failed_runs: 0, error: null };
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, card } : { ...paper, card, card_requestable: false, card_pass: pass }), "POST /api/papers/2610.00002/card": { pass_id: 74 } });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, card } : { ...paper, card, card_requestable: false, card_pass: pass }), "POST /api/papers/2610.00002/card": { pass_id: 74 } });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     const among = screen.getByText("Among the collection").closest(".rung")!;
@@ -527,7 +510,7 @@ describe("a paper's page", () => {
       { kind: "tool", source: "model", note: "A table could not be parsed from the PDF text.", url: "javascript:alert(1)" },
     ];
     const card = { card: { key_claim: "A meta-verifier catches 71% of unfaithful chains.", limitations: ["Two models only."], prior_work: [{ title: "Measuring Faithfulness", relation: "extends" }], process_notes: notes }, written_at: "2026-10-20T03:00:00Z" };
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, card } });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, card } });
     renderApp("/paper/2610.00002");
     const fold = await screen.findByRole("button", { name: "Process notes · 2" });
     expect(fold).toHaveAttribute("aria-expanded", "false");
@@ -551,7 +534,6 @@ describe("a paper's page", () => {
     viewport(true);
     const pass = { id: 73, reason: "pick", state: "running", queued_at: "2026-10-15T21:00:00Z", failed_runs: 0, error: null };
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": { ...paper, card_pass: pass },
       "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", card_requestable: false, card_pass: { ...pass, reason: "request", state: "failed", failed_runs: 3, error: "timed out" } },
@@ -572,7 +554,6 @@ describe("a paper's page", () => {
     const pass = { id: 73, reason: "pick", state: "failed", queued_at: "2026-10-15T21:00:00Z", failed_runs: 1, error: "timed out" };
     let reads = 0;
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       // the first read shows the failed automatic pass; the one after the request shows it taken over and queued
       "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, card_pass: pass } : { ...paper, card_requestable: false, card_pass: { ...pass, reason: "request", state: "ready", failed_runs: 0, error: null } }),
@@ -591,7 +572,6 @@ describe("a paper's Brief and abstract", () => {
   it("opens on the Brief, switches to the abstract in its place, and opens on the Brief again on the next paper", async () => {
     viewport(true);
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": { ...paper, brief },
       "GET /api/papers/2610.00003": { ...paper, id: "2610.00003", title: "Epic two", brief },
@@ -615,7 +595,7 @@ describe("a paper's Brief and abstract", () => {
 
   it("has no switch without a Brief", async () => {
     viewport(false);
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.queryByRole("group", { name: "Show" })).toBeNull();
@@ -636,7 +616,6 @@ describe("a paper's topic rows", () => {
   it("go by grade, fold after two with the rest's badges and count, and hold still when a label regrades one", async () => {
     viewport(true);
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       // labelling Must one none makes it a none
       "GET /api/papers/2610.00002": () => (calls.some((c) => c.method === "PUT") ? { ...many, topics: many.topics.map((t) => (t.topic.slug === "mr" ? { ...t, grade: "none", rarity: "common", label: { value: "none" } } : t)) } : many),
@@ -666,7 +645,7 @@ describe("a paper's topic rows", () => {
     };
     onTestFinished(() => void (Element.prototype.scrollIntoView = was));
     const split = { ...many, topics: many.topics.map((t) => (t.topic.slug === "nn" ? { ...t, state: "split" } : t)), states: [{ kind: "split", topic: "nn", revision: 1, error: null, pass_id: null }] };
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": split });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": split });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     expect(railNames()).toEqual(["Must one", "Rel one"]);
@@ -679,7 +658,7 @@ describe("a paper's topic rows", () => {
     viewport(true);
     const verdict = { fit: "related", reason: "r", split: false, escalated: false, one_lab: true, opinions: { judge: { fit: "related", reason: "j" } } };
     const one = { ...many, topics: many.topics.map((t) => (t.topic.slug === "rl" ? { ...t, state: "one_lab", verdict } : t)), states: [{ kind: "one_lab", topic: "rl", revision: 1, error: null, pass_id: null }] };
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": one });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": one });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.getByText(/One lab on Rel one/).closest(".note")).toHaveTextContent("Check refused, judge related; related stands until it is labelled.");
@@ -690,7 +669,6 @@ describe("a paper's topic rows", () => {
   it("keep an open Label open when a third topic arrives and the fold appears", async () => {
     viewport(true);
     const calls = scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/papers/2610.00002": () => ({ ...many, topics: many.topics.slice(0, calls.some((c) => c.method === "PUT") ? 3 : 2) }),
       "PUT /api/labels/aa/2610.00002": { saved: false },
@@ -705,7 +683,7 @@ describe("a paper's topic rows", () => {
 
   it("have no fold with two rows", async () => {
     viewport(true);
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": { ...many, topics: many.topics.slice(0, 2) } });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...many, topics: many.topics.slice(0, 2) } });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     expect(railNames()).toEqual(["Adj one", "None one"]);
@@ -714,7 +692,7 @@ describe("a paper's topic rows", () => {
 
   it("go the same way in the phone's paper sheet", async () => {
     viewport(false);
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": many });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": many });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     await userEvent.click(screen.getByRole("button", { name: "More" }));
@@ -730,7 +708,7 @@ describe("a paper's topic rows", () => {
   it("say a topic grading again is ungraded on the phone, as the fold counts it", async () => {
     viewport(false);
     const again = { ...many, topics: many.topics.map((t) => (t.topic.slug === "rl" ? { ...t, state: "grading_again" } : t)) };
-    scriptFetch({ "GET /api/status": status, "GET /api/topics": [], "GET /api/papers/2610.00002": again });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": again });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     await userEvent.click(screen.getByRole("button", { name: "More" }));

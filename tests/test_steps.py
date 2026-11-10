@@ -290,7 +290,7 @@ async def test_failed_analysis_stops_after_three_runs_until_the_owner_says_try_a
     await night(conn, models)
     assert ("analyse", A.title) not in models.asked  # left for the owner, at no cost
     async with api(conn) as client:
-        status = (await client.get("/api/status")).json()
+        status = (await client.get("/api/summary")).json()["status"]
         assert status["state"] == "attention" and status["analysis_failed"] == 1
         url = "/api/settings/analysis/{}/retry"
         assert (await client.post(url.format(A.id), json={"revision": 2})).status_code == 409
@@ -518,7 +518,7 @@ async def test_a_classifier_refusal_stops_at_once(conn, models):
 
 
 async def test_a_paper_awaiting_classification_is_counted_and_listed(client):
-    status = (await client.get("/api/status")).json()
+    status = (await client.get("/api/summary")).json()["status"]
     assert status["state"] == "attention" and status["awaiting_classification"] == 1
     assert await awaiting(client) == [A.id]
     quality = (await client.get("/api/settings/quality")).json()
@@ -533,7 +533,7 @@ async def test_dismissing_drops_the_paper_from_processing(client, conn, models):
     dismissed = await client.post(f"/api/settings/classification/{A.id}/dismiss", json=AT_1)
     assert dismissed.status_code == 204
     assert await awaiting(client) == []
-    assert (await client.get("/api/status")).json()["state"] == "quiet"
+    assert (await client.get("/api/summary")).json()["status"]["state"] == "quiet"
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
     await papers_store.upsert(conn, [rewritten])
     models.asked.clear()

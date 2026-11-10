@@ -36,7 +36,6 @@ const papers = { rows: [], total: 0, counts: { legendary: 0, epic: 0, rare: 0, u
 const day = (d: string, previous: string | null, next: string | null) => ({ day: d, released: true, digests: [{ ...card, day: d }], previous, next, weekly: null });
 const routes = {
   "GET /api/summary": summary,
-  "GET /api/status": status,
   "GET /api/digests/days/2026-10-14": day("2026-10-14", "2026-10-13", null),
   "GET /api/digests/days/2026-10-13": day("2026-10-13", null, "2026-10-14"),
   "GET /api/topics": [{ depth: "focus", topics: [focus] }],

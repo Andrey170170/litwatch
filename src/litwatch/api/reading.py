@@ -195,11 +195,6 @@ async def run_status(request: Request, c: psycopg.AsyncConnection) -> s.RunStatu
     return s.RunStatus(**await reading.status(c), over_budget=over)
 
 
-@router.get("/status")
-async def status(request: Request, c: Conn) -> s.RunStatus:
-    return await run_status(request, c)
-
-
 # -- papers ----------------------------------------------------------------------------------------
 
 
@@ -677,12 +672,6 @@ async def set_publication(
     return record
 
 
-@router.delete("/papers/{paper_id:path}/publication", status_code=204)
-async def forget_publication(paper_id: str, c: Conn) -> None:
-    """Drop the stored version, the owner's choice included; the paper is looked up again."""
-    await publications_store.forget(c, paper_id)
-
-
 def _cited(row: Any) -> Cited:
     published = row["published"]
     return Cited(
@@ -746,26 +735,6 @@ async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
         if h.id not in ids
     ]
     return await _bibtex(c, ids, outside)
-
-
-@router.get("/bibtex", response_class=PlainTextResponse, responses=NOT_FOUND)
-async def bibtex_filter(c: Conn, params: Annotated[s.PaperQuery, Query()]) -> str:
-    """BibTeX for every collection paper a Papers filter matches."""
-    return await _bibtex(c, await _matching(c, params))
-
-
-@router.post("/lookup", responses={**NOT_FOUND, **ARXIV_SILENT})
-async def lookup(body: s.LookupIn, c: Conn) -> s.Lookup:
-    """Find a paper by arXiv id or link, fetching it when the collection lacks it."""
-    try:
-        found, fetched = await misses.lookup(c, body.q)
-    except misses.NotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except NoAnswerError as exc:
-        raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    tree = await taxonomy_store.load(c)
-    listed = await reading.papers(c, tree, reading.Query(ids=[found.id]), limit=1)
-    return s.Lookup(row=_row(tree, _looks(tree), listed.rows[0], s.Row), fetched=fetched)
 
 
 # -- topics ----------------------------------------------------------------------------------------

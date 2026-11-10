@@ -25,7 +25,6 @@ describe("the Digest", () => {
     viewport(true);
     const calls = scriptFetch({
       "GET /api/summary": summary,
-      "GET /api/status": status,
       "GET /api/digests/days/2026-10-14": day,
       "GET /api/digests/days/2026-10-13": { ...day, day: "2026-10-13", digests: [{ ...card, id: 5, day: "2026-10-13" }], previous: null, next: "2026-10-14" },
     });
@@ -47,7 +46,6 @@ describe("the Digest", () => {
     const night = { due: new Date(2026, 9, 19, 2).toISOString(), deadline: new Date(2026, 9, 19, 7, 30).toISOString(), papers: 0, total: null, error: null };
     scriptFetch({
       "GET /api/summary": summary,
-      "GET /api/status": status,
       "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", previous: "2026-10-15", next: null },
       "GET /api/digests/days/2026-10-19": { ...day, day: "2026-10-19", released: false, digests: [], previous: "2026-10-16", next: null, run: { ...night, state: "waiting" } },
     });
@@ -67,7 +65,7 @@ describe("the Digest", () => {
     const night = { due: new Date(2026, 9, 19, 2).toISOString(), deadline: new Date(2026, 9, 19, 7, 30).toISOString(), papers: 120, total: 480, error: null };
     const empty = { ...day, day: "2026-10-19", released: true, digests: [], previous: "2026-10-16", next: null, run: { ...night, state: "running" } };
     let today: object = empty;
-    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-19": () => json(today) });
+    scriptFetch({ "GET /api/summary": summary, "GET /api/digests/days/2026-10-19": () => json(today) });
     renderApp("/");
     expect(await screen.findByText("120 / 480 papers read")).toBeInTheDocument();
     today = { ...empty, digests: [{ ...card, day: "2026-10-19" }], run: { ...night, state: "done" } };
@@ -79,14 +77,14 @@ describe("the Digest", () => {
   it("stops on today even when a browser behind the server's zone is shown a later day as the next", async () => {
     vi.setSystemTime(new Date(2026, 9, 18, 20));
     viewport(true);
-    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", next: "2026-10-19" } });
+    scriptFetch({ "GET /api/summary": summary, "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", next: "2026-10-19" } });
     renderApp("/?day=2026-10-16");
     expect(await screen.findByRole("link", { name: "Newer" })).toHaveAttribute("href", "/?day=2026-10-18");
   });
 
   it("opens a digest over the day on the desktop, its papers by role, and closes it back to the day", async () => {
     viewport(true);
-    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-14": day, "GET /api/digests/7": digest });
+    scriptFetch({ "GET /api/summary": summary, "GET /api/digests/days/2026-10-14": day, "GET /api/digests/7": digest });
     const { router } = renderApp("/");
     await userEvent.click(await screen.findByText("Two measurement papers."));
     const over = await screen.findByRole("dialog");
@@ -112,7 +110,7 @@ describe("the Digest", () => {
     viewport(true);
     const updated = (n: number, over: object = {}) => ({ ...paper, id: `2605.0000${n}`, title: `Updated ${n}`, announced: "2026-05-12", role: "updated", version: 3, gist: `Gist ${n}.`, ...over });
     const withUpdated = { ...digest, counts: { ...counts, updated: 2 }, papers: [paper, related, updated(1), updated(2, { rarity: "rare" })] };
-    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/7": withUpdated });
+    scriptFetch({ "GET /api/summary": summary, "GET /api/digests/7": withUpdated });
     renderApp("/digests/7");
     const head = await screen.findByRole("button", { name: "Updated · 2" });
     expect(screen.getByText(/2 new · 1 must read · 2 updated/)).toBeInTheDocument();
@@ -142,7 +140,6 @@ describe("the Digest", () => {
     const quietUp = { ...quiet, counts: { ...quiet.counts, updated: 3 } };
     scriptFetch({
       "GET /api/summary": summary,
-      "GET /api/status": status,
       "GET /api/digests/days/2026-10-14": { ...day, digests: [{ ...card, counts: { ...counts, updated: 1 } }, quietUp] },
       "GET /api/digests/8": { ...quietUp, text: null, error: null, written_at: null, papers: [up] },
     });
@@ -157,7 +154,7 @@ describe("the Digest", () => {
 
   it("on the phone opens a digest as its own page, and puts the stepper in the bottom bar", async () => {
     viewport(false);
-    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-14": day, "GET /api/digests/7": digest });
+    scriptFetch({ "GET /api/summary": summary, "GET /api/digests/days/2026-10-14": day, "GET /api/digests/7": digest });
     const { router } = renderApp("/");
     await screen.findByText("Two measurement papers.");
     const foot = document.querySelector(".pfoot .stp.foot");
@@ -181,7 +178,6 @@ describe("the Digest", () => {
     }
     scriptFetch({
       "GET /api/summary": summary,
-      "GET /api/status": status,
       "GET /api/digests": { days, weeks: [{ monday: "2026-10-05", marks: [{ ...mark(50, "2026-10-05"), period: "week" }] }, { monday: "2026-10-12", marks: [] }], start: "2026-10-05" },
     });
     renderApp("/history");
@@ -207,7 +203,7 @@ describe("the Digest", () => {
   it("says a failed read of the day, and tries again", async () => {
     viewport(true);
     let down = true;
-    scriptFetch({ "GET /api/summary": summary, "GET /api/status": status, "GET /api/digests/days/2026-10-14": () => (down ? json({ detail: "down" }, 500) : day) });
+    scriptFetch({ "GET /api/summary": summary, "GET /api/digests/days/2026-10-14": () => (down ? json({ detail: "down" }, 500) : day) });
     renderApp("/");
     expect(await screen.findByText(/Could not load the day/)).toBeInTheDocument();
     down = false;

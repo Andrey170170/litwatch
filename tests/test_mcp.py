@@ -138,7 +138,7 @@ async def test_only_the_mcp_token_opens_mcp_and_it_opens_nothing_else(conn):
         assert (await rpc(http, "initialize", INIT, token=None)).status_code == 401
         http.cookies.clear()
         mcp = {"authorization": f"Bearer {MCP_TOKEN}"}
-        for path in ("/api/status", "/api/papers", f"/api/papers/{P.id}"):
+        for path in ("/api/summary", "/api/papers", f"/api/papers/{P.id}"):
             assert (await http.get(path, headers=mcp)).status_code == 401, path
         assert (await http.get(f"/api/papers/{P.id}", headers=AUTH)).status_code == 200
         # The host check (R3): production's name answers, another gets the SDK's 421.
