@@ -13,11 +13,13 @@ export interface PaperInput {
   body_source?: string | null;
 }
 
-/** A topic the card is for: why the lab follows it and what it must read. */
+/** A topic the card is for: why the lab follows it, what it must read, and the grade litwatch gave the paper there
+ * (`must_read`, `relevant` or `adjacent`). */
 export interface SelectionContext {
   name: string;
   subject: string;
   rubric?: string | null;
+  grade?: string | null;
 }
 
 export const MAX_BODY_CHARS_IN_CONTEXT = 200_000;
@@ -29,8 +31,8 @@ export function systemPrompt(
   context: SelectionContext[],
 ): string {
   return `You are the deep processor of litwatch, a literature watch run by an NLP research lab. The lab follows \
-topics, each with a subject and a rubric for what it must read. litwatch graded this paper must read in the topics \
-listed below, or a lab member asked for its card. Your job is the lab's reading card for it: the result described \
+topics, each with a subject and a rubric for what it must read. The card is written for the topics listed below, \
+the ones litwatch graded this paper in, each with its grade; a lab member may also have asked for it. Your job is the lab's reading card for it: the result described \
 by the schema below, delivered through submit().
 
 ${renderSelections(context)}
@@ -81,10 +83,11 @@ Budget: ${maxCells} cells. The run ends on a successful submit.`;
 }
 
 function renderSelections(context: SelectionContext[]): string {
-  if (context.length === 0) return "Topics: none recorded for this job.";
+  if (context.length === 0) return "Topics: no topic grades this paper above none.";
   const lines = ["Topics this card is for:"];
   for (const s of context) {
-    lines.push(`- ${s.name}: ${s.subject}`);
+    const grade = s.grade ? ` (graded ${s.grade.replace("_", " ")})` : "";
+    lines.push(`- ${s.name}${grade}: ${s.subject}`);
     if (s.rubric) lines.push(`  Rubric: ${s.rubric}`);
   }
   return lines.join("\n");

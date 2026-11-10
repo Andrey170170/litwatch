@@ -296,6 +296,39 @@ async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db):
     assert len(await deep_rows(db)) == 1
 
 
+async def field(conn, p, fit: str) -> None:
+    """A member of the Field topic's class, graded there at `fit`, grading finished."""
+    await classify(conn, p, AGENTS.slug)
+    await analyse(conn, p)
+    await verdict(conn, p, fit, AGENTS)
+    await verdicts.passed(conn, [(p.id, 1)])
+
+
+@pytest.mark.parametrize(
+    ("graded", "selections"),
+    [
+        (None, []),
+        (lambda c: verdict(c, Q, "none"), []),
+        (lambda c: area(c, Q, "related"), [("Interpretability", "relevant")]),
+        (lambda c: field(c, Q, "related"), [("Agents and tool use", "relevant")]),
+    ],
+    ids=["graded-nowhere", "graded-none", "area-not-picked", "field"],
+)
+async def test_a_requested_card_is_written_for_the_topics_that_graded_the_paper(
+    db, graded, selections
+):
+    """Not for every Focus topic: a paper no topic graded gets no topic context, and one
+    graded only outside the CoT topics gets no CoT extension."""
+    if graded:
+        await graded(db)
+    await deep_passes.request(db, Q.id)
+    fake = FakeDeep(DONE)
+    assert await work(db, with_text(Q), make(fake)) == {"cards_written": 1}
+    (sent,) = fake.requests
+    assert [(s["name"], s["grade"]) for s in sent["selections"]] == selections
+    assert sent["extensions"] == []
+
+
 async def test_a_failed_job_records_its_usage_and_waits_for_the_owner_after_three_runs(db):
     await grade(db, Fit.CENTRAL)
     failed = {"error": "cell budget exhausted", "failure": "paper", "stats": USAGE, "trace": []}
