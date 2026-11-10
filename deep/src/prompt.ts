@@ -83,7 +83,7 @@ Budget: ${maxCells} cells. The run ends on a successful submit.`;
 }
 
 function renderSelections(context: SelectionContext[]): string {
-  if (context.length === 0) return "Topics: none graded this paper; a lab member asked for its card.";
+  if (context.length === 0) return "Topics: no topic grades this paper above none.";
   const lines = ["Topics this card is for:"];
   for (const s of context) {
     const grade = s.grade ? ` (graded ${s.grade.replace("_", " ")})` : "";

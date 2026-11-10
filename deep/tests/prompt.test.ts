@@ -19,8 +19,8 @@ test("the system prompt names each selection with its grade, subject and rubric"
   assert.ok(p.includes('"process_notes"'), "the schema offers them");
 });
 
-test("a card for no topic says it was asked for", () => {
-  assert.ok(systemPrompt(40, 8000, [], []).includes("Topics: none graded this paper; a lab member asked for its card."));
+test("a card for no topic says no topic grades the paper", () => {
+  assert.ok(systemPrompt(40, 8000, [], []).includes("Topics: no topic grades this paper above none."));
 });
 
 test("the extension schema appears only when requested", () => {

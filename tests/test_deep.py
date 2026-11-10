@@ -308,10 +308,11 @@ async def field(conn, p, fit: str) -> None:
     ("graded", "selections"),
     [
         (None, []),
+        (lambda c: verdict(c, Q, "none"), []),
         (lambda c: area(c, Q, "related"), [("Interpretability", "relevant")]),
         (lambda c: field(c, Q, "related"), [("Agents and tool use", "relevant")]),
     ],
-    ids=["graded-nowhere", "area-not-picked", "field"],
+    ids=["graded-nowhere", "graded-none", "area-not-picked", "field"],
 )
 async def test_a_requested_card_is_written_for_the_topics_that_graded_the_paper(
     db, graded, selections
