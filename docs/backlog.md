@@ -27,16 +27,17 @@ building); A1 starts once the Deep read has landed. Each milestone's shape goes 
 
 ### A0. Rules and baseline
 
-Planned in [`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md) (P1–P3 and the small fixes). The role checks
-in CI with today's violations listed.
+Planned in [`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md). Merged: the role checks (#156) and the review's
+small fixes (#149–#155, #157, #158). Left:
 
-- **What production still uses,** found against production rather than read from the code (review, project 5):
-  config options, `llm` roles, evaluation tables and cohorts, migration-era guards, routes with only test callers
-  (`GET /api/bibtex`, publication DELETE). Ends in a keep/drop list for the owner, before anything is migrated.
-- **The review's small fixes,** one PR each (review, "Small, one PR each"): `.dockerignore`; deep out of the event
-  dispatcher; the dead pre-OAI arXiv transport; `usePaperBusy`; queries passing `signal`; `httpx2` declared; the web
-  scaffold leftovers; stale guidance in `verification.md`, the spec README and N9. (`/summary` and Calibrate's double
-  read go with A1.)
+- **The drops the owner marked** in [`notes/still-used.md`](notes/still-used.md) (P3): five routes with only test
+  callers, two empty evaluation tables and old evaluation columns, four unused label origins.
+- **Follow-ups the small fixes' reviews found:**
+  - `mcp_types`, `starlette` and `pymupdf` are imported but not declared; they arrive through other packages;
+  - two more tests in `tests/test_batches.py` share the race #154 fixed (the batched night, the digest batch count):
+    each call's journal rows can outlast the batcher's quiet, so the calls split into two batches;
+  - `web/src/deepread/DeepRead.test.tsx`, "shows a table cell's note on hover…", fails now and then under the full
+    suite and passes alone.
 
 ### A1. Database gate
 
@@ -51,7 +52,7 @@ Shape, blueprint, drive. Inputs: the measurement of where work waits (2026-11-09
   - **the sidebar's count for today:** the count beside a followed topic with a digest today, highlighted for Focus
     (DESIGN.md, "Shell"); `/api/summary` carries badges only;
   - **today in the schedule's zone:** the Digest's defaults (today's Day, the last complete Week, History's pinned
-    week) use the browser's date; the summary or `/api/status` should carry today's date
+    week) use the browser's date; the summary should carry today's date
     ([`notes/schedule-zone-today.md`](notes/schedule-zone-today.md)).
 - **Calibrate reads each topic's pool once** (review).
 - **Ratings on the generated text:** ✓/✗ on a Gist and a Brief, from Calibrate and from the paper's ladder, stored
@@ -62,6 +63,10 @@ Shape, blueprint, drive. Inputs: the measurement of where work waits (2026-11-09
   - which source set the owner's word on a topic, from the API instead of guessed by the UI (`whoseFit`);
   - typed response models for `/quality`, `/runs` and `/calibrate` (review, project 3).
 - **Intake stops rewriting unchanged rows** on its three-day overlap (review, project 8).
+- **The role checks' listed violations in its area:** `store` imports `events` (`store/digests.py`, `store/papers.py`
+  emit events) and `llm` (`store/calls.py` uses `llm.types.Usage`), listed in `pyproject.toml`.
+- **Drops the owner marked** in [`notes/still-used.md`](notes/still-used.md): the live-label `provisional` handling
+  and the revision-1 fallback (`papers.py`, `row.get("revision") or 1`).
 
 ### A2. Work gate
 
