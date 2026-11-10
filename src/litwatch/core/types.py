@@ -94,10 +94,6 @@ class LabelOrigin(StrEnum):
     """
 
     SAMPLE = "sample"  # drawn for this topic in a Calibrate session: production precision
-    CANDIDATE_SAMPLE = "candidate_sample"  # M2's random candidates; historical, never pooled
-    REJECT_SAMPLE = "reject_sample"  # drawn at random from triage rejects
-    LEGACY_POSITIVE = "legacy_positive"  # 0.14 placed it at tier 1 or 2
-    GOLD = "gold"  # hand-labelled before v1
     READER = "reader"  # the owner's own choice: the paper page, or Calibrate off-sample
     MISS = "miss"
 
