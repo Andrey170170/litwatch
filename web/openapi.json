@@ -2782,7 +2782,7 @@
     "/api/settings/integrations": {
       "get": {
         "summary": "Status",
-        "description": "One card per loaded integration, then one per configured section that is turned off\n(its cursor kept, so its lag shows what turning it on again would hand it). A card shows\nthe event it is stuck on, or its failing setup.",
+        "description": "One card per loaded integration, then one per configured section that is turned off\n(its cursor kept, so its lag shows what turning it on again would hand it). A card shows\nthe event it is stuck on, or its failing setup; one that reacts to no event has neither,\nwhatever cursor it kept from before.",
         "operationId": "status_api_settings_integrations_get",
         "responses": {
           "200": {

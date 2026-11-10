@@ -902,7 +902,8 @@ export interface paths {
          * Status
          * @description One card per loaded integration, then one per configured section that is turned off
          *     (its cursor kept, so its lag shows what turning it on again would hand it). A card shows
-         *     the event it is stuck on, or its failing setup.
+         *     the event it is stuck on, or its failing setup; one that reacts to no event has neither,
+         *     whatever cursor it kept from before.
          */
         get: operations["status_api_settings_integrations_get"];
         put?: never;
