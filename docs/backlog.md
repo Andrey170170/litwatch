@@ -22,22 +22,9 @@ shared between `writing.py` and the deep prompt instead of copied.
 ## The rework
 
 The backend brought to the roles and gates of [`specs/architecture.md`](specs/architecture.md), one milestone at a
-time. A0 runs alongside the Deep read (it removes and checks, and changes no pipeline code the Deep read is
-building); A1 starts once the Deep read has landed. Each milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
-
-### A0. Rules and baseline
-
-Planned in [`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md). Merged: the role checks (#156) and the review's
-small fixes (#149–#155, #157, #158). Left:
-
-- **The drops the owner marked** in [`notes/still-used.md`](notes/still-used.md) (P3): five routes with only test
-  callers, two empty evaluation tables and old evaluation columns, four unused label origins.
-- **Follow-ups the small fixes' reviews found:**
-  - `mcp_types`, `starlette` and `pymupdf` are imported but not declared; they arrive through other packages;
-  - two more tests in `tests/test_batches.py` share the race #154 fixed (the batched night, the digest batch count):
-    each call's journal rows can outlast the batcher's quiet, so the calls split into two batches;
-  - `web/src/deepread/DeepRead.test.tsx`, "shows a table cell's note on hover…", fails now and then under the full
-    suite and passes alone.
+time. A0, the role checks and the baseline, was merged on 2026-11-10
+([`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md)); A1 starts once the Deep read has landed. Each
+milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
 
 ### A1. Database gate
 
@@ -162,6 +149,12 @@ Built between milestones, on whatever structure exists then.
   the owner's go-ahead.
 - **A Calibrate session whose drawn topic left Focus:** answering it is a 422 now. *Needs a decision* on what an
   answer there means.
+- **A0's small fixes left three follow-ups:**
+  - `mcp_types`, `starlette` and `pymupdf` are imported but not declared; they arrive through other packages;
+  - two more tests in `tests/test_batches.py` share the race #154 fixed (the batched night, the digest batch count):
+    each call's journal rows can outlast the batcher's quiet, so the calls split into two batches;
+  - `web/src/deepread/DeepRead.test.tsx`, "shows a table cell's note on hover…", fails now and then under the full
+    suite and passes alone.
 
 Smaller deferred follow-ups, each owned by its note: [`notes/deep-session-end.md`](notes/deep-session-end.md),
 [`notes/updated-papers-follow-ups.md`](notes/updated-papers-follow-ups.md).
