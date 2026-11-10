@@ -1,9 +1,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { Profiler } from "react";
 import { describe, expect, it } from "vitest";
 import { useQuery } from "@tanstack/react-query";
 import { useAnswer, useLabel, useSave, useUnreact } from "./mutations";
 import { paperQuery, patchRead, qualityQuery, sessionQuery, sessionsQuery } from "./queries";
+import { Star } from "@/components/Rows";
 import { freshClient, json, scriptFetch } from "@/test/harness";
 
 describe("a write on a paper", () => {
@@ -79,6 +81,58 @@ describe("a write on a paper", () => {
     expect(elsewhere.result.current.isPending).toBe(false);
     release();
     await waitFor(() => expect(second.result.current.isPending).toBe(false));
+  });
+  it("follows the paper a control shows, when it moves to another and back", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    scriptFetch({
+      "PUT /api/library/2610.00001": async () => {
+        await held;
+        return json({ message: null, saved: true, grades: {} });
+      },
+    });
+    const client = freshClient();
+    const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const { result, rerender } = renderHook(({ id }) => useSave(id), { wrapper, initialProps: { id: "2610.00001" } });
+    act(() => result.current.mutate(true));
+    await waitFor(() => expect(result.current.isPending).toBe(true));
+    rerender({ id: "2610.00002" });
+    expect(result.current.isPending).toBe(false);
+    rerender({ id: "2610.00001" });
+    expect(result.current.isPending).toBe(true);
+    release();
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+  });
+
+  it("re-renders only the Star of the paper being written", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    scriptFetch({
+      "PUT /api/library/2610.00001": async () => {
+        await held;
+        return json({ message: null, saved: true, grades: {} });
+      },
+    });
+    const client = freshClient();
+    const renders: Record<string, number> = {};
+    const count = (id: string) => (renders[id] = (renders[id] ?? 0) + 1);
+    render(
+      <QueryClientProvider client={client}>
+        {["2610.00001", "2610.00002"].map((id) => (
+          <Profiler key={id} id={id} onRender={count}>
+            <Star id={id} saved={false} />
+          </Profiler>
+        ))}
+      </QueryClientProvider>,
+    );
+    const [first] = screen.getAllByRole("button");
+    const before = { ...renders };
+    fireEvent.click(first!);
+    await waitFor(() => expect((first as HTMLButtonElement).disabled).toBe(true));
+    release();
+    await waitFor(() => expect((first as HTMLButtonElement).disabled).toBe(false));
+    expect(renders["2610.00001"]).toBeGreaterThan(before["2610.00001"]!);
+    expect(renders["2610.00002"]).toBe(before["2610.00002"]);
   });
 });
 

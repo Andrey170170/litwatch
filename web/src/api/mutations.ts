@@ -5,6 +5,7 @@
  * what the API says the page cannot show.
  */
 import { useMutation, useMutationState, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useSyncExternalStore } from "react";
 import { ApiError, api, ok, type Schemas } from "./client";
 import { digestQuery, JOBS_PAGES, jobsQuery, patchRead, qualityQuery, refreshSummary, replayOfferQuery, sessionQuery, sessionsQuery, settingsReads } from "./queries";
 import { type Job, type JobAction, underWay } from "@/lib/jobs";
@@ -71,13 +72,14 @@ export function said(e: unknown, fallback = "That did not go through"): string {
 const PAPER_WRITE = ["paper-write"];
 
 /** Whether a write on this paper is in flight, wherever it was started: a control that closed and reopened
- * meanwhile still waits for it, so a Clear cannot land before a slower change and be undone by it. */
+ * meanwhile still waits for it, so a Clear cannot land before a slower change and be undone by it. The snapshot is
+ * this paper's flag alone, read with the current id, so a write on another paper re-renders nothing here. */
 function usePaperBusy(paperId: string): boolean {
-  const ids = useMutationState({
-    filters: { mutationKey: PAPER_WRITE, status: "pending" },
-    select: (m) => (m.state.variables as { id?: string } | undefined)?.id,
-  });
-  return ids.includes(paperId);
+  const cache = useQueryClient().getMutationCache();
+  const subscribe = useCallback((onChange: () => void) => cache.subscribe(onChange), [cache]);
+  const busy = () =>
+    cache.find({ mutationKey: PAPER_WRITE, status: "pending", predicate: (m) => (m.state.variables as { id?: string } | undefined)?.id === paperId }) !== undefined;
+  return useSyncExternalStore(subscribe, busy);
 }
 
 /**
