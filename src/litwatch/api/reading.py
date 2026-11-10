@@ -48,6 +48,7 @@ from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import digests as digests_store
 from litwatch.store import feedback as feedback_store
+from litwatch.store import integrations as integrations_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
@@ -285,6 +286,37 @@ async def pdf(paper_id: str, request: Request) -> Response:
                 headers={"Content-Disposition": f'inline; filename="{name}.pdf"'},
             )
     return RedirectResponse(f"https://arxiv.org/pdf/{paper_id}", status_code=307)
+
+
+# A figure's address carries `v`, when its read was written: the read written again has other
+# figures under the same names, at another address, so one fetched with it is kept for good.
+FIGURE_KEPT = "private, max-age=31536000, immutable"
+
+
+# Before the paper's page too, for the same reason.
+@router.get(
+    "/papers/{paper_id:path}/deep/figures/{name}",
+    response_class=Response,
+    responses={
+        200: {"content": {"image/webp": {}}, "description": "The figure, as stored with the read"},
+        404: {"description": "The paper's Deep read has no figure of that name"},
+    },
+)
+async def deep_figure(paper_id: str, name: str, c: Conn, v: str | None = None) -> Response:
+    """One of the paper's figures its Deep read shows, by the name the read's `fig` block
+    cites. With `v` (when the read was written, as the paper page asks) the answer may be kept;
+    without it, it is checked again each time."""
+    found = await integrations_store.figure(c, paper_id, name)
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such figure")
+    return Response(
+        found.data,
+        media_type=found.mime,
+        headers={
+            "Cache-Control": FIGURE_KEPT if v is not None else "private, no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get(

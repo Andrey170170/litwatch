@@ -1,9 +1,12 @@
-"""deep: the deep service's Deep cards (docs/specs/v1/integrations.md). Which papers get a card,
-and when, is the full-text queue's (`litwatch.fulltext.deep`): a card is a pass like a Brief,
-so it waits for the paper's text and is re-checked under the paper's lock before it runs. This
-module is how one is asked for: what a submission carries (the paper's text from the archive,
-the topics the card is for and the card extensions they ask for), and the service's job
-protocol, followed to the job's end with its usage.
+"""deep: the deep service's Deep reads, and the Deep cards before them (docs/specs/deep-read.md;
+docs/specs/v1/integrations.md). Which papers get one, and when, is the full-text queue's
+(`litwatch.fulltext.deep`): a card is a pass like a Brief, so it waits for the paper's text and
+is re-checked under the paper's lock before it runs. This module is how one is asked for: what
+a submission carries (the paper's text from the archive and its arXiv version, the topics the
+card is for and the card extensions they ask for), and the service's job protocol, followed to
+the job's end with its usage. What a finished job returns is checked before any of it is
+stored (`core.deepread.received`): a result of an unknown format, or figures or reviews that
+are not what docs/integrations.md says, end the job as the service's failure.
 
 The queue records each submission as an attempt before it is sent and the job once accepted,
 and sends the attempt as the submission's key, by which the service finds the job it
@@ -22,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import quote
@@ -32,7 +35,7 @@ import psycopg
 
 from litwatch.archive import PaperText
 from litwatch.config import Config
-from litwatch.core import Event, Grade, Paper, Status, Topic
+from litwatch.core import Event, Grade, Paper, Status, Topic, deepread
 from litwatch.integrations import IntegrationError, enabled_using, required, required_secret
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
@@ -49,7 +52,8 @@ LEASE_MARGIN = timedelta(minutes=15)
 class Outcome:
     """How a job ended. `usage` is the job's usage as the service reported it (turns, tokens,
     list cost), and `trace` what the job did; each None when it never reported (the job was
-    lost, or litwatch gave up waiting).
+    lost, or litwatch gave up waiting). `figures` are the result's, decoded, and `reviews` the
+    job's review rounds as the service returned them (None: no review ran).
     `failure` says whose a failed job's failure was, as the service tagged it, or the service's
     when the job was lost or never ended. `still_running`: litwatch stopped waiting at the
     job's deadline, but the job may yet run: followed again after each pause until it ends,
@@ -62,6 +66,33 @@ class Outcome:
     error: str | None = None
     failure: Literal["paper", "service"] | None = None
     still_running: bool = False
+    figures: tuple[deepread.Figure, ...] = ()
+    reviews: list[Any] | None = None
+
+
+def ended(job: dict[str, Any]) -> Outcome:
+    """A finished job as the service reports it. One that says it is done is checked before
+    its result is taken (`deepread.received`): what litwatch cannot store is the service's
+    failure, an error with the job's usage and trace kept, never a card with something
+    missing."""
+    said = job.get("reviews")
+    outcome = Outcome(
+        job.get("result"),
+        job.get("trace"),
+        job.get("stats"),
+        job.get("model") or "",
+        job.get("error"),
+        job.get("failure"),
+        reviews=said if isinstance(said, list) else None,
+    )
+    if outcome.error or outcome.result is None:
+        return outcome
+    try:
+        figures, reviews = deepread.received(outcome.result, job.get("figures"), said)
+    except ValueError as exc:
+        error = f"the deep service returned a result litwatch cannot store: {exc}"
+        return replace(outcome, result=None, error=error, failure="service")
+    return replace(outcome, figures=tuple(figures), reviews=reviews)
 
 
 # A 4xx the service answers a submission with that is not about the submission: a wrong
@@ -164,14 +195,7 @@ class DeepClient:
                 )
                 seen = mark
             if job["status"] in ("done", "error"):
-                return Outcome(
-                    job.get("result"),
-                    job.get("trace"),
-                    job.get("stats"),
-                    job.get("model") or "",
-                    job.get("error"),
-                    job.get("failure"),
-                )
+                return ended(job)
             if datetime.now(UTC) > deadline:
                 started = job.get("started_at")
                 running = started and datetime.now(UTC) - datetime.fromisoformat(started)
@@ -221,8 +245,9 @@ class Deep:
     async def submission(
         self, conn: psycopg.AsyncConnection, paper: Paper, text: PaperText
     ) -> dict[str, Any]:
-        """What the service is sent for the paper: its text, the topics the card is for with the
-        grade each gave it, and the extensions they ask for."""
+        """What the service is sent for the paper: its text and the arXiv version it is of (null
+        when the archive cannot say), which the service fetches the paper's figures at; the
+        topics the card is for with the grade each gave it, and the extensions they ask for."""
         topics = await self._topics(conn, paper.id)
         return {
             "paper": {
@@ -234,6 +259,7 @@ class Deep:
                 "url": paper.url,
                 "body": text.body,
                 "body_source": text.source,
+                "body_version": text.version,
             },
             "extensions": sorted(
                 {self.extensions[t.slug] for _, t, _ in topics if t.slug in self.extensions}

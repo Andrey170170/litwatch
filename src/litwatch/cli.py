@@ -241,8 +241,9 @@ def deep_trace(
     config: ConfigPath = None,
 ) -> None:
     """The paper's Deep attempts, then one attempt's trace: its turns, cells, host calls with
-    why one failed and where a fetch went, submits, and the card's process notes if it wrote
-    the card. Times are the configured time zone's."""
+    why one failed and where a fetch went, submits, its review rounds with their scores and
+    findings, and the card's process notes if it wrote the card. Times are the configured time
+    zone's."""
     import json  # noqa: PLC0415
 
     from litwatch.fulltext import deep_trace as text  # noqa: PLC0415
@@ -258,21 +259,23 @@ def deep_trace(
         if not 1 <= chosen <= len(found):
             raise SystemExit(f"{paper} has attempts 1 to {len(found)}")
         trace = await cards.attempt_trace(conn, found[chosen - 1]["id"])
+        reviews = await cards.attempt_reviews(conn, found[chosen - 1]["id"])
         known = await papers_store.get(conn, paper)
         notes = []
         # The card's process notes are this attempt's only when it wrote the card.
         if found[chosen - 1]["wrote_card"]:
             card = await cards.card(conn, paper)
             notes = ((card or {}).get("card") or {}).get("process_notes") or []
-        return found, chosen, trace, known.title if known else None, notes
+        return found, chosen, trace, known.title if known else None, notes, reviews
 
-    found, chosen, trace, title, notes = _run(work, migrate=False)
+    found, chosen, trace, title, notes, reviews = _run(work, migrate=False)
     if as_json:
         out = {"paper": paper, "title": title, "attempts": found, "attempt": chosen}
-        print(json.dumps(out | {"trace": trace, "process_notes": notes}, indent=2, default=str))
+        out |= {"trace": trace, "reviews": reviews, "process_notes": notes}
+        print(json.dumps(out, indent=2, default=str))
         return
     # Plain text: a trace holds brackets that rich would read as markup.
-    print(text.trace_text(paper, title, found, chosen, trace, notes, zone), end="")
+    print(text.trace_text(paper, title, found, chosen, trace, notes, zone, reviews), end="")
 
 
 @deep_app.command("notes")
