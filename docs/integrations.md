@@ -72,10 +72,11 @@ class Integration(Protocol):
     (retrying a delivery that waits on something outside litwatch). A failure is logged and changes
     nothing else; keep it short and bounded, since events wait while it runs.
 
-Deep cards come from the built-in `deep` integration only: the owner's request (`POST
+Deep reads come from the built-in `deep` integration only: the owner's request (`POST
 /api/papers/<id>/card`) queues a Deep pass, which the service's Deep worker submits to it, and
 only with it loaded does the paper page offer the request. Another integration may react to
-`card.requested` (a webhook passes it on) but makes no card.
+`card.requested` (a webhook passes it on) but makes no card. What the deep service returns, and
+what litwatch stores of it, is under "The deep service's result" below.
 
 `Event` is `litwatch.core.Event`:
 
@@ -102,7 +103,7 @@ only with it loaded does the paper page offer the request. Another integration m
   repositories; do not write to its tables.
 - **You may emit events** of your own with `litwatch.events.emit(conn, type, paper_id, **payload)`,
   in the same transaction as the state they describe. Other integrations can subscribe to them
-  (`deep` emits `card.ready`, which `zotero` turns into a note).
+  (`deep` emits `card.ready`, which `zotero` and `notion` react to).
 - **Keep secrets out of logs and errors.** An error message is stored and shown under Settings.
 
 ## Events
@@ -147,7 +148,7 @@ Through the repositories in `litwatch.store`. Each function takes the connection
 | `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug` (its class's), `name`, `depth` (`focus`, `area`, `field`) and `grade` |
 | `store.publications.found(conn, [paper_id])` | `{paper_id: core.Publication}` for those with a published record |
 | `store.taxonomy.topics(conn, core.Status.ACTIVE)` | the active `core.Topic`s, in the owner's order; `store.taxonomy.load(conn)` gives the whole `core.Taxonomy`, class names included |
-| `store.integrations.card(conn, paper_id)` | the deep card row (`card`, `model`, `stats`, `error`, `written_at`, and what it was written from: `revision`, `arxiv_version`, `source`) or None. `card` may hold `process_notes`, which describe Deep's process, not the paper: the built-in exports leave them out |
+| `store.integrations.card(conn, paper_id)` | the deep card row (`card`, `model`, `stats`, `error`, `written_at`, and what it was written from: `revision`, `arxiv_version`, `source`) or None. `card` is a Deep read when its `format` is `"read"` (`core.deepread.is_read`; `core.deepread.section` and `inline` take one apart) and a Deep card, the format from before, when it has none: handle both, and take a field a read lacks as absent. Either may hold `process_notes`, which describe Deep's process, not the paper: the built-in exports leave them out, but for a read's `review` note, which says the read failed its review |
 
 ## Configuration and loading
 
@@ -220,14 +221,57 @@ The built-in `archive` integration is a search provider.
 
 | Name | Reacts to | Does |
 | --- | --- | --- |
-| `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `publication.found`, `card.ready` | Keeps a Zotero item per library paper with tags and notes in step; tags it `litwatch:dropped` when it leaves the library and never deletes it |
+| `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `publication.found`, `card.ready` | Keeps a Zotero item per library paper with tags and notes in step; tags it `litwatch:dropped` when it leaves the library and never deletes it. A Deep read gets no note and no tags of its own (it is read on the paper page) and still counts as written for the inbox tag; a Deep card from before keeps its note and tags |
 | `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF of a `must_read` library paper for Zotero's file sync (needs `zotero`) |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source), unless intake read it from the archive; answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers. With `harvest = true` (and registering), intake's catalog pass also registers every new or revised arXiv paper outside intake's categories, as metadata only: `litwatch intake --catalog-from DATE` backfills it from a day |
-| `deep` | none: its work is the full-text queue's Deep passes (a saved Focus must read without a card, the owner's request) | Asks the deep service for a reading card and records each attempt's usage and trace (`litwatch deep trace`); emits `card.ready`. Loads only with an archive to read papers from |
+| `deep` | none: its work is the full-text queue's Deep passes (a saved Focus must read without a card, the owner's request) | Asks the deep service for a Deep read, stores it with its figures, and records each attempt's usage, trace and reviews (`litwatch deep trace`); emits `card.ready`. Loads only with an archive to read papers from. See below |
 | `notion` | `grade.changed` for an exported topic, `gist.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the papers listed for the exported topics, for a reader who does not use litwatch; never deletes a page. See below |
 | `webhook` | any, by pattern | POSTs the event as JSON to a URL |
 
 Each module's docstring lists its options and environment variables.
+
+### The deep service's result
+
+`deep` submits a paper (`POST /process`) and follows its job (`GET /jobs/<id>`) to its end;
+[`deep/README.md`](../deep/README.md) has the protocol, the trace and the failures. This is the
+part of it litwatch stores.
+
+**The submission's `paper`** carries the paper's `body`, `body_source` (`latex` or `pdf`) and
+`body_version`: the arXiv version the text is of, or null when the archive cannot say (a text
+read from its historical LaTeX). The service takes the paper's figures from that version.
+
+**A finished job** (`status: "done"`) carries, beside its `stats` and `trace`:
+
+| Field | What it holds | Stored |
+| --- | --- | --- |
+| `result` | The Deep read, an object whose `format` is `"read"`, valid against the service's schema (`deep/src/read.ts`). A result with no `format` is a Deep card, the format from before | `deep_cards.card`, as returned |
+| `figures` | The paper's figures the read shows, a list of `{"name", "mime", "data"}`: `name` as the read's `fig` blocks cite it (letters, digits, `.`, `_` and `-`, starting with a letter or digit, each name once), `mime` `image/webp`, `data` the image in base64, at most 1600 px wide. Absent or empty: no figures | `deep_figures`, one row per figure, replacing the paper's earlier ones in the transaction that writes the read |
+| `reviews` | The review rounds the read went through, in order, a list of `{"round", "passed", "scores", "checks", "findings"}`: `scores` the rubric's (`faithfulness`, `clarity`, `depth`, `calibration`, 1 to 5), `checks` the code checks by name (true: passed), `findings` each `{"about", "where", "text"}` with an optional `rewrite`. Absent or null: no review ran | `deep_attempts.reviews`, as returned, for a failed job too |
+
+`figures` and `reviews` are the job's fields, not the read's: the read's schema takes no others.
+
+litwatch checks only this much before it stores anything (`core.deepread.received`), and leaves
+the read's own shape to the service that validated it. A `format` other than `"read"`, a result
+that is not an object, `figures` that are not such a list (an unknown `mime`, a name outside the
+pattern or given twice, data that is not base64 or not a WebP image, more than 32 MiB together)
+or `reviews` that are not a list end the job as the service's failure: nothing of the result is
+stored, the card and figures before it stay, the attempt keeps its usage, trace and reviews, and
+the Deep queue pauses and tries the pass again, as for any failure of the service.
+
+**A read that still failed its review** when the rounds ran out is stored and shown: the service
+adds a process note `{"kind": "review", "source": "service", "note": ...}` to it. Needs you lists
+it with the read's other process notes, the Notion export opens the read's short form with a line
+saying so, and the MCP server's `get_paper` says so above the read.
+
+**The figures** are served to the web app at `GET /api/papers/<id>/deep/figures/<name>` (the web
+app's token, as a cookie or a bearer header; the read token is refused, and an unknown name is
+404). The paper page asks with `?v=` the read's time of writing, and an answer to that is cached
+for good; without `v` it is fetched afresh each time.
+
+**The read token** (`LITWATCH_READ_TOKEN`), which the service's agent uses, searches and reads
+papers (`GET /api/papers`, `GET /api/papers/<id>`) and fetches a paper's PDF
+(`GET /api/papers/<id>/pdf`), from which the service cuts the figures of a paper with no LaTeX
+source. Everything else answers it 403.
 
 ### The Notion export
 
@@ -277,8 +321,11 @@ under the new page and leaves the old database as it is.
 Authors, Venue (linked to the published version), arXiv, PDF, Added (the day it entered the list),
 Why, one grade column per exported topic, and a hidden arXiv id used to find the row. Status is the
 reader's and never written. The body is a callout pointing to "How to read this", the TL;DR, the
-Abstract and, with a Deep card, a collapsed Deep read with one callout
-per section (its process notes left out). A paper that falls below the minimum for a topic says No longer listed there, with a
+Abstract and, under a collapsed "Deep read" heading, the read's short form: its key claim and
+points, then each claim with whether the paper shows it (Holds, Partly, Not shown, Overclaimed) and
+each limitation with whose it is (the paper's own or the read's). Its process notes are left out,
+but a read that failed its review opens with a line saying so. A Deep card from before keeps the
+body it had, one callout per section, and is not rewritten. A paper that falls below the minimum for a topic says No longer listed there, with a
 dated Why line from the newest `grade.changed` that took it off (a missing `cause` reads as
 `verdict`). A dismissed paper that has a page is No longer listed for every topic, "set it aside" by
 the owner, from the next write of it (dismissal emits no event, so in practice the next start; a

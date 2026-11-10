@@ -59,7 +59,7 @@ Compose reads `.env` beside `compose.yaml`. Fill in:
 | `LITWATCH_DB_PASSWORD` | yes | Postgres's password, set when the database is first created | generate (below) |
 | `LITWATCH_API_TOKEN` | yes | The web app's and the API's token: the only sign-in | generate |
 | `LITWATCH_ARCHIVE_TOKEN` | yes | The token litwatch and the archive share | generate |
-| `LITWATCH_READ_TOKEN` | with deep | A second token that may only search and read papers; `deep` uses it for a card's "Among the collection" | generate |
+| `LITWATCH_READ_TOKEN` | with deep | A second token that may only search and read papers and fetch a paper's PDF; `deep` uses it for a read's "Among the collection" and for the figures of a paper with no LaTeX source | generate |
 | `LITWATCH_MCP_TOKEN` | no | The MCP server's token, for research agents; unset, `/mcp` is not served (step 10) | generate |
 | `ANTHROPIC_API_KEY` | for the nightly run | Anthropic API key | from the Anthropic console |
 | `OPENROUTER_API_KEY` | for the nightly run | OpenRouter API key | from openrouter.ai |

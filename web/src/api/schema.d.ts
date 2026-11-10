@@ -68,6 +68,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/papers/{paper_id}/deep/figures/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deep Figure
+         * @description One of the paper's figures its Deep read shows, by the name the read's `fig` block
+         *     cites. With `v` (when the read was written, as the paper page asks) the answer may be kept;
+         *     without it, it is checked again each time.
+         */
+        get: operations["deep_figure_api_papers__paper_id__deep_figures__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/papers/{paper_id}": {
         parameters: {
             query?: never;
@@ -3473,6 +3495,61 @@ export interface operations {
             };
             /** @description The read token, outside reading papers */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deep_figure_api_papers__paper_id__deep_figures__name__get: {
+        parameters: {
+            query?: {
+                v?: string | null;
+            };
+            header?: never;
+            path: {
+                paper_id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The figure, as stored with the read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/webp": unknown;
+                };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The paper's Deep read has no figure of that name */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -62,7 +62,7 @@ node src/main.ts serve
 | `DEEP_MAX_FETCH_MB` | `2` | MiB read per `fetch`, fractions allowed; the rest of the body is never read |
 | `DEEP_MAX_FETCHES` | `60` | `fetch` calls per paper; the next one fails in the cell |
 | `LITWATCH_URL` | `http://litwatch:8080` | litwatch v1, for the agent's `store.search` (`GET /api/papers`) |
-| `LITWATCH_TOKEN` | | litwatch's read token (`LITWATCH_READ_TOKEN` there), which may only search and read papers |
+| `LITWATCH_TOKEN` | | litwatch's read token (`LITWATCH_READ_TOKEN` there), which may only search and read papers and fetch a paper's PDF |
 | `S2_API_KEY` | | Semantic Scholar key; without one `s2.lookup` is rate-limited |
 | `DEEP_CONTACT` | | An address the fetched sites can write to, sent in the User-Agent (arXiv asks for one) |
 

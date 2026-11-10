@@ -321,6 +321,76 @@
         }
       }
     },
+    "/api/papers/{paper_id}/deep/figures/{name}": {
+      "get": {
+        "summary": "Deep Figure",
+        "description": "One of the paper's figures its Deep read shows, by the name the read's `fig` block\ncites. With `v` (when the read was written, as the paper page asks) the answer may be kept;\nwithout it, it is checked again each time.",
+        "operationId": "deep_figure_api_papers__paper_id__deep_figures__name__get",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "V"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The figure, as stored with the read",
+            "content": {
+              "image/webp": {}
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "404": {
+            "description": "The paper's Deep read has no figure of that name"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/papers/{paper_id}": {
       "get": {
         "summary": "Paper",

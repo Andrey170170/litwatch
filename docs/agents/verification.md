@@ -73,18 +73,19 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 
 ### Deep-card service (`deep/`)
 - Works means: a paper submitted gets a card back with the lab's fields filled from the paper.
-- Evidence: `npm test` and `npm run typecheck`; for a change to the agent or its prompt, cards on the gold set
-  scored by the quality harness.
+- Evidence: `npm test` and `npm run typecheck`; for a change to the agent or its prompt, the owner's read of real
+  reads with each run's reviews, until the Deep quality harness exists (Known gaps).
 - How: in `deep/`, `npm test && npm run typecheck`.
 
 ### Stack and container
 - Works means: the image builds and runs, and a fresh stack starts and serves.
 - Evidence: CI's container smoke test and the stack smoke test (`tests/stack/smoke.sh`): a fresh stack from
   `deploy/compose.yaml` under its own project name, an empty archive seeded with real papers
-  (`tests/stack/papers.json`) and their text, the day read into litwatch from the archive, a Deep card from a fake
-  deep service that searched litwatch with the read token, then headless Playwright visiting every page at both
-  widths, failing on console errors, uncaught exceptions, 5xx or an empty page. Screenshots and the stack's logs are
-  CI artifacts.
+  (`tests/stack/papers.json`) and their text, the day read into litwatch from the archive, a Deep read with its
+  figures (and, for a second paper, a Deep card in the format from before) from a fake deep service that searched
+  litwatch with the read token, then headless Playwright visiting every page at both widths, the paper page of each
+  among them, failing on console errors, uncaught exceptions, an answer of 400 or more or an empty page. Screenshots
+  and the stack's logs are CI artifacts.
 - How: CI; locally `tests/stack/smoke.sh OUT` (needs Playwright's Chromium:
   `uv run --no-project --with playwright==1.64.0 playwright install chromium`). It removes only its own project's
   containers and volumes.
@@ -132,7 +133,10 @@ preference set.
 - **The quality harness and the preference set** are partial. Classification has its harness (`litwatch eval
   classify`) and Briefs theirs (`litwatch eval briefs`, `eval briefs-report`, over `evals/preferences/briefs.yaml`):
   rule checks and the owner's read so far; the judge model and the comparison with the last approved output join
-  once the preference set holds approved outputs. Digests arrive in N4. Deep cards have none yet: N3's change to
-  `deep/` did not build it, and it comes with the next.
+  once the preference set holds approved outputs. Digests arrive in N4. Deep reads have none: a Deep quality
+  harness (`litwatch eval deep`, with a judge from another lab) is a backlog item (`docs/backlog.md`). Until it is
+  built, a change to the Deep agent, its prompt or its reviewer is shown by the owner's read of real reads and the
+  run's own record of them, the reviews and code checks each attempt keeps (`litwatch deep trace`), as
+  `docs/plans/deep-read.md` (D3) sets out for the Deep read's own build.
 - **The stack smoke test's page list** (`pages()` in `tests/stack/pages.py`) holds the pages W1 built; it grows
   with W2–W4 and N7.

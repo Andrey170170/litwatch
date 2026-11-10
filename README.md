@@ -60,8 +60,9 @@ litwatch library sync                # settle effective grades, rarity and the l
 litwatch publications                # look up published versions
 ```
 
-`LITWATCH_READ_TOKEN`, when set, is a second token that may only search and read papers
-(`GET /api/papers` and `/api/papers/{id}`); the deep service uses it. `LITWATCH_MCP_TOKEN`, when set,
+`LITWATCH_READ_TOKEN`, when set, is a second token that may only search and read papers and fetch
+a paper's PDF (`GET /api/papers`, `/api/papers/{id}` and `/api/papers/{id}/pdf`); the deep service
+uses it. `LITWATCH_MCP_TOKEN`, when set,
 serves the MCP server at `/mcp` behind it alone, for research agents
 ([`docs/specs/v1/mcp.md`](docs/specs/v1/mcp.md)).
 

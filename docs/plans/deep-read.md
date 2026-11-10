@@ -47,7 +47,7 @@ deep → litwatch: deep_cards.card (format "read"), deep_figures, deep_attempts.
 
 - **Diagram layout is done once, in `deep/`.** elkjs lays a diagram out when the agent checks or renders a draft, and the stored read always carries coordinates, so the web app only draws. Nodes given exact coordinates keep them, and edges may carry waypoints.
 - **Equations** are rendered with KaTeX in the web app. `submit` parses every equation with KaTeX and rejects any that fail.
-- **Figures** are sent as WebP, at most 1600 px wide, inside the result. litwatch keeps them in a new `deep_figures` table (paper, name, bytes), replaced on each write, and serves them at `/api/papers/{id}/deep/figures/{name}`, about 1 MB per read.
+- **Figures** are sent as WebP, at most 1600 px wide, with the result (the finished job's `figures`, beside `result`, as its `reviews` are: the read's schema takes no other fields; `docs/integrations.md`). litwatch keeps them in a new `deep_figures` table (paper, name, bytes), replaced on each write, and serves them at `/api/papers/{id}/deep/figures/{name}`, about 1 MB per read.
 - **PDF-only papers:** the agent looks at a page and gives a crop box, and `crop` cuts the figure out. There is no caption-matching heuristic.
 
 **The run**

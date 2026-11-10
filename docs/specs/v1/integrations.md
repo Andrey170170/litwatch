@@ -60,6 +60,13 @@ document ([pipeline.md](pipeline.md), section 6). Cards have no daily cap: the s
 beside the owner's own, and a re-run's passes wait behind the night's. An integration acting on a grade checks the effective grade and the
 library when it handles the event (first v1).
 
+**Changed: the Deep read** ([deep-read.md](../deep-read.md)). The deep service returns a Deep read, stored tagged
+`"format": "read"` with the paper's figures (`deep_figures`) and, with its attempt, the read's review rounds; a result
+tagged with any other format is refused as the service's failure. `zotero` writes no card note and no card tags for
+a read (those of the Deep cards from before stay on their items) and a ready read still sets the inbox; `notion`
+exports a read's short form and leaves a Deep card's callouts as they were; the MCP server gives a read's At a glance
+and sections ([mcp.md](mcp.md)). The result's contract is in [`docs/integrations.md`](../../integrations.md).
+
 The service's agent reads the web through one `fetch`: any public http(s) host, GET only, at most 60 fetches per
 paper and 2 MB per answer, and never an address that is not public unicast, checked where the connection is made and
 on every redirect hop (decision 80). anonymous.4open.science links go to its JSON API, since its pages are built by

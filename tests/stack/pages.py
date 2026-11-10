@@ -1,7 +1,9 @@
 """The stack smoke test's walk (docs/agents/verification.md): every page of the web app at phone
 and desktop widths in headless Chromium, failing on a console error, an uncaught exception, a 5xx
-answer or an empty page, with a screenshot of each kept in OUT. Then a Deep card asked for
-through the API must come back from the deep service with live "Among the collection" rows.
+answer or an empty page, with a screenshot of each kept in OUT. Before the walk, a Deep read
+asked for through the API must come back from the deep service with live "Among the collection"
+rows and its figures, and a second paper's Deep card, the format from before, likewise; the walk
+then sees a paper page drawing each.
 
     python pages.py BASE_URL TOKEN PAPERS_JSON OUT
 
@@ -28,9 +30,10 @@ LOADING = re.compile(r"^(Loading|Searching)…$")
 MISSING_ID = "0001.00001"
 
 
-def pages(paper: str, topic: str, day: str, missing: str = MISSING_ID) -> dict[str, str]:
+def pages(paper: str, held: str, topic: str, day: str, missing: str = MISSING_ID) -> dict[str, str]:
     """Every page there is, by name (web/src/router.tsx): the Digest's views, the lists, a paper
-    in the collection and one neither litwatch nor the archive has, the share target with each,
+    in the collection with a Deep read, one (`held`) with a Deep card from before Deep reads and
+    one neither litwatch nor the archive has, the share target with each,
     and every Settings page with the pages inside them. A digest's own page and a Calibrate
     session need a digest written or a session drawn, which the smoke stack has not; `walk` adds
     them when the API has one."""
@@ -45,6 +48,7 @@ def pages(paper: str, topic: str, day: str, missing: str = MISSING_ID) -> dict[s
         "topics": "/topics",
         "topic": f"/topics/{topic}",
         "paper": f"/paper/{paper}",
+        "paper-card": f"/paper/{held}",
         "paper-outside": f"/paper/{missing}",
         "share": f"/share?url=https%3A%2F%2Farxiv.org%2Fabs%2F{paper}",
         "share-outside": f"/share?text=see%20arxiv.org%2Fabs%2F{missing}",
@@ -78,12 +82,13 @@ def expect(paper: str, day: str, width: str) -> dict[str, tuple[str, str]]:
     view tabs, History's active form); the lists show their data (Papers a paper link, a shelf
     folded on its count, or its loaded empty state: a fresh stack's papers are classified by hand
     and ungraded, so common, in the shelf folded by default; an archive search's heading, a topic
-    card, the topic's heading); a paper shows its id, or Process when
-    outside the collection; the share target's landing has the paper's sheet open on its labels on
-    the phone (the desktop's rail is open already), or the picker of Report as a miss open when the
-    shared paper is one neither litwatch nor the archive has; the Settings pages their titles. A
-    `locator` is looked for in the whole page (a phone's bar and foot lie outside <main>); `text`
-    in <main>, without case (`inner_text` renders a button's CSS `text-transform`)."""
+    card, the topic's heading); a paper shows its Deep read's key claim, the one with a Deep card
+    from before that card's, or Process when outside the collection; the share target's landing
+    has the paper's sheet open on its labels on the phone (the desktop's rail is open already),
+    or the picker of Report as a miss open when the shared paper is one neither litwatch nor the
+    archive has; the Settings pages their titles. A `locator` is looked for in the whole page (a
+    phone's bar and foot lie outside <main>); `text` in <main>, without case (`inner_text`
+    renders a button's CSS `text-transform`)."""
     d = date.fromisoformat(day)
     phone = width == "phone"
     return {
@@ -99,7 +104,8 @@ def expect(paper: str, day: str, width: str) -> dict[str, tuple[str, str]]:
         "search": ("locator", ".outh"),
         "topics": ("locator", ".tcard"),
         "topic": ("locator", ".thead .h1"),
-        "paper": ("text", paper),
+        "paper": ("locator", "main .dr-claim"),
+        "paper-card": ("locator", "main .rung.card .claim"),
         "paper-outside": ("text", "Process"),
         "share": ("locator", ".sheet .slab") if phone else ("text", paper),
         "share-outside": ("locator", '[role="group"][aria-label="Report as a miss"]'),
@@ -177,7 +183,9 @@ def found_pages(context, base: str, day: str) -> dict[str, str]:
     return extra
 
 
-def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> list[str]:
+def walk(
+    base: str, token: str, paper: str, held: str, topic: str, day: str, out: Path
+) -> list[str]:
     """Visit every page at each width; return what went wrong."""
     failures: list[str] = []
     with sync_playwright() as p:
@@ -188,7 +196,8 @@ def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> 
             assert signed.ok, f"signing in: HTTP {signed.status}"
             page = context.new_page()
             seen = watch(page)
-            for name, path in (pages(paper, topic, day) | found_pages(context, base, day)).items():
+            every = pages(paper, held, topic, day) | found_pages(context, base, day)
+            for name, path in every.items():
                 seen.clear()
                 page.goto(base + path, wait_until="networkidle")
                 # Both shells put the page in <main>. A read still loading (a retry waits between
@@ -227,10 +236,23 @@ def walk(base: str, token: str, paper: str, topic: str, day: str, out: Path) -> 
     return failures
 
 
-def card(base: str, token: str, paper: str, collection: set[str]) -> list[str]:
-    """Ask for a Deep card and wait for it: its among rows must name collection papers."""
+def figure_names(block: object) -> list[str]:
+    """The names of the figures a read cites, in its `fig` blocks at any depth."""
+    if isinstance(block, list):
+        return [name for b in block for name in figure_names(b)]
+    if not isinstance(block, dict):
+        return []
+    own = [block["name"]] if block.get("type") == "fig" else []
+    return own + [name for b in block.values() for name in figure_names(b)]
+
+
+def card(base: str, token: str, paper: str, collection: set[str], *, read: bool) -> list[str]:
+    """Ask for a paper's Deep read and wait for it: it must be what the fake deep service sends
+    this paper (`read`: a Deep read; else a Deep card, the format from before), its among rows
+    must name collection papers, and every figure a read cites must be served as an image."""
     from urllib.request import Request, urlopen  # noqa: PLC0415
 
+    what = "read" if read else "card"
     auth = {"Authorization": f"Bearer {token}"}
     urlopen(Request(f"{base}/api/papers/{paper}/card", method="POST", headers=auth), timeout=30)
     deadline = time.monotonic() + CARD_WAIT_SECONDS
@@ -238,21 +260,40 @@ def card(base: str, token: str, paper: str, collection: set[str]) -> list[str]:
         with urlopen(Request(f"{base}/api/papers/{paper}", headers=auth), timeout=30) as response:
             found = json.load(response)
         if found["card"]:
+            made = found["card"]["card"]
+            if (made.get("format") == "read") != read:
+                return [f"the {what} of {paper} came back as format {made.get('format')!r}"]
             among = found["card"]["among"]
             if not among:
-                return ["the card has no Among the collection rows"]
+                return [f"the {what} has no Among the collection rows"]
             strays = [
                 a["id"]
                 for a in among
                 if not a["in_collection"] or a["id"] not in collection or a["id"] == paper
             ]
-            print(f"card: {len(among)} among rows: {[a['id'] for a in among]}")
-            return [f"among rows outside the collection: {strays}"] if strays else []
+            print(f"{what}: {len(among)} among rows: {[a['id'] for a in among]}")
+            failures = [f"among rows outside the collection: {strays}"] if strays else []
+            names = list(dict.fromkeys(figure_names(made.get("sections")))) if read else []
+            if read and not names:
+                failures.append("the read cites no figure")
+            for name in names:
+                url = f"{base}/api/papers/{paper}/deep/figures/{name}"
+                try:
+                    with urlopen(Request(url, headers=auth), timeout=30) as response:
+                        kind, size = response.headers.get("Content-Type"), len(response.read())
+                except OSError as exc:  # an HTTPError is one: a 404 for a figure not stored
+                    failures.append(f"figure {name}: {exc}")
+                    continue
+                if kind != "image/webp" or not size:
+                    failures.append(f"figure {name} came as {kind}, {size} bytes")
+            if read:
+                print(f"read: {len(names)} figures served: {names}")
+            return failures
         state = found["card_pass"] or {}
         if state.get("state") == "failed":
-            return [f"the card pass failed: {state.get('error')}"]
+            return [f"the {what}'s pass failed: {state.get('error')}"]
         time.sleep(2)
-    return [f"no card within {CARD_WAIT_SECONDS}s: {found['card_pass']}"]
+    return [f"no {what} within {CARD_WAIT_SECONDS}s: {found['card_pass']}"]
 
 
 def topic_lists(base: str, token: str, topic: str, collection: set[str]) -> list[str]:
@@ -271,9 +312,13 @@ def main(base: str, token: str, fixture: str, out: str) -> None:
     shots = Path(out)
     shots.mkdir(parents=True, exist_ok=True)
     # smoke.sh classified every seeded paper into the seed taxonomy's language-models Field topic.
-    failures = card(base, token, papers[0], set(papers))
+    # The fake deep service sends the first paper a Deep read and the second a Deep card.
+    failures = card(base, token, papers[0], set(papers), read=True)
+    failures += card(base, token, papers[1], set(papers), read=False)
     failures += topic_lists(base, token, "language-models", set(papers))
-    failures += walk(base, token, papers[0], "language-models", items[0]["published"], shots)
+    failures += walk(
+        base, token, papers[0], papers[1], "language-models", items[0]["published"], shots
+    )
     for failure in failures:
         print("FAIL", failure)
     print(f"{len(failures)} failures; screenshots in {shots}")
