@@ -2,7 +2,7 @@
 (`events.Reacting`), in id order, from that integration's own cursor.
 
 Each integration is delivered to on its own connection and its own loop, so one that fails
-or takes long (a deep card can take most of an hour) delays nobody else. When `handle`
+or takes long (a WebDAV upload of a large PDF) delays nobody else. When `handle`
 raises, the cursor stays before that event, the failure is recorded for the API, and the
 event is tried again after a backoff that doubles up to an hour; the integration's later
 events wait behind it, since they may depend on it. The owner can retry the event at once

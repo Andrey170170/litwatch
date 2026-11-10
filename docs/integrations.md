@@ -12,8 +12,8 @@ what an integration may read, how it is configured and loaded, and a worked exam
 
 Every pipeline step writes an **event** to the **outbox** (a table) in the same transaction as
 the data the event describes, so an event exists exactly when its change does. A
-**dispatcher** runs inside `litwatch serve` and hands each loaded integration the events after
-its own **cursor**, in order:
+**dispatcher** runs inside `litwatch serve` and hands each loaded integration that reacts to events
+(a `Reacting` one, below) the events after its own **cursor**, in order:
 
 - The order is the order of transactions, then of events within one: an event's place is its
   writing transaction's id, then its own id. Only events whose transactions are older than every
