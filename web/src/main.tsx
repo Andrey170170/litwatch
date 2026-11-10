@@ -7,6 +7,7 @@ import { TokenPrompt } from "./components/TokenPrompt";
 import { applyAppearance, readAppearance } from "./lib/theme";
 import { router } from "./router";
 import "./styles.css";
+import "./deepread/deepread.css";
 
 // index.html put the forced side on the document before paint; the bar colour follows it here
 applyAppearance(readAppearance());

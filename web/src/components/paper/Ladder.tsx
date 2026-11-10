@@ -1,22 +1,12 @@
-/** The ladder (DESIGN.md, "The ladder"): Gist, the Brief with a switch to the abstract, or the abstract standing in for it, the Deep card, the paper. */
+/** The ladder (DESIGN.md, "The ladder"): Gist, the Brief with a switch to the abstract, or the abstract standing in for it, the Deep read (or the Deep card from before it), the paper. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Prose } from "@/components/Prose";
 import { fullDate } from "@/lib/format";
 import { useDesktop } from "@/hooks/useDesktop";
 import { DoiForm, type Paper } from "./Actions";
 import { DeepCard } from "./DeepCard";
-
-export function Rung({ name, extra, className, children }: { name: ReactNode; extra?: ReactNode; className?: string; children: ReactNode }) {
-  return (
-    <section className={`rung${className ? ` ${className}` : ""}`}>
-      <div className="rl">
-        {name}
-        {extra}
-      </div>
-      <div className="rb">{children}</div>
-    </section>
-  );
-}
+import { PaperRead, readOf } from "./PaperRead";
+import { Rung } from "./Rung";
 
 /** The paper's classes with their parents, members only. */
 export function Classes({ paper }: { paper: Paper }) {
@@ -178,6 +168,7 @@ export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
   const desktop = useDesktop();
   const gistRef = useRef<HTMLDivElement>(null);
   const analysisFailed = (paper.states ?? []).some((s) => s.kind === "analysis_stopped");
+  const read = readOf(paper);
   useEffect(() => {
     const el = gistRef.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
@@ -205,7 +196,8 @@ export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
           <p className="prose">{paper.abstract}</p>
         </Rung>
       )}
-      {(paper.in_collection || paper.card || paper.card_pass || asked) && <DeepCard paper={paper} asked={asked} deepRead={deepRead} />}
+      {/* the format switch: a card written as a Deep read is drawn as one, any other as the Deep card it is */}
+      {read ? <PaperRead paper={paper} read={read} asked={asked} /> : (paper.in_collection || paper.card || paper.card_pass || asked) && <DeepCard paper={paper} asked={asked} deepRead={deepRead} />}
       {desktop && <ThePaper paper={paper} />}
     </div>
   );

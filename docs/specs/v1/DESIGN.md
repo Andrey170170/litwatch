@@ -161,7 +161,7 @@ longer processes it and leaves it out of lists, search and new digests.", and ar
 italics. It offers no Deep read. Where a row of it shows (a digest that listed it, the saved list), its date reads
 "Withdrawn" in `--sig` Mono caps.
 
-**The ladder**, in the reading column, each rung with its name in a narrow side column:
+**The ladder**, in the reading column, each rung with its name in a narrow side column (128 px):
 1. **Gist**, with ✓ and ✗ to say whether it is accurate.
 2. **Brief**, with ✓ ✗. A Brief that found the abstract overstating says so first, in a red-edged callout. A Brief
    from an older revision says which, and that the current one waits for the text. The rung's name is a switch,
@@ -176,6 +176,20 @@ italics. It offers no Deep read. Where a row of it shows (a digest that listed i
    contradicts, supersedes). It ends with what it was written from and when, and "Write again". Without a card: one
    line saying when cards are automatic and "Deep read" to ask for one; while one is queued or being written, a
    status line with a pulsing dot.
+
+   A card in the Deep read's format (`"format": "read"`, [deep-read.md](../deep-read.md)) shows as the **Deep read**
+   instead, and a card without the tag as above. The rung reads "Deep read", and each section of the read is a rung
+   under it: its name in the side column with its kind's colour square to the left (At a glance accent, problem
+   neutral, method cyan, findings blue, claims amber, a lens its topic's colour, limitations red, related work
+   purple, reproducibility green), its blocks beside it: paragraphs, subheadings, lists, WHY boxes, CARD notes with
+   their place in the paper, equations (KaTeX), experiments (question, Did, Found, Means, Not shown), the paper's
+   figures (a click zooms; "the image did not load" over the caption when it does not), tables (a dotted cell
+   shows its note on hover or tap, the column under the pointer is lit, heat where the read asks for it) and
+   diagrams (a click on a box or an arrow lights it and its neighbours, dims the rest and explains it underneath).
+   A section's takeaway is kept with the read and not shown here. Claims are one line each, the verdict chip first
+   (holds quiet, the others filled), the evidence opening on a click. Everything else is laid out in full; process
+   notes stay folded. It ends like a card: what it was written from and when, and "Write again". A page showing a
+   read is at most 1200 px wide instead of 1080.
 4. **The paper**: links (arXiv page, PDF, LaTeX source), the versions, the published version or "Preprint only, as
    far as DBLP knows" with "Paste a DOI", and its classes with their parents.
 
@@ -192,8 +206,12 @@ italics. It offers no Deep read. Where a row of it shows (a digest that listed i
   fetches it and starts a job that processes it now (Jobs); the button reads "Processing" while it runs. A paper
   litwatch fetched but never processed (a lookup, a miss report) gets the same Process. While the schedule is off,
   which runs no jobs, Process only fetches the paper, and a fetched one reads "Fetched · next run" instead.
+- Under them, for a paper with a Deep read, its contents: one row per section with its colour, the section in view
+  lit, a click scrolling to it; dimmed while the read is out of view.
 
-**On the phone** the page is one column: the header and the ladder without its last rung. The bottom bar: ☆ Save, 👍,
+**On the phone** the page is one column: the header and the ladder without its last rung. Through a Deep read a
+strip of section chips sticks under the top bar, the current one outlined and scrolled into sight, a tap scrolling to
+its section; diagrams and wide tables scroll sideways. The bottom bar: ☆ Save, 👍,
 the paper's place in its list ("3/22"), 👎, and ⋯. ⋯ opens the paper sheet: a label per topic (the topic's name, its
 grade and whose Fit it shows, then the Fit control; in the rail's order and fold), the actions and links as the same grid (arXiv, PDF, LaTeX, Code,
 Weights, BibTeX), then versions, published version and classes, and Done. A swipe steps to the previous or next paper

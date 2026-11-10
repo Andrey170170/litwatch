@@ -15,10 +15,12 @@ import { Fill } from "@/components/slots";
 import { Failed } from "@/routes/settings/parts";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rc } from "@/lib/rarity";
+import { Contents } from "@/deepread/contents";
 import { DeepReadCell, linkCells, MissPicker, ProcessCell, SaveCell, type Paper } from "@/components/paper/Actions";
 import { Header, WithdrawnNote } from "@/components/paper/Header";
 import { Ladder } from "@/components/paper/Ladder";
 import { Notes } from "@/components/paper/Notes";
+import { readOf, topicColourOf } from "@/components/paper/PaperRead";
 import { PhoneBar } from "@/components/paper/Phone";
 import { PaperRow, TopicRow } from "@/components/paper/TopicRow";
 import { folded, FoldedTopics, type Topics, useSettledTopics } from "@/components/paper/Fold";
@@ -26,6 +28,7 @@ import { folded, FoldedTopics, type Topics, useSettledTopics } from "@/component
 function Rail({ paper, topics, gistAway, asked, missOpen }: { paper: Paper; topics: Topics; gistAway: boolean; asked: boolean; missOpen: boolean }) {
   const [miss, setMiss] = useState(missOpen);
   const analysisFailed = (paper.states ?? []).some((s) => s.kind === "analysis_stopped");
+  const read = readOf(paper);
   return (
     <aside className="pgrail">
       {paper.gist && !analysisFailed && (
@@ -61,6 +64,7 @@ function Rail({ paper, topics, gistAway, asked, missOpen }: { paper: Paper; topi
           {miss && <MissPicker paper={paper} onDone={() => setMiss(false)} />}
         </>
       )}
+      {read && <Contents sections={read.sections} topicColour={topicColourOf(paper)} />}
     </aside>
   );
 }

@@ -1,13 +1,13 @@
 /** The Deep card rung (DESIGN.md, "The ladder", 3): the claim, then each section as a rung of its own under it. */
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
 import type { Schemas } from "@/api/client";
 import { useDeepRead } from "@/api/mutations";
 import { dateTime } from "@/lib/format";
 import { rc } from "@/lib/rarity";
 import type { ProcessNote } from "@/lib/settings";
 import type { Paper } from "./Actions";
-import { Rung } from "./Ladder";
+import { ProcessNotes } from "./ProcessNotes";
+import { Rung } from "./Rung";
 
 type CardPass = Schemas["CardPass"];
 const WHY: Record<CardPass["reason"], string> = { request: "Asked for", focus: "Automatic for a Focus must read", pick: "Automatic for an Area pick" };
@@ -89,58 +89,29 @@ function Fact({ name, value }: { name: string; value: unknown }) {
   );
 }
 
-/** A URL to link, only when it is http(s): a note's URL comes from the model, and is never a `javascript:` link. */
-export function webUrl(url: string | undefined): URL | null {
-  if (!url) return null;
-  try {
-    const u = new URL(url);
-    return u.protocol === "https:" || u.protocol === "http:" ? u : null;
-  } catch {
-    return null;
-  }
-}
-
-/** What Deep's own process held back (GLOSSARY.md, process note): folded under "Process notes · N" until opened, each
- * note with its kind as a tag and its page as a link. It starts folded on every card. */
-function ProcessNotes({ notes }: { notes: ProcessNote[] }) {
-  const [open, setOpen] = useState(false);
+/** The last rung under a card or a read: what it was written from and when, Write again, and where a new one stands. */
+export function CardFoot({ paper, asked }: { paper: Paper; asked: boolean }) {
+  const again = useDeepRead(paper.id);
+  if (!paper.card) return null;
   return (
-    <Rung name="" className="sub pnotes">
-      <button className="tpfold" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className={`car${open ? " open" : ""}`} aria-hidden />
-        <span className="ct">
-          Process notes · <b>{notes.length}</b>
-        </span>
-      </button>
-      {open && (
-        <ul className="lim">
-          {notes.map((n, i) => {
-            const link = webUrl(n.url);
-            return (
-              <li key={i}>
-                <i className="tag">{n.kind}</i>
-                {n.note}
-                {link ? (
-                  <>
-                    {" "}
-                    <a className="lnk" href={link.href} target="_blank" rel="noopener noreferrer" title={link.href}>
-                      {link.hostname} ↗
-                    </a>
-                  </>
-                ) : n.url ? (
-                  <span className="faint"> {n.url}</span>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+    <Rung name="" className="sub end">
+      <div className="cfoot">
+        {label(paper.card)}
+        {paper.card_requestable && !asked && (
+          <>
+            {" · "}
+            <button className="inl" onClick={() => again.mutate(undefined)} disabled={again.isPending}>
+              Write again
+            </button>
+          </>
+        )}
+      </div>
+      {(asked || paper.card_pass) && <CardStatus pass={paper.card_pass} asked={asked} again />}
     </Rung>
   );
 }
 
 export function DeepCard({ paper, asked, deepRead }: { paper: Paper; asked: boolean; deepRead: React.ReactNode }) {
-  const again = useDeepRead(paper.id);
   if (!paper.card) {
     if (asked || paper.card_pass)
       return (
@@ -246,20 +217,7 @@ export function DeepCard({ paper, asked, deepRead }: { paper: Paper; asked: bool
           ))}
         </Rung>
       ) : null}
-      <Rung name="" className="sub end">
-        <div className="cfoot">
-          {label(paper.card)}
-          {paper.card_requestable && !asked && (
-            <>
-              {" · "}
-              <button className="inl" onClick={() => again.mutate(undefined)} disabled={again.isPending}>
-                Write again
-              </button>
-            </>
-          )}
-        </div>
-        {(asked || paper.card_pass) && <CardStatus pass={paper.card_pass} asked={asked} again />}
-      </Rung>
+      <CardFoot paper={paper} asked={asked} />
     </>
   );
 }
