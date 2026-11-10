@@ -12,8 +12,8 @@ The queue records each submission as an attempt before it is sent and the job on
 and sends the attempt as the submission's key, by which the service finds the job it
 started for that key while it keeps it; so a submission whose answer was lost is looked up,
 never sent again. A failed job says whose failure it was, the paper's or the service's. It
-reacts to no event: `card.requested` is the owner's request already queued, and `card.ready` is
-emitted when the card is stored.
+reacts to no event, so the dispatcher never runs it: `card.requested` is the owner's request
+already queued, and `card.ready` is emitted when the card is stored.
 
 Options: `url` (or $LITWATCH_DEEP_URL), `extensions` ({topic slug: extension}), `poll_seconds`
 (15) and `timeout_minutes` (135). There is no daily cap: `max_per_day` is refused. Keep
@@ -37,7 +37,7 @@ import psycopg
 
 from litwatch.archive import PaperText
 from litwatch.config import Config
-from litwatch.core import Event, Grade, Paper, Status, Topic, deepread
+from litwatch.core import Grade, Paper, Status, Topic, deepread
 from litwatch.integrations import IntegrationError, enabled_using, required, required_secret
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
@@ -234,12 +234,6 @@ class Deep:
     def lease(self) -> timedelta:
         """How long a Deep pass is held: past the longest a job is followed."""
         return timedelta(seconds=self.client.timeout_seconds) + LEASE_MARGIN
-
-    def wants(self, event: Event) -> bool:
-        return False  # its work comes from the full-text queue
-
-    async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
-        return None
 
     async def aclose(self) -> None:
         await self.client.http.aclose()

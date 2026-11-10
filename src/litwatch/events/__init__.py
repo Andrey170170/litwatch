@@ -49,7 +49,21 @@ async def emit(
 
 @runtime_checkable
 class Integration(Protocol):
-    """Something outside the core that reacts to events: Zotero, a webhook, a deep card.
+    """Something outside the core that the configuration loads: Zotero, a webhook, the deep
+    service. Most react to events (`Reacting`); one that reacts to none (deep, whose work is the
+    full-text queue's) is never handed one and keeps no cursor.
+
+    Optional hooks, used when present: `aclose()`, awaited when the service stops; `requires`,
+    names of integrations that must be loaded too.
+    """
+
+    name: str
+    description: str
+
+
+@runtime_checkable
+class Reacting(Integration, Protocol):
+    """An integration the dispatcher hands events to.
 
     `wants` is a cheap filter on the event alone; `handle` does the work and must be
     idempotent, because an event is handed over again after a failure or a restart. It
@@ -59,15 +73,17 @@ class Integration(Protocol):
 
     Optional hooks, used when present: `setup(conn)`, awaited once whenever the dispatcher
     starts, before any event and under the same lock as `handle` (a failure is shown and tried
-    again after a backoff, and events wait for it); `aclose()`, awaited when it stops;
-    `requires`, names of integrations that must be loaded too; `idle(conn)`, awaited when it
-    has no event to be handed, at most about once a minute, for work no event brings (a
-    failure there is logged and changes nothing else).
+    again after a backoff, and events wait for it); `idle(conn)`, awaited when it has no event
+    to be handed, at most about once a minute, for work no event brings (a failure there is
+    logged and changes nothing else).
     """
-
-    name: str
-    description: str
 
     def wants(self, event: Event) -> bool: ...
 
     async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None: ...
+
+
+def reacting(integrations: list[Integration]) -> list[Reacting]:
+    """The integrations that react to events: the ones the dispatcher delivers to, and the only
+    ones with a cursor to show."""
+    return [i for i in integrations if isinstance(i, Reacting)]

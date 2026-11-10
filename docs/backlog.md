@@ -22,11 +22,13 @@ shared between `writing.py` and the deep prompt instead of copied.
 ## The rework
 
 The backend brought to the roles and gates of [`specs/architecture.md`](specs/architecture.md), one milestone at a
-time, after the Deep read. Each milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
+time. A0 runs alongside the Deep read (it removes and checks, and changes no pipeline code the Deep read is
+building); A1 starts once the Deep read has landed. Each milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
 
 ### A0. Rules and baseline
 
-Blueprint only. The role checks in CI with today's violations listed; the glossary's terms for the rework.
+Planned in [`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md) (P1–P3 and the small fixes). The role checks
+in CI with today's violations listed.
 
 - **What production still uses,** found against production rather than read from the code (review, project 5):
   config options, `llm` roles, evaluation tables and cohorts, migration-era guards, routes with only test callers

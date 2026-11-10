@@ -68,14 +68,16 @@ def answers_card_requests(integrations: list[events.Integration]) -> bool:
 async def status(request: Request, c: Conn) -> list[s.IntegrationCard]:
     """One card per loaded integration, then one per configured section that is turned off
     (its cursor kept, so its lag shows what turning it on again would hand it). A card shows
-    the event it is stuck on, or its failing setup."""
+    the event it is stuck on, or its failing setup; one that reacts to no event has neither,
+    whatever cursor it kept from before."""
     found = {i.name: i for i in loaded(request)}
+    reacting = [i.name for i in events.reacting(loaded(request))]
     off = [
         name
         for name, section in request.app.state.config.integrations.items()
         if name not in found and section.get("enabled", True) is False
     ]
-    cursors = await outbox.cursors(c, [*found, *off])
+    cursors = await outbox.cursors(c, [*reacting, *off])
     stats = request.app.state.search_stats
     cards = []
     for name in [*found, *off]:

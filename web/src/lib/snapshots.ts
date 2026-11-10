@@ -35,7 +35,3 @@ export function showSnapshot(index: number, into: HTMLElement): HTMLElement | nu
   if (scroll) scroll.scrollTop = s.scrollTop;
   return s.node;
 }
-
-export function clearSnapshots() {
-  kept.clear();
-}
