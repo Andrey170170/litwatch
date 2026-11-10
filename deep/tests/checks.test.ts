@@ -301,8 +301,12 @@ test("a place code does not look up is the reviewer's, by name: an equation, an 
   // a class that numbers its sections in Roman numerals: "Sec. IV" is a place, the reviewer's to look up
   const ieee = BODY.replace("\\documentclass{article}", "\\documentclass[journal]{IEEEtran}");
   assert.deepEqual(left("Sec. IV", { paper: ieee }), [[], ["§3", "§IV"]]);
-  // and its tables in Roman numerals
+  // and its tables in Roman numerals, one or a list
   assert.deepEqual(left("Table II", { paper: ieee }), [[], ["§3", "Table II"]]);
+  assert.deepEqual(left("Tables II and III", { paper: ieee }), [[], ["§3", "Tables II and III"]]);
+  // a list, in any case, is named whole
+  assert.deepEqual(left("equations 9999 and 8888"), [[], ["equations 9999 and 8888"]]);
+  assert.deepEqual(left("pp. 3–9"), [[], ["pp. 3–9"]]);
 });
 
 test("the paper's places in prose go to the reviewer where code cannot confirm them, and Related work's are other papers'", () => {
@@ -313,7 +317,7 @@ test("the paper's places in prose go to the reviewer where code cannot confirm t
   for (const text of ["Unlike Section 9 of Smith et al. (2023), the authors train a linear probe.", "Each probe takes 5 sec. 12 probes run in parallel.", "The method works across apps. X is the input."])
     assert.deepEqual(check(saying(text), ctx()).errors, [], text);
   assert.deepEqual(check(saying("Table I/O is measured separately."), ctx()).unverified, [], "no Roman table");
-  const related = changed((d) => ((d.sections.find((s) => s.kind === "related") as unknown as { takeaway: string }).takeaway = "Their Section 9 and Eq. 4 differ."));
+  const related = changed((d) => ((d.sections.find((s) => s.kind === "related") as unknown as { takeaway: string }).takeaway = "Their Section 9 and Eq. 4 differ; it reports 62.5% in Table 9."));
   assert.deepEqual(check(related, ctx()), { errors: [], plots: [], unverified: [] });
 });
 

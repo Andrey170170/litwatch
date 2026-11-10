@@ -92,7 +92,7 @@ export function ownNumbering(tex: string, counters: readonly string[], also?: Re
 export const ownFloatNumbering = (tex: string, kind: string): boolean => ownNumbering(tex, [kind], CONTINUED);
 
 /** Where a LaTeX source starts its appendix by command: from here its sections are lettered. */
-const APPENDIX_COMMAND = /\\appendix(?![a-zA-Z])|\\begin\{appendi(?:x|ces)\}/g;
+const APPENDIX_COMMAND = /\\appendi(?:x|ces)(?![a-zA-Z])|\\begin\{appendi(?:x|ces)\}/g;
 
 /** The text between the brace at `open` and its match. */
 function braced(body: string, open: number): string {
@@ -137,7 +137,7 @@ function latexHeadings(body: string): Bare[] {
       counters.fill(0, level);
       const top = lettered ? String.fromCharCode(64 + counters[0]!) : String(counters[0]);
       // a subsection before any section has no number worth giving
-      if (counters[0]! > 0 && counters[0]! <= 26) heading.number = [top, ...counters.slice(1, level)].join(".");
+      if (counters[0]! > 0 && (!lettered || counters[0]! <= 26)) heading.number = [top, ...counters.slice(1, level)].join(".");
     }
     out.push(heading);
   }

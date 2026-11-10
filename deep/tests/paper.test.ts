@@ -31,6 +31,8 @@ test("an appendix that is commented out, or only mentioned, is not one", () => {
   assert.deepEqual(splitPaper(body, "latex").cuts, []);
   const named = "\\begin{document}\n\\section{Method}\nWe probe.\n\\section{Appendix: proofs}\nLemma.\n\\end{document}";
   assert.deepEqual(splitPaper(named, "latex").cuts.map((c) => c.part), ["appendix"], "a section named Appendix starts it");
+  const ieee = "\\begin{document}\n\\section{Method}\nWe probe.\n\\appendices\n\\section{Proofs}\nLemma.\n\\end{document}";
+  assert.deepEqual(splitPaper(ieee, "latex").cuts.map((c) => c.part), ["appendix"], "IEEEtran's \\appendices starts it");
 });
 
 test("a PDF's text is cut at its References and Appendix headings", () => {
@@ -131,6 +133,9 @@ test("a LaTeX source's headings carry its numbers: sections counted, lettered fr
     assert.ok(headings(nested.replace("\\subsection{Probe training}", `${custom}\n\\subsection{Probe training}`), "latex").every((h) => h.number === undefined), custom);
   for (const cls of ["\\documentclass[journal]{IEEEtran}", "\\documentclass[aps,prl]{revtex4-2}", "\\documentclass{report}"])
     assert.ok(headings(nested.replace("\\documentclass{article}", cls), "latex").every((h) => h.number === undefined), cls);
+  // past the alphabet's 26, a section is still counted; only an appendix's letter runs out
+  const many = BODY.replace("\\section{Results}", `${Array.from({ length: 25 }, (_, i) => `\\section{Part ${i}}\nText.\n`).join("")}\\section{Results}`);
+  assert.equal(headings(many, "latex").find((h) => h.title === "Results")!.number, "28");
   // a counter that numbers no section, and a setting in a comment, change nothing
   for (const other of ["\\setcounter{figure}{3}", "% \\setcounter{subsection}{3}"])
     assert.equal(headings(nested.replace("\\subsection{Probe training}", `${other}\n\\subsection{Probe training}`), "latex").find((h) => h.title === "Data")!.number, "2.2", other);

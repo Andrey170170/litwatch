@@ -299,8 +299,9 @@ somewhere in the paper's text; and, where the paper's LaTeX source shows them, t
 exist.
 What code has not checked, which is yours:
 - The places the message lists as not confirmed. Code looks up no equation, algorithm, theorem, footnote, page or line, no \
-figure or table numbered in Roman numerals, no place of a paper read from its PDF that the text does not itself name, and no label under numbering the source sets itself: \
-it names each for you to check against the paper.
+figure or table numbered in Roman numerals, no place of a paper read from its PDF that the text does not itself name, no \
+label under numbering the source sets itself, and no section the prose cites that it cannot find: it names each for you to \
+check against the paper. It looks up no place Related work cites, which are other papers'.
 - These numbers, which the number check leaves out: whole numbers under ten; years; every number in Related work; an \
 equation's TeX; the reading time; a table caption's counts of the rows and columns the read kept; the read's own headings \
 and labels (section titles, sub-headings, fact names).
