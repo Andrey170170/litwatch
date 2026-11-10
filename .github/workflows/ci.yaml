@@ -96,6 +96,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - name: The Deep read's schema and types match deep/src/read.ts
+        run: |
+          npm ci --no-audit --no-fund --prefix ../deep
+          npm run read-schema --prefix ../deep
+          pnpm generate:read
+          git diff --exit-code -- src/deepread/read.schema.json src/deepread/read.d.ts
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build

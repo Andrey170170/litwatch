@@ -36,6 +36,10 @@ The card places the paper among litwatch's collection (`among_collection`): pape
 contradicts, extends or supersedes. `submit` takes only ids a `store.search` in the same session
 returned from the collection. `paper` is the archive's LaTeX source, or the PDF's text as markdown.
 
+`src/read.ts` is the schema of the Deep read (`docs/specs/deep-read.md`), the format that replaces the card; the
+agent does not write it yet. `npm run read-schema` exports it to `web/src/deepread/read.schema.json`, from which the
+web app's types are generated (`pnpm generate:read` in `web/`); run both after changing it.
+
 ```sh
 npm ci
 npm test && npm run typecheck
