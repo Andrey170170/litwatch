@@ -85,7 +85,7 @@ const CONTINUED = /\\ContinuedFloat(?![a-zA-Z])/;
  * package that numbers its own way. No number of that kind is then inferred from the source. */
 export function ownNumbering(tex: string, counters: readonly string[], also?: RegExp): boolean {
   const names = counters.join("|");
-  const set = new RegExp(`\\\\(?:setcounter|addtocounter|numberwithin|counterwithin\\*?|counterwithout\\*?)\\s*\\{(?:${names})\\}|\\\\the(?:${names})(?![a-zA-Z])`);
+  const set = new RegExp(`\\\\(?:setcounter|addtocounter|stepcounter|refstepcounter|numberwithin|counterwithin\\*?|counterwithout\\*?)\\s*\\{(?:${names})\\}|\\\\the(?:${names})(?![a-zA-Z])`);
   return set.test(tex) || RENUMBERING.test(tex) || (also?.test(tex) ?? false);
 }
 /** Whether it numbers a kind of float itself. */
