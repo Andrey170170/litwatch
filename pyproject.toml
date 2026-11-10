@@ -139,6 +139,8 @@ forbidden_modules = [
     "litwatch.archive",
     "litwatch.classification",
     "litwatch.cli",
+    "litwatch.concurrency",
+    "litwatch.config",
     "litwatch.digests",
     "litwatch.events",
     "litwatch.feedback",
@@ -148,10 +150,12 @@ forbidden_modules = [
     "litwatch.integrations",
     "litwatch.jobs",
     "litwatch.llm",
+    "litwatch.logs",
     "litwatch.publications",
     "litwatch.quality",
     "litwatch.seeds",
     "litwatch.store",
+    "litwatch.writing",
 ]
 
 [[tool.importlinter.contracts]]

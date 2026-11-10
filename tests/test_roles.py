@@ -51,8 +51,8 @@ def _graph() -> grimp.ImportGraph:
 
 
 def _top(module: str) -> str:
-    """The top-level module under `litwatch` that a module belongs to; "" for `litwatch` itself."""
-    return module.split(".")[1] if "." in module else ""
+    """The top-level module under `litwatch` that a module belongs to, or `litwatch` itself."""
+    return module.split(".")[1] if "." in module else module
 
 
 def _packages() -> set[str]:
@@ -75,7 +75,7 @@ def test_contracts_name_every_package():
     assert _forbidden("store") == _packages() - {"store", "core"}
     assert _forbidden("llm") == _services() | ENTRIES
     for shared in SHARED:
-        assert _forbidden(shared) == _packages() - SHARED - {"core"}
+        assert _forbidden(shared) == _packages() - {"core"}
 
 
 def _package_imports() -> dict[tuple[str, str], list[str]]:
@@ -85,7 +85,7 @@ def _package_imports() -> dict[tuple[str, str], list[str]]:
     for importer in sorted(graph.modules):
         for imported in sorted(graph.find_modules_directly_imported_by(importer)):
             a, b = _top(importer), _top(imported)
-            if a != b and a and b:
+            if a != b:
                 found.setdefault((a, b), []).extend(
                     f"{d['importer']}:{d['line_number']}: {d['line_contents']}"
                     for d in graph.get_import_details(importer=importer, imported=imported)
