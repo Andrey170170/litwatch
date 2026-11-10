@@ -11,7 +11,12 @@ const api = process.env.LITWATCH_API ?? "http://127.0.0.1:8766";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
-  build: { outDir: path.resolve(import.meta.dirname, "../src/litwatch/api/web"), emptyOutDir: true },
+  build: {
+    outDir: path.resolve(import.meta.dirname, "../src/litwatch/api/web"),
+    emptyOutDir: true,
+    // two pages: the app, and the Deep read's render page (src/deepread/render.tsx), which litwatch serves at /render.html
+    rolldownOptions: { input: { index: path.resolve(import.meta.dirname, "index.html"), render: path.resolve(import.meta.dirname, "render.html") } },
+  },
   server: { port: 5173, proxy: { "/api": api } },
   test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], include: ["src/**/*.test.{ts,tsx}"] },
 });

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="robots" content="noindex" />
+    <title>litwatch · Deep read render</title>
+  </head>
+  <body>
+    <!-- The render page (docs/plans/deep-read.md, D1): the deep service's browser draws a draft here to look at it.
+         It holds no data and asks the API for nothing; src/deepread/render.tsx says how it is driven. -->
+    <div id="root"></div>
+    <script type="module" src="/src/deepread/render.tsx"></script>
+  </body>
+</html>
