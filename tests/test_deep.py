@@ -695,8 +695,10 @@ async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(d
         ).status_code == 404
         assert (await http.get(f"/api/papers/{P.id}")).json()["card"]["card"]["format"] == "read"
         # Written again: a tab still on the old read gets none of the new read's figures under
-        # the old address, which it would keep for good; the new address has them.
-        fake.outcome = WROTE_READ | {"figures": [sent_figure(f["name"], RUST) for f in FIGURES]}
+        # the old address, which it would keep for good; the new address has them. A figure
+        # named "pdf" is the read's, never the paper's PDF.
+        again = [sent_figure(f["name"], RUST) for f in FIGURES] + [sent_figure("pdf")]
+        fake.outcome = WROTE_READ | {"figures": again}
         await deep_passes.request(db, P.id)
         assert await work(db, with_text(P), d) == {"cards_written": 1}
         stale = await http.get(f"{base}/methodology_by_step", params={"v": written})
@@ -708,6 +710,12 @@ async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(d
         assert (
             await http.get(f"{base}/methodology_by_step", params={"v": "soon"})
         ).status_code == 404
+        named_pdf = await http.get(f"{base}/pdf", params={"v": now})
+        assert named_pdf.status_code == 200 and named_pdf.content == BLUE
+        assert named_pdf.headers["content-type"] == "image/webp"
+        assert (await http.get(f"{base}/pdf", params={"v": written})).status_code == 404
+        http.cookies.clear()
+        assert (await http.get(f"{base}/pdf", headers=read_token)).status_code == 403
 
 
 async def test_the_read_token_fetches_a_papers_pdf(db):

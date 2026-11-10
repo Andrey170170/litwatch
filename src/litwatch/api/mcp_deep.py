@@ -83,7 +83,8 @@ def _diagram(block: dict[str, Any]) -> list[str]:
     for e in block.get("edges") or []:
         ends = f"{names.get(e.get('from'), e.get('from'))} → {names.get(e.get('to'), e.get('to'))}"
         label = f" ({e['label']})" if e.get("label") else ""
-        out.append(f"- **{ends}**{label}: {e.get('tip', '')}{where(e)}")
+        title = f"{e['title']}: " if e.get("title") else ""
+        out.append(f"- **{ends}**{label}: {title}{e.get('tip', '')}{where(e)}")
     return out
 
 
