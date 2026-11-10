@@ -161,15 +161,6 @@ def test_one_unresolvable_history_keeps_resolving_the_rest_of_the_batch():
     assert batch.versions_error == "Raw history absent for 0 and unresolved for 1 canonical records"
 
 
-def test_get_record_version_resolution_checks_identity():
-    from litwatch.intake.oai import fetch_versions
-
-    raw = page(raw_record()).replace(b"ListRecords", b"GetRecord")
-    assert fetch_versions("2609.12345", Client([raw]))["version"] == 2
-    with pytest.raises(SourceError, match="mismatched"):
-        fetch_versions("2609.22222", Client([raw]))
-
-
 def test_raw_history_newer_than_canonical_snapshot_does_not_relabel_old_metadata():
     raw = raw_record(version_date="Sun, 13 Sep 2026 12:00:00 GMT")
     batch = fetch_category(

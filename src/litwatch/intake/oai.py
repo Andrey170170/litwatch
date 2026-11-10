@@ -252,32 +252,6 @@ def resolve_observed_version(
     return paper.model_copy(update={"version": version, "version_history": eligible})
 
 
-def fetch_versions(paper_id: str, client: XmlClient) -> dict:
-    """Resolve an unknown revision without guessing from a metadata update timestamp."""
-    if not _ID.fullmatch(paper_id):
-        raise SourceError(f"Invalid arXiv ID: {paper_id}")
-    try:
-        root = ET.fromstring(
-            client.get(
-                URL,
-                params={
-                    "verb": "GetRecord",
-                    "metadataPrefix": "arXivRaw",
-                    "identifier": f"oai:arXiv.org:{paper_id}",
-                },
-            )
-        )
-    except ET.ParseError as exc:
-        raise SourceError("Malformed OAI raw XML") from exc
-    record = root.find("o:GetRecord/o:record", NS)
-    if record is None:
-        raise SourceError(f"OAI revision record unavailable for {paper_id}")
-    paper = _raw_paper(record)
-    if paper is None or paper.id != re.sub(r"v\d+$", "", paper_id):
-        raise SourceError(f"OAI revision record deleted or mismatched for {paper_id}")
-    return {"version": paper.version, "version_history": paper.version_history}
-
-
 def fetch_category(
     category: str,
     since: date,
