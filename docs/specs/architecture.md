@@ -86,13 +86,14 @@ One gate per shared resource. Nothing reaches the resource except through its ga
 - **Async submissions:** the nightly's steps, full-text and Deep passes, digests, re-runs, Write again,
   publications, integration deliveries, downloads. Submitted, and the caller moves on.
 - **Sync submissions:** CLI commands that run pipeline work (`litwatch run`, evaluations, replays) submit to the Work
-  gate and wait for the result instead of running in their own process. So only the service process calls models,
-  and its Model gate's limits are the global ones.
+  gate and wait for the result instead of running in their own process. So only the service process calls models
+  for litwatch, and its Model gate's limits are the global ones. The deep service is outside this: litwatch submits
+  to it through the Fetch gate, and it calls and accounts its own models (its subscription, as today).
 - **Not a submission:** a request's own short write (a label, a thumb, Save). It runs inline as one Database-gate
   unit, attributed to the request; whatever it triggers is submitted.
 - **Lanes replace the run lock.** The nightly is one lane of capacity one; the owner's work, passes and deliveries
-  run alongside it. Concurrent writes stay safe through the per-paper locks a change takes; spend stays bounded by
-  the Model gate's budgets.
+  run alongside it. Concurrent writes stay safe through the per-paper locks a change takes; spend is governed
+  exactly as today (the monthly budgets alert, a re-run's ceiling stops it), whichever lanes run at once.
 - **The nightly is an Orchestrator:** it submits its steps (intake; classification, analysis and grading; full-text
   passes; digests) as child work, waits on barriers, and appears in the log as a parent with children. The Model gate
   gathers many items' calls into one provider batch.
