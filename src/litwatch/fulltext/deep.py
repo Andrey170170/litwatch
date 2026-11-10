@@ -171,7 +171,7 @@ async def _work_one(
             if reason is None:
                 return "lost"
             requested = reason == REQUESTED
-            submission = await deep.submission(conn, c.paper, a.text, requested)
+            submission = await deep.submission(conn, c.paper, a.text)
             attempt_id = await cards.add_attempt(conn, c.paper.id, c.id, automatic=not requested)
         try:
             job_id = await deep.client.submit(submission, key=_key(attempt_id, c))

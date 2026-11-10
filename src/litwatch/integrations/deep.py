@@ -32,9 +32,8 @@ import psycopg
 
 from litwatch.archive import PaperText
 from litwatch.config import Config
-from litwatch.core import Depth, Event, Grade, Paper, Status, Topic
+from litwatch.core import Event, Grade, Paper, Status, Topic
 from litwatch.integrations import IntegrationError, enabled_using, required, required_secret
-from litwatch.store import fulltext as fulltext_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 
@@ -220,11 +219,11 @@ class Deep:
         await self.client.http.aclose()
 
     async def submission(
-        self, conn: psycopg.AsyncConnection, paper: Paper, text: PaperText, requested: bool
+        self, conn: psycopg.AsyncConnection, paper: Paper, text: PaperText
     ) -> dict[str, Any]:
-        """What the service is sent for the paper: its text, the topics the card is for and the
-        extensions they ask for."""
-        topics = await self._topics(conn, paper.id, requested)
+        """What the service is sent for the paper: its text, the topics the card is for with the
+        grade each gave it, and the extensions they ask for."""
+        topics = await self._topics(conn, paper.id)
         return {
             "paper": {
                 "id": paper.id,
@@ -237,36 +236,28 @@ class Deep:
                 "body_source": text.source,
             },
             "extensions": sorted(
-                {self.extensions[t.slug] for _, t in topics if t.slug in self.extensions}
+                {self.extensions[t.slug] for _, t, _ in topics if t.slug in self.extensions}
             ),
             "selections": [
-                {"name": name, "subject": t.subject, "rubric": t.rubric} for name, t in topics
+                {"name": name, "subject": t.subject, "rubric": t.rubric, "grade": g.value}
+                for name, t, g in topics
             ],
         }
 
     async def _topics(
-        self, conn: psycopg.AsyncConnection, paper_id: str, requested: bool
-    ) -> list[tuple[str, Topic]]:
-        """The topics the card is for, each with its class's name: the active Focus topics that
-        grade the paper must read and the active Area topics whose published digests picked it,
-        else, for the owner's request, every active Focus topic."""
-        grades = await word_store.focus_grades(conn, paper_id)
-        found = await fulltext_store.deep_facts(conn, paper_id)
-        picked = found.picked_by if found else frozenset()
+        self, conn: psycopg.AsyncConnection, paper_id: str
+    ) -> list[tuple[str, Topic, Grade]]:
+        """The topics the card is for: the active topics, at any depth, that grade the paper
+        above none, each with its class's name and its grade (docs/specs/deep-read.md,
+        "Lenses"). An Area pick asks for a card but is a topic of it only through its grade; a
+        paper no topic grades gets a card written for none."""
+        grades = await word_store.effective_for(conn, paper_id)
         tree = await taxonomy_store.load(conn)
-        active = [
-            (tree.get(t.slug).name, t)
+        return [
+            (tree.get(t.slug).name, t, grades[t.slug].grade)
             for t in (tree.topics if tree else [])
-            if t.status == Status.ACTIVE
+            if t.status == Status.ACTIVE and t.slug in grades and grades[t.slug].grade != Grade.NONE
         ]
-        chosen = [
-            (n, t)
-            for n, t in active
-            if (t.depth == Depth.FOCUS and grades.get(t.slug) == Grade.MUST_READ)
-            or (t.depth == Depth.AREA and t.slug in picked)
-        ]
-        focus = [(n, t) for n, t in active if t.depth == Depth.FOCUS]
-        return chosen or (focus if requested else [])
 
 
 def load(name: str, options: dict[str, Any], config: Config) -> Deep:
