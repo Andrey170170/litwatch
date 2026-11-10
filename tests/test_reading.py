@@ -926,7 +926,7 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
         assert (await c.get("/api/papers/2610.08888")).status_code == 404
         assert fetched == [] and await papers_store.get(conn, pid) is None
 
-        assert (await misses.lookup(conn, pid))[1]
+        assert (await misses.keep(conn, *await misses.resolve(conn, pid)))[1]
         page = (await c.get(f"/api/papers/{pid}")).json()
         assert (page["stored"], page["in_collection"], page["next_run"]) == (True, False, True)
         assert fetched == [[pid]]
