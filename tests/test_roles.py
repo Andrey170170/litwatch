@@ -1,9 +1,8 @@
 """The role rules over the import graph (docs/specs/architecture.md, "Layout and enforcement").
 `lint-imports` checks which role may import which, by the contracts in `pyproject.toml`; this
 file keeps those contracts' package lists in step with the packages, and checks that no two
-Service packages import each other in a cycle, function-level imports included. A cycle can't
-pass through the other roles, whose contracts forbid them to import Services, but through the
-violations those contracts list. The cycle list
+Service packages import each other in a cycle, function-level imports included, the way back
+through any role counted (a listed violation such as `store -> events` is one). The cycle list
 only shrinks: an import that leaves a cycle comes off it."""
 
 import tomllib
@@ -31,7 +30,7 @@ ENTRIES = {"api", "cli"}
 SHARED = {"config", "logs", "concurrency", "writing"}
 
 # Imports from one Service package into another that lie on a cycle, before the rule: the
-# imported package imports back, directly or through other Services. To be broken.
+# imported package imports back, directly or through other packages. To be broken.
 CYCLES_BEFORE_THE_RULE = {
     ("digests", "jobs"),  # digests -> jobs.context
     ("feedback", "intake"),  # feedback.misses -> intake.batch, intake.search
@@ -79,14 +78,14 @@ def test_contracts_name_every_package():
         assert _forbidden(shared) == _packages() - SHARED - {"core"}
 
 
-def _service_imports() -> dict[tuple[str, str], list[str]]:
-    """Each import from one Service package into another, with its lines."""
-    graph, services = _graph(), _services()
+def _package_imports() -> dict[tuple[str, str], list[str]]:
+    """Each import from one top-level module into another, with its lines."""
+    graph = _graph()
     found: dict[tuple[str, str], list[str]] = {}
     for importer in sorted(graph.modules):
         for imported in sorted(graph.find_modules_directly_imported_by(importer)):
             a, b = _top(importer), _top(imported)
-            if a != b and {a, b} <= services:
+            if a != b and a and b:
                 found.setdefault((a, b), []).extend(
                     f"{d['importer']}:{d['line_number']}: {d['line_contents']}"
                     for d in graph.get_import_details(importer=importer, imported=imported)
@@ -95,15 +94,15 @@ def _service_imports() -> dict[tuple[str, str], list[str]]:
 
 
 def test_services_form_no_cycle():
-    imports = _service_imports()
+    imports, services = _package_imports(), _services()
     packages = grimp.ImportGraph()
     for a, b in imports:
         packages.add_import(importer=a, imported=b)
-    # Each import a -> b that lies on a cycle, with the way back from b to a.
+    # Each import between Services that lies on a cycle, with the way back from b to a.
     on_cycle = {
         (a, b): back
         for a, b in imports
-        if (back := packages.find_shortest_chain(importer=b, imported=a))
+        if {a, b} <= services and (back := packages.find_shortest_chain(importer=b, imported=a))
     }
 
     problems = [
