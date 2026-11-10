@@ -298,6 +298,9 @@ test("a place code does not look up is the reviewer's, by name: an equation, an 
   assert.deepEqual(left("§2.4", { paper: NESTED })[0], ["/sections/3/claims/0/where: cites §2.4, but the paper has no section 2.4"]);
   const fourth = NESTED.replace("\\subsection{Probe training}", "\\setcounter{subsection}{3}\n\\subsection{Probe training}");
   assert.deepEqual(left("§2.4", { paper: fourth }), [[], ["§3", "§2.4"]]);
+  // a class that numbers its sections in Roman numerals: "Sec. IV" is a place, the reviewer's to look up
+  const ieee = BODY.replace("\\documentclass{article}", "\\documentclass[journal]{IEEEtran}");
+  assert.deepEqual(left("Sec. IV", { paper: ieee }), [[], ["§3", "§IV"]]);
 });
 
 test("a PDF's text refuses no section: a number a line opens with is there, and any other is the reviewer's", () => {

@@ -74,7 +74,8 @@ export function cites(text: string): Cite[] {
   return out;
 }
 
-const SECTION_LABEL = "(?:[A-Z](?:\\.?\\d+(?:\\.\\d+)*)?(?![A-Za-z])|\\d+(?:\\.\\d+)*)";
+// A Roman numeral first ("Sec. IV", as IEEEtran and REVTeX number), then a letter or a number.
+const SECTION_LABEL = "(?:[IVX]{2,6}(?:\\.\\d+)*(?![A-Za-z])|[A-Z](?:\\.?\\d+(?:\\.\\d+)*)?(?![A-Za-z])|\\d+(?:\\.\\d+)*)";
 const SECTION = new RegExp(`(§+|\\b(?:[Ss]ections?|[Ss]ecs?\\.?|[Aa]ppendi(?:x|ces)|[Aa]pps?\\.))\\s*(${SECTION_LABEL}(?:${JOIN}§*\\s*${SECTION_LABEL})*)?`, "g");
 
 /** The sections and appendices a location names, each by its label; a bare "Appendix" has none. */
