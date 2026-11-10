@@ -502,7 +502,24 @@ async def test_the_deep_commands_read_each_attempts_trace_and_the_cards_notes(
 # -- a Deep read -----------------------------------------------------------------------------------
 
 READ = fixture_read("scarce")
-FIGURES = [sent_figure("methodology_by_step"), sent_figure("channel_util_s1", RUST)]
+FIGURES = [
+    sent_figure("methodology_by_step"),
+    sent_figure("channel_util_s1", RUST),
+    sent_figure("pact_vs_bid"),
+]
+
+
+def citing(read: dict, names: set[str]) -> dict:
+    """The read with only the figures named, so what it cites is what is sent with it."""
+    keep = lambda b: b["type"] != "fig" or b["name"] in names  # noqa: E731
+    return read | {
+        "sections": [
+            s | {"blocks": [b for b in s["blocks"] if keep(b)]} if "blocks" in s else s
+            for s in read["sections"]
+        ]
+    }
+
+
 # Two review rounds as the service returns them (docs/integrations.md): the first sends the
 # read back, the second passes it.
 REVIEWS = [
@@ -549,6 +566,7 @@ async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_repla
     assert await figures(db) == {
         "methodology_by_step": ("image/webp", BLUE),
         "channel_util_s1": ("image/webp", RUST),
+        "pact_vs_bid": ("image/webp", BLUE),
     }
     (attempt,) = await attempts(db)
     assert attempt["reviews"] == REVIEWS and attempt["error"] is None
@@ -557,7 +575,11 @@ async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_repla
     ]
 
     # Written again: the new read's figures are the paper's, the old ones gone with their read.
-    fake.outcome = WROTE_READ | {"figures": [sent_figure("pact_vs_bid", RUST)], "reviews": []}
+    fake.outcome = WROTE_READ | {
+        "result": citing(READ, {"pact_vs_bid"}),
+        "figures": [sent_figure("pact_vs_bid", RUST)],
+        "reviews": [],
+    }
     await deep_passes.request(db, P.id)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     assert await figures(db) == {"pact_vs_bid": ("image/webp", RUST)}
@@ -619,7 +641,7 @@ async def test_a_failed_read_keeps_the_figures_of_the_read_before_it(db):
     fake.outcome["reviews"] = REVIEWS[:1]
     await deep_passes.request(db, P.id)
     assert await work(db, with_text(P), d) == {"card_failed": 1}
-    assert (await cards.card(db, P.id))["card"] == READ and len(await figures(db)) == 2
+    assert (await cards.card(db, P.id))["card"] == READ and len(await figures(db)) == len(FIGURES)
     assert (await attempts(db))[-1]["reviews"] == REVIEWS[:1]  # what ran is kept with the failure
 
 
@@ -639,7 +661,8 @@ async def test_a_text_of_unknown_version_is_submitted_as_such(db):
 
 async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(db):
     await grade(db, Fit.CENTRAL)
-    d = make(FakeDeep(WROTE_READ))
+    fake = FakeDeep(WROTE_READ)
+    d = make(fake)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     app = create_app(dsn, TOKEN, Config(), integrations=[d], read_token="r3ad")
@@ -666,11 +689,25 @@ async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(d
             assert other.content == RUST
             assert other.headers["cache-control"] == "private, no-cache"
         # A name the read does not have, a figure of another paper's, and the page still its own.
-        assert (await http.get(f"{base}/pact_vs_bid", params={"v": written})).status_code == 404
+        assert (await http.get(f"{base}/no_such_figure", params={"v": written})).status_code == 404
         assert (
             await http.get(f"/api/papers/{Q.id}/deep/figures/methodology_by_step")
         ).status_code == 404
         assert (await http.get(f"/api/papers/{P.id}")).json()["card"]["card"]["format"] == "read"
+        # Written again: a tab still on the old read gets none of the new read's figures under
+        # the old address, which it would keep for good; the new address has them.
+        fake.outcome = WROTE_READ | {"figures": [sent_figure(f["name"], RUST) for f in FIGURES]}
+        await deep_passes.request(db, P.id)
+        assert await work(db, with_text(P), d) == {"cards_written": 1}
+        stale = await http.get(f"{base}/methodology_by_step", params={"v": written})
+        assert stale.status_code == 404
+        now = (await http.get(f"/api/papers/{P.id}")).json()["card"]["written_at"]
+        assert now != written
+        fresh = await http.get(f"{base}/methodology_by_step", params={"v": now})
+        assert fresh.status_code == 200 and fresh.content == RUST
+        assert (
+            await http.get(f"{base}/methodology_by_step", params={"v": "soon"})
+        ).status_code == 404
 
 
 async def test_the_read_token_fetches_a_papers_pdf(db):

@@ -102,7 +102,6 @@ MAX_OFFSET = 10_000
 MAX_TEXT = 100_000_000  # a character offset
 MAX_PART = 100_000  # an outline entry, or a PDF page
 CAPTION_CHARS = 40
-SECTION_CHARS = 80  # a Deep read's section id
 MAX_LISTED = 300  # outline entries an answer lists
 OUTLINE_FOOTER = 200  # the room an outline's answer keeps for the line saying where to go on
 RENDER_SECONDS = 20.0  # the bound on rendering one page, waiting for the executor included
@@ -377,7 +376,7 @@ def build(state: State) -> MCPServer:
         paper_id: Annotated[Text, Field(description="An arXiv id or link, e.g. 2610.01234.")],
         section: Annotated[
             Text,
-            Field(max_length=SECTION_CHARS, description="A section's id, as get_paper lists it."),
+            Field(description="A section's id, as get_paper lists it."),
         ],
     ) -> str:
         """One section of the paper's Deep read, in full: litwatch's account of the paper at close

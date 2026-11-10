@@ -116,12 +116,21 @@ async def put_card(
             )
 
 
-async def figure(conn: psycopg.AsyncConnection, paper_id: str, name: str) -> Figure | None:
-    """One of the figures stored with the paper's Deep read, by the name the read cites."""
+async def figure(
+    conn: psycopg.AsyncConnection, paper_id: str, name: str, written: datetime | None = None
+) -> Figure | None:
+    """One of the figures stored with the paper's Deep read, by the name the read cites. With
+    `written`, only while the read stored is the one written then: a read written again has its
+    own figures, and an old one's are gone."""
     row = await (
         await conn.execute(
-            "SELECT name, mime, data FROM deep_figures WHERE paper_id = %s AND name = %s",
-            (paper_id, name),
+            """
+            SELECT f.name, f.mime, f.data
+            FROM deep_figures f JOIN deep_cards c USING (paper_id)
+            WHERE f.paper_id = %(p)s AND f.name = %(n)s
+              AND (%(w)s::timestamptz IS NULL OR c.written_at = %(w)s)
+            """,
+            {"p": paper_id, "n": name, "w": written},
         )
     ).fetchone()
     return Figure(row["name"], row["mime"], bytes(row["data"])) if row else None

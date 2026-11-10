@@ -78,8 +78,9 @@ export interface paths {
         /**
          * Deep Figure
          * @description One of the paper's figures its Deep read shows, by the name the read's `fig` block
-         *     cites. With `v` (when the read was written, as the paper page asks) the answer may be kept;
-         *     without it, it is fetched again each time.
+         *     cites. With `v` (when the read was written, as the paper page asks) it is that read's figure
+         *     or none, and the answer may be kept; without it, the current read's, fetched again each
+         *     time.
          */
         get: operations["deep_figure_api_papers__paper_id__deep_figures__name__get"];
         put?: never;
@@ -3548,7 +3549,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The paper's Deep read has no figure of that name */
+            /** @description The paper's Deep read has no figure of that name, or `v` names a read written over since */
             404: {
                 headers: {
                     [name: string]: unknown;
