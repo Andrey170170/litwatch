@@ -267,7 +267,13 @@ class Deep:
                 {self.extensions[t.slug] for _, t, _ in topics if t.slug in self.extensions}
             ),
             "selections": [
-                {"name": name, "subject": t.subject, "rubric": t.rubric, "grade": g.value}
+                {
+                    "slug": t.slug,
+                    "name": name,
+                    "subject": t.subject,
+                    "rubric": t.rubric,
+                    "grade": g.value,
+                }
                 for name, t, g in topics
             ],
         }

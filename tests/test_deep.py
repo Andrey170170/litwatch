@@ -322,8 +322,8 @@ async def field(conn, p, fit: str) -> None:
     [
         (None, []),
         (lambda c: verdict(c, Q, "none"), []),
-        (lambda c: area(c, Q, "related"), [("Interpretability", "relevant")]),
-        (lambda c: field(c, Q, "related"), [("Agents and tool use", "relevant")]),
+        (lambda c: area(c, Q, "related"), [("interpretability", "Interpretability", "relevant")]),
+        (lambda c: field(c, Q, "related"), [("agents", "Agents and tool use", "relevant")]),
     ],
     ids=["graded-nowhere", "graded-none", "area-not-picked", "field"],
 )
@@ -338,7 +338,8 @@ async def test_a_requested_card_is_written_for_the_topics_that_graded_the_paper(
     fake = FakeDeep(DONE)
     assert await work(db, with_text(Q), make(fake)) == {"cards_written": 1}
     (sent,) = fake.requests
-    assert [(s["name"], s["grade"]) for s in sent["selections"]] == selections
+    # The slug is what the read's lens names its topic by (`Lens.topic`, deep/src/read.ts).
+    assert [(s["slug"], s["name"], s["grade"]) for s in sent["selections"]] == selections
     assert sent["extensions"] == []
 
 
