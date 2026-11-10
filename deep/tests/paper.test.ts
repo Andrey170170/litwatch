@@ -50,6 +50,13 @@ test("a PDF's text is cut at its References and Appendix headings", () => {
   assert.deepEqual(splitPaper(last, "pdf"), { main: "# Probes\n\n## Method\n\nWe probe.\n\n", cuts: [{ part: "references", start: last.indexOf("## References"), end: last.length }] });
   const swapped = "# Probes\n\n## Method\n\nWe probe.\n\n## Appendix\n\nDetails.\n\n## References\n\n- [1] Turpin et al.\n";
   assert.deepEqual(splitPaper(swapped, "pdf").cuts.map((c) => c.part), ["appendix"], "a bibliography inside the appendix goes with it");
+  // an appendix a level below the references, with no heading after it at theirs, ends the bibliography
+  const below = "# Probes\n\n## Method\n\nWe probe.\n\n## References\n\n- [1] Turpin et al.\n\n### Appendix A\n\nDetails.\n";
+  const appendix = below.indexOf("### Appendix A");
+  assert.deepEqual(splitPaper(below, "pdf").cuts, [
+    { part: "references", start: below.indexOf("## References"), end: appendix },
+    { part: "appendix", start: appendix, end: below.length },
+  ]);
 });
 
 // The forms litwatch's archive gives a PDF's text (src/litwatch/archive/text.py): pymupdf4llm's Markdown, whose

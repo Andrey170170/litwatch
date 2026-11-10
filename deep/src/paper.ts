@@ -232,7 +232,10 @@ export function splitPaper(body: string, source?: string | null): Split {
   for (const cut of found) {
     const last = cuts.at(-1);
     if (last && cut.start < last.end) {
-      if (cut.end > last.end) cuts.push({ ...cut, start: last.end });
+      if (cut.part === "appendix") {
+        last.end = cut.start;
+        cuts.push({ ...cut });
+      } else if (cut.end > last.end) cuts.push({ ...cut, start: last.end });
     } else cuts.push({ ...cut });
   }
   let main = "";
