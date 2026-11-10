@@ -186,21 +186,24 @@ interface PdfParts {
 
 /** A PDF text's headings, with the one that starts its bibliography and the one that starts its appendix. The
  * Markdown headings are all taken; a line that is none counts only as one of those two, since nothing else tells a
- * heading from a short line. The bibliography's is the last line that reads "References". The appendix's is the
- * first line that names it ("Appendix", "Appendix A: Proofs"), wherever it sits past the Introduction's heading,
- * before which such a line is a table of contents' entry; or the first lettered line ("A Additional samples"),
- * which only after the bibliography reads as a heading. (Plain text is not told by its having no Markdown
+ * heading from a short line. A Markdown heading counts from the Introduction's heading on, before which it may be a
+ * table of contents' entry. The bibliography's is the first such heading that reads "References", else the last
+ * line that does. The appendix's is the first such heading or, failing that, line that names it ("Appendix",
+ * "Appendix A: Proofs"), a line too only past the Introduction's heading; or the first lettered one ("A Additional
+ * samples"), which only after the bibliography reads as a heading. (Plain text is not told by its having no Markdown
  * heading: a table's "# Failed" column is one.) */
 function pdfParts(body: string): PdfParts {
   const marked: Bare[] = [...body.matchAll(/^(#{1,6})[ \t]+(.*)$/gm)].map((m) => ({ level: m[1]!.length, title: unmarked(m[2]!), start: m.index })).filter((h) => h.title);
   // below every Markdown heading, so the next one of any level ends it
   const level = Math.max(1, ...marked.map((h) => h.level));
   const lines: Bare[] = [...body.matchAll(/^[ \t]*(?!#)(\S.*)$/gm)].map((m) => ({ level, title: unmarked(m[1]!), start: m.index }));
-  const references = marked.find((h) => REFERENCES.test(h.title)) ?? lines.filter((h) => REFERENCES.test(h.title)).at(-1);
-  const after = (h: Bare) => references !== undefined && h.start > references.start;
   const introduction = Math.max(0, ...[...marked, ...lines].filter((h) => INTRODUCTION.test(h.title)).map((h) => h.start));
+  // a contents list in Markdown headings sits before the Introduction too
+  const sections = marked.filter((h) => h.start >= introduction);
+  const references = sections.find((h) => REFERENCES.test(h.title)) ?? lines.filter((h) => REFERENCES.test(h.title)).at(-1);
+  const after = (h: Bare) => references !== undefined && h.start > references.start;
   const appendix =
-    marked.find((h) => APPENDIX_TITLE.test(h.title) || (after(h) && LETTERED.test(h.title))) ??
+    sections.find((h) => APPENDIX_TITLE.test(h.title) || (after(h) && LETTERED.test(h.title))) ??
     lines.find((h) => h.start > introduction && (APPENDIX_LINE.test(h.title) || (after(h) && LETTERED_LINE.test(h.title))));
   const headings = [...marked];
   for (const h of [references, appendix]) if (h && !marked.includes(h)) headings.push(h);
