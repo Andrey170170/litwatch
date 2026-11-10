@@ -160,6 +160,22 @@ A line on a Deep read saying what the Deep agent could not do because of its too
 text it was given was cut or unreadable), as against a limitation, which is the paper's own.
 _Avoid_: Process limitation, Deep note (Deep notes is only Needs you's group of them)
 
+## Running
+
+**Job**:
+Work the owner asks for and sees on the Jobs page: processing papers, a topic's re-run, a replay, a digest's Write
+again.
+
+**Run**:
+One execution of litwatch's work from start to end, with what it did and spent: a nightly, one go of a job, a
+full-text wave, an evaluation.
+
+**Work item**:
+One unit of work submitted to the Work gate, with a record of how it went; jobs, the nightly's steps, full-text
+passes, integration deliveries and downloads are all work items. From the rework's A2
+([specs/architecture.md](docs/specs/architecture.md)); the Jobs page then shows every work item, not only jobs.
+_Avoid_: task, background job
+
 ## The Notion export
 
 **Notion export**:
