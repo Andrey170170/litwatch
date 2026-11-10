@@ -523,14 +523,14 @@ async def test_a_label_is_a_fit_or_unsure_on_any_topic(client, conn):
 
 async def test_signing_in_trades_the_token_for_a_cookie(client):
     bare = httpx.AsyncClient(transport=client._transport, base_url="http://test")
-    assert (await bare.get("/api/status")).status_code == 401
+    assert (await bare.get("/api/summary")).status_code == 401
     assert (await bare.post("/api/session", json={"token": "no"})).status_code == 401
     assert (await bare.post("/api/session", json={"token": TOKEN})).status_code == 204
-    assert (await bare.get("/api/status")).json()["state"] == "none"
+    assert (await bare.get("/api/summary")).json()["status"]["state"] == "none"
 
 
 async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
-    assert (await client.get("/api/status")).json() == {
+    assert (await client.get("/api/summary")).json()["status"] == {
         "state": "none",
         "run_id": None,
         "started_at": None,
@@ -549,7 +549,7 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
     await runs.start(conn, "nightly")
     await conn.execute("UPDATE runs SET started_at = now() - '1m'::interval")
     await classify(conn, P, FAITH.slug)
-    running = (await client.get("/api/status")).json()
+    running = (await client.get("/api/summary")).json()["status"]
     assert (running["state"], running["papers"], running["waiting"]) == ("running", 1, 1)
     # The owner classifying by hand meanwhile is not the run's work.
     await conn.execute(
@@ -557,16 +557,16 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
         "primary_class, model) SELECT paper_id, paper_revision, taxonomy_revision, "
         "primary_class, 'owner' FROM classifications"
     )
-    assert (await client.get("/api/status")).json()["papers"] == 1
+    assert (await client.get("/api/summary")).json()["status"]["papers"] == 1
     await conn.execute("UPDATE runs SET finished_at = now()")
-    done = (await client.get("/api/status")).json()
+    done = (await client.get("/api/summary")).json()["status"]
     assert (done["state"], done["papers"], done["waiting"]) == ("quiet", 1, None)
     await conn.execute("UPDATE runs SET error = 'boom'")
-    status = (await client.get("/api/status")).json()
+    status = (await client.get("/api/summary")).json()["status"]
     assert (status["state"], status["error"]) == ("failed", "boom")
     # A run left open by a process that is gone failed too.
     await conn.execute("UPDATE runs SET error = NULL, finished_at = NULL, backend_pid = NULL")
-    status = (await client.get("/api/status")).json()
+    status = (await client.get("/api/summary")).json()["status"]
     assert (status["state"], status["error"]) == (
         "failed",
         "the run's process ended without closing it",
@@ -723,13 +723,10 @@ async def test_an_owner_request_ends_when_arxiv_stays_silent(client, conn, monke
 
     monkeypatch.setattr(search, "LOOKUP_BUDGET", 0.3)
     monkeypatch.delenv("ARXIV_PACING_DIR", raising=False)
-    for path, body in [
-        ("/api/lookup", {"q": "2610.07777"}),
-        ("/api/misses", {"paper_id": "2610.07777", "topic": FAITH.slug}),
-    ]:
-        answer = await asyncio.wait_for(client.post(path, json=body), 5)
-        assert answer.status_code == 503, path
-        assert answer.json()["detail"] == misses.SILENT
+    body = {"paper_id": "2610.07777", "topic": FAITH.slug}
+    answer = await asyncio.wait_for(client.post("/api/misses", json=body), 5)
+    assert answer.status_code == 503
+    assert answer.json()["detail"] == misses.SILENT
     assert await papers_store.get(conn, "2610.07777") is None
 
 
@@ -862,10 +859,6 @@ async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client
     # So does a filter only the collection has, as the list leaves the band out under it.
     body["filter"] = {"q": "hidden computation", "source": "outside", "rarity": ["rare"]}
     assert "@" not in (await client.post("/api/bibtex", json=body)).text
-    text = (await client.get("/api/bibtex", params={"q": "sparse"})).text
-    assert "eprint = {2610.00002}" in text and "2610.00001" not in text
-    outside = {"q": "hidden computation", "source": "outside"}
-    assert "@" not in (await client.get("/api/bibtex", params=outside)).text
 
 
 # -- a paper outside the collection ----------------------------------------------------------------
@@ -933,7 +926,7 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
         assert (await c.get("/api/papers/2610.08888")).status_code == 404
         assert fetched == [] and await papers_store.get(conn, pid) is None
 
-        assert (await c.post("/api/lookup", json={"q": pid})).json()["fetched"]
+        assert (await misses.lookup(conn, pid))[1]
         page = (await c.get(f"/api/papers/{pid}")).json()
         assert (page["stored"], page["in_collection"], page["next_run"]) == (True, False, True)
         assert fetched == [[pid]]

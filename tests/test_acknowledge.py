@@ -122,7 +122,7 @@ NOTHING = {"steps": [], "passes": [], "digests": [], "cards": []}
 
 
 async def status(client) -> dict:
-    return (await client.get("/api/status")).json()
+    return (await client.get("/api/summary")).json()["status"]
 
 
 async def test_acknowledge_per_group_then_all_clears_the_run_status(client, conn):

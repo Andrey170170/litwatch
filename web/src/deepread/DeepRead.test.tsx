@@ -96,7 +96,7 @@ beforeEach(() => {
 
 async function open(card: object = withRead, desktop = true) {
   viewport(desktop);
-  const calls = scriptFetch({ "GET /api/status": status, "GET /api/topics": [], [`GET /api/papers/${paper.id}`]: card, [`POST /api/papers/${paper.id}/card`]: { pass_id: 74 } });
+  const calls = scriptFetch({ "GET /api/topics": [], [`GET /api/papers/${paper.id}`]: card, [`POST /api/papers/${paper.id}/card`]: { pass_id: 74 } });
   const view = renderApp(`/paper/${paper.id}`);
   await screen.findByRole("heading", { name: "SCARCE" });
   return { calls, ...view };

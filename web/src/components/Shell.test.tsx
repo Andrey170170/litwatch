@@ -17,7 +17,6 @@ describe("The shell's sidebar", () => {
     (globalThis as { __renders?: Record<string, number> }).__renders = renders;
     const calls = scriptFetch({
       "GET /api/summary": summary,
-      "GET /api/status": status,
       "GET /api/topics": [{ depth: "focus", topics: [] }],
       "GET /api/papers": { rows: [], total: 0, counts, grades, outside: [] },
       "GET /api/topics/mi": { topic, rows: [], total: 0, counts, grades },
@@ -43,7 +42,6 @@ describe("The shell's sidebar", () => {
     viewport(true);
     scriptFetch({
       "GET /api/summary": summary,
-      "GET /api/status": status,
       "GET /api/topics": [{ depth: "focus", topics: [] }],
       "GET /api/papers": { rows: [], total: 0, counts, grades, outside: [] },
       "GET /api/topics/mi": { topic, rows: [], total: 0, counts, grades },
@@ -61,7 +59,6 @@ describe("The shell's sidebar", () => {
     let down = true;
     scriptFetch({
       "GET /api/summary": () => (down ? json({ detail: "down" }, 500) : summary),
-      "GET /api/status": status,
       "GET /api/topics": [{ depth: "focus", topics: [] }],
       "GET /api/papers": { rows: [], total: 0, counts, grades, outside: [] },
     });
@@ -77,7 +74,7 @@ describe("The shell's sidebar", () => {
 
   it("says the Settings counts are unavailable when the summary's first read fails", async () => {
     viewport(true);
-    scriptFetch({ "GET /api/summary": () => json({ detail: "down" }, 500), "GET /api/status": status, "GET /api/topics": [], "GET /api/settings/config": {} });
+    scriptFetch({ "GET /api/summary": () => json({ detail: "down" }, 500), "GET /api/topics": [], "GET /api/settings/config": {} });
     renderApp("/settings/configuration");
     expect(await screen.findByText(/counts unavailable/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Needs you/ })).toBeInTheDocument();
@@ -88,7 +85,6 @@ describe("The shell's sidebar", () => {
     let waiting = 0;
     scriptFetch({
       "GET /api/summary": () => ({ ...summary, status: { ...status, awaiting_classification: waiting }, settings: { ...summary.settings, waiting } }),
-      "GET /api/status": status,
       "GET /api/topics": [{ depth: "focus", topics: [] }],
       "GET /api/settings/config": {},
     });

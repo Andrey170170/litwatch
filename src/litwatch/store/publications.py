@@ -66,11 +66,6 @@ async def put(
     return stored.rowcount == 1, Publication.model_validate(previous) if previous else None
 
 
-async def forget(conn: psycopg.AsyncConnection, paper_id: str) -> None:
-    """Drop what is stored, the owner's choice included: the paper is looked up afresh."""
-    await conn.execute("DELETE FROM publications WHERE paper_id = %s", (paper_id,))
-
-
 async def due(conn: psycopg.AsyncConnection, limit: int) -> list[str]:
     """Library papers to look up: those never looked up or saved again since the last look,
     newest saves first, then those still without a published record a month after the

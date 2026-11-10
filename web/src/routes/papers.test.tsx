@@ -24,7 +24,6 @@ describe("Papers", () => {
   it("shows each rarity shelf from its own page, folded shelves as counts, and saves in place", async () => {
     viewport(true);
     const calls = scriptFetch({
-      "GET /api/status": { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
       "GET /api/topics": [{ depth: "focus", topics: [] }, { depth: "area", topics: [] }, { depth: "field", topics: [] }],
       "GET /api/papers": ({ url }) => {
         const q = new URL(url, "http://x").searchParams;
@@ -63,7 +62,6 @@ describe("Papers", () => {
   it("filters a rarity from the bar and puts it in the URL", async () => {
     viewport(true);
     scriptFetch({
-      "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
       "GET /api/topics": [],
       "GET /api/papers": json({ rows: [], total: 0, counts }),
     });
@@ -76,7 +74,6 @@ describe("Papers", () => {
   it("names the archive's size in the search box", async () => {
     viewport(true);
     scriptFetch({
-      "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
       "GET /api/topics": [],
       "GET /api/papers": json({ rows: [], total: 0, counts }),
       "GET /api/search/scope": { archive_papers: 3_141_592 },
@@ -90,7 +87,6 @@ describe("Papers", () => {
     let release!: () => void;
     const held = new Promise<void>((r) => (release = r));
     scriptFetch({
-      "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
       "GET /api/topics": [],
       "GET /api/papers": async ({ url }) => {
         const q = new URL(url, "http://x").searchParams;
@@ -114,7 +110,6 @@ describe("Papers", () => {
     viewport(true);
     let failRare = true;
     const calls = scriptFetch({
-      "GET /api/status": { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
       "GET /api/topics": [],
       "GET /api/papers": ({ url }) => {
         const rarity = new URL(url, "http://x").searchParams.get("rarity") ?? "";
@@ -148,7 +143,6 @@ describe("Papers", () => {
     let failMore = true;
     const many = Array.from({ length: 50 }, (_, i) => row(`2610.${String(i).padStart(5, "0")}`, `Epic ${i}`, "epic"));
     const calls = scriptFetch({
-      "GET /api/status": { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
       "GET /api/topics": [],
       "GET /api/papers": ({ url }) => {
         const q = new URL(url, "http://x").searchParams;
@@ -173,7 +167,6 @@ describe("Papers", () => {
   async function leaveAnOpenedList() {
     viewport(true);
     const calls = scriptFetch({
-      "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
       "GET /api/topics": [],
       "GET /api/papers": ({ url }) => {
         const q = new URL(url, "http://x").searchParams;
@@ -219,7 +212,6 @@ describe("Papers", () => {
   it("folds a shelf that starts open, and keeps it folded on the way back", async () => {
     viewport(true);
     scriptFetch({
-      "GET /api/status": { state: "none", papers: 0, awaiting_classification: 0, analysis_failed: 0, ungraded: 0 },
       "GET /api/topics": [],
       "GET /api/papers": ({ url }) =>
         new URL(url, "http://x").searchParams.get("rarity") === "rare" ? { rows: [row("2610.00003", "Rare one", "rare")], total: 1, counts } : { rows: [], total: 0, counts },

@@ -5,30 +5,6 @@
     "version": "0.1.0"
   },
   "paths": {
-    "/api/status": {
-      "get": {
-        "summary": "Status",
-        "operationId": "status_api_status_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunStatus"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or wrong token"
-          },
-          "403": {
-            "description": "The read token, outside reading papers"
-          }
-        }
-      }
-    },
     "/api/papers": {
       "get": {
         "summary": "Papers",
@@ -511,43 +487,6 @@
             }
           }
         }
-      },
-      "delete": {
-        "summary": "Forget Publication",
-        "description": "Drop the stored version, the owner's choice included; the paper is looked up again.",
-        "operationId": "forget_publication_api_papers__paper_id__publication_delete",
-        "parameters": [
-          {
-            "name": "paper_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Paper Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "Missing or wrong token"
-          },
-          "403": {
-            "description": "The read token, outside reading papers"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
       }
     },
     "/api/bibtex": {
@@ -556,280 +495,10 @@
         "description": "BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the\npublished version as soon as DBLP has it; several use what is stored. `cited` are\npapers a search provider found outside the collection: they get arXiv entries from\nwhat the hit carries, with no fetch, no lookup and nothing written.",
         "operationId": "bibtex_selection_api_bibtex_post",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BibtexIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or wrong token"
-          },
-          "403": {
-            "description": "The read token, outside reading papers"
-          },
-          "404": {
-            "description": "No such paper or topic"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Bibtex Filter",
-        "description": "BibTeX for every collection paper a Papers filter matches.",
-        "operationId": "bibtex_filter_api_bibtex_get",
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "name": "rarity",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/Rarity"
-              },
-              "title": "Rarity"
-            }
-          },
-          {
-            "name": "grade",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/GradeLevel"
-              },
-              "title": "Grade"
-            }
-          },
-          {
-            "name": "saved",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Saved"
-            }
-          },
-          {
-            "name": "code",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Code"
-            }
-          },
-          {
-            "name": "weight",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/Weight"
-              },
-              "title": "Weight"
-            }
-          },
-          {
-            "name": "since",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Since"
-            }
-          },
-          {
-            "name": "until",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Until"
-            }
-          },
-          {
-            "name": "sort",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/Sort"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`.",
-              "title": "Sort"
-            },
-            "description": "Omitted: `best` (search rank) while `q` is given, else `rarest`."
-          },
-          {
-            "name": "topic",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "title": "Topic"
-            }
-          },
-          {
-            "name": "depth",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/Depth"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Depth"
-            }
-          },
-          {
-            "name": "source",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "collection",
-                    "outside"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Source"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or wrong token"
-          },
-          "403": {
-            "description": "The read token, outside reading papers"
-          },
-          "404": {
-            "description": "No such paper or topic"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/lookup": {
-      "post": {
-        "summary": "Lookup",
-        "description": "Find a paper by arXiv id or link, fetching it when the collection lacks it.",
-        "operationId": "lookup_api_lookup_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LookupIn"
               }
             }
           },
@@ -839,9 +508,9 @@
           "200": {
             "description": "Successful Response",
             "content": {
-              "application/json": {
+              "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/Lookup"
+                  "type": "string"
                 }
               }
             }
@@ -854,9 +523,6 @@
           },
           "404": {
             "description": "No such paper or topic"
-          },
-          "503": {
-            "description": "arXiv did not answer in time; nothing was stored"
           },
           "422": {
             "description": "Validation Error",
@@ -2763,7 +2429,7 @@
     "/api/settings/integrations": {
       "get": {
         "summary": "Status",
-        "description": "One card per loaded integration, then one per configured section that is turned off\n(its cursor kept, so its lag shows what turning it on again would hand it). A card shows\nthe event it is stuck on, or its failing setup.",
+        "description": "One card per loaded integration, then one per configured section that is turned off\n(its cursor kept, so its lag shows what turning it on again would hand it). A card shows\nthe event it is stuck on, or its failing setup; one that reacts to no event has neither,\nwhatever cursor it kept from before.",
         "operationId": "status_api_settings_integrations_get",
         "responses": {
           "200": {
@@ -5845,37 +5511,6 @@
         ],
         "title": "LabelValue",
         "description": "A label's answer: a Fit (`core.grading.Fit`), or unsure."
-      },
-      "Lookup": {
-        "properties": {
-          "row": {
-            "$ref": "#/components/schemas/Row"
-          },
-          "fetched": {
-            "type": "boolean",
-            "title": "Fetched"
-          }
-        },
-        "type": "object",
-        "required": [
-          "row",
-          "fetched"
-        ],
-        "title": "Lookup"
-      },
-      "LookupIn": {
-        "properties": {
-          "q": {
-            "type": "string",
-            "title": "Q",
-            "description": "An arXiv id or link"
-          }
-        },
-        "type": "object",
-        "required": [
-          "q"
-        ],
-        "title": "LookupIn"
       },
       "Miss": {
         "properties": {

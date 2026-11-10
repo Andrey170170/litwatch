@@ -51,7 +51,7 @@ Shape, blueprint, drive. Inputs: the measurement of where work waits (2026-11-09
   - **the sidebar's count for today:** the count beside a followed topic with a digest today, highlighted for Focus
     (DESIGN.md, "Shell"); `/api/summary` carries badges only;
   - **today in the schedule's zone:** the Digest's defaults (today's Day, the last complete Week, History's pinned
-    week) use the browser's date; the summary or `/api/status` should carry today's date
+    week) use the browser's date; the summary should carry today's date
     ([`notes/schedule-zone-today.md`](notes/schedule-zone-today.md)).
 - **Calibrate reads each topic's pool once** (review).
 - **Ratings on the generated text:** ✓/✗ on a Gist and a Brief, from Calibrate and from the paper's ladder, stored

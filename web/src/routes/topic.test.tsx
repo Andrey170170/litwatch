@@ -25,7 +25,6 @@ describe("A topic page", () => {
   it("counts the papers under the rarity filter, not the whole topic", async () => {
     viewport(true);
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/topics/mi": { topic, rows: [], total: 0, counts, grades },
     });
@@ -48,7 +47,6 @@ describe("A topic page", () => {
     );
     const many = Array.from({ length: 50 }, (_, i) => row(`2610.${String(i).padStart(5, "0")}`, `Must ${i}`));
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/topics/mi": ({ url }) => {
         const q = new URL(url, "http://x").searchParams;
@@ -68,7 +66,6 @@ describe("A topic page", () => {
   it("says when there is no such topic", async () => {
     viewport(true);
     scriptFetch({
-      "GET /api/status": status,
       "GET /api/topics": [],
       "GET /api/topics/nope": json({ detail: "not found" }, 404),
     });

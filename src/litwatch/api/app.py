@@ -128,7 +128,9 @@ def create_app(
     (`api.mcp`), which takes that token alone, as `/api` never does."""
     if mcp_token is not None and mcp_token in (token, read_token):
         raise ValueError("the MCP token must differ from the API token and the read token")
-    app = FastAPI(title="litwatch", docs_url=None, redoc_url=None, lifespan=_lifespan)
+    app = FastAPI(
+        title="litwatch", docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lifespan
+    )
     app.state.dsn, app.state.token, app.state.read_token = dsn, token, read_token
     app.state.config, app.state.gateway = config or Config(), gateway
     app.state.publications = publications or Dblp()
