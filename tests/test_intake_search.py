@@ -44,6 +44,10 @@ async def test_an_owner_lookup_reads_arxivs_feed_in_one_try(monkeypatch):
     (found,) = await arxiv_source.fetch_by_ids(["2609.10001"], client)
     assert (found.id, found.version, found.title) == ("2609.10001", 1, "Test")
     assert parse_qs(calls[0].url.query.decode())["id_list"] == ["2609.10001"]
+    # A feed with no entry and a total of 0 is arXiv lacking the paper, not a failed answer.
+    client, calls = arxiv_answering((200, feed(total=0).split(b"<entry>")[0] + b"</feed>"))
+    assert await arxiv_source.fetch_by_ids(["2609.10001"], client) == []
+    assert len(calls) == 1
     # A throttled arXiv, a page that is no feed, an answer too large: no answer, at once.
     for answer in ((429, b""), (200, b"<html/>"), (200, b" " * (4 * 1024 * 1024 + 1))):
         client, calls = arxiv_answering(answer)

@@ -109,9 +109,9 @@ async def fetch_by_ids(ids: list[str], client: httpx.AsyncClient | None = None) 
 
 
 def _papers(content: bytes) -> list[Paper]:
-    """The papers of an arXiv result feed, read by the `arxiv` library's parser, checked as the
-    nightly intake checks a page: a total with no entry read is a feed cut short, and an entry
-    the parser or `Paper` cannot read is no answer, not "arXiv lacks it"."""
+    """The papers of an arXiv result feed, read by the `arxiv` library's parser and checked: a
+    total with no entry read is a feed cut short, and an entry the parser or `Paper` cannot
+    read is no answer, not "arXiv lacks it"."""
     _check_feed(content)
     try:
         feed = arxiv._feed.parse(content)
