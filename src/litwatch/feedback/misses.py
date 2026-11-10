@@ -28,12 +28,6 @@ class NotFoundError(LookupError):
 SILENT = "arXiv did not answer in time, and nothing was stored; try again in a minute"
 
 
-async def lookup(conn: psycopg.AsyncConnection, text: str) -> tuple[Paper, bool]:
-    """The paper an arXiv id or link names, fetched and stored when the collection lacks it.
-    Returns the paper and whether it was fetched just now."""
-    return await keep(conn, *await resolve(conn, text))
-
-
 async def resolve(conn: psycopg.AsyncConnection, text: str) -> tuple[str, Paper | None]:
     """The arXiv id `text` names, and arXiv's record of the paper when litwatch lacks it. Call
     it outside a transaction: arXiv may keep it waiting for `search.LOOKUP_BUDGET`. NotFoundError

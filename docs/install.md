@@ -217,10 +217,10 @@ Check: Settings lists the topics and classes you imported. From a shell:
 
 ```sh
 T=$(grep '^LITWATCH_API_TOKEN=' .env | cut -d= -f2-)
-curl -s -H "Authorization: Bearer $T" http://127.0.0.1:8080/api/status
+curl -s -H "Authorization: Bearer $T" http://127.0.0.1:8080/api/summary
 ```
 
-answers JSON with `"state": "none"` before the first run; without the token it answers 401.
+answers JSON whose `status` has `"state": "none"` before the first run; without the token it answers 401.
 
 ## 7. Check the model keys
 

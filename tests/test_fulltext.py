@@ -404,7 +404,7 @@ async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_n
     await db.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
     app, http = client(db)
     async with http:
-        status = (await http.get("/api/status")).json()
+        status = (await http.get("/api/summary")).json()["status"]
         quality = (await http.get("/api/settings/quality")).json()
         page = (await http.get(f"/api/papers/{P.id}")).json()
         now = await http.post(f"/api/settings/fulltext/{row['id']}/now")

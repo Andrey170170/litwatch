@@ -46,7 +46,6 @@ const badge = { slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI",
 /** The shell's summary with `waiting` things on Needs you. */
 const summaryOf = (waiting: number) => ({ status, topics: [badge], settings: { waiting, last_session: null, misses: 0, topics: 1, classes: 1, spent: 1.5, budget: 20, failing: [] } });
 const common = {
-  "GET /api/status": status,
   "GET /api/summary": summaryOf(4),
   "GET /api/topics": [{ depth: "focus", topics: [{ slug: "mi", name: "Mech interp", depth: "focus", monogram: "MI", colour: "#f3e600", papers: 3, saved: 0, counts: {}, newest_must_read: null }] }],
   "GET /api/settings/taxonomy": tree,

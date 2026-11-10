@@ -36,7 +36,7 @@ async def test_the_read_token_only_searches_and_reads_papers(client):
     assert found.status_code == 200 and len(found.json()["rows"]) == 3
     assert (await client.get("/api/papers/2609.1", headers=READ)).json()["id"] == "2609.1"
     for method, path in [
-        ("GET", "/api/status"),
+        ("GET", "/api/summary"),
         ("GET", "/api/topics"),
         ("GET", "/api/settings/config"),
         ("PUT", "/api/library/2609.1"),
@@ -53,11 +53,11 @@ async def test_the_read_token_only_searches_and_reads_papers(client):
 
 async def test_everything_but_the_health_check_needs_the_token(client):
     assert (await client.get("/healthz")).status_code == 200
-    assert (await client.get("/api/status")).status_code == 401
+    assert (await client.get("/api/summary")).status_code == 401
     assert (
-        await client.get("/api/status", headers={"authorization": "Bearer no"})
+        await client.get("/api/summary", headers={"authorization": "Bearer no"})
     ).status_code == 401
-    assert (await client.get("/api/status", headers=AUTH)).status_code == 200
+    assert (await client.get("/api/summary", headers=AUTH)).status_code == 200
 
 
 async def test_an_old_style_arxiv_id_with_a_slash_can_be_labelled(client, conn):
@@ -71,10 +71,10 @@ async def test_an_old_style_arxiv_id_with_a_slash_can_be_labelled(client, conn):
 
 async def test_a_good_bearer_header_works_beside_a_stale_cookie(client):
     client.cookies.set("litwatch_token", "old")
-    assert (await client.get("/api/status", headers=AUTH)).status_code == 200
+    assert (await client.get("/api/summary", headers=AUTH)).status_code == 200
     # The scheme is checked, not skipped over.
     wrong_scheme = {"authorization": f"Basic  {TOKEN}"}
-    assert (await client.get("/api/status", headers=wrong_scheme)).status_code == 401
+    assert (await client.get("/api/summary", headers=wrong_scheme)).status_code == 401
 
 
 def _web(app) -> httpx.AsyncClient:

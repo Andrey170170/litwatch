@@ -591,15 +591,6 @@ class Ack(BaseModel):
     grades: dict[str, Grade | None] = Field(default_factory=dict)  # topics whose grade moved
 
 
-class LookupIn(BaseModel):
-    q: str = Field(description="An arXiv id or link")
-
-
-class Lookup(BaseModel):
-    row: Row
-    fetched: bool  # it was not in the collection until now
-
-
 class MissIn(BaseModel):
     paper_id: str
     topic: str
