@@ -112,5 +112,5 @@ function figure(file, name, number) { return __call('figure', [file, name, numbe
 function pdfPage(n) { return __call('pdfPage', [n]); }
 function crop(page, box, name, number) { return __call('crop', [page, box, name, number]); }
 function render(read, target, width) { return __call('render', [read, target, width]); }
-function check(read) { return __call('check', [read]); }
-function submit(read) { return __call('submit', [read]); }
+function check(read, standBy) { return __call('check', standBy === undefined ? [read] : [read, standBy]); }
+function submit(read, standBy) { return __call('submit', standBy === undefined ? [read] : [read, standBy]); }

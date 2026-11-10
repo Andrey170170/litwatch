@@ -104,6 +104,8 @@ export interface ReviewInput {
   plots: { name: string; number?: string; shot: Shot }[];
   /** The places the read cites that code could not look up in the paper's text. */
   unverified: string[];
+  /** The places and numbers code refused that the writer stood by. */
+  stood: string[];
 }
 
 export interface ReviewOutcome {
@@ -127,7 +129,7 @@ export async function review(
   opts: { effort: ThinkingLevel; signal?: AbortSignal; onPayload?: (payload: unknown) => unknown },
 ): Promise<ReviewOutcome> {
   const { text, left } = reviewerText(input.paper, paperRoom(model.contextWindow, JSON.stringify(input.read).length, input.plots.length));
-  const content: (TextContent | ImageContent)[] = [{ type: "text", text: reviewerMessage(input.paper, text, left, input.read, input.unverified) }];
+  const content: (TextContent | ImageContent)[] = [{ type: "text", text: reviewerMessage(input.paper, text, left, input.read, input.unverified, input.stood) }];
   for (const { name, number, shot } of input.plots) {
     // the number is the writer's word for which figure this is, not something code confirmed
     const what = `The writer's figure "${name}"${number ? `, made as the paper's ${number}` : ""}, which the read gives values read off:`;

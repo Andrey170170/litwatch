@@ -355,6 +355,18 @@ test("a PDF's text refuses no section: a number a line opens with is there, and 
   assert.deepEqual(left("Discussion"), [[], ['the location "Discussion"']]);
 });
 
+test("a refused place or number the writer stands by is the reviewer's instead; what is not a place or a number is not", () => {
+  const read = changed((d) => {
+    blocks(d, "method")[0]!.text = "Accuracy peaks at 0.84 (Figure 1). The probe reaches 83.4% accuracy, with $\\frac{1}{$ broken TeX.";
+    (d.sections[3] as unknown as { claims: { where: string }[] }).claims[0]!.where = "Discussion";
+  });
+  const refused = check(read, ctx());
+  assert.equal(refused.stood, undefined);
+  const stood = check(read, ctx({ standing: ["0.84", "83.4%", "Discussion", "KaTeX"] }));
+  assert.deepEqual(stood.stood, ["0.84", "83.4%", "Discussion"], "a plot value with no image, a number the text lacks, a location naming nothing code knows");
+  assert.ok(stood.errors.length === 1 && stood.errors[0]!.includes("KaTeX cannot parse"), stood.errors.join("\n"));
+});
+
 test("TeX that KaTeX cannot parse is rejected, in an equation and inline", () => {
   const eq = (tex: string) => changed((d) => blocks(d, "method").push({ type: "eq", tex }));
   const block = errors(eq(String.raw`\frac{a}{`));

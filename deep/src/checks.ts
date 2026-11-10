@@ -13,6 +13,10 @@
  *
  * A number the paper's text lacks passes when its sentence cites a figure this session has an image of: it was read
  * off a plot, and the reviewer checks it against that image (`Checked.plots`).
+ *
+ * Reading LaTeX and prose this way has no end of cases it gets wrong, so no refusal of a place or a number is final:
+ * the writer may stand by an item it is sure of (`CheckContext.standing`), which then goes to the reviewer by name
+ * instead (`Checked.stood`).
  */
 
 import katex from "katex";
@@ -22,6 +26,9 @@ import type { Draft, DraftBlock, DraftDiagram, DraftSection } from "./read.ts";
 import { amongErrors, isWebUrl, type Found } from "./schema.ts";
 
 export interface CheckContext {
+  /** The places and numbers code refused that the writer stands by, each as the refusal quotes it ("Table 2",
+   * "0.00005"): the reviewer's to check instead. */
+  standing?: readonly string[];
   /** The paper's places and numbers. */
   index: PaperIndex;
   found: Found;
@@ -38,7 +45,12 @@ export interface Checked {
   plots: string[];
   /** The places cited that code can neither confirm nor rule out, as cited: the reviewer's to check. */
   unverified: string[];
+  /** The places and numbers code refused that the writer stood by, when any: the reviewer's to check. */
+  stood?: string[];
 }
+
+/** How an item is compared with one the writer stands by. */
+const quoted = (item: string): string => item.replace(/\s+/g, " ").trim().toLowerCase();
 
 /** Diagram nodes stay tappable on the phone. */
 export const MIN_NODE_HEIGHT = 40;
@@ -325,11 +337,15 @@ export function check(read: Draft, ctx: CheckContext): Checked {
   const unverified = new Set<string>();
   const absent = new Map<string, string[]>();
   const unseen = new Map<string, { texts: string[]; figures: Set<string> }>();
+  const standing = new Set((ctx.standing ?? []).map(quoted));
+  const stood = new Set<string>();
+  /** Whether the writer stands by an item code would refuse, which then goes to the reviewer. */
+  const standsBy = (item: string): boolean => standing.has(quoted(item)) && Boolean(stood.add(item));
   /** What the index says of a place cited at `path`: refused where the paper has none, the reviewer's where it
    * cannot tell. */
   const settle = (path: string, name: string, answer: Answer): void => {
     if (answer === "unknown") unverified.add(name);
-    else if (answer !== "there") errors.push(`${path}: cites ${name}, but ${answer.no}`);
+    else if (answer !== "there" && !standsBy(name)) errors.push(`${path}: cites ${name}, but ${answer.no}`);
   };
 
   for (const [i, s] of read.sections.entries()) {
@@ -387,7 +403,7 @@ export function check(read: Draft, ctx: CheckContext): Checked {
         // nothing in a location has the form of a place, and no heading is named: no place where the paper's
         // headings are all known, and the reviewer's to judge where they are not
         if (unit.where && cited.length + sections.length + others.length === 0 && !index.named(text)) {
-          if (index.outlined) errors.push(`${unit.path}: "${unit.text}" names no place in the paper: give a numbered section, figure, table, appendix, equation or page of the paper, or a section by its title`);
+          if (index.outlined && !standsBy(unit.text)) errors.push(`${unit.path}: "${unit.text}" names no place in the paper: give a numbered section, figure, table, appendix, equation or page of the paper, or a section by its title`);
           else unverified.add(`the location "${unit.text}"`);
         }
       }
@@ -406,7 +422,9 @@ export function check(read: Draft, ctx: CheckContext): Checked {
         // one's.
         const labels = unit.figures ?? cites(unit.figure === undefined ? sentence(text, n.index) : text).filter((c) => c.kind === "figure").map((c) => c.label);
         const lacking = labels.filter((label) => !imaged.has(labelKey(label)));
-        if (unit.figure === undefined && labels.length === 0) missing.push(n.text);
+        if (unit.figure === undefined && labels.length === 0) {
+          if (!standsBy(n.text)) missing.push(n.text);
+        } else if (lacking.length > 0 && standsBy(n.text)) continue;
         else if (lacking.length === 0) {
           if (unit.figure !== undefined) plots.add(unit.figure);
           for (const label of labels) for (const name of imaged.get(labelKey(label))!) plots.add(name);
@@ -436,5 +454,5 @@ export function check(read: Draft, ctx: CheckContext): Checked {
     );
   errors.push(...listed, ...amongErrors(read.among_collection, ctx.found));
   for (const [i, n] of (read.process_notes ?? []).entries()) if (n.url !== undefined && !isWebUrl(n.url)) errors.push(`/process_notes/${i}/url: not an absolute http(s) URL`);
-  return { errors, plots: [...plots], unverified: [...unverified] };
+  return { errors, plots: [...plots], unverified: [...unverified], ...(stood.size ? { stood: [...stood] } : {}) };
 }

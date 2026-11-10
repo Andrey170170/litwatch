@@ -437,7 +437,7 @@ RICH = [
                                           "status": 200, "bytes": 1024}},
     {"t": 92000, "type": "cell", "n": 1, "code": "while (true) {}", "output": "", "ms": 90001,
      "error": "cell ran longer than 90s", "timedOut": True},
-    {"t": 93000, "type": "submit", "ok": True},
+    {"t": 93000, "type": "submit", "ok": True, "stood": ["Table 2", "0.00005"]},
 ]  # fmt: skip
 NOTE = {"kind": "access", "source": "model", "note": "The repository could not be listed.",
         "url": "https://anonymous.4open.science/r/x"}  # fmt: skip
@@ -483,6 +483,7 @@ async def test_the_deep_commands_read_each_attempts_trace_and_the_cards_notes(
     assert "went: 302 https://anonymous.4open.science/api/repo/x/files/ → no page" in latest
     assert "went: 200 https://example.org/ · 1024 bytes read" in latest
     assert "cell 1 · 90001 ms · timed out" in latest
+    assert "submit · ok · stood by: Table 2; 0.00005" in latest
     assert "access (model): The repository could not be listed." in latest
     first = await run("trace", P.id, "--attempt", "1")
     assert "No trace was kept" in first and "failed (service)" in first

@@ -37,7 +37,7 @@ export type TraceEvent =
   | { t: number; type: "assistant"; text: string; thinking: string; stop: string; usage: TurnUsage }
   | { t: number; type: "cell"; n: number; code: string; output: string; error?: string; ms: number; timedOut?: true; images?: number }
   | { t: number; type: "host"; name: string; args: string; ms: number; ok: boolean; chars: number; error?: string; fetch?: FetchRecord }
-  | { t: number; type: "submit"; ok: boolean; errors?: string[] }
+  | { t: number; type: "submit"; ok: boolean; errors?: string[]; stood?: string[] }
   | { t: number; type: "review"; round: number; passed?: boolean; error?: string; usage: TurnUsage }
   | { t: number; type: "system"; text: string };
 
@@ -155,7 +155,7 @@ export function serviceNotes(seen: ReadonlyMap<Held, { count: number; url?: stri
 /** A read `submit` accepted: laid out, with what its checks left to the reviewer, and the figures it shows or
  * cites for plot values as they were when it was accepted. A figure made again under the same name afterwards, in
  * a revision that is then not accepted, is no part of it. */
-interface Accepted extends Pick<Checked, "plots" | "unverified"> {
+interface Accepted extends Pick<Checked, "plots" | "unverified" | "stood"> {
   read: Read;
   figures: ReadonlyMap<string, Made>;
 }
@@ -248,18 +248,21 @@ export async function processPaper(
   // The collection's papers the agent was shown: among_collection may name only these.
   const collection = new Set<string>();
   const topics = spec.selections.map(topicKey);
-  const checked = (draft: Draft): Checked => check(draft, { index, found: { collection, self: paper.id }, topics, figures: figures.made });
-  /** A draft through the schema, the code checks and the layout: the read to store, or what is wrong with it. */
-  const examine = async (input: unknown): Promise<{ errors: string[] } | Accepted> => {
+  const checked = (draft: Draft, standing: readonly string[]): Checked => check(draft, { index, found: { collection, self: paper.id }, topics, figures: figures.made, standing });
+  /** A draft through the schema, the code checks and the layout: the read to store, or what is wrong with it.
+   * `standBy` names the refused places and numbers the writer stands by. */
+  const examine = async (input: unknown, standBy: unknown): Promise<{ errors: string[] } | Accepted> => {
+    if (standBy !== undefined && !(Array.isArray(standBy) && standBy.every((s) => typeof s === "string")))
+      return { errors: ["the second argument names what you stand by: an array of strings, each a place or number as a refusal quoted it"] };
     const shape = draftErrors(input);
     if (shape.length) return { errors: shape };
-    const { errors, plots, unverified } = checked(input as Draft);
+    const { errors, plots, unverified, stood } = checked(input as Draft, (standBy as string[] | undefined) ?? []);
     if (errors.length) return { errors };
     // the figures as they are now: each record is replaced, never changed, when its name is made again
     const kept = new Map([...figuresOf(input as Read), ...plots].flatMap((name) => (figures.made.has(name) ? [[name, figures.made.get(name)!] as const] : [])));
     const read = await layout(input as Draft);
     const stored = readErrors(read);
-    return stored.length ? { errors: stored.map((e) => `after the diagrams were laid out, ${e}`) } : { read, plots, unverified, figures: kept };
+    return stored.length ? { errors: stored.map((e) => `after the diagrams were laid out, ${e}`) } : { read, plots, unverified, stood, figures: kept };
   };
 
   const hosts: Record<string, HostFn> = {
@@ -277,18 +280,18 @@ export async function processPaper(
       shown.push(...made.shots);
       return { target: target ?? "read", width: renderWidth(width), images: made.shots.length, height: made.height, ...(made.cut ? { cut: "only the top is shown: render a section or a block" } : {}) };
     },
-    check: async ([draft]) => {
-      const result = await examine(draft);
+    check: async ([draft, standBy]) => {
+      const result = await examine(draft, standBy);
       return "errors" in result ? { ok: false, errors: result.errors } : { ok: true };
     },
-    submit: async ([draft]) => {
-      const result = await examine(draft);
+    submit: async ([draft, standBy]) => {
+      const result = await examine(draft, standBy);
       if ("errors" in result) {
         record({ t: now(), type: "submit", ok: false, errors: result.errors.slice(0, MAX_TRACED_ERRORS) });
         return { ok: false, errors: result.errors };
       }
       candidate = result;
-      record({ t: now(), type: "submit", ok: true });
+      record({ t: now(), type: "submit", ok: true, ...(result.stood ? { stood: result.stood } : {}) });
       return { ok: true };
     },
   };
@@ -405,6 +408,7 @@ export async function processPaper(
             return made ? [{ name, ...(made.label === undefined ? {} : { number: `Figure ${made.label}` }), shot: made.view }] : [];
           }),
           unverified: next.unverified,
+          stood: next.stood ?? [],
         },
         { effort: opts.effort, signal: session.signal, onPayload: detailedSummaries },
       );

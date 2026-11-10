@@ -198,8 +198,9 @@ figure is taken from a paper with no source, from an EPS file, or when a figure 
 you. target: nothing for the whole read, a section's id, or "<section id>.<n>" for its n-th block, counted from 0; width: \
 "desktop" (the default) or "phone". A long target comes back as several images and is cut after eight: render a section or \
 a block rather than the whole read
-- await check(read): the checks submit runs, without submitting: {ok: true} or {ok: false, errors: [...]}
-- await submit(read): checks the read and returns {ok: true} or {ok: false, errors: [...]}. Fix the errors and submit again.
+- await check(read, standBy?): the checks submit runs, without submitting: {ok: true} or {ok: false, errors: [...]}
+- await submit(read, standBy?): checks the read and returns {ok: true} or {ok: false, errors: [...]}. Fix the errors and \
+submit again. standBy lists refused places and numbers you are sure are the paper's, each as the refusal quoted it.
 
 Images come back with the output of the cell that made them. Output per cell is cut at ${maxOutputChars} characters; print \
 what you need, not whole objects. Keep the draft in a variable and change it in place rather than retyping it. The first \
@@ -226,6 +227,10 @@ words. A value cited to several figures needs the image of each: a range ("Figur
 fig block's caption that cites another figure needs that figure's image too. Not checked: whole numbers under ten, years, \
 the reading time, other papers' numbers in Related work, and a table caption's counts of the rows and columns kept ("11 of \
 its 12 rows").
+- Standing by: code reads the paper's source and text by rule, and can be wrong: a table a macro makes, a number the paper \
+spells its own way. Where you have checked that a refused place or number is the paper's, stand by it (submit(read, \
+["Table 2", "0.00005"])) rather than reword a correct read; the reviewer is told and checks it. Standing by an item you \
+have not checked is a faithfulness finding waiting to happen.
 - Equations: every eq block and every $inline formula$ parses in KaTeX.
 - Diagrams: leave a diagram's coordinates out and it is laid out for you; render it to see the result, and place the nodes \
 yourself (x, y, w, h on every node, at least 40 tall) only where the layout does not serve.
@@ -335,7 +340,7 @@ export function reviewerText(paper: PaperInput, room: number): { text: string; l
 }
 
 /** What the reviewer is given to read, before the plot figures: `text` and `left` are `reviewerText`'s. */
-export function reviewerMessage(paper: PaperInput, text: string, left: string[], read: Read, unverified: string[]): string {
+export function reviewerMessage(paper: PaperInput, text: string, left: string[], read: Read, unverified: string[], stood: string[] = []): string {
   return [
     `arXiv ${paper.id}: ${paper.title}`,
     `Text source: ${paper.body_source ?? "unknown"}`,
@@ -349,6 +354,7 @@ export function reviewerMessage(paper: PaperInput, text: string, left: string[],
     JSON.stringify(read),
     ...(left.length ? ["", "What the read says of the parts of the paper left out above cannot be checked here: do not count it for or against the read."] : []),
     ...(unverified.length ? ["", `Not confirmed by code, which could not tell whether the paper has these places the read cites: ${unverified.join("; ")}. Check each against the paper.`] : []),
+    ...(stood.length ? ["", `Refused by code, and stood by the writer as the paper's: ${stood.join("; ")}. Check each against the paper; one it does not support is a faithfulness finding.`] : []),
   ].join("\n");
 }
 

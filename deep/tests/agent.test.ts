@@ -227,6 +227,27 @@ test("the reviewer is told by name the places code could not look up", async () 
   );
 });
 
+test("a refused place or number the writer stands by goes to the reviewer by name, and the trace keeps it", async () => {
+  const { models: m, faux } = models();
+  const sent: Sent[] = [];
+  const read = changed((d) => {
+    blocks(d, "method")[0]!.text = "The probe reaches 83.4% accuracy.";
+    (d.sections[3] as unknown as { claims: { where: string }[] }).claims[0]!.where = "Table 9";
+  });
+  faux.setResponses([
+    cell(`console.log(JSON.stringify(await submit(${JSON.stringify(read)}, ["83.4%"])))`),
+    seeing(cell(`console.log(JSON.stringify(await submit(${JSON.stringify(read)}, ["table  9", "83.4%", "Section 1"])))`), sent),
+    seeing(reviews(PASSING), sent),
+  ]);
+  const outcome = await run(m);
+  assert.match(textOf(sent[0]!.messages.at(-1)!), /^\{"ok":false,"errors":\["\/sections\/3\/claims\/0\/where: cites Table 9, but the paper's source has 1 table"\]\}/, "only what is not stood by is refused");
+  assert.deepEqual(outcome.trace.filter((e) => e.type === "submit").map((s) => [s.ok, s.stood]), [[false, undefined], [true, ["83.4%", "Table 9"]]], "stood by as refused, in any case or spacing; what was never refused is not stood by");
+  assert.ok(
+    textOf(sent[1]!.messages[1]!).endsWith("Refused by code, and stood by the writer as the paper's: 83.4%; Table 9. Check each against the paper; one it does not support is a faithfulness finding."),
+    textOf(sent[1]!.messages[1]!).slice(-300),
+  );
+});
+
 test("the reviewer reads the whole paper where the model's context has room, past any fixed cut", async () => {
   // 400,000 tokens of context: room for a text of 250,000 characters, whose appendix ends it
   const { models: m, faux } = models(400_000);
