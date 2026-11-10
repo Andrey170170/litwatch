@@ -34,7 +34,11 @@ export function Figure({ block }: { block: BlockOf<"fig"> }) {
     <figure className="dr-fig">
       {shown ? (
         <button ref={opener} className="fi" onClick={() => setZoom(true)} aria-label={`${block.number}, larger`}>
-          <img src={src} alt={block.number} loading={env.eager ? "eager" : "lazy"} onError={() => setFailed(src)} />
+          <img src={src} alt={block.number} loading={env.eager ? "eager" : "lazy"} onError={() => {
+            // a zoom open on it closes too, taking its hold on the keyboard with it
+            setFailed(src);
+            setZoom(false);
+          }} />
         </button>
       ) : (
         <div className="fi nofig">

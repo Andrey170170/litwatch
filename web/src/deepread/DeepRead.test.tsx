@@ -319,7 +319,11 @@ describe("a paper's Deep read", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: "Figure 2, larger" })).toHaveFocus();
+    // an image that fails while it is open large closes the zoom, and Tab moves again
+    await userEvent.click(screen.getByRole("button", { name: "Figure 2, larger" }));
     fireEvent.error(img);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fireEvent.keyDown(document, { key: "Tab" })).toBe(true);
     expect(within(rung("env")).queryByRole("img")).toBeNull();
     expect(within(rung("env")).getByText("Figure 2 · the image did not load")).toBeInTheDocument();
     expect(within(rung("env")).getByText(/The round: queue with bids, private messages, ballots, scheduler\./)).toBeInTheDocument();
