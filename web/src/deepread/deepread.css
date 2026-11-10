@@ -149,6 +149,10 @@
 .dread .dr-dg .eg.dot path { stroke-dasharray: 1.5 3.5; }
 .dread .dr-dg .eg text { fill: var(--fg2); font-size: 10px; }
 .dread .dr-dg .eg .ht { stroke: transparent; stroke-width: 18; stroke-dasharray: none; }
+/* a 40px target on the phone; nodes are drawn over the arrows, so a tap near a box still picks the box */
+@media (max-width: 55.99rem) { .dread .dr-dg .eg .ht { stroke-width: 40; } }
+/* a section focused from the contents shows no ring: the scroll already says where the reader is */
+.dread > .rung.dr-sec:focus:not(:focus-visible) { outline: none; }
 .dread .dr-dg .eg:hover path:not(.ht), .dread .dr-dg .eg.on path:not(.ht) { stroke: light-dark(var(--fg), var(--acc)); stroke-width: 2.4; }
 .dread .dr-dg .dr-ah path { fill: var(--fg3); }
 .dread .dr-dg .dr-on path { fill: light-dark(var(--fg), var(--acc)); }
@@ -185,7 +189,9 @@
 .dread .dr-lim .who { flex: none; width: 44px; padding-top: 3px; font: 700 10px var(--font-name); letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg3); }
 .dread .dr-lim .who.read { color: var(--warn); }
 
-/* ── the render page (render.html): the read alone, in a column as wide as the paper page's ──── */
+/* ── the render page (render.html): the read alone, in the paper page's column at its widest ──── */
+/* 854px, the column beside the rail under the 1200px cap, which every desktop view from about 1440px wide shows; the
+   column stays that wide in any desktop viewport, so a render's wrapping does not depend on the browser's size */
 .dr-render { max-width: 1200px; margin: 0 auto; padding: 18px 24px 40px; }
-.dr-render .ladder { max-width: 854px; }
+.dr-render .ladder { width: min(854px, 100%); }
 @media (max-width: 55.99rem) { .dr-render { padding: 12px; } }

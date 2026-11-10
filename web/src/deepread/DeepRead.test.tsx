@@ -167,6 +167,8 @@ describe("a paper's Deep read", () => {
     await userEvent.click(within(toc).getByRole("button", { name: "Claims" }));
     expect(scrolled).toHaveBeenCalledWith("dr-claims");
     expect(current()).toEqual(["Claims"]);
+    // the focus goes with it, so the next Tab is in the section
+    expect(rung("claims")).toHaveFocus();
     act(() => window.dispatchEvent(new Event("scroll")));
     expect(current()).toEqual(["Claims"]);
     // at the end of the scroll the last section is the one being read, though it never reached the line
@@ -195,6 +197,7 @@ describe("a paper's Deep read", () => {
     expect(scrollTo.mock.contexts).toContain(strip);
     await userEvent.click(within(strip).getByRole("button", { name: "Limitations" }));
     expect(scrolled).toHaveBeenCalledWith("dr-limits");
+    expect(rung("limits")).toHaveFocus();
     // the rail and its contents are the desktop's
     expect(document.querySelector(".dr-toc")).toBeNull();
   });

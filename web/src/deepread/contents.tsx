@@ -70,8 +70,11 @@ export function useReadSpy(sections: Section[]): { current: string | null; inVie
       view?.disconnect();
     };
   }, [ids]);
+  // the focus goes with the scroll, so the next Tab is in the section and not back in the contents
   const go = (id: string) => {
-    document.getElementById(sectionId(id))?.scrollIntoView({ block: "start" });
+    const el = document.getElementById(sectionId(id));
+    el?.scrollIntoView({ block: "start" });
+    el?.focus({ preventScroll: true });
     pinned.current = position.current();
     setCurrent(id);
   };

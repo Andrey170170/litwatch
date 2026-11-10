@@ -149,4 +149,6 @@ Found while building, owned by the stage named.
   - The code checks also cover edges that name existing nodes, unique ids, each table row's cell count against its columns, and verdict anchors.
   - Diagram nodes are at least 40 px tall, so they stay tappable on the phone.
   - The exported schema is about 29 KB; mind it in the prompt.
+  - `render.html` draws the desktop read at the paper page's widest column (854 px, a 710 px body), whatever the viewport; render the phone at 390 px. A narrower desktop wraps more than the render shows.
+  - elkjs spacing leaves each arrow at least 40 px of length between boxes, so it stays tappable on the phone.
   - `renderRead()` resolves before a figure that fails to decode has swapped to its placeholder. Render only figures `figure()` or `crop()` produced, or wait for the image's error before the screenshot.

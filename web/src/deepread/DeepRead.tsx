@@ -147,7 +147,7 @@ export function DeepRead({ read, among, env, children }: Props) {
         </Rung>
         {!desktop && <Chips sections={read.sections} topicColour={env.topicColour} />}
         {read.sections.map((s) => (
-          <Rung key={s.id} name={s.title} className="dr-sec" id={sectionId(s.id)} data-section={s.id} {...sectionMark(s, env.topicColour)}>
+          <Rung key={s.id} name={s.title} className="dr-sec" id={sectionId(s.id)} data-section={s.id} tabIndex={-1} {...sectionMark(s, env.topicColour)}>
             <SectionBody section={s} among={among} />
           </Rung>
         ))}
