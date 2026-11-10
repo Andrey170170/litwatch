@@ -3,14 +3,18 @@ who does not use litwatch (docs/specs/v1/integrations.md, The Notion export).
 
 One row per paper whose effective grade for an exported topic is at least the minimum grade.
 The words are the export's own (GLOSSARY.md, The Notion export): Must read and Worth a look for
-the grades, No longer listed for a paper that fell below them, TL;DR and Deep read for the Gist
-and the Deep card; the Abstract is the paper's own. A page is never deleted: a paper that
-falls below the minimum for a topic says No longer listed there, with a dated Why line saying
-who took it off and why, from the `grade.changed` that did; a dismissed paper says it for every
-topic, the owner having set it aside, and a paper withdrawn on arXiv says so for every topic,
-with the date and arXiv's comment at the top of its page. A paper's page someone moves to
-Notion's trash or deletes
-is left alone and never made again; "How to read this" is litwatch's and is made again.
+the grades, No longer listed for a paper that fell below them, TL;DR for the Gist, and Deep
+read for a short form of the Deep read (docs/specs/deep-read.md, Beyond the web app): its key
+claim and points, its claims with their verdicts and its limitations, under a line saying so
+when the read failed its review. A Deep card from before keeps its callouts exactly as they
+were written, so its page is not rewritten. The Abstract is the paper's own.
+
+A page is never deleted: a paper that falls below the minimum for a topic says No longer listed
+there, with a dated Why line saying who took it off and why, from the `grade.changed` that did;
+a dismissed paper says it for every topic, the owner having set it aside, and a paper withdrawn
+on arXiv says so for every topic, with the date and arXiv's comment at the top of its page. A
+paper's page someone moves to Notion's trash or deletes is left alone and never made again;
+"How to read this" is litwatch's and is made again.
 
 `setup` reconciles on every start, idempotently: it makes what is missing under `parent_page`
 (the database, its columns, "How to read this", the All papers view, a grade column and a view
@@ -46,7 +50,7 @@ import psycopg
 
 from litwatch import events
 from litwatch.config import Config
-from litwatch.core import Cause, Depth, Event, Grade, Paper, Publication, Status
+from litwatch.core import Cause, Depth, Event, Grade, Paper, Publication, Status, deepread
 from litwatch.integrations import IntegrationError, required, required_secret
 from litwatch.store import analyses as analyses_store
 from litwatch.store import integrations as integrations_store
@@ -114,7 +118,23 @@ COLUMNS: dict[str, dict[str, Any]] = {
     HIDDEN: {"rich_text": {}},
 }
 
-# The Deep read's callouts: (card section, icon, colour, heading).
+EQUATION = 1000  # characters in one equation's expression
+
+# A Deep read's short form: how its verdicts and its limitations' owners read, and the line
+# above it when the read failed its review.
+VERDICTS = {
+    "holds": "Holds",
+    "partly": "Partly",
+    "not shown": "Not shown",
+    "overclaimed": "Overclaimed",
+}
+LIMITATION_BY = {"paper": "the paper's own", "read": "the read's"}
+FAILED_REVIEW = (
+    "This Deep read did not pass litwatch's own review of it: check what it says against the paper."
+)
+
+# A Deep card's callouts (the format before the Deep read): (card section, icon, colour,
+# heading).
 SECTIONS = [
     ("key_claim", "💬", "gray", "Key claim"),
     ("summary", "📖", "blue", "Summary"),
@@ -818,7 +838,10 @@ class Notion:
             blocks += [_heading("TL;DR"), *map(_paragraph, _paragraphs(gist))]
         blocks += [_heading("Abstract"), *map(_paragraph, _paragraphs(paper.abstract))]
         if card and card["card"]:
-            blocks.append(_heading("Deep read", children=_deep_read(card["card"])))
+            # A read never goes through a card's sections, which read fields it does not have.
+            made = card["card"]
+            children = _short_form(made) if deepread.is_read(made) else _deep_read(made)
+            blocks.append(_heading("Deep read", children=children))
         return blocks
 
     def _guide_blocks(self) -> list[dict[str, Any]]:
@@ -837,9 +860,12 @@ class Notion:
         text = {
             "TL;DR": "what the paper does, in a sentence or two.",
             "Abstract": "the paper's abstract, as its authors wrote it.",
-            "Deep read": "for some papers, a longer reading of the full text: its key claim, "
-            "its evaluation, the closest prior work and its limitations. It is folded under "
-            "its heading.",
+            "Deep read": "for some papers, a reading of the full text, folded under its "
+            "heading. It gives the paper's key claim and main points, then each of the paper's "
+            "claims marked with whether the paper shows it (Holds, Partly, Not shown or "
+            "Overclaimed), then the limitations, each marked as the paper's own or the read's. "
+            "A Deep read written earlier has another shape: the key claim, a summary, the "
+            "evaluation, the closest prior work and the limitations.",
         }
         return [
             _paragraph(
@@ -927,8 +953,53 @@ def _callout(icon: str, colour: str, rich: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def _marked(text: str) -> list[dict[str, Any]]:
+    """A read's inline text as Notion's rich text: bold, italic, code, links and maths."""
+    rich: list[dict[str, Any]] = []
+    for run in deepread.inline(text):
+        if run.tex and len(run.text) <= EQUATION:
+            pieces = [{"type": "equation", "equation": {"expression": run.text}}]
+        else:
+            pieces = _rich(f"${run.text}$" if run.tex else run.text, link=run.link)
+        if marks := {m: True for m in ("bold", "italic", "code") if getattr(run, m)}:
+            for piece in pieces:
+                piece["annotations"] = marks
+        rich += pieces
+    return rich
+
+
+def _bullet(rich: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": rich}}
+
+
+def _short_form(read: dict[str, Any]) -> list[dict[str, Any]]:
+    """A Deep read's short form, which stands on its own: the key claim and its points, each
+    claim with its verdict, and the limitations; above them, a line when the read failed its
+    review. Its process notes, sections, figures and lenses stay in litwatch."""
+    blocks = []
+    if deepread.review_note(read) is not None:
+        blocks.append(_callout("⚠️", "orange", _rich(FAILED_REVIEW)))
+    glance = deepread.section(read, "glance") or {}
+    if claim := glance.get("claim"):
+        blocks.append(_callout("💬", "gray", [*_rich("Key claim\n", bold=True), *_marked(claim)]))
+    blocks += [_bullet(_marked(point)) for point in glance.get("points") or []]
+    if claims := (deepread.section(read, "claims") or {}).get("claims"):
+        blocks.append(_paragraph(_rich("Claims", bold=True)))
+        for c in claims:
+            verdict = c.get("verdict", "")
+            head = _rich(f"{VERDICTS.get(verdict, verdict)}. ", bold=True) if verdict else []
+            blocks.append(_bullet([*head, *_marked(c.get("text", ""))]))
+    if limits := (deepread.section(read, "limits") or {}).get("limitations"):
+        blocks.append(_paragraph(_rich("Limitations", bold=True)))
+        for x in limits:
+            by = LIMITATION_BY.get(x.get("by"))
+            blocks.append(_bullet([*_marked(x.get("text", "")), *_rich(f" ({by})" if by else "")]))
+    # One request takes at most this many children of a block.
+    return blocks[:BLOCKS]
+
+
 def _deep_read(card: dict[str, Any]) -> list[dict[str, Any]]:
-    """One callout per section of the card it has, then its code link."""
+    """One callout per section of the Deep card it has, then its code link."""
     blocks = [
         _callout(icon, colour, [*_rich(f"{heading}\n", bold=True), *_section(key, card[key])])
         for key, icon, colour, heading in SECTIONS
