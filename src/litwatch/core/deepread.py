@@ -26,6 +26,8 @@ FIGURE_MIMES = frozenset({"image/webp"})
 FIGURE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 # The most one read's figures may weigh, decoded: far above any read's (about 1 MB).
 FIGURES_BYTES = 32 * 1024 * 1024
+# Whose a limitation is (its `by`), as every export of a read words it.
+LIMITATION_BY = {"paper": "the paper's own", "read": "the read's"}
 
 
 @dataclass(frozen=True)

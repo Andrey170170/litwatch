@@ -305,7 +305,7 @@ FIGURE_KEPT = "private, max-age=31536000, immutable"
 async def deep_figure(paper_id: str, name: str, c: Conn, v: str | None = None) -> Response:
     """One of the paper's figures its Deep read shows, by the name the read's `fig` block
     cites. With `v` (when the read was written, as the paper page asks) the answer may be kept;
-    without it, it is checked again each time."""
+    without it, it is fetched again each time."""
     found = await integrations_store.figure(c, paper_id, name)
     if found is None:
         raise HTTPException(status_code=404, detail="no such figure")
@@ -313,7 +313,7 @@ async def deep_figure(paper_id: str, name: str, c: Conn, v: str | None = None) -
         found.data,
         media_type=found.mime,
         headers={
-            "Cache-Control": FIGURE_KEPT if v is not None else "private, no-cache",
+            "Cache-Control": FIGURE_KEPT if v else "private, no-cache",
             "X-Content-Type-Options": "nosniff",
         },
     )

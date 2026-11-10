@@ -79,7 +79,7 @@ export interface paths {
          * Deep Figure
          * @description One of the paper's figures its Deep read shows, by the name the read's `fig` block
          *     cites. With `v` (when the read was written, as the paper page asks) the answer may be kept;
-         *     without it, it is checked again each time.
+         *     without it, it is fetched again each time.
          */
         get: operations["deep_figure_api_papers__paper_id__deep_figures__name__get"];
         put?: never;

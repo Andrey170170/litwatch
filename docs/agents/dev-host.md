@@ -47,8 +47,8 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
 - Stop only what you started: the PID you captured when starting it, or the owner of your port
   (`ss -H -ltnp 'sport = :8766'`) after checking that `/proc/<pid>/cwd` is your checkout. Never kill by a name or
   path pattern: the production container and other worktrees run `litwatch serve` too.
-- What Deep did: `litwatch deep trace <paper>` prints the paper's Deep attempts and the latest one's trace
-  (`--attempt N` another, `--json` everything uncut), and `litwatch deep notes [--since YYYY-MM-DD]` the
+- What Deep did: `litwatch deep trace <paper>` prints the paper's Deep attempts and the latest one's trace and
+  review rounds (`--attempt N` another, `--json` everything uncut), and `litwatch deep notes [--since YYYY-MM-DD]` the
   cards' process notes. Both only read, and never migrate. On production they run inside its container,
   which has its database and configuration:
 

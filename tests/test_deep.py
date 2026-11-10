@@ -660,8 +660,11 @@ async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(d
         assert shown.headers["content-type"] == "image/webp"
         assert shown.headers["cache-control"] == "private, max-age=31536000, immutable"
         assert shown.headers["x-content-type-options"] == "nosniff"
-        other = await http.get(f"{base}/channel_util_s1")
-        assert other.content == RUST and other.headers["cache-control"] == "private, no-cache"
+        # Without the time, an empty one included, nothing says which read's figure it is.
+        for unversioned in ({}, {"v": ""}):
+            other = await http.get(f"{base}/channel_util_s1", params=unversioned)
+            assert other.content == RUST
+            assert other.headers["cache-control"] == "private, no-cache"
         # A name the read does not have, a figure of another paper's, and the page still its own.
         assert (await http.get(f"{base}/pact_vs_bid", params={"v": written})).status_code == 404
         assert (

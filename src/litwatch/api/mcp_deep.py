@@ -24,7 +24,6 @@ KINDS = {
     "related": "related work",
     "repro": "reproducibility",
 }
-LIMITATION_BY = {"paper": "the paper's own", "read": "the read's"}
 
 
 def _row(cells: list[Any]) -> str:
@@ -150,7 +149,7 @@ def _body(read: dict[str, Any], section: dict[str, Any]) -> list[str]:
         return out
     if kind == "limits":
         return [
-            f"- ({LIMITATION_BY.get(x.get('by'), x.get('by'))}) {x.get('text', '')}"
+            f"- ({deepread.LIMITATION_BY.get(x.get('by'), x.get('by'))}) {x.get('text', '')}"
             for x in section.get("limitations") or []
         ]
     if kind == "related":

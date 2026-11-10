@@ -120,15 +120,14 @@ COLUMNS: dict[str, dict[str, Any]] = {
 
 EQUATION = 1000  # characters in one equation's expression
 
-# A Deep read's short form: how its verdicts and its limitations' owners read, and the line
-# above it when the read failed its review.
+# A Deep read's short form: how its verdicts read, and the line above it when the read failed
+# its review.
 VERDICTS = {
     "holds": "Holds",
     "partly": "Partly",
     "not shown": "Not shown",
     "overclaimed": "Overclaimed",
 }
-LIMITATION_BY = {"paper": "the paper's own", "read": "the read's"}
 FAILED_REVIEW = (
     "This Deep read did not pass litwatch's own review of it: check what it says against the paper."
 )
@@ -992,7 +991,7 @@ def _short_form(read: dict[str, Any]) -> list[dict[str, Any]]:
     if limits := (deepread.section(read, "limits") or {}).get("limitations"):
         blocks.append(_paragraph(_rich("Limitations", bold=True)))
         for x in limits:
-            by = LIMITATION_BY.get(x.get("by"))
+            by = deepread.LIMITATION_BY.get(x.get("by"))
             blocks.append(_bullet([*_marked(x.get("text", "")), *_rich(f" ({by})" if by else "")]))
     # One request takes at most this many children of a block.
     return blocks[:BLOCKS]
