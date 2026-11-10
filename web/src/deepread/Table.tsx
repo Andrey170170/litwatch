@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Inline } from "./inline";
 import { COLOUR, type BlockOf } from "./types";
 
@@ -24,14 +24,16 @@ function figureColumns(block: BlockOf<"table">): boolean[] {
 export function Table({ block }: { block: BlockOf<"table"> }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [col, setCol] = useState<number | null>(null);
-  const [tip, setTip] = useState<{ text: string; left: number; top: number } | null>(null);
+  // the note on show, and the cell it belongs to, which it describes to a screen reader
+  const [tip, setTip] = useState<{ text: string; cell: string; left: number; top: number } | null>(null);
+  const tipId = useId();
 
   const show = (td: HTMLElement) => {
     const box = wrap.current?.getBoundingClientRect();
-    if (!box || !td.dataset.note) return;
+    if (!box || !td.dataset.note || !td.dataset.cell) return;
     const r = td.getBoundingClientRect();
     // under the cell, kept inside the table's own width
-    setTip({ text: td.dataset.note, left: Math.max(0, Math.min(r.left - box.left, box.width - 300)), top: r.bottom - box.top + 6 });
+    setTip({ text: td.dataset.note, cell: td.dataset.cell, left: Math.max(0, Math.min(r.left - box.left, box.width - 300)), top: r.bottom - box.top + 6 });
   };
   const noted = (target: EventTarget) => (target as Element).closest<HTMLElement>("td[data-note]");
   // a tap anywhere else puts the note away
@@ -77,6 +79,7 @@ export function Table({ block }: { block: BlockOf<"table"> }) {
               if (td) show(td);
             }}
             onBlur={() => setTip(null)}
+            onKeyDown={(e) => e.key === "Escape" && setTip(null)}
           >
             <thead>
               <tr>
@@ -103,6 +106,8 @@ export function Table({ block }: { block: BlockOf<"table"> }) {
                           key={i}
                           className={cls(i === col && "hl", hot && "heat", note && "tip", figures[i] && "num")}
                           data-note={note}
+                          data-cell={note ? `${r}:${i}` : undefined}
+                          aria-describedby={note && tip?.cell === `${r}:${i}` ? tipId : undefined}
                           tabIndex={note ? 0 : undefined}
                           style={hot ? ({ "--heat": `${Math.round(Math.min(1, value / heat.max) * HEAT)}%` } as CSSProperties) : undefined}
                         >
@@ -117,7 +122,7 @@ export function Table({ block }: { block: BlockOf<"table"> }) {
           </table>
         </div>
         {tip && (
-          <div className="dr-ftip" role="tooltip" style={{ left: tip.left, top: tip.top }}>
+          <div className="dr-ftip" id={tipId} role="tooltip" style={{ left: tip.left, top: tip.top }}>
             {tip.text}
           </div>
         )}

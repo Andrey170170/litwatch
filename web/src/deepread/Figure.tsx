@@ -5,7 +5,7 @@ import { Inline } from "./inline";
 import type { BlockOf } from "./types";
 
 /** One of the paper's own figures, with its number in the paper and the read's caption; a click opens it large,
- * and a click anywhere or Escape closes it, the focus going in and back out with it. The image comes from the page
+ * and a click anywhere or Escape closes it, the focus going in, staying in and going back out with it. The image comes from the page
  * (`ReadEnv.figureSrc`); when there is none, or it does not load, the caption stands under a quiet placeholder
  * that says which. */
 export function Figure({ block }: { block: BlockOf<"fig"> }) {
@@ -21,7 +21,11 @@ export function Figure({ block }: { block: BlockOf<"fig"> }) {
   };
   useEffect(() => {
     if (!zoom) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+      // the close button is all there is in it, so the focus stays on it
+      else if (e.key === "Tab") e.preventDefault();
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [zoom]);
@@ -44,7 +48,7 @@ export function Figure({ block }: { block: BlockOf<"fig"> }) {
       {zoom &&
         shown &&
         createPortal(
-          <div className="dr-zoom" role="dialog" aria-label={block.number} onClick={close}>
+          <div className="dr-zoom" role="dialog" aria-modal="true" aria-label={block.number} onClick={close}>
             <button autoFocus aria-label="Close the figure">
               <img src={src} alt={block.number} />
             </button>

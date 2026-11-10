@@ -64,7 +64,8 @@ function Rail({ paper, topics, gistAway, asked, missOpen }: { paper: Paper; topi
           {miss && <MissPicker paper={paper} onDone={() => setMiss(false)} />}
         </>
       )}
-      {read && <Contents sections={read.sections} topicColour={topicColourOf(paper)} />}
+      {/* keyed like the read itself, so a read written again is watched afresh */}
+      {read && <Contents key={`${paper.id}:${paper.card?.written_at ?? ""}`} sections={read.sections} topicColour={topicColourOf(paper)} />}
     </aside>
   );
 }

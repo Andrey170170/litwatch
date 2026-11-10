@@ -223,6 +223,11 @@ describe("a paper's Deep read", () => {
     expect(screen.getByRole("tooltip")).toHaveTextContent("A sum of row percentages");
     fireEvent.click(document.body);
     expect(screen.queryByRole("tooltip")).toBeNull();
+    // the keyboard: a focused cell is described by its note, which Escape puts away
+    act(() => sum.focus());
+    expect(sum).toHaveAccessibleDescription(/^A sum of row percentages/);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("tooltip")).toBeNull();
     // heat: by value against the table's maximum (50), an empty cell and the row's name left alone
     const heat = (cell: HTMLElement) => cell.style.getPropertyValue("--heat");
     const reputation = cells("Reputation");
@@ -273,6 +278,9 @@ describe("a paper's Deep read", () => {
     await userEvent.click(within(rung("env")).getByRole("button", { name: "Figure 2, larger" }));
     const zoom = screen.getByRole("dialog", { name: "Figure 2" });
     expect(within(zoom).getByRole("img")).toHaveAttribute("src", img.getAttribute("src"));
+    expect(within(zoom).getByRole("button", { name: "Close the figure" })).toHaveFocus();
+    // the focus stays in it
+    await userEvent.tab();
     expect(within(zoom).getByRole("button", { name: "Close the figure" })).toHaveFocus();
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
