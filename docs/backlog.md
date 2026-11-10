@@ -26,7 +26,8 @@ time, after the Deep read. Each milestone's shape goes in `specs/architecture/`,
 
 ### A0. Rules and baseline
 
-Blueprint only. The role checks in CI with today's violations listed; the glossary's terms for the rework.
+Planned in [`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md) (P1–P3 and the small fixes). The role checks
+in CI with today's violations listed.
 
 - **What production still uses,** found against production rather than read from the code (review, project 5):
   config options, `llm` roles, evaluation tables and cohorts, migration-era guards, routes with only test callers
