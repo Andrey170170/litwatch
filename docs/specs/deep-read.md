@@ -131,7 +131,9 @@ today, with these additions:
   read's own figures such as reading time aside, and values read off a plot (cited to its figure) left to the
   reviewer; every figure and table cited exists, every claim verdict
   and CARD note carries a location in the paper. A failed check goes back to the agent as today's schema errors do.
-  The same checks are available to it before it submits.
+  The same checks are available to it before it submits. Code reads the source and text by rule and can be wrong
+  (a table a macro makes, a number spelled its own way), so no refusal of a place or a number is final: the agent may
+  stand by an item it has checked, which then goes to the reviewer by name, and the trace keeps what it stood by.
 - **A reviewer.** Once a submit passes the checks, a separate call on the same model reviews the read against the
   paper and the rubric below and returns its verdict. If it does not pass, its findings go back to the writer, which
   revises. The first write does not count; at most two revisions follow. The reviewer's findings come last in its

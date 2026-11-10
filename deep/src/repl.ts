@@ -62,7 +62,7 @@ export class Repl {
     this.isolate = new ivm.Isolate({ memoryLimit: opts.memoryMb });
   }
 
-  /** `globals` are string-valued (the paper markdown and JSON metadata); see prelude.js. */
+  /** `globals` are string-valued (the paper's text, its metadata and its headings as JSON); see prelude.js. */
   static async create(
     globals: Record<string, string>,
     hosts: Record<string, HostFn>,

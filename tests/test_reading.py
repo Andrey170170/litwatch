@@ -1020,6 +1020,8 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
             assert opened.headers["location"] == f"https://arxiv.org/pdf/{P.id}"
             assert unknown.status_code == 307
             assert unknown.headers["location"] == "https://arxiv.org/pdf/2610.09999"
+            pinned = await c.get(page["pdf_url"], params={"version": 1})
+            assert pinned.headers["location"] == f"https://arxiv.org/pdf/{P.id}v1"
     # An archive that hangs costs the owner its wait at most, whichever call hangs (P5).
     hung_archive = ArchiveClient(
         "http://archive.test", "archive-token", http=mock(hang), wait_seconds=0.2

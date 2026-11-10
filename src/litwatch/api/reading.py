@@ -298,12 +298,18 @@ async def deep_figure(paper_id: str, name: str, c: Conn, v: str | None = None) -
         307: {"description": "arXiv's PDF: no archive, or none it could get in time"},
     },
 )
-async def pdf(paper_id: str, request: Request) -> Response:
+async def pdf(
+    paper_id: str,
+    request: Request,
+    version: Annotated[int | None, Query(ge=1, description="This arXiv version's PDF")] = None,
+) -> Response:
     """The paper's PDF as the owner opens it: from the archive, which is asked for it urgently
     (the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on
     for its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record
     of it. arXiv's PDF without an archive, for a paper neither holds, or when the archive
-    cannot get it in time. The database is read before the wait, which holds no connection."""
+    cannot get it in time. The database is read before the wait, which holds no connection.
+    `version` asks for that version's PDF, as the deep service does for the version its text
+    is of; without it, the version litwatch knows of."""
     archive = request.app.state.archive
     async with await store.connect(request.app.state.dsn) as c:
         held = await papers_store.get(c, paper_id)
@@ -313,6 +319,8 @@ async def pdf(paper_id: str, request: Request) -> Response:
             # One bound over every archive call: the record, the request, the wait, the file.
             async with asyncio.timeout(archive.wait_seconds + PDF_READ_SLACK):
                 known = held if held is not None else await archive.paper(paper_id)
+                if known is not None and version is not None:
+                    known = known.model_copy(update={"version": version})
                 body = await archive.pdf(known) if known is not None else None
         except (ArchiveError, TimeoutError):  # unreachable, slow, no known version, a broken file
             body = None
@@ -323,7 +331,8 @@ async def pdf(paper_id: str, request: Request) -> Response:
                 media_type="application/pdf",
                 headers={"Content-Disposition": f'inline; filename="{name}.pdf"'},
             )
-    return RedirectResponse(f"https://arxiv.org/pdf/{paper_id}", status_code=307)
+    pinned = f"v{version}" if version is not None else ""
+    return RedirectResponse(f"https://arxiv.org/pdf/{paper_id}{pinned}", status_code=307)
 
 
 @router.get(

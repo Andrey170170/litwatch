@@ -322,8 +322,8 @@ async def field(conn, p, fit: str) -> None:
     [
         (None, []),
         (lambda c: verdict(c, Q, "none"), []),
-        (lambda c: area(c, Q, "related"), [("Interpretability", "relevant")]),
-        (lambda c: field(c, Q, "related"), [("Agents and tool use", "relevant")]),
+        (lambda c: area(c, Q, "related"), [("interpretability", "Interpretability", "relevant")]),
+        (lambda c: field(c, Q, "related"), [("agents", "Agents and tool use", "relevant")]),
     ],
     ids=["graded-nowhere", "graded-none", "area-not-picked", "field"],
 )
@@ -338,7 +338,8 @@ async def test_a_requested_card_is_written_for_the_topics_that_graded_the_paper(
     fake = FakeDeep(DONE)
     assert await work(db, with_text(Q), make(fake)) == {"cards_written": 1}
     (sent,) = fake.requests
-    assert [(s["name"], s["grade"]) for s in sent["selections"]] == selections
+    # The slug is what the read's lens names its topic by (`Lens.topic`, deep/src/read.ts).
+    assert [(s["slug"], s["name"], s["grade"]) for s in sent["selections"]] == selections
     assert sent["extensions"] == []
 
 
@@ -436,7 +437,7 @@ RICH = [
                                           "status": 200, "bytes": 1024}},
     {"t": 92000, "type": "cell", "n": 1, "code": "while (true) {}", "output": "", "ms": 90001,
      "error": "cell ran longer than 90s", "timedOut": True},
-    {"t": 93000, "type": "submit", "ok": True},
+    {"t": 93000, "type": "submit", "ok": True, "stood": ["Table 2", "0.00005"]},
 ]  # fmt: skip
 NOTE = {"kind": "access", "source": "model", "note": "The repository could not be listed.",
         "url": "https://anonymous.4open.science/r/x"}  # fmt: skip
@@ -482,6 +483,7 @@ async def test_the_deep_commands_read_each_attempts_trace_and_the_cards_notes(
     assert "went: 302 https://anonymous.4open.science/api/repo/x/files/ → no page" in latest
     assert "went: 200 https://example.org/ · 1024 bytes read" in latest
     assert "cell 1 · 90001 ms · timed out" in latest
+    assert "submit · ok · stood by: Table 2; 0.00005" in latest
     assert "access (model): The repository could not be listed." in latest
     first = await run("trace", P.id, "--attempt", "1")
     assert "No trace was kept" in first and "failed (service)" in first
@@ -730,6 +732,15 @@ async def test_the_read_token_fetches_a_papers_pdf(db):
         got = await http.get(f"/api/papers/{P.id}/pdf", headers={"Authorization": "Bearer r3ad"})
         assert got.status_code == 200 and got.content == b"%PDF-1.7 the paper"
         assert got.headers["content-type"] == "application/pdf"
+        # The version a read's text is of, asked for, is the version fetched, not the latest.
+        pinned = await http.get(
+            f"/api/papers/{P.id}/pdf",
+            params={"version": 1},
+            headers={"Authorization": "Bearer r3ad"},
+        )
+        assert pinned.status_code == 200
+        assert [j["version"] for j in fake.jobs] == [2, 1]
+        assert fake.pdf_versions == ["2", "1"]
         # Reading still, and nothing else: the token asks for no card.
         asked = await http.post(
             f"/api/papers/{P.id}/card", headers={"Authorization": "Bearer r3ad"}

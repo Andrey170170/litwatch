@@ -302,8 +302,10 @@ Two rules for all of them:
 
 Each integration's card is under Settings → Integrations, with its errors.
 
-**Deep cards** (`deep`). The `deep` service reads a paper with a ChatGPT-signed-in model and writes its Deep card;
-cards are queued for Focus must reads, Area picks, and papers you ask for. Set `LITWATCH_READ_TOKEN` (and optionally
+**Deep reads** (`deep`). The `deep` service reads a paper with a ChatGPT-signed-in model and writes its Deep read,
+taking the paper's figures from arXiv and looking at its own draft through a headless browser inside its image, on
+the page litwatch serves at `/render.html`; reads are queued for Focus must reads, Area picks, and papers you ask
+for. A read may take up to two hours. Set `LITWATCH_READ_TOKEN` (and optionally
 `S2_API_KEY`) in `.env`, uncomment `[integrations.deep]` in `litwatch.toml`, then:
 
 ```sh

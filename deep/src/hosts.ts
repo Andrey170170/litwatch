@@ -25,6 +25,10 @@ export interface HostConfig {
   maxFetches: number;
   /** Bytes read per fetched body; the rest is never read. */
   maxFetchBytes: number;
+  /** Where a paper's e-print is fetched from (`<arxivUrl>/e-print/<id>`); arXiv when left out. */
+  arxivUrl?: string;
+  /** What lets a public fetch through; the public-addresses-only guard when left out. Tests give their own. */
+  guard?: Guard;
 }
 
 /** One `store.search` hit, as the agent has always been given it. */
@@ -81,7 +85,7 @@ const PACING_MS: Record<string, number> = { "arxiv.org": 3000, "export.arxiv.org
 /** The pace of a site the agent fetches that has none of its own above: polite, and far below the budget. */
 const FETCH_PACING_MS = 1000;
 
-type Pace = <T>(host: string, work: () => Promise<T>, fallbackMs?: number) => Promise<T>;
+export type Pace = <T>(host: string, work: () => Promise<T>, fallbackMs?: number) => Promise<T>;
 
 /** One request at a time per host, spaced by that host's pacing (else `fallbackMs`). Each paper's
  * session gets its own lanes; once `ended` aborts, work still queued in them stops waiting and never
@@ -156,13 +160,12 @@ async function getJson(pace: Pace, url: string, headers: Record<string, string> 
 }
 
 /** The agent's host functions for one paper's session; `ended` aborts when the session ends, and
- * stops what it left queued or under way. */
-export function buildHosts(cfg: HostConfig, ended?: AbortSignal): Record<string, HostFn> {
+ * stops what it left queued or under way. `pace` is the session's, shared with what else it fetches. */
+export function buildHosts(cfg: HostConfig, ended?: AbortSignal, pace: Pace = pacer(ended)): Record<string, HostFn> {
   const s2Headers: Record<string, string> = cfg.s2ApiKey ? { "x-api-key": cfg.s2ApiKey } : {};
   const litwatchHeaders: Record<string, string> = cfg.litwatchToken
     ? { authorization: `Bearer ${cfg.litwatchToken}` }
     : {};
-  const pace = pacer(ended);
   let fetches = 0;
   return {
     "store.search": async ([query, limit]) => {
@@ -184,7 +187,7 @@ export function buildHosts(cfg: HostConfig, ended?: AbortSignal): Record<string,
       if (++fetches > cfg.maxFetches) throw new BudgetError(`the fetch budget of ${cfg.maxFetches} per paper is used up`);
       const record: FetchRecord = { hops: [] };
       if (detail) detail.fetch = record;
-      return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, contact: cfg.contact, pace, ended, record });
+      return fetchPublic(String(url), { maxChars: cfg.maxFetchChars, maxBytes: cfg.maxFetchBytes, contact: cfg.contact, pace, ended, record, guard: cfg.guard });
     },
   };
 }
@@ -301,9 +304,13 @@ export interface FetchRecord {
   bytes?: number;
 }
 
-/** GET a public page: each hop's scheme and address checked (a literal here, a name where the
- * socket resolves it), at most five redirects, the body read only up to `maxBytes`. */
-export async function fetchPublic(url: string, opts: FetchOptions): Promise<unknown> {
+/** What one hop's answer is read into, once it is no redirect. `failed` words a failure as the network's, or as the
+ * session's when that has ended. */
+type Reader<T> = (resp: Awaited<ReturnType<typeof undiciFetch>>, at: URL, failed: (message: string) => Error) => Promise<T>;
+
+/** GET on a public address: each hop's scheme and address checked (a literal here, a name where the socket resolves
+ * it), at most five redirects, and the answer handed to `read`. */
+async function publicGet<T>(url: string, opts: Omit<FetchOptions, "maxChars" | "maxBytes">, read: Reader<T>): Promise<T> {
   const { publicOnly, dispatcher } = opts.guard ?? guard();
   const record = opts.record ?? { hops: [] };
   const pace = opts.pace ?? pacer();
@@ -321,7 +328,7 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
     const at = current;
     // A failure once the paper's session has ended is the session's, not the network's.
     const failed = (message: string) => (opts.ended?.aborted ? new Error(message) : new NetworkError(message));
-    const answer = await pace<{ next?: URL; page?: unknown }>(
+    const answer = await pace<{ next?: URL; value?: T }>(
       at.hostname,
       async () => {
         const resp = await undiciFetch(at, {
@@ -346,43 +353,61 @@ export async function fetchPublic(url: string, opts: FetchOptions): Promise<unkn
           return { next: new URL(location, at) };
         }
         Object.assign(record, { url: at.href, status: resp.status, bytes: 0 });
-        const contentType = resp.headers.get("content-type") ?? "";
-        const media = contentType.toLowerCase();
-        if (media.includes("pdf")) {
-          await resp.body?.cancel();
-          return { page: { status: resp.status, contentType, url: at.href, text: "", note: "PDF bodies are not fetched; use the arXiv HTML or abstract page" } };
-        }
-        const { raw, cut } = await readCapped(resp.body, opts.maxBytes, record).catch((e: unknown) => {
-          throw failed(`${at.href}: the body was cut off: ${e instanceof Error ? e.message : String(e)}`);
-        });
-        const text = media.includes("html") ? htmlToText(raw) : raw;
-        return {
-          page: {
-            status: resp.status,
-            contentType,
-            url: at.href,
-            text: text.slice(0, opts.maxChars),
-            truncated: cut || text.length > opts.maxChars,
-          },
-        };
+        return { value: await read(resp, at, failed) };
       },
       FETCH_PACING_MS,
     );
-    if (!answer.next) return answer.page;
+    if (!answer.next) return answer.value as T;
     if (hop + 1 > MAX_HOPS) throw new Error(`${url}: more than ${MAX_HOPS} redirects`);
     current = answer.next;
   }
 }
 
-/** A body as text, read only up to `maxBytes`: reading stops once that many have come, so a body
+/** GET a public page as text, the body read only up to `maxBytes`. */
+export async function fetchPublic(url: string, opts: FetchOptions): Promise<unknown> {
+  const record = (opts.record ??= { hops: [] });
+  return publicGet<unknown>(url, opts, async (resp, at, failed) => {
+    const contentType = resp.headers.get("content-type") ?? "";
+    const media = contentType.toLowerCase();
+    if (media.includes("pdf")) {
+      await resp.body?.cancel();
+      return { status: resp.status, contentType, url: at.href, text: "", note: "PDF bodies are not fetched; use the arXiv HTML or abstract page" };
+    }
+    const { bytes, cut } = await readCapped(resp.body, opts.maxBytes, record).catch((e: unknown) => {
+      throw failed(`${at.href}: the body was cut off: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    const raw = new TextDecoder().decode(bytes);
+    const text = media.includes("html") ? htmlToText(raw) : raw;
+    return { status: resp.status, contentType, url: at.href, text: text.slice(0, opts.maxChars), truncated: cut || text.length > opts.maxChars };
+  });
+}
+
+/** A public file, whole: its status, type and bytes. One of `maxBytes` or more is refused, never cut. */
+export async function fetchFile(url: string, opts: Omit<FetchOptions, "maxChars">): Promise<{ status: number; contentType: string; bytes: Buffer }> {
+  const record = (opts.record ??= { hops: [] });
+  return publicGet(url, opts, async (resp, at, failed) => {
+    const contentType = resp.headers.get("content-type") ?? "";
+    if (!resp.ok) {
+      await resp.body?.cancel();
+      return { status: resp.status, contentType, bytes: Buffer.alloc(0) };
+    }
+    const { bytes, cut } = await readCapped(resp.body, opts.maxBytes, record).catch((e: unknown) => {
+      throw failed(`${at.href}: the body was cut off: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    if (cut) throw new Error(`${at.href}: ${opts.maxBytes} bytes or more, too large to take`);
+    return { status: resp.status, contentType, bytes };
+  });
+}
+
+/** A body's bytes, read only up to `maxBytes`: reading stops once that many have come, so a body
  * left open past the cap is never waited on. `counted.bytes` follows each chunk taken, so a read
  * cut off by the connection or a timeout still says how much came. */
-async function readCapped(
+export async function readCapped(
   body: ReadableStream<Uint8Array> | null,
   maxBytes: number,
-  counted: { bytes?: number },
-): Promise<{ raw: string; cut: boolean }> {
-  if (!body) return { raw: "", cut: false };
+  counted: { bytes?: number } = {},
+): Promise<{ bytes: Buffer; cut: boolean }> {
+  if (!body) return { bytes: Buffer.alloc(0), cut: false };
   // A whole number of bytes, or a fractional setting (DEEP_MAX_FETCH_MB=0.1) would never be reached.
   const limit = Math.floor(maxBytes);
   const reader = body.getReader();
@@ -402,7 +427,7 @@ async function readCapped(
       break;
     }
   }
-  return { raw: new TextDecoder().decode(Buffer.concat(chunks)), cut };
+  return { bytes: Buffer.concat(chunks), cut };
 }
 
 /** Readable text from HTML: scripts, styles and comments dropped, block boundaries kept as newlines.

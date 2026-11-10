@@ -187,6 +187,7 @@ class FakeArchive:
         self.statuses: dict[str, str] = {}
         self.texts: dict[str, tuple[int | None, str]] = {}
         self.pdfs: dict[str, bytes] = {}
+        self.pdf_versions: list[str | None] = []
         self.records: dict[str, dict[str, Any]] = {
             pid: {"id": pid, "latest_version": v, "metadata": {}}
             for pid, v in (records or {}).items()
@@ -236,6 +237,7 @@ class FakeArchive:
             )
         pid = path.removeprefix("/v1/papers/").removesuffix("/pdf")
         if path.endswith("/pdf"):
+            self.pdf_versions.append(req.url.params.get("version"))
             return httpx.Response(200, content=self.pdfs.get(pid, PDF))
         if req.method == "PUT":
             body = json.loads(req.content)

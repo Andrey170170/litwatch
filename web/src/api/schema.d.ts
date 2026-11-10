@@ -64,6 +64,8 @@ export interface paths {
          *     for its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record
          *     of it. arXiv's PDF without an archive, for a paper neither holds, or when the archive
          *     cannot get it in time. The database is read before the wait, which holds no connection.
+         *     `version` asks for that version's PDF, as the deep service does for the version its text
+         *     is of; without it, the version litwatch knows of.
          */
         get: operations["pdf_api_papers__paper_id__pdf_get"];
         put?: never;
@@ -3425,7 +3427,10 @@ export interface operations {
     };
     pdf_api_papers__paper_id__pdf_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description This arXiv version's PDF */
+                version?: number | null;
+            };
             header?: never;
             path: {
                 paper_id: string;

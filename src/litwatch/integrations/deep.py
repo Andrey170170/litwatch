@@ -16,9 +16,11 @@ reacts to no event, so the dispatcher never runs it: `card.requested` is the own
 already queued, and `card.ready` is emitted when the card is stored.
 
 Options: `url` (or $LITWATCH_DEEP_URL), `extensions` ({topic slug: extension}), `poll_seconds`
-(15) and `timeout_minutes` (45). There is no daily cap: `max_per_day` is refused. Keep
-`timeout_minutes` above the service's `DEEP_WALL_CLOCK_MIN` (30): a job running longer than it,
-by its own start, ends as stuck, so a lower one ends healthy jobs and lets a duplicate in.
+(15) and `timeout_minutes` (135). There is no daily cap: `max_per_day` is refused. Keep
+`timeout_minutes` above the service's `DEEP_WALL_CLOCK_MIN` (120, the time a read's writing,
+review and revisions may take): a job running longer than it, by its own start, ends as stuck,
+so a lower one ends healthy jobs and lets a duplicate in. The 15 minutes between the two are
+the service's to end its own run and for litwatch's next poll to see it.
 """
 
 from __future__ import annotations
@@ -122,7 +124,7 @@ class DeepClient:
         base_url: str,
         http: httpx.AsyncClient | None = None,
         poll_seconds: float = 15.0,
-        timeout_seconds: float = 45 * 60,
+        timeout_seconds: float = 135 * 60,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.http = http or httpx.AsyncClient(timeout=60.0)
@@ -259,7 +261,13 @@ class Deep:
                 {self.extensions[t.slug] for _, t, _ in topics if t.slug in self.extensions}
             ),
             "selections": [
-                {"name": name, "subject": t.subject, "rubric": t.rubric, "grade": g.value}
+                {
+                    "slug": t.slug,
+                    "name": name,
+                    "subject": t.subject,
+                    "rubric": t.rubric,
+                    "grade": g.value,
+                }
                 for name, t, g in topics
             ],
         }
@@ -294,6 +302,6 @@ def load(name: str, options: dict[str, Any], config: Config) -> Deep:
     client = DeepClient(
         required(options, "url", env="LITWATCH_DEEP_URL"),
         poll_seconds=float(options.get("poll_seconds", 15.0)),
-        timeout_seconds=float(options.get("timeout_minutes", 45)) * 60,
+        timeout_seconds=float(options.get("timeout_minutes", 135)) * 60,
     )
     return Deep(client, name=name, extensions=options.get("extensions"))

@@ -118,7 +118,8 @@ def event_lines(trace: list[dict[str, Any]]) -> Iterator[str]:
                 yield f"{INDENT}went: {_fetched(e['fetch'])}"
         elif kind == "submit":
             if e.get("ok"):
-                yield f"{at}  submit · ok"
+                stood = e.get("stood") or []
+                yield f"{at}  submit · ok" + (f" · stood by: {'; '.join(stood)}" if stood else "")
             else:
                 yield f"{at}  submit · rejected"
                 for error in e.get("errors") or []:

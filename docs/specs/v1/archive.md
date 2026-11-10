@@ -46,7 +46,7 @@ job (`pdfs wanted` holds the background ones again). LaTeX is never held. litwat
   archive integration reacts to `grade.changed` and `paper.saved`, and to a revision of such a paper, and asks when
   it handles the event, so a grade already taken back asks for nothing;
 - a PDF opened: `GET /api/papers/{id}/pdf` asks urgently and waits up to the client's `wait_seconds`, then sends
-  the reader to arXiv;
+  the reader to arXiv; `?version=<n>` asks for that version instead of the one litwatch knows of;
 - a full-text pass with no LaTeX source: the queue already asks urgently for the PDF (N3).
 
 ## Search

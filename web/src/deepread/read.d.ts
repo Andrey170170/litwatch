@@ -292,7 +292,7 @@ export interface Read {
                  */
                 w: number;
                 /**
-                 * The box's height.
+                 * The box's height, at least 40.
                  */
                 h: number;
                 /**
@@ -631,7 +631,7 @@ export interface Read {
                  */
                 w: number;
                 /**
-                 * The box's height.
+                 * The box's height, at least 40.
                  */
                 h: number;
                 /**

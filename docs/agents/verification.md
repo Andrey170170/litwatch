@@ -71,10 +71,15 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
   worker over a scratch directory; it prints the URL and token to export) and `stop <dir>` when done. Its worker
   downloads from arXiv, so ask it for a handful of papers.
 
-### Deep-card service (`deep/`)
-- Works means: a paper submitted gets a card back with the lab's fields filled from the paper.
-- Evidence: `npm test` and `npm run typecheck`; for a change to the agent or its prompt, the owner's read of real
-  reads with each run's reviews, until the Deep quality harness exists (Known gaps).
+### Deep service (`deep/`)
+- Works means: a paper submitted gets a Deep read back: valid against the schema, through the code checks, reviewed,
+  with the figures it shows.
+- Evidence: `npm test` and `npm run typecheck`, the model a fake one; for a change to the agent, its prompt or its
+  reviewer, the owner's read of real reads with each run's reviews, until the Deep quality harness exists (Known
+  gaps). The tests of the browser and poppler (`tests/imaging.test.ts`) skip where those are not installed, and the
+  one through the web app's own render page where `web/` is not built: for a change to `src/imaging.ts`, the render
+  page or the Dockerfile, install both (`deep/README.md`), build `web/`, and see them run; then build the image and
+  start its browser once, as CI's container job does.
 - How: in `deep/`, `npm test && npm run typecheck`.
 
 ### Stack and container
