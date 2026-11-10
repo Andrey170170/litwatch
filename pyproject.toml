@@ -34,6 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "import-linter>=2.1",
     "prometheus-client>=0.20",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -56,6 +57,83 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# The role rules (docs/specs/architecture.md, "Roles"), by package: `core` is Records and
+# Policies, `store` Repositories, `llm` the Model gate, `api` and `cli` Entries, and every other
+# package a Service. `config`, `logs`, `concurrency` and `writing` are shared modules any role but
+# `core` and `store` may import. `tests/test_roles.py` keeps the lists below in step with the
+# packages, and checks that Services form no cycle. `ignore_imports` lists today's violations: it
+# only shrinks, and an entry that no longer matches an import fails the check.
+[tool.importlinter]
+root_package = "litwatch"
+
+[[tool.importlinter.contracts]]
+name = "core imports nothing of litwatch outside core"
+type = "forbidden"
+source_modules = ["litwatch.core"]
+forbidden_modules = ["litwatch.*"]
+
+[[tool.importlinter.contracts]]
+name = "store imports only core and itself"
+type = "forbidden"
+source_modules = ["litwatch.store"]
+forbidden_modules = [
+    "litwatch.analysis",
+    "litwatch.api",
+    "litwatch.archive",
+    "litwatch.classification",
+    "litwatch.cli",
+    "litwatch.concurrency",
+    "litwatch.config",
+    "litwatch.digests",
+    "litwatch.events",
+    "litwatch.feedback",
+    "litwatch.fulltext",
+    "litwatch.grading",
+    "litwatch.intake",
+    "litwatch.integrations",
+    "litwatch.jobs",
+    "litwatch.llm",
+    "litwatch.logs",
+    "litwatch.publications",
+    "litwatch.quality",
+    "litwatch.seeds",
+    "litwatch.writing",
+]
+ignore_imports = [
+    "litwatch.store.calls -> litwatch.llm.types",
+    "litwatch.store.digests -> litwatch.events",
+    "litwatch.store.papers -> litwatch.events",
+]
+
+[[tool.importlinter.contracts]]
+name = "a gate (llm) imports no Service and no Entry"
+type = "forbidden"
+source_modules = ["litwatch.llm"]
+forbidden_modules = [
+    "litwatch.analysis",
+    "litwatch.api",
+    "litwatch.archive",
+    "litwatch.classification",
+    "litwatch.cli",
+    "litwatch.digests",
+    "litwatch.events",
+    "litwatch.feedback",
+    "litwatch.fulltext",
+    "litwatch.grading",
+    "litwatch.intake",
+    "litwatch.integrations",
+    "litwatch.jobs",
+    "litwatch.publications",
+    "litwatch.quality",
+    "litwatch.seeds",
+]
+
+[[tool.importlinter.contracts]]
+name = "nothing imports an Entry, but cli may import api"
+type = "protected"
+protected_modules = ["litwatch.api", "litwatch.cli"]
+allowed_importers = ["litwatch.cli"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/litwatch"]
