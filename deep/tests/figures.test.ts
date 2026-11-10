@@ -83,7 +83,7 @@ test("pdfPage() shows a page of litwatch's PDF and crop() keeps a part of one as
       assert.deepEqual(calls.pictures.at(-1)!.crop, [0.1, 0.2, 0.9, 0.5]);
       assert.deepEqual(figures.made.get("fig-3"), { webp: WEBP, view: shown[1] });
       assert.equal(shown.length, 2);
-      assert.deepEqual(asked, ["/api/papers/2610.00001/pdf Bearer secret"], "the PDF is litwatch's, fetched once, and no e-print was needed");
+      assert.deepEqual(asked, ["/api/papers/2610.00001/pdf?version=2 Bearer secret"], "the PDF is litwatch's, of the text's version, fetched once, and no e-print was needed");
 
       await assert.rejects(hosts.pdfPage!([4]), /the PDF has pages 1 to 3; got 4/);
       await assert.rejects(hosts.crop!([1, [0.5, 0.2, 0.4, 0.9], "x"]), /left < right and top < bottom/);
@@ -112,7 +112,7 @@ test("a PDF litwatch does not hold is arXiv's at the version of litwatch's text,
     const { figures, hosts } = session(url, 2);
     try {
       assert.deepEqual(await hosts.pdfPage!([1]), { page: 1, pages: 2, width: 800, height: 400 }, "version 2's two pages, not the latest's five");
-      assert.deepEqual(asked, ["/api/papers/2610.00001/pdf Bearer secret", "/pdf/2610.00001v2"], "the token goes to litwatch only");
+      assert.deepEqual(asked, ["/api/papers/2610.00001/pdf?version=2 Bearer secret", "/pdf/2610.00001v2"], "the token goes to litwatch only");
       assert.equal(figures.usedLatest, false);
       await assert.rejects(hosts.crop!([3, [0, 0, 1, 1], "fig-9"]), /the PDF has pages 1 to 2; got 3/, "a page only the latest version has is not there to crop");
     } finally {
@@ -126,7 +126,7 @@ test("with no version from litwatch the PDF arXiv is asked for is its latest, an
     const { figures, hosts } = session(url, null);
     try {
       assert.deepEqual(await hosts.pdfPage!([5]), { page: 5, pages: 5, width: 800, height: 400 });
-      assert.equal(asked.at(-1), "/pdf/2610.00001");
+      assert.deepEqual(asked, ["/api/papers/2610.00001/pdf Bearer secret", "/pdf/2610.00001"], "no version to ask litwatch or arXiv for");
       assert.equal(figures.usedLatest, true);
     } finally {
       await figures.dispose();

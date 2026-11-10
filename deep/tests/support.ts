@@ -298,8 +298,8 @@ export async function withSite<T>(work: (site: { url: string; asked: string[] })
   const server = createServer((req, res) => {
     asked.push(`${req.url}${req.headers.authorization ? ` ${req.headers.authorization}` : ""}`);
     if (req.url?.startsWith("/e-print/")) res.writeHead(eprintStatus, { "content-type": "application/gzip" }).end(eprintStatus === 200 ? EPRINT : "");
-    else if (req.url === `/api/papers/${PAPER.id}/pdf` && !archived) res.writeHead(307, { location: `/pdf/${PAPER.id}` }).end();
-    else if (req.url === `/api/papers/${PAPER.id}/pdf`) res.writeHead(200, { "content-type": "application/pdf" }).end(pdf(3));
+    else if (req.url?.split("?")[0] === `/api/papers/${PAPER.id}/pdf` && !archived) res.writeHead(307, { location: `/pdf/${PAPER.id}` }).end();
+    else if (req.url?.split("?")[0] === `/api/papers/${PAPER.id}/pdf`) res.writeHead(200, { "content-type": "application/pdf" }).end(pdf(3));
     else if (req.url?.startsWith(`/pdf/${PAPER.id}`)) res.writeHead(200, { "content-type": "application/pdf" }).end(pdf(Number(/v(\d+)$/.exec(req.url)?.[1] ?? 5)));
     else res.writeHead(404).end();
   });

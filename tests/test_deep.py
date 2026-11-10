@@ -731,6 +731,15 @@ async def test_the_read_token_fetches_a_papers_pdf(db):
         got = await http.get(f"/api/papers/{P.id}/pdf", headers={"Authorization": "Bearer r3ad"})
         assert got.status_code == 200 and got.content == b"%PDF-1.7 the paper"
         assert got.headers["content-type"] == "application/pdf"
+        # The version a read's text is of, asked for, is the version fetched, not the latest.
+        pinned = await http.get(
+            f"/api/papers/{P.id}/pdf",
+            params={"version": 1},
+            headers={"Authorization": "Bearer r3ad"},
+        )
+        assert pinned.status_code == 200
+        assert [j["version"] for j in fake.jobs] == [2, 1]
+        assert fake.pdf_versions == ["2", "1"]
         # Reading still, and nothing else: the token asks for no card.
         asked = await http.post(
             f"/api/papers/{P.id}/card", headers={"Authorization": "Bearer r3ad"}

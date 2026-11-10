@@ -74,14 +74,19 @@ export class Figures {
     this.ended = ended;
   }
 
+  /** The arXiv version litwatch's text is of, or undefined when it cannot say. */
+  private version(): number | undefined {
+    const version = this.paper.body_version;
+    return typeof version === "number" && Number.isInteger(version) && version >= 1 ? version : undefined;
+  }
+
   /** One of arXiv's files of the paper (`e-print`, `pdf`) at the version litwatch's text is of, or at the latest
    * when litwatch cannot say which that is. */
   private async arxiv(what: "e-print" | "pdf"): Promise<{ status: number; bytes: Buffer; url: string }> {
-    const version = this.paper.body_version;
-    const known = typeof version === "number" && Number.isInteger(version) && version >= 1;
-    const url = `${this.cfg.arxivUrl ?? "https://arxiv.org"}/${what}/${this.paper.id}${known ? `v${version}` : ""}`;
+    const version = this.version();
+    const url = `${this.cfg.arxivUrl ?? "https://arxiv.org"}/${what}/${this.paper.id}${version ? `v${version}` : ""}`;
     const got = await fetchFile(url, { maxBytes: MAX_DOWNLOAD_BYTES, contact: this.cfg.contact, pace: this.pace, ended: this.ended, guard: this.cfg.guard });
-    if (got.status === 200 && !known) this.usedLatest = true;
+    if (got.status === 200 && !version) this.usedLatest = true;
     return { ...got, url };
   }
 
@@ -100,11 +105,12 @@ export class Figures {
     return (this.dir ??= mkdtemp(path.join(tmpdir(), "litwatch-deep-")));
   }
 
-  /** The paper's PDF, fetched on first use and kept as a file for poppler: litwatch's own, or arXiv's when
-   * litwatch has none and sends the reader on. */
+  /** The paper's PDF, fetched on first use and kept as a file for poppler: litwatch's own, of the version the text is
+   * of where litwatch can say, or arXiv's when litwatch has none and sends the reader on. */
   private document(): Promise<{ file: string; pages: number }> {
     this.pdf ??= (async () => {
-      const url = `${this.cfg.litwatchUrl}/api/papers/${encodeURIComponent(this.paper.id)}/pdf`;
+      const version = this.version();
+      const url = `${this.cfg.litwatchUrl}/api/papers/${encodeURIComponent(this.paper.id)}/pdf${version ? `?version=${version}` : ""}`;
       const resp = await this.pace(new URL(url).host, () =>
         fetch(url, {
           headers: this.cfg.litwatchToken ? { authorization: `Bearer ${this.cfg.litwatchToken}` } : {},

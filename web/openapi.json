@@ -349,7 +349,7 @@
     "/api/papers/{paper_id}/pdf": {
       "get": {
         "summary": "Pdf",
-        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record\nof it. arXiv's PDF without an archive, for a paper neither holds, or when the archive\ncannot get it in time. The database is read before the wait, which holds no connection.",
+        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record\nof it. arXiv's PDF without an archive, for a paper neither holds, or when the archive\ncannot get it in time. The database is read before the wait, which holds no connection.\n`version` asks for that version's PDF, as the deep service does for the version its text\nis of; without it, the version litwatch knows of.",
         "operationId": "pdf_api_papers__paper_id__pdf_get",
         "parameters": [
           {
@@ -360,6 +360,25 @@
               "type": "string",
               "title": "Paper Id"
             }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "This arXiv version's PDF",
+              "title": "Version"
+            },
+            "description": "This arXiv version's PDF"
           }
         ],
         "responses": {

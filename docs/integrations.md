@@ -278,7 +278,8 @@ for good; without `v` it is fetched afresh each time.
 **The read token** (`LITWATCH_READ_TOKEN`), which the service's agent uses, searches and reads
 papers (`GET /api/papers`, `GET /api/papers/<id>`) and fetches a paper's PDF
 (`GET /api/papers/<id>/pdf`), from which the service cuts the figures of a paper with no LaTeX
-source. Everything else answers it 403.
+source. The service asks for the version its text is of (`?version=<n>`), which the archive is
+asked for, or arXiv's PDF of it. Everything else answers it 403.
 
 ### The Notion export
 
