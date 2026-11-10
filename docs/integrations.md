@@ -50,16 +50,21 @@ class Integration(Protocol):
     name: str          # unique; also the key of its cursor
     description: str   # one or two sentences for its card under Settings
 
+class Reacting(Integration, Protocol):
     def wants(self, event: Event) -> bool: ...
     async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None: ...
 ```
+
+An integration that reacts to events is a `Reacting` one; only those are handed events and keep
+a cursor. `deep`, whose work is the full-text queue's, is a plain `Integration`.
 
 - `wants` is a cheap filter on the event alone (no I/O). Events it does not want are passed
   over without calling `handle`.
 - `handle` does the work. `conn` is an autocommit async psycopg connection (rows are dicts);
   group writes with `async with conn.transaction():`. The connection is the integration's own
   and serves one event at a time.
-- Optional, used when present:
+- Optional, used when present (`aclose` and `requires` on any integration, the rest on a
+  `Reacting` one):
   - `async def setup(self, conn)`: awaited whenever the dispatcher starts, before any event, under
     the same lock as `handle`. It must be safe to run again. When it raises, no event is handed
     over; the error is shown under Settings → Integrations and setup is tried again after the

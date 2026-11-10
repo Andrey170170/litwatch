@@ -1,5 +1,5 @@
-"""The dispatcher: hands outbox events to each loaded integration, in id order, from that
-integration's own cursor.
+"""The dispatcher: hands outbox events to each loaded integration that reacts to them
+(`events.Reacting`), in id order, from that integration's own cursor.
 
 Each integration is delivered to on its own connection and its own loop, so one that fails
 or takes long (a deep card can take most of an hour) delays nobody else. When `handle`
@@ -13,8 +13,8 @@ An integration's `setup` runs when its loop starts, under the same lock, before 
 handed over. A failing setup is recorded for the API like a failing event, with no event
 attached, and tried again after the same backoff; the integration's events wait meanwhile.
 
-An integration with work of its own that no event brings (deep's papers waiting for their
-text) gets an `idle(conn)` call when it has nothing to be handed, at most once a minute,
+An integration with work of its own that no event brings (a delivery waiting on something
+outside litwatch) gets an `idle(conn)` call when it has nothing to be handed, at most once a minute,
 under the same lock. A failing `idle` is logged and changes nothing else.
 """
 
@@ -28,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 
 from litwatch import store
-from litwatch.events import Integration
+from litwatch.events import Reacting
 from litwatch.store import outbox
 
 log = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def _describe(exc: BaseException) -> str:
 
 
 async def deliver(
-    conn: psycopg.AsyncConnection, integration: Integration, now: datetime | None = None
+    conn: psycopg.AsyncConnection, integration: Reacting, now: datetime | None = None
 ) -> int:
     """One pass: hand over the settled events after the cursor, up to a batch, stopping at the
     first failure. Returns how many events the cursor moved past, wanted or not. `now` fixes
@@ -94,7 +94,7 @@ async def deliver(
 
 
 async def start(
-    conn: psycopg.AsyncConnection, integration: Integration, now: datetime | None = None
+    conn: psycopg.AsyncConnection, integration: Reacting, now: datetime | None = None
 ) -> bool:
     """Make the integration's cursor (at the last settled event, the first time) and run its
     setup under the dispatch lock. Returns whether the integration is set up: False while
@@ -128,7 +128,7 @@ async def start(
         return True
 
 
-async def idle(conn: psycopg.AsyncConnection, integration: Integration) -> bool:
+async def idle(conn: psycopg.AsyncConnection, integration: Reacting) -> bool:
     """Call the integration's `idle` hook, if it has one, under its delivery lock. A failure is
     logged and goes no further. Returns whether the hook ran."""
     hook = getattr(integration, "idle", None)
@@ -144,7 +144,7 @@ async def idle(conn: psycopg.AsyncConnection, integration: Integration) -> bool:
     return True
 
 
-async def _loop(dsn: str, integration: Integration) -> None:
+async def _loop(dsn: str, integration: Reacting) -> None:
     started = False
     clock = asyncio.get_running_loop().time
     idled = clock() - IDLE_HOOK_SECONDS
@@ -168,8 +168,9 @@ async def _loop(dsn: str, integration: Integration) -> None:
             await asyncio.sleep(IDLE_SECONDS)
 
 
-async def run_forever(dsn: str, integrations: list[Integration]) -> None:
-    """Deliver to every integration until cancelled, each in a loop of its own."""
+async def run_forever(dsn: str, integrations: list[Reacting]) -> None:
+    """Deliver to every integration until cancelled, each in a loop of its own. Closing them is
+    their owner's (the app's), once everything that uses them has stopped."""
     log.info("dispatcher on: %s", ", ".join(i.name for i in integrations))
     tasks = [asyncio.create_task(_loop(dsn, i), name=f"dispatch:{i.name}") for i in integrations]
     try:
@@ -180,7 +181,3 @@ async def run_forever(dsn: str, integrations: list[Integration]) -> None:
         for task in tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        for integration in integrations:
-            if close := getattr(integration, "aclose", None):
-                with contextlib.suppress(Exception):
-                    await close()

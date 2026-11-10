@@ -18,7 +18,7 @@ from croniter import croniter
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
-from litwatch import store
+from litwatch import events, store
 from litwatch.api.deps import budget_lines
 from litwatch.archive import ArchiveClient
 from litwatch.config import ROLES, Config, secret
@@ -128,7 +128,7 @@ class Facts:
     # the owner acknowledged it: the owner's Acknowledge is for the app's run status alone
     status: dict[str, Any]
     passes: dict[tuple[str, str], int]
-    cursors: dict[str, Cursor]  # of the loaded integrations
+    cursors: dict[str, Cursor]  # of the loaded integrations that react to events
     spend: list[Spend]
     probes: dict[str, str | None] = field(default_factory=dict)  # name: error, None if it answers
     night: Night | None = None
@@ -156,7 +156,7 @@ async def facts(
         jobs=jobs,
         status=await reading.status(conn) | await reading.stopped(conn, unacknowledged=False),
         passes=await fulltext.count_by_state(conn),
-        cursors=await outbox.cursors(conn, [i.name for i in integrations]),
+        cursors=await outbox.cursors(conn, [i.name for i in events.reacting(integrations)]),
         spend=await budget_lines(conn, config.budget),
         night=await _night(conn),
         observed=await calls.observations(conn),
