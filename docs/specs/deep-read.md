@@ -1,6 +1,6 @@
 # Deep read
 
-Status (2026-11-09): **shaped, not built.** This replaces the Deep card (`deep` integration, [v1
+Status (2026-11-09): **planned, not built**; the build plan is [`plans/deep-read.md`](../plans/deep-read.md). This replaces the Deep card (`deep` integration, [v1
 integrations.md](v1/integrations.md), "Changed: deep"; [DESIGN.md](v1/DESIGN.md), "The ladder", rung 3) with the Deep
 read. The visual reference is [`deep-read/sketches/`](deep-read/sketches/index.html): R1 is the read on its own, R2
 puts it in the paper page. Where this spec and the sketches differ, this spec decides.
@@ -83,7 +83,7 @@ data, models, compute, statistics. **Process notes** stay as they are (decisions
 
 - **The paper's own figures**, inline where the read discusses them, with the paper's figure number and a caption in
   the read's words; tap to zoom. They come from the LaTeX source's figure files, rendered to images; for a paper with
-  only a PDF, cropped from its pages by caption.
+  only a PDF, cropped from its pages by the agent, which looks at the page.
 - **Tables rebuilt** from the paper as real tables, cut to the rows that matter and said so in the caption. A cell can
   carry a short note shown on hover or tap; the column under the pointer is highlighted so a number reads against its
   header. A table may be heat-coloured where the values compare.
@@ -201,10 +201,9 @@ names the ones to remake, through "Write again" or an agent, so no remake path i
 - A reviewer on a different model than the writer.
 - Changing which papers get a read.
 
-## Left to the build plan
+## Settled by the build plan
 
-How figure images are fetched, stored and served (the archive strips figures from the LaTeX source today, and its
-client reads only text and PDFs); how the Deep read components are shared between `web/` and `deep/` and how
-the `deep` image runs a headless browser for `render`; the block schema in full; the automatic layout library (ELK is
-the candidate); confirming end to end that the model accepts the screenshots (pi-ai declares image input for
-`gpt-6.1-sol` on the subscription route).
+[`plans/deep-read.md`](../plans/deep-read.md) settles what this spec left open: figures come from the paper's e-print,
+fetched from arXiv by the `deep` service at the version litwatch read (the archive keeps no figures), and are stored
+by litwatch with the read; `render` opens a page litwatch serves, built from the web app's own Deep read components;
+the schema is TypeBox in `deep/`, exported for the web app; diagrams are laid out with ELK.
