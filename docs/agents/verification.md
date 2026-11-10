@@ -20,8 +20,8 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - Works means: quality holds or improves on the gold set at a known cost.
 - Evidence: the quality harness before and after on the same gold set; for classification,
   `litwatch eval classify` and `litwatch eval classify-report` against the evaluation labels (recall per Focus class,
-  cost per call), and for grading the replay N2 builds. A report in `evals/` is committed when it sets a default or
-  records a milestone check.
+  cost per call), and for grading the replay (`litwatch eval replay`, then `litwatch eval report`: recall per Focus
+  topic and cohort). A report in `evals/` is committed when it sets a default or records a milestone check.
 - How: the harness command for the artifact (built with the milestone that introduces it, see Known gaps).
 
 ### Model providers (`llm/`)
@@ -133,10 +133,12 @@ preference set.
 - **The quality harness and the preference set** are partial. Classification has its harness (`litwatch eval
   classify`) and Briefs theirs (`litwatch eval briefs`, `eval briefs-report`, over `evals/preferences/briefs.yaml`):
   rule checks and the owner's read so far; the judge model and the comparison with the last approved output join
-  once the preference set holds approved outputs. Digests arrive in N4. Deep reads have none: a Deep quality
+  once the preference set holds approved outputs. Digests have rule checks (`litwatch eval digests`: the voice
+  rules and the picks each depth allows) and the owner's read. Deep reads have none: a Deep quality
   harness (`litwatch eval deep`, with a judge from another lab) is a backlog item (`docs/backlog.md`). Until it is
   built, a change to the Deep agent, its prompt or its reviewer is shown by the owner's read of real reads and the
   run's own record of them, the reviews and code checks each attempt keeps (`litwatch deep trace`), as
   `docs/plans/deep-read.md` (D3) sets out for the Deep read's own build.
-- **The stack smoke test's page list** (`pages()` in `tests/stack/pages.py`) holds the pages W1 built; it grows
-  with W2–W4 and N7.
+- **The stack smoke test's page list** (`pages()` in `tests/stack/pages.py`) holds every page in
+  `web/src/router.tsx`, and a new page joins it; a digest's own page and a Calibrate session are visited only when
+  the API has one, which the smoke stack has not.

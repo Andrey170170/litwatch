@@ -129,7 +129,9 @@ Carried notes: do not share v1's Postgres with services holding transactions ope
 md5 and mtime against the real library once.
 
 **N9 · Release** (the first spec's M8; the licence Apache-2.0 since 2026-10-20): compose file, install and configuration docs, repository clean-up,
-Apache-2.0 licence, `v1.0.0`; `evals/` and homelab specifics leave the repository; the AGPL `pdf` extra stays optional.
+Apache-2.0 licence, `v1.0.0`; `evals/` and homelab specifics leave the repository, but for `evals/labels/`, which moves
+with the code that reads it (`quality.replay.LABELS`; the image ships it for Run replay); the AGPL `pdf` extra stays
+optional.
 
 **The Notion export** (decisions 68–76, after the switch; [integrations.md](integrations.md)): the built-in `notion`
 integration and its database for the PI, on the owner's instance on the existing LitWatch page, then 0.14's Notion
