@@ -12,7 +12,7 @@ import { addDays, nextSpan } from "@/lib/digests";
  * navigation. Counts only; the pages keep their own reads. */
 export const summaryQuery = queryOptions({
   queryKey: ["summary"],
-  queryFn: async () => ok(await api.GET("/api/summary")),
+  queryFn: async ({ signal }) => ok(await api.GET("/api/summary", { signal })),
   staleTime: 30_000,
   refetchInterval: 60_000,
   // A sidebar mounting (the reading one for the Settings one, the phone's drawer) is navigation, not a reason.
@@ -25,27 +25,27 @@ export const refreshSummary = (qc: QueryClient) => void qc.invalidateQueries({ q
 
 export const topicsQuery = queryOptions({
   queryKey: ["topics"],
-  queryFn: async () => ok(await api.GET("/api/topics")),
+  queryFn: async ({ signal }) => ok(await api.GET("/api/topics", { signal })),
   staleTime: 60_000,
 });
 
 export const paperQuery = (id: string) =>
   queryOptions({
     queryKey: ["paper", id],
-    queryFn: async () => ok(await api.GET("/api/papers/{paper_id}", { params: { path: { paper_id: id } } })),
+    queryFn: async ({ signal }) => ok(await api.GET("/api/papers/{paper_id}", { signal, params: { path: { paper_id: id } } })),
   });
 
 /** The search box's reach beyond the collection: the archive's size, which changes slowly. */
 export const searchScopeQuery = queryOptions({
   queryKey: ["search-scope"],
-  queryFn: async () => ok(await api.GET("/api/search/scope")),
+  queryFn: async ({ signal }) => ok(await api.GET("/api/search/scope", { signal })),
   staleTime: 60 * 60_000,
 });
 
 /** The class tree, for classifying a paper by hand. */
 export const taxonomyQuery = queryOptions({
   queryKey: ["taxonomy"],
-  queryFn: async () => ok(await api.GET("/api/settings/taxonomy")),
+  queryFn: async ({ signal }) => ok(await api.GET("/api/settings/taxonomy", { signal })),
   staleTime: 5 * 60_000,
 });
 
@@ -91,9 +91,10 @@ export function freshVisit(qc: QueryClient, pathname: string) {
 export const papersQuery = (search: ListSearch, shelf: Shelf, limit = 50) =>
   infiniteQueryOptions({
     queryKey: ["papers", search, shelf.key, limit],
-    queryFn: async ({ pageParam }) =>
+    queryFn: async ({ pageParam, signal }) =>
       ok(
         await api.GET("/api/papers", {
+          signal,
           params: { query: { ...shelfFilter(search, shelf), topic: search.topic, source: "collection", limit, offset: pageParam } },
         }),
       ),
@@ -107,7 +108,7 @@ export const papersQuery = (search: ListSearch, shelf: Shelf, limit = 50) =>
 export const outsideQuery = (q: string | undefined, search: ListSearch) =>
   queryOptions({
     queryKey: ["papers", "outside", q ?? "", sortOf(search)],
-    queryFn: async () => ok(await api.GET("/api/papers", { params: { query: { q, source: "outside", sort: sortOf(search), limit: 50 } } })),
+    queryFn: async ({ signal }) => ok(await api.GET("/api/papers", { signal, params: { query: { q, source: "outside", sort: sortOf(search), limit: 50 } } })),
     enabled: !!q,
     ...listOptions,
   });
@@ -116,9 +117,10 @@ export const outsideQuery = (q: string | undefined, search: ListSearch) =>
 export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit = 50) =>
   infiniteQueryOptions({
     queryKey: ["topic", slug, search, shelf.key, limit],
-    queryFn: async ({ pageParam }) =>
+    queryFn: async ({ pageParam, signal }) =>
       ok(
         await api.GET("/api/topics/{slug}", {
+          signal,
           params: { path: { slug }, query: { ...shelfFilter(search, shelf), limit, offset: pageParam } },
         }),
       ),
@@ -134,21 +136,21 @@ export const topicQuery = (slug: string, search: ListSearch, shelf: Shelf, limit
 /** A Digest view's read, under `["digest", <view>, ...]`, kept as a list is (`listOptions`): a Day or Week stepped
  * to stays as read for the visit and the way back, and a fresh visit of the view refetches it behind what is shown
  * (`freshVisit`). A digest's own read is under its id, the same on the desktop's slide-over and the phone's page. */
-const digestRead = <T,>(key: (string | number)[], queryFn: () => Promise<T>) => queryOptions({ queryKey: ["digest", ...key], queryFn, ...listOptions });
+const digestRead = <T,>(key: (string | number)[], queryFn: (ctx: { signal: AbortSignal }) => Promise<T>) => queryOptions({ queryKey: ["digest", ...key], queryFn, ...listOptions });
 
-export const dayQuery = (day: string) => digestRead(["day", day], async () => ok(await api.GET("/api/digests/days/{day}", { params: { path: { day } } })));
+export const dayQuery = (day: string) => digestRead(["day", day], async ({ signal }) => ok(await api.GET("/api/digests/days/{day}", { signal, params: { path: { day } } })));
 
 /** The week holding `day`. */
-export const weekQuery = (day: string) => digestRead(["week", day], async () => ok(await api.GET("/api/digests/weeks/{day}", { params: { path: { day } } })));
+export const weekQuery = (day: string) => digestRead(["week", day], async ({ signal }) => ok(await api.GET("/api/digests/weeks/{day}", { signal, params: { path: { day } } })));
 
-export const digestQuery = (id: number) => digestRead([String(id)], async () => ok(await api.GET("/api/digests/{digest_id}", { params: { path: { digest_id: id } } })));
+export const digestQuery = (id: number) => digestRead([String(id)], async ({ signal }) => ok(await api.GET("/api/digests/{digest_id}", { signal, params: { path: { digest_id: id } } })));
 
 /** History back from `until`, a span of days at a time (`SPAN`), older pages as the reader scrolls until the
  * archive's start. */
 export const historyQuery = (until: string, span: number) =>
   infiniteQueryOptions({
     queryKey: ["digest", "history", until],
-    queryFn: async ({ pageParam }) => ok(await api.GET("/api/digests", { params: { query: { until: pageParam, since: addDays(pageParam, -span) } } })),
+    queryFn: async ({ pageParam, signal }) => ok(await api.GET("/api/digests", { signal, params: { query: { until: pageParam, since: addDays(pageParam, -span) } } })),
     initialPageParam: until,
     getNextPageParam: (_last, pages) => nextSpan(pages),
     ...listOptions,
@@ -162,7 +164,7 @@ export const historyQuery = (until: string, span: number) =>
  * page is open or on the way back to it, and a page left keeps its rows whatever its siblings or subpages read
  * meanwhile (two pages reading one endpoint each keep their own copy). What a write settles is patched into the
  * cached page (`settle`, `settleFromPaper`); a write that changes a page invalidates its reads (`settingsReads`). */
-const settingsRead = <T,>(page: string, name: string, queryFn: () => Promise<T>) => queryOptions({ queryKey: ["settings", page, name], queryFn, ...listOptions });
+const settingsRead = <T,>(page: string, name: string, queryFn: (ctx: { signal: AbortSignal }) => Promise<T>) => queryOptions({ queryKey: ["settings", page, name], queryFn, ...listOptions });
 
 /** The reads of a Settings page and its subpages (`page` and `page/...`), for a write that changes what they show. */
 export const settingsReads = (page: string) => ({
@@ -182,27 +184,27 @@ export async function patchRead<T>(qc: QueryClient, key: QueryKey, patch: (old: 
   else void qc.invalidateQueries({ queryKey: key, exact: true });
 }
 
-export const qualityQuery = (page: "needs" | "overview" | "runs") => settingsRead(page, "quality", async () => ok(await api.GET("/api/settings/quality")) as unknown as Quality);
+export const qualityQuery = (page: "needs" | "overview" | "runs") => settingsRead(page, "quality", async ({ signal }) => ok(await api.GET("/api/settings/quality", { signal })) as unknown as Quality);
 
-export const missesQuery = settingsRead("misses", "list", async () => ok(await api.GET("/api/settings/misses")));
+export const missesQuery = settingsRead("misses", "list", async ({ signal }) => ok(await api.GET("/api/settings/misses", { signal })));
 
-export const sessionsQuery = (page: "calibrate" | "overview") => settingsRead(page, "sessions", async () => ok(await api.GET("/api/settings/calibrate")) as unknown as SessionRow[]);
+export const sessionsQuery = (page: "calibrate" | "overview") => settingsRead(page, "sessions", async ({ signal }) => ok(await api.GET("/api/settings/calibrate", { signal })) as unknown as SessionRow[]);
 
 export const sessionQuery = (id: number) =>
-  settingsRead(`calibrate/${id}`, "session", async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })) as unknown as Session);
+  settingsRead(`calibrate/${id}`, "session", async ({ signal }) => ok(await api.GET("/api/settings/calibrate/{session_id}", { signal, params: { path: { session_id: id } } })) as unknown as Session);
 
-export const runsQuery = (page: "overview" | "runs") => settingsRead(page, "runs", async () => ok(await api.GET("/api/settings/runs")) as unknown as Run[]);
+export const runsQuery = (page: "overview" | "runs") => settingsRead(page, "runs", async ({ signal }) => ok(await api.GET("/api/settings/runs", { signal })) as unknown as Run[]);
 
-export const scheduleQuery = settingsRead("runs", "schedule", async () => ok(await api.GET("/api/settings/schedule")));
+export const scheduleQuery = settingsRead("runs", "schedule", async ({ signal }) => ok(await api.GET("/api/settings/schedule", { signal })));
 
 /** The jobs in their groups, for Runs and cost (`page` "runs") and the Jobs page ("runs/jobs"). */
-export const jobsQuery = (page: "runs" | "runs/jobs") => settingsRead(page, "jobs", async () => ok(await api.GET("/api/jobs")));
+export const jobsQuery = (page: "runs" | "runs/jobs") => settingsRead(page, "jobs", async ({ signal }) => ok(await api.GET("/api/jobs", { signal })));
 
 /** The re-run offer for a topic just saved, for the scopes ticked (and the date range when it is one of them). */
 export const rerunOfferQuery = (slug: string, scopes: RerunScope[], since: string | null, until: string | null) =>
   queryOptions({
     queryKey: ["settings", `topics/${slug}`, "rerun-offer", scopes, since, until],
-    queryFn: async () => ok(await api.GET("/api/jobs/reruns/offer", { params: { query: { topic: slug, scopes, since, until } } })),
+    queryFn: async ({ signal }) => ok(await api.GET("/api/jobs/reruns/offer", { signal, params: { query: { topic: slug, scopes, since, until } } })),
     // Read afresh each time the offer opens: the save it follows changes the counts (keywords) and versions.
     staleTime: 0,
     refetchOnWindowFocus: false,
@@ -210,23 +212,23 @@ export const rerunOfferQuery = (slug: string, scopes: RerunScope[], since: strin
 
 /** Both pages' reads of the jobs, for a write that changes them. */
 /** What Overview's Run replay would do: the replay running, or what a new or stopped one leaves to do and costs. */
-export const replayOfferQuery = settingsRead("overview", "replay-offer", async () => ok(await api.GET("/api/jobs/replays/offer")));
+export const replayOfferQuery = settingsRead("overview", "replay-offer", async ({ signal }) => ok(await api.GET("/api/jobs/replays/offer", { signal })));
 
 export const JOBS_PAGES = ["runs", "runs/jobs"] as const;
 
-export const configQuery = settingsRead("configuration", "config", async () => ok(await api.GET("/api/settings/config")) as Record<string, unknown>);
+export const configQuery = settingsRead("configuration", "config", async ({ signal }) => ok(await api.GET("/api/settings/config", { signal })) as Record<string, unknown>);
 
 /** `page` is "integrations" or an integration's events page, `integrations/<name>`. */
-export const integrationsQuery = (page: string) => settingsRead(page, "cards", async () => ok(await api.GET("/api/settings/integrations")));
+export const integrationsQuery = (page: string) => settingsRead(page, "cards", async ({ signal }) => ok(await api.GET("/api/settings/integrations", { signal })));
 
 /** The tree as a Settings page reads it (`page` is "topics", "taxonomy" or a topic's editor, `topics/<slug>`); the
  * paper's page and the labels elsewhere read `taxonomyQuery`. */
-export const settingsTaxonomyQuery = (page: string) => settingsRead(page, "taxonomy", async () => ok(await api.GET("/api/settings/taxonomy")));
+export const settingsTaxonomyQuery = (page: string) => settingsRead(page, "taxonomy", async ({ signal }) => ok(await api.GET("/api/settings/taxonomy", { signal })));
 
-export const taxonomyStatsQuery = (page: string) => settingsRead(page, "stats", async () => ok(await api.GET("/api/settings/taxonomy/stats")));
+export const taxonomyStatsQuery = (page: string) => settingsRead(page, "stats", async ({ signal }) => ok(await api.GET("/api/settings/taxonomy/stats", { signal })));
 
 /** How many papers of the last 90 days each of a topic's keywords matches, for the editor. */
 export const keywordsQuery = (slug: string, enabled = true) => ({
-  ...settingsRead(`topics/${slug}`, "keywords", async () => ok(await api.GET("/api/settings/topics/{slug}/keywords", { params: { path: { slug } } }))),
+  ...settingsRead(`topics/${slug}`, "keywords", async ({ signal }) => ok(await api.GET("/api/settings/topics/{slug}/keywords", { signal, params: { path: { slug } } }))),
   enabled,
 });
