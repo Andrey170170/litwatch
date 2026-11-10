@@ -285,7 +285,7 @@ function inlineTex(text: string): string[] {
 
 /** A numbered place code does not look up: an equation, an algorithm, a theorem, a footnote, a page, a line, and a
  * figure or table numbered in Roman numerals (IEEEtran's tables). It has the form of a place; whether the paper has it is the reviewer's to check, by name. */
-const OTHER_PLACE = /\b(?:Eqs?\.?|Equations?|Alg(?:orithm|\.)s?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|pp?\.|[Pp]ages?|[Ll]ines?)\s*\(?[A-Z]?\.?\d+(?:\.\d+)*[a-z]?\)?|\b(?:Fig(?:ure)?s?\.?|Tables?|Tabs?\.)\s*[IVX]{1,6}\b/g;
+const OTHER_PLACE = /\b(?:Eqs?\.?|Equations?|Alg(?:orithm|\.)s?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|pp?\.|[Pp]ages?|[Ll]ines?)\s*\(?[A-Z]?\.?\d+(?:\.\d+)*[a-z]?\)?|\b(?:Fig(?:ure)?s?\.?|Tables?|Tabs?\.)\s*[IVX]{1,6}\b(?!\/)/g;
 /** How a table's caption says the read cut the paper's table, which the spec asks it to say: the rows and columns
  * kept, counted ("11 of its 12 rows", "the first 5 columns"). The counts are the read's own. */
 const CUT_COUNTS = /(?<![\d.,])\d+(?:\s+of\s+(?:(?:its|the|all)\s+)?\d+)?\s+(?:[a-z-]+\s+)?(?:rows?|columns?)\b/gi;
@@ -369,12 +369,15 @@ export function check(read: Draft, ctx: CheckContext): Checked {
       const text = plainText(unit.text);
       const cited = cites(text);
       for (const c of cited) settle(unit.path, `${c.kind === "figure" ? "Figure" : "Table"} ${c.label}`, index.float(c.kind, c.label));
-      // the paper's places in a location and in prose given as the paper's (Related work cites other papers')
+      // the paper's places in a location, and in prose given as the paper's (Related work cites other papers'). Prose
+      // may name another paper's section, or read as one ("5 sec. 12 probes"): what the paper may lack there is the
+      // reviewer's, and only a location is refused.
       if (unit.where || unit.numbers) {
+        const look = (name: string, answer: Answer) => (unit.where ? settle(unit.path, name, answer) : answer !== "there" && unverified.add(name));
         const sections = sectionCites(text);
         for (const c of sections) {
-          if (c.label !== undefined) settle(unit.path, c.appendix ? `Appendix ${c.label}` : `§${c.label}`, index.section(c.label));
-          else settle(unit.path, "the appendix", index.appendix());
+          if (c.label !== undefined) look(c.appendix ? `Appendix ${c.label}` : `§${c.label}`, index.section(c.label));
+          else look("the appendix", index.appendix());
         }
         const others = [...text.matchAll(OTHER_PLACE)].map((m) => m[0].replace(/\s+/g, " "));
         for (const other of others) unverified.add(other);

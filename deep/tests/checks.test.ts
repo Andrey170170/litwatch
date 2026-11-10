@@ -305,10 +305,14 @@ test("a place code does not look up is the reviewer's, by name: an equation, an 
   assert.deepEqual(left("Table II", { paper: ieee }), [[], ["§3", "Table II"]]);
 });
 
-test("the paper's places in prose are held as a location's are, and Related work's are other papers'", () => {
+test("the paper's places in prose go to the reviewer where code cannot confirm them, and Related work's are other papers'", () => {
   const prose = check(saying("See Section 9999 and Eq. 9999 for the setup."), ctx());
-  assert.deepEqual([prose.errors, prose.unverified], [["/sections/1/blocks/0/text: cites §9999, but the paper has no section 9999"], ["Eq. 9999"]]);
+  assert.deepEqual([prose.errors, prose.unverified], [[], ["§9999", "Eq. 9999"]]);
   assert.deepEqual(check(saying("Section 2 sets it up."), ctx()), { errors: [], plots: [], unverified: [] });
+  // another paper's section, and what only reads as a section, are refused nowhere
+  for (const text of ["Unlike Section 9 of Smith et al. (2023), the authors train a linear probe.", "Each probe takes 5 sec. 12 probes run in parallel.", "The method works across apps. X is the input."])
+    assert.deepEqual(check(saying(text), ctx()).errors, [], text);
+  assert.deepEqual(check(saying("Table I/O is measured separately."), ctx()).unverified, [], "no Roman table");
   const related = changed((d) => ((d.sections.find((s) => s.kind === "related") as unknown as { takeaway: string }).takeaway = "Their Section 9 and Eq. 4 differ."));
   assert.deepEqual(check(related, ctx()), { errors: [], plots: [], unverified: [] });
 });

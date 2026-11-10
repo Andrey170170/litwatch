@@ -214,8 +214,8 @@ What submit checks beyond the schema:
 many cells as the table has columns; each edge between nodes the diagram has.
 - Places: a fig block's name is a figure figure() or crop() made in this session, and its number is the paper's ("Figure \
 6"). Every where names a place: a section or an appendix by its number as sections() gives it ("§3.2", "Appendix B.1") or \
-by its title, a figure or table, an equation, a page. A figure, table or section number the read cites, in a where or in \
-prose, that a LaTeX source's own numbering rules out is refused; a place code cannot look up goes to the reviewer by name.
+by its title, a figure or table, an equation, a page. A figure or table number the read cites, or a section number in a \
+where, that a LaTeX source's own numbering rules out is refused; a place code cannot look up goes to the reviewer by name.
 - Numbers: every number written in digits that the read gives as the paper's (a result, a setting, a count) appears in the \
 paper's text, in any common form (0.34 or 34%, .95 or 0.95, 1,200 or 1.2k, rounded to fewer places): in prose, captions, \
 facts and their tags, tables and diagrams. A value read off a plot cites its figure in the same sentence ("about 0.7 at \
