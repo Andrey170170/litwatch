@@ -119,6 +119,21 @@ test("a LaTeX source's headings carry its numbers: sections counted, lettered fr
   // a source that numbers its sections its own way is not guessed at
   const own = BODY.replace("\\appendix", "\\setcounter{section}{0}\\renewcommand{\\thesection}{S\\arabic{section}}");
   assert.ok(headings(own, "latex").every((h) => h.number === undefined));
+  // at any level, and by a class: one number set by the source leaves none of them LaTeX's to count
+  for (const custom of [
+    "\\setcounter{subsection}{3}",
+    "\\addtocounter{section}{1}",
+    "\\renewcommand\\thesubsection{\\thesection.\\alph{subsection}}",
+    "\\numberwithin{subsection}{section}",
+    "\\setcounter{secnumdepth}{1}",
+    "\\usepackage{chngcntr}",
+  ])
+    assert.ok(headings(nested.replace("\\subsection{Probe training}", `${custom}\n\\subsection{Probe training}`), "latex").every((h) => h.number === undefined), custom);
+  for (const cls of ["\\documentclass[journal]{IEEEtran}", "\\documentclass[aps,prl]{revtex4-2}", "\\documentclass{report}"])
+    assert.ok(headings(nested.replace("\\documentclass{article}", cls), "latex").every((h) => h.number === undefined), cls);
+  // a counter that numbers no section, and a setting in a comment, change nothing
+  for (const other of ["\\setcounter{figure}{3}", "% \\setcounter{subsection}{3}"])
+    assert.equal(headings(nested.replace("\\subsection{Probe training}", `${other}\n\\subsection{Probe training}`), "latex").find((h) => h.title === "Data")!.number, "2.2", other);
 });
 
 test("the outline gives each heading's number and says which were left out of the message", () => {

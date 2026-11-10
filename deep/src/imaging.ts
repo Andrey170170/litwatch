@@ -106,19 +106,26 @@ export class Studio implements Imaging {
     this.renderUrl = new URL("render.html", base.href.endsWith("/") ? base.href : `${base.href}/`).href;
   }
 
-  private async launch(): Promise<Browser> {
-    const running = await this.browser?.catch(() => undefined);
-    if (running?.isConnected()) return running;
-    this.browser = chromium.launch({
-      headless: true,
-      args: [
-        // names resolve for the render page's host only
-        `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ${new URL(this.origin).hostname}`,
-        // a container's /dev/shm is too small for a long page
-        "--disable-dev-shm-usage",
-      ],
-    });
-    return this.browser;
+  /** The browser, started where none is running. Every call waits on the one before it, and its promise is kept
+   * before anything is awaited, so calls that arrive together share one start: the first call's, and the restart
+   * of a browser that died. */
+  private launch(): Promise<Browser> {
+    const before = this.browser;
+    const browser = (async () => {
+      const running = await before?.catch(() => undefined);
+      if (running?.isConnected()) return running;
+      return chromium.launch({
+        headless: true,
+        args: [
+          // names resolve for the render page's host only
+          `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ${new URL(this.origin).hostname}`,
+          // a container's /dev/shm is too small for a long page
+          "--disable-dev-shm-usage",
+        ],
+      });
+    })();
+    this.browser = browser;
+    return browser;
   }
 
   /** A context whose requests go to `allowed` only, or nowhere, and which is closed after `limitMs` whatever the
@@ -251,8 +258,10 @@ export class Studio implements Imaging {
   }
 
   async close(): Promise<void> {
-    const browser = await this.browser?.catch(() => undefined);
+    // forgotten before it is awaited: a call that arrives meanwhile starts a browser of its own
+    const started = this.browser;
     this.browser = undefined;
+    const browser = await started?.catch(() => undefined);
     await browser?.close().catch(() => undefined);
   }
 }

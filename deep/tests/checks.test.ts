@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { check, drawErrors, type CheckContext } from "../src/checks.ts";
-import { PaperIndex, figureLabel } from "../src/places.ts";
+import { PaperIndex, cites, figureLabel } from "../src/places.ts";
 import { draftErrors, type Draft } from "../src/read.ts";
 import { BODY, blocks, changed, draft } from "./support.ts";
 
@@ -147,7 +147,59 @@ test("a figure code can neither find nor rule out is the reviewer's, by name: in
   // a source that sets the figure counter itself: no number within the count is known to be the paper's
   const reset = APPENDIX_FIGURE.replace("\\appendix", "\\appendix\\setcounter{figure}{0}\\renewcommand{\\thefigure}{S\\arabic{figure}}");
   assert.deepEqual(left(saying("See Figures 1 and S1."), { paper: reset }), [[], ["Figure 1", "Figure S1"]]);
-  assert.deepEqual(left(saying("See Figure 3."), { paper: reset })[0], ["/sections/1/blocks/0/text: cites Figure 3, but the paper's source has at most 2 figures"]);
+  assert.deepEqual(left(saying("See Figure 3."), { paper: reset }), [[], ["Figure 3"]], "past the count too: the count says nothing of numbers the source sets");
+});
+
+test("a LaTeX source that numbers its figures itself has no figure number refused or confirmed", () => {
+  const left = (text: string, paper: string) => {
+    const checked = check(saying(text), ctx({ paper }));
+    return [checked.errors, checked.unverified];
+  };
+  // by LaTeX's defaults the one figure is Figure 1, and there is no Figure 11
+  assert.deepEqual(left("See Figures 1 and 11.", BODY), [["/sections/1/blocks/0/text: cites Figure 11, but the paper's source has 1 figure"], []]);
+  // the counter set, so the one figure is Figure 11
+  const eleven = BODY.replace("\\begin{figure}", "\\setcounter{figure}{10}\n\\begin{figure}");
+  assert.deepEqual(left("See Figures 1 and 11.", eleven), [[], ["Figure 1", "Figure 11"]]);
+  for (const custom of [
+    "\\addtocounter{figure}{-1}",
+    "\\renewcommand{\\thefigure}{\\Roman{figure}}",
+    "\\renewcommand\\thefigure{S\\arabic{figure}}",
+    "\\numberwithin{figure}{section}",
+    "\\counterwithin{figure}{section}",
+  ])
+    assert.deepEqual(left("See Figures 1 and 11.", BODY.replace("\\begin{figure}", `${custom}\n\\begin{figure}`)), [[], ["Figure 1", "Figure 11"]], custom);
+  // What renumbers every float: a continued one, the package that ties counters, chapters, a class that has
+  // them. The fixture's own cite of Table 1 is then unknown as well, and with the last three its §3.
+  const all = (custom: string, paper: string) => assert.deepEqual(left("See Figures 1 and 11.", paper).map((list) => list.filter((name) => name !== "§3")), [[], ["Figure 1", "Figure 11", "Table 1"]], custom);
+  for (const custom of ["\\ContinuedFloat", "\\usepackage[nottoc]{chngcntr}", "\\chapter{One}"]) all(custom, BODY.replace("\\begin{figure}", `${custom}\n\\begin{figure}`));
+  all("report", BODY.replace("\\documentclass{article}", "\\documentclass[11pt]{report}"));
+  // another counter's setting, or one in a comment, leaves the figures' numbering LaTeX's
+  for (const other of ["\\setcounter{table}{4}", "% \\setcounter{figure}{10}", "\\setcounter{topnumber}{3}"])
+    assert.equal(left("See Figure 11.", BODY.replace("\\begin{figure}", `${other}\n\\begin{figure}`))[0].length, 1, other);
+  assert.deepEqual(left("See Table 5.", BODY.replace("\\begin{figure}", "\\setcounter{table}{4}\n\\begin{figure}")), [[], ["Table 5", "Table 1"]], "with the fixture's own Table 1");
+  // the source's own inventory still holds: one with no table has none, however it numbers
+  const none = BODY.replace(/\\begin\{table\}[\s\S]*?\\end\{table\}/, "\\setcounter{table}{4}").replace("Table~\\ref{tab:main}", "the appendix");
+  assert.equal(left("See Table 5.", none)[0][0], "/sections/1/blocks/0/text: cites Table 5, but the paper's source has no table");
+});
+
+test("a citation is read in any case, and a range names every label in it", () => {
+  const labels = (text: string) => cites(text).map((c) => `${c.kind} ${c.label}`);
+  assert.deepEqual(labels("see fig. 1 and table 2, then FIGURE 3 and Tab. 4"), ["figure 1", "table 2", "figure 3", "table 4"]);
+  assert.deepEqual(labels("Figures 1–3"), ["figure 1", "figure 2", "figure 3"]);
+  assert.deepEqual(labels("Figs. 1-3"), ["figure 1", "figure 2", "figure 3"]);
+  assert.deepEqual(labels("Tables 2 to 4"), ["table 2", "table 3", "table 4"]);
+  assert.deepEqual(labels("figures A.1–A.3 and tables S2—S4"), ["figure A.1", "figure A.2", "figure A.3", "table S2", "table S3", "table S4"]);
+  // a list stays a list, and a range inside one is still a range
+  assert.deepEqual(labels("Figures 1, 3 and 5"), ["figure 1", "figure 3", "figure 5"]);
+  assert.deepEqual(labels("Figures 1–3 and 7"), ["figure 1", "figure 2", "figure 3", "figure 7"]);
+  // ends that do not count the same way, or count down, are the two ends; a singular cites its first label
+  assert.deepEqual(labels("Figures 3a–3c, Figures 2–A.1 and Figures 4–2"), ["figure 3a", "figure 3c", "figure 2", "figure A.1", "figure 4", "figure 2"]);
+  assert.deepEqual(labels("Figure 1–3"), ["figure 1"]);
+
+  // through the checks: a lowercase cite is held to the paper like any other
+  assert.deepEqual(errors(saying("The numbers are in table 9.")), ["/sections/1/blocks/0/text: cites Table 9, but the paper's source has 1 table"]);
+  const lower = check(saying("Accuracy peaks near 0.84 at layer 9 (fig. 1)."), ctx({ figures: { probe: { label: "1" } } }));
+  assert.deepEqual([lower.errors, lower.plots], [[], ["probe"]]);
 });
 
 test("a fig block's number is looked up however it is written", () => {
@@ -242,6 +294,10 @@ test("a place code does not look up is the reviewer's, by name: an equation, an 
   // a source that numbers its sections itself: no number is known to be the paper's
   const reset = BODY.replace("\\appendix", "\\setcounter{section}{0}\\renewcommand{\\thesection}{S\\arabic{section}}");
   assert.deepEqual(left("§7", { paper: reset }), [[], ["§3", "§7"]], "the fixture's note cites §3");
+  // a subsection counter set: the one subsection of section 2 is 2.4, which LaTeX's defaults would call 2.1
+  assert.deepEqual(left("§2.4", { paper: NESTED })[0], ["/sections/3/claims/0/where: cites §2.4, but the paper has no section 2.4"]);
+  const fourth = NESTED.replace("\\subsection{Probe training}", "\\setcounter{subsection}{3}\n\\subsection{Probe training}");
+  assert.deepEqual(left("§2.4", { paper: fourth }), [[], ["§3", "§2.4"]]);
 });
 
 test("a PDF's text refuses no section: a number a line opens with is there, and any other is the reviewer's", () => {
@@ -308,6 +364,23 @@ test("a value read off a plot passes only with its figure cited in the same sent
     (blocks(d, "result")[1]!.rows as { cells: unknown[] }[])[0]!.cells[1] = 0.84;
   });
   assert.ok(has(errors(built2, { ...two, figures: { probe: { label: "1" } } }), "/sections/2/blocks/1/rows/0/cells/1: 0.84 is not in the paper's text, and this session has no image of Figure 2 "), "a table built from two figures needs both");
+
+  // a range cites every figure in it: the one in the middle needs its image too
+  const three = { paper: two.paper.replace("\\section{Results}", "\\begin{figure}\n\\includegraphics{figs/norm.pdf}\n\\caption{Norm by layer.}\n\\end{figure}\n\\section{Results}") };
+  const ranged = saying("Accuracy peaks near 0.84 in every setting (Figures 1–3).");
+  const ends = { probe: { label: "1" }, norm: { label: "3" } };
+  assert.deepEqual(errors(ranged, { ...three, figures: ends })[0], "/sections/1/blocks/0/text: 0.84 is not in the paper's text, and this session has no image of Figure 2 to check it against");
+  const all = check(ranged, ctx({ ...three, figures: { ...ends, loss: { label: "2" } } }));
+  assert.deepEqual([all.errors, all.plots], [[], ["probe", "loss", "norm"]]);
+
+  // a figure's caption that cites another figure: the value may be that one's, so its image is needed as well
+  const captioned = changed((d) => blocks(d, "method").push({ type: "fig", name: "probe", number: "Figure 1", caption: "Compared with Figure 2, accuracy is 0.84." }));
+  assert.deepEqual(errors(captioned, { ...two, figures: { probe: {} } }), [
+    "/sections/1/blocks/2/caption: 0.84 is not in the paper's text, and this session has no image of Figure 2 to check it against",
+    errors(saying(plot)).at(-1)!,
+  ]);
+  const compared = check(captioned, ctx({ ...two, figures: { probe: {}, loss: { label: "2" } } }));
+  assert.deepEqual([compared.errors, compared.plots], [[], ["probe", "loss"]]);
 
   // without the cite, or with it in another sentence, the value is only a number the paper lacks
   const imaged = { figures: { probe: { label: "1" } } };

@@ -2,6 +2,9 @@
  * The real browser and poppler. These run where both are installed (the image, a developer's machine after
  * `npx playwright-core install chromium-headless-shell`) and skip where they are not. Installed is told by what is
  * on disk, never by trying: a browser that is there and does not start, or a conversion that fails, fails the test.
+ *
+ * CI's deep job installs both and builds the web app, and sets DEEP_IMAGING_TESTS=required: there nothing is
+ * skipped, and what is missing fails its test.
  */
 
 import assert from "node:assert/strict";
@@ -11,6 +14,7 @@ import type { AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
+import { chromium, type Browser } from "playwright-core";
 import { RenderUnavailable, Studio } from "../src/imaging.ts";
 import { layout } from "../src/layout.ts";
 import type { Read } from "../src/read.ts";
@@ -29,6 +33,8 @@ const studio = new Studio("http://127.0.0.1:9");
 const browser = shellInstalled() ? undefined : "Chromium's headless shell is not installed here";
 const poppler = onPath("pdftoppm") && onPath("pdfinfo") ? undefined : "poppler-utils is not installed here";
 after(() => studio.close());
+/** Why a test is skipped, if it is: the first thing it needs that is missing, and never where all are required. */
+const skip = (...missing: (string | undefined)[]): string | false => (process.env.DEEP_IMAGING_TESTS === "required" ? false : (missing.find((m) => m !== undefined) ?? false));
 
 const listen = async (server: Server): Promise<string> => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -37,7 +43,7 @@ const listen = async (server: Server): Promise<string> => {
 const isWebp = (b: Buffer) => b.subarray(0, 4).toString() === "RIFF" && b.subarray(8, 12).toString() === "WEBP";
 const isJpeg = (base64: string) => Buffer.from(base64, "base64").subarray(0, 2).equals(Buffer.from([0xff, 0xd8]));
 
-test("a picture is stored as WebP, whole or cropped, no wider than 1600 px, with a JPEG for the model", { skip: browser }, async () => {
+test("a picture is stored as WebP, whole or cropped, no wider than 1600 px, with a JPEG for the model", { skip: skip(browser) }, async () => {
   const whole = await studio.picture(png(400, 200), "image/png");
   assert.ok(isWebp(whole.webp), "WebP bytes");
   assert.deepEqual([whole.width, whole.height], [400, 200]);
@@ -50,7 +56,7 @@ test("a picture is stored as WebP, whole or cropped, no wider than 1600 px, with
   await assert.rejects(studio.picture(Buffer.from("not an image"), "image/png"), /the image could not be read/);
 });
 
-test("poppler counts a PDF's pages and draws one at the width asked for", { skip: browser ?? poppler }, async () => {
+test("poppler counts a PDF's pages and draws one at the width asked for", { skip: skip(browser, poppler) }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "deep-test-"));
   try {
     const file = path.join(dir, "paper.pdf");
@@ -102,7 +108,7 @@ window.renderRead = async (read) => {
 };
 </script>`;
 
-test("a render draws the target in tiles at either width, and the browser reaches nothing but the render page", { skip: browser }, async () => {
+test("a render draws the target in tiles at either width, and the browser reaches nothing but the render page", { skip: skip(browser) }, async () => {
   let asked = 0;
   const other = createServer((req, res) => {
     asked += 1;
@@ -151,7 +157,35 @@ test("a render draws the target in tiles at either width, and the browser reache
   }
 });
 
-test("a render page that is not there is the service's trouble, not the draft's", { skip: browser }, async () => {
+test("calls that arrive together share one browser, at the first start and after it died, and close leaves none running", { skip: skip(browser) }, async () => {
+  const launched: Promise<Browser>[] = [];
+  const launch = chromium.launch;
+  chromium.launch = (...args: Parameters<typeof launch>) => {
+    const started = launch.apply(chromium, args);
+    launched.push(started);
+    return started;
+  };
+  const fresh = new Studio("http://127.0.0.1:9");
+  const pictures = (n: number) => Promise.all(Array.from({ length: n }, () => fresh.picture(png(8, 8), "image/png")));
+  try {
+    await pictures(2);
+    assert.equal(launched.length, 1, "two first calls at once start one browser");
+    await pictures(2);
+    assert.equal(launched.length, 1, "which is kept");
+    // the browser dies under the service
+    await (await launched[0]!).close();
+    await pictures(3);
+    assert.equal(launched.length, 2, "calls that find it dead at once start one more");
+    await fresh.close();
+    assert.deepEqual((await Promise.all(launched)).map((b) => b.isConnected()), [false, false], "none is left running");
+  } finally {
+    chromium.launch = launch;
+    await fresh.close();
+    for (const started of launched) await started.then((b) => b.close()).catch(() => undefined);
+  }
+});
+
+test("a render page that is not there is the service's trouble, not the draft's", { skip: skip(browser) }, async () => {
   const read = await layout(draft());
   await assert.rejects(studio.render(read, {}, {}, "desktop"), (e) => e instanceof RenderUnavailable && /render page could not be opened/.test(e.message));
   const site = createServer((_req, res) => void res.writeHead(404).end());
@@ -169,7 +203,7 @@ const WEB = path.resolve(import.meta.dirname, "../../src/litwatch/api/web");
 const built = existsSync(path.join(WEB, "render.html")) ? undefined : "the web app is not built in this checkout";
 const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
 
-test("the web app's render page draws a read with its figure, at the desktop's column and the phone's", { skip: browser ?? built }, async () => {
+test("the web app's render page draws a read with its figure, at the desktop's column and the phone's", { skip: skip(browser, built) }, async () => {
   const site = createServer((req, res) => {
     const file = path.join(WEB, path.normalize(new URL(req.url ?? "/", "http://local").pathname));
     if (!file.startsWith(WEB) || !existsSync(file)) return void res.writeHead(404).end();

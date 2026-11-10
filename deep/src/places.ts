@@ -6,19 +6,17 @@
  *
  * An answer is "there" or a refusal only on evidence. A LaTeX source numbered by LaTeX's defaults shows its floats
  * and its section commands, so a number past them is refused and one within them is there. Everything else is
- * "unknown" and left to the reviewer by name: any place of a PDF's text that the text does not itself name, a label
- * under numbering the source sets itself, an appendix's own numbering, a float the count cannot place.
+ * "unknown" and left to the reviewer by name: any place of a PDF's text that the text does not itself name, every
+ * number of a kind the source numbers itself (`ownNumbering`), an appendix's own numbering, a float the count
+ * cannot place.
  */
 
 import { PaperNumbers } from "./numbers.ts";
-import { headings, isLatex, splitPaper } from "./paper.ts";
+import { headings, isLatex, ownFloatNumbering, splitPaper, uncommented } from "./paper.ts";
 
 export type Kind = "figure" | "table";
 /** Whether the paper has a place: it does, it does not (and why), or the text cannot tell. */
 export type Answer = "there" | "unknown" | { no: string };
-
-/** LaTeX without its comments: an unescaped % to the end of its line. */
-const uncommented = (tex: string) => tex.replace(/((?:^|[^\\])(?:\\\\)*)%.*$/gm, "$1");
 
 // ── labels ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -41,17 +39,37 @@ export interface Cite {
   end: number;
 }
 
-const CITE = new RegExp(`\\b(Figures?|Figs?\\.?|Tables?|Tabs?\\.?)(?:\\s|~)*(${LABEL}(?:${JOIN}${LABEL})*)`, "g");
-/** The figures and tables a text cites: a plural cites each label of its list, a singular its first only. */
+// the word in any case ("fig. 1", "TABLE 2"); the label as the paper writes it
+const CITE = new RegExp(`\\b((?i:figures?|figs?\\.?|tables?|tabs?\\.?))(?:\\s|~)*(${LABEL}(?:${JOIN}${LABEL})*)`, "g");
+/** The longest range that is written out label by label. */
+const MAX_RANGE = 50;
+
+/** The labels a range names, both ends included, where the two count the same way ("1" to "3", "A.1" to "A.3",
+ * "S2" to "S4"); the two ends alone where they do not. */
+function between(from: string, to: string): string[] {
+  const parts = (label: string) => /^(.*?)(\d+)[a-z]?$/.exec(label);
+  const [a, b] = [parts(from), parts(to)];
+  const span = a && b && a[1] === b[1] ? Number(b[2]) - Number(a[2]) : 0;
+  return span > 1 && span <= MAX_RANGE ? Array.from({ length: span + 1 }, (_, i) => `${a![1]}${Number(a![2]) + i}`) : [from, to];
+}
+
+/** The figures and tables a text cites. A plural cites every label of its list, a range in it label by label
+ * ("Figures 1–3 and 5" cites 1, 2, 3 and 5); a singular cites its first label only. */
 export function cites(text: string): Cite[] {
   const out: Cite[] = [];
   for (const m of text.matchAll(CITE)) {
     const kind: Kind = /^f/i.test(m[1]!) ? "figure" : "table";
     const plural = /^(Figures|Figs\.?|Tables|Tabs\.?)$/i.test(m[1]!);
-    const labels = m[2]!.split(new RegExp(JOIN));
-    const taken = plural ? labels : labels.slice(0, 1);
-    const end = plural ? m.index + m[0].length : m.index + m[0].length - (m[2]!.length - labels[0]!.length);
-    for (const label of taken) out.push({ kind, label, index: m.index, end });
+    // labels and what joins them, in turn
+    const tokens = m[2]!.split(new RegExp(`(${JOIN})`));
+    const labels = [tokens[0]!];
+    if (plural)
+      for (let i = 1; i < tokens.length; i += 2) {
+        if (/[–—-]|to/.test(tokens[i]!)) labels.push(...between(labels.pop()!, tokens[i + 1]!));
+        else labels.push(tokens[i + 1]!);
+      }
+    const end = plural ? m.index + m[0].length : m.index + m[0].length - (m[2]!.length - tokens[0]!.length);
+    for (const label of labels) out.push({ kind, label, index: m.index, end });
   }
   return out;
 }
@@ -90,9 +108,12 @@ const words = (text: string): string =>
     .join(" ")} `;
 /** A line of a PDF's text that opens with a section number: "3.1 Setup", "## **2 Method**", "A Additional samples". */
 const NUMBERED_LINE = /^[ \t#]*\**[ \t]*((?:\d{1,2}|[A-Z])(?:\.\d{1,2}){0,3})\.?\**[ \t]+\**[A-Z]/gm;
-/** A LaTeX source that numbers a kind of float its own way: a counter set, its form redefined, or chapters. */
-const renumbered = (text: string, kind: Kind): boolean =>
-  new RegExp(`\\\\(?:setcounter|numberwithin|counterwithin\\*?)\\s*\\{${kind}\\}|\\\\the${kind}(?![a-zA-Z])|\\\\chapter\\*?\\s*[[{]`).test(text);
+
+interface Floats {
+  sure: number;
+  most: number;
+  plain: boolean;
+}
 
 export class PaperIndex {
   /** The paper's text, a LaTeX source's without its comments. */
@@ -100,9 +121,9 @@ export class PaperIndex {
   /** Whether the paper's headings are all known, as a LaTeX source's are: a location that names none of them names
    * no place. A PDF's are unevenly found. */
   readonly outlined: boolean;
-  /** How many figures and tables a LaTeX source numbers: at least `sure`, numbered from 1 in its main text, and at
-   * most `most` in all. */
-  private readonly floats: Record<Kind, { sure: number; most: number }> = { figure: { sure: 0, most: 0 }, table: { sure: 0, most: 0 } };
+  /** How many figures and tables a LaTeX source holds: at least `sure` in its main text and at most `most` in
+   * all. `plain`: they are numbered by LaTeX's defaults, from 1, so the counts say which numbers there are. */
+  private readonly floats: Record<Kind, Floats> = { figure: { sure: 0, most: 0, plain: false }, table: { sure: 0, most: 0, plain: false } };
   /** The labels the text itself cites, by kind ("Tables 2–3" names both). */
   private readonly mentioned: Record<Kind, Set<string>> = { figure: new Set(), table: new Set() };
   /** The section numbers the text shows, as keys: a LaTeX source's own, or those a PDF's lines open with. */
@@ -146,9 +167,8 @@ export class PaperIndex {
 
   /** The numbered floats of a kind, between two bounds. Each environment's captions outside its sub-floats and
    * each \captionof count; an environment with no caption may be captioned by a macro, so it counts toward `most`
-   * only. `sure` holds the main text's, before `appendix`, since numbering runs on from 1 there in every class;
-   * it is 0 where the source numbers the kind its own way. */
-  private count(kind: Kind, appendix: number): { sure: number; most: number } {
+   * only. `sure` holds the main text's, before `appendix`, where default numbering runs on from 1. */
+  private count(kind: Kind, appendix: number): Floats {
     let sure = 0;
     let most = 0;
     const add = (at: number, captions: number, floor: number) => {
@@ -161,7 +181,7 @@ export class PaperIndex {
       add(m.index, (body.match(/\\caption\s*[[{]/g) ?? []).length, 1);
     }
     for (const m of this.text.matchAll(new RegExp(`\\\\captionof\\s*\\{${kind}\\}`, "g"))) add(m.index, 1, 1);
-    return { sure: renumbered(this.text, kind) ? 0 : sure, most };
+    return { sure, most, plain: !ownFloatNumbering(this.text, kind) };
   }
 
   /** Whether the paper has the figure or table of this label. */
@@ -170,11 +190,11 @@ export class PaperIndex {
     if (this.mentioned[kind].has(key)) return "there";
     // a PDF's text may hold a figure it never names as the read does
     if (!this.outlined) return "unknown";
-    const { sure, most } = this.floats[kind];
-    // a source with no such environment has none: every cite is wrong, an appendix's too
+    const { sure, most, plain } = this.floats[kind];
+    // a source with no such environment has none, however it numbers: every cite is wrong, an appendix's too
     if (most === 0) return { no: `the paper's source has no ${kind}` };
-    // A.1, S2, 3.4: an appendix's or a section's own numbering, which the source does not carry
-    if (!/^\d+$/.test(key)) return "unknown";
+    // numbers the source sets itself, and A.1, S2, 3.4: an appendix's or a section's own, which it does not carry
+    if (!plain || !/^\d+$/.test(key)) return "unknown";
     if (Number(key) > most) return { no: `the paper's source has ${sure === most ? "" : "at most "}${most} ${kind}${most === 1 ? "" : "s"}` };
     return Number(key) <= sure ? "there" : "unknown";
   }

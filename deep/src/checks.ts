@@ -49,9 +49,10 @@ const MAX_LISTED = 40;
 
 /** One string of the read. `inline`: it takes the inline markup, so its $tex$ is parsed. `numbers`: its numbers are
  * given as the paper's, so they are checked. A number the paper's text lacks may have been read off a plot: off
- * `figure` (by name), which the whole text is about, as a figure's own caption is; or off the paper's figures the
- * text is said to be built from (`figures`, by label), as a table's cells are whose caption cites one; or off a
- * figure its own sentence cites. `cut`: a table's caption, whose counts of the rows and columns kept are the read's.
+ * `figure` (by name), which the whole text is about, as a figure's own caption is, and any figure that text cites;
+ * or off the paper's figures the text is said to be built from (`figures`, by label), as a table's cells are whose
+ * caption cites one; or off a figure its own sentence cites. `cut`: a table's caption, whose counts of the rows
+ * and columns kept are the read's.
  *
  * Not checked for numbers: the read's own presentation (a section's title and id, an `h3`, a fact's name, a
  * figure's number), the reading time, and Related work, whose numbers are other papers'. The reviewer's prompt
@@ -391,18 +392,18 @@ export function check(read: Draft, ctx: CheckContext): Checked {
       const missing: string[] = [];
       for (const n of numbersIn(values)) {
         if ((n.bare && n.value < 10) || isYear(n) || index.numbers.has(n)) continue;
-        if (unit.figure !== undefined) {
-          // a figure's own caption; one the session did not make has its error already
-          if (ctx.figures.has(unit.figure)) plots.add(unit.figure);
-          continue;
-        }
-        // read off a plot: the figures the whole text is built from, or those its sentence cites. Every one of them
-        // needs its image, since the value may be any one's.
-        const labels = unit.figures ?? cites(sentence(text, n.index)).filter((c) => c.kind === "figure").map((c) => c.label);
+        // a figure's own caption; a figure the session did not make has its error already
+        if (unit.figure !== undefined && !ctx.figures.has(unit.figure)) continue;
+        // read off a plot: the figure the text captions with every figure it cites, the figures the whole text is
+        // built from, or those its sentence cites. Every one of them needs its image, since the value may be any
+        // one's.
+        const labels = unit.figures ?? cites(unit.figure === undefined ? sentence(text, n.index) : text).filter((c) => c.kind === "figure").map((c) => c.label);
         const lacking = labels.filter((label) => !imaged.has(labelKey(label)));
-        if (labels.length === 0) missing.push(n.text);
-        else if (lacking.length === 0) for (const label of labels) for (const name of imaged.get(labelKey(label))!) plots.add(name);
-        else {
+        if (unit.figure === undefined && labels.length === 0) missing.push(n.text);
+        else if (lacking.length === 0) {
+          if (unit.figure !== undefined) plots.add(unit.figure);
+          for (const label of labels) for (const name of imaged.get(labelKey(label))!) plots.add(name);
+        } else {
           const entry = unseen.get(unit.path) ?? { texts: [], figures: new Set<string>() };
           entry.texts.push(n.text);
           for (const label of lacking) entry.figures.add(`Figure ${label}`);

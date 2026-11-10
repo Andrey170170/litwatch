@@ -222,8 +222,10 @@ facts and their tags, tables and diagrams. A value read off a plot cites its fig
 layer 12 (Fig. 6)"), and this session has that figure's image, made by figure() or crop() with its number or shown in a fig \
 block: the reviewer checks the value against the image. Your own arithmetic, such as a difference or a ratio the paper does \
 not state, and what you found outside the paper (a repository's file count) are given through the paper's own numbers or in \
-words. A value cited to several figures needs the image of each. Not checked: whole numbers under ten, years, the reading \
-time, other papers' numbers in Related work, and a table caption's counts of the rows and columns kept ("11 of its 12 rows").
+words. A value cited to several figures needs the image of each: a range ("Figures 1–3") cites every figure in it, and a \
+fig block's caption that cites another figure needs that figure's image too. Not checked: whole numbers under ten, years, \
+the reading time, other papers' numbers in Related work, and a table caption's counts of the rows and columns kept ("11 of \
+its 12 rows").
 - Equations: every eq block and every $inline formula$ parses in KaTeX.
 - Diagrams: leave a diagram's coordinates out and it is laid out for you; render it to see the result, and place the nodes \
 yourself (x, y, w, h on every node, at least 40 tall) only where the layout does not serve.

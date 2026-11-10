@@ -59,21 +59,23 @@ code cannot settle either way is neither passed in silence nor refused; it goes 
   with as many cells as the table has columns, each edge between nodes the diagram has, a placed node at least 40 px
   tall;
 - every `fig` block naming a figure this session made, under the number it was made as, and every figure and table
-  cited, a `fig` block's number included however it is written (`Figure 6`, `6`). A label is read whole (`3`,
-  `A.1`, `S2`), by one parser for every lookup (`src/places.ts`). A LaTeX source's floats are counted: a number
-  past the count is refused, and a source with no table has none;
+  cited, a `fig` block's number included however it is written (`Figure 6`, `6`). A cite is read in any case
+  (`fig. 1`, `Table 2`), a range names every label in it (`Figures 1–3` cites 2 as well), and a label is read
+  whole (`3`, `A.1`, `S2`), by one parser for every lookup (`src/places.ts`). A LaTeX source's floats are counted:
+  where LaTeX's defaults number them, a number past the count is refused; a source with no table has none,
+  however it numbers;
 - every `where` (a claim's verdict, a CARD note, a diagram's part) naming a place: a section or an appendix by its
   number, a figure or table, a numbered equation, algorithm, theorem, footnote, page or line, or a section by its
   title, whole at any length (`PPO`) or in part where the part is long enough not to match by chance. A LaTeX
-  source numbered by LaTeX's defaults carries its outline, so a section number it lacks is refused (`§2.3` needs
-  section 2 to have a third subsection), and so is a `where` that names nothing of these;
+  source whose sections LaTeX's defaults number carries its outline, so a section number it lacks is refused
+  (`§2.3` needs section 2 to have a third subsection), and so is a `where` that names nothing of these;
 - every equation and inline formula through KaTeX;
 - every number given as the paper's being in the paper's text, in any common form (`src/numbers.ts`: 0.34 or 34%,
   .95 or 0.95, 1,200 or 1.2k, rounded to the read's precision): in prose, captions, facts and their tags, tables
   with their group headings, and diagrams. A value the text lacks passes when its sentence cites a figure this
   session has an image of, made with that number or shown in a `fig` block: it was read off a plot, and the reviewer
-  is shown that image. A sentence, or a table's caption, that cites several figures needs the image of each. Not
-  checked: whole numbers under ten, years from 1950 to next year, the reading time, other papers' numbers in
+  is shown that image. A sentence, or a table's caption, that cites several figures needs the image of each, and
+  so does a figure's own caption that cites another figure. Not checked: whole numbers under ten, years from 1950 to next year, the reading time, other papers' numbers in
   Related work, an equation's own TeX (notation, not values), a table caption's counts of the rows and columns the
   read kept (`11 of its 12 rows`), and the read's own labels (section titles, `h3`, fact names). The reviewer's
   prompt names these, so it checks them itself.
@@ -84,8 +86,14 @@ What goes to the reviewer by name, since code can neither confirm it nor rule it
   and a `where` of such a paper that names nothing code knows;
 - an equation, algorithm, theorem, footnote, page or line, which code does not look up;
 - in a LaTeX source: a figure or table past the main text's count and within the source's whole count, an
-  appendix's own labels (`A.1`, `S2`), any label where the source sets the counter or its form itself, an appendix
-  where no command starts one, and a `fig` block's number with no number in it.
+  appendix's own labels (`A.1`, `S2`), an appendix where no command starts one, and a `fig` block's number with no
+  number in it;
+- every number of a kind a LaTeX source numbers itself (`ownNumbering` in `src/paper.ts`). The source's numbering
+  is taken as LaTeX's defaults only where nothing in it says otherwise. A `\setcounter`, `\addtocounter`,
+  `\numberwithin` or `\counterwithin` on the counter, any `\the…` of it, chapters or a class that has them, the
+  `chngcntr` package, a `\ContinuedFloat` (for figures and tables), and `secnumdepth` or a class that numbers
+  sections in Roman numerals (IEEEtran, REVTeX; for sections) each make every figure, table or section number of
+  that paper unknown. Its headings then carry no numbers in `sections()` either.
 
 A draft that passes is laid out: a diagram without coordinates gets them from ELK's layered algorithm
 (`src/layout.ts`), so the stored read always carries them.
@@ -98,7 +106,8 @@ five checks (`anchors`, `experiments`, `why_boxes`, `voice`, `length`) and its f
 score is at least 4 and every check passed. Otherwise the findings go into the writer's own conversation and it
 revises: the first write plus at most two revisions. A read that still fails is kept, with a `review` process note
 saying what it failed on; a review that could not run leaves the read with a `tool` note saying it was not
-reviewed. The job returns each round in `reviews`, and the figures the read shows in `figures`. Both the review
+reviewed. That holds for a revision too: the verdict on the draft before it is not carried over to it, and stays
+in `reviews` as what happened. The job returns each round in `reviews`, and the figures the read shows in `figures`. Both the review
 and the job take a read's figures as they were when `submit` accepted it: a figure made again under the same name
 in a revision that is then not accepted does not change the read that is kept.
 
@@ -139,7 +148,9 @@ app's types are generated (`pnpm generate:read` in `web/`); run both after chang
 The images need poppler (`pdftoppm`, `pdfinfo`) and Chromium's headless shell at the revision the pinned
 `playwright-core` drives; the image has both. On a development machine: poppler-utils from the system, and
 `npx playwright-core install chromium-headless-shell`. The tests that use them skip where they are missing, told
-by what is on disk; where they are installed, a browser that does not start fails the tests.
+by what is on disk; where they are installed, a browser that does not start fails the tests. One of them draws a
+read on the web app's own render page and skips until `pnpm build` in `web/` has built it. CI's deep job installs
+all three and sets `DEEP_IMAGING_TESTS=required`, under which none of these tests skips: what is missing fails.
 
 ```sh
 npm ci

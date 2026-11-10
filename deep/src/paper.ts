@@ -53,6 +53,9 @@ function first(body: string, pattern: RegExp): RegExpExecArray | null {
   return null;
 }
 
+/** LaTeX without its comments: an unescaped % to the end of its line. */
+export const uncommented = (tex: string): string => tex.replace(/((?:^|[^\\])(?:\\\\)*)%.*$/gm, "$1");
+
 type Bare = Omit<Heading, "end" | "chars">;
 
 /** The headings in the order of the text, each with where its section ends. */
@@ -67,6 +70,27 @@ function sized(found: Bare[], length: number): Heading[] {
 // ── a LaTeX source ──────────────────────────────────────────────────────────────────────────────────
 
 const TEX_LEVELS: Record<string, number> = { section: 1, subsection: 2, subsubsection: 3, paragraph: 4 };
+
+/** What numbers a paper some other way than an article's defaults, whatever is counted: chapters, a class that
+ * has them, or the package that ties one counter to another. */
+const RENUMBERING = /\\chapter\*?\s*[[{]|\\documentclass\s*(?:\[[^\]]*\])?\s*\{(?:book|report|memoir|scrbook|scrreprt)\}|\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bchngcntr\b/;
+/** The classes that number sections in Roman numerals and subsections by letter. */
+const ROMAN_SECTIONS = /\\documentclass\s*(?:\[[^\]]*\])?\s*\{(?:IEEEtran|revtex[\w-]*)\}/;
+/** A float that takes the number of the one before it. */
+const CONTINUED = /\\ContinuedFloat(?![a-zA-Z])/;
+
+/** Whether a LaTeX source (without its comments) numbers these counters itself, rather than leave them to the
+ * defaults this code models: counted from 1 through the paper, sections lettered from \appendix on. It does where
+ * it sets or steps a counter, ties it to another, redefines or prints its form (\thefigure), or loads a class or
+ * package that numbers its own way. No number of that kind is then inferred from the source. */
+export function ownNumbering(tex: string, counters: readonly string[], also?: RegExp): boolean {
+  const names = counters.join("|");
+  const set = new RegExp(`\\\\(?:setcounter|addtocounter|numberwithin|counterwithin\\*?|counterwithout\\*?)\\s*\\{(?:${names})\\}|\\\\the(?:${names})(?![a-zA-Z])`);
+  return set.test(tex) || RENUMBERING.test(tex) || (also?.test(tex) ?? false);
+}
+/** Whether it numbers a kind of float itself. */
+export const ownFloatNumbering = (tex: string, kind: string): boolean => ownNumbering(tex, [kind], CONTINUED);
+
 /** Where a LaTeX source starts its appendix by command: from here its sections are lettered. */
 const APPENDIX_COMMAND = /\\appendix(?![a-zA-Z])|\\begin\{appendi(?:x|ces)\}/g;
 
@@ -93,8 +117,9 @@ const plain = (tex: string): string =>
 function latexHeadings(body: string): Bare[] {
   const out: Bare[] = [];
   // Numbers are LaTeX's defaults: sections counted from 1, lettered from the appendix command on. A source that
-  // sets the counter or its form itself, or has chapters, is numbered some other way, which is not guessed at.
-  const numbered = !/\\chapter\*?\s*[[{]|\\setcounter\s*\{section\}|\\thesection|\\numberwithin\s*\{(?:sub)*section\}/.test(body);
+  // numbers any level of its sections itself is numbered some other way, which is not guessed at: no heading of
+  // it gets a number.
+  const numbered = !ownNumbering(uncommented(body), ["section", "subsection", "subsubsection", "secnumdepth"], ROMAN_SECTIONS);
   const appendix = first(body, APPENDIX_COMMAND)?.index ?? Infinity;
   const counters = [0, 0, 0];
   let lettered = false;

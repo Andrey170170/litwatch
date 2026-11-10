@@ -35,6 +35,8 @@ const FAILING: Verdict = {
 const revised = (n: number) => changed((d) => (blocks(d, "method")[1]!.text = `A linear probe, because it adds little of its own (revision ${n}).`));
 const why = (read: { sections: unknown[] } | null) => blocks(read as Draft, "method")[1]!.text;
 const stopping = [fauxAssistantMessage("Done."), fauxAssistantMessage("Done."), fauxAssistantMessage("Done.")];
+/** `BODY` with `chars` more characters of appendix before its last sentence. */
+const long = (chars: number) => BODY.replace("The learning rate is 0.003", `${"The probe is linear. ".repeat(Math.ceil(chars / 21))}\nThe learning rate is 0.003`);
 
 // ── the run's failures ──────────────────────────────────────────────────────────────────────────────
 
@@ -225,9 +227,6 @@ test("the reviewer is told by name the places code could not look up", async () 
   );
 });
 
-/** `BODY` with `chars` more characters of appendix before its last sentence. */
-const long = (chars: number) => BODY.replace("The learning rate is 0.003", `${"The probe is linear. ".repeat(Math.ceil(chars / 21))}\nThe learning rate is 0.003`);
-
 test("the reviewer reads the whole paper where the model's context has room, past any fixed cut", async () => {
   // 400,000 tokens of context: room for a text of 250,000 characters, whose appendix ends it
   const { models: m, faux } = models(400_000);
@@ -315,6 +314,26 @@ test("a revision the writer does not make leaves the reviewed read, with a note 
   assert.deepEqual(outcome.result?.process_notes, [
     { kind: "review", source: "service", note: "The read did not pass its review: scores below 4: clarity 3. The revision that should have followed was not made: the writer stopped without submitting." },
   ]);
+});
+
+test("a revision whose review cannot run is kept as unreviewed, not as failing the review of the draft before it", async () => {
+  const { models: m, faux } = models();
+  // round 1 fails on clarity; the writer revises; the review of the revision meets a usage limit
+  faux.setResponses([submits(draft()), reviews(FAILING), submits(revised(1)), fauxAssistantMessage("", { stopReason: "error", errorMessage: "usage limit reached" })]);
+  const outcome = await run(m);
+  assert.equal(outcome.error, undefined);
+  assert.equal(why(outcome.result), why(revised(1)), "the revision is the read kept");
+  assert.deepEqual(outcome.result?.process_notes, [
+    { kind: "tool", source: "service", note: "The read was not reviewed: the review could not run (usage limit reached). It is a revision: the reviews on record are of the drafts before it." },
+  ]);
+  assert.deepEqual(outcome.reviews, [{ round: 1, passed: false, ...FAILING }], "the round that was completed stays as history");
+  assert.deepEqual(outcome.trace.filter((e) => e.type === "review").map((e) => [e.round, e.passed, e.error]), [[1, false, undefined], [2, undefined, "usage limit reached"]]);
+
+  // what round 1's reviewer was not given of a long paper is no note on a revision no reviewer read
+  const small = models(64_000);
+  small.faux.setResponses([submits(draft()), reviews(FAILING), submits(revised(1)), fauxAssistantMessage("", { stopReason: "error", errorMessage: "usage limit reached" })]);
+  const cut = await run(small.models, { paper: { ...PAPER, body: long(40_000) } });
+  assert.deepEqual(cut.result?.process_notes?.map((n) => n.note.slice(0, 28)), ["The read was not reviewed: t"]);
 });
 
 test("a review that cannot run keeps the read, unreviewed; a verdict that does not fit is asked for once more", async () => {

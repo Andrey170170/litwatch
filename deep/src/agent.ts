@@ -412,10 +412,11 @@ export async function processPaper(
       if (!judged.verdict) {
         const why = failure ?? judged.error ?? "it gave no verdict";
         record({ t: now(), type: "review", round, error: why, usage });
-        // a read that failed a review before stays unpassed; one never reviewed is only unreviewed
-        reviewNote = reviews.length
-          ? { kind: "review", source: "service", note: `The read did not pass its review (${failings(reviews.at(-1)!)}), and the review of its revision could not run: ${cut(why)}.` }
-          : { kind: "tool", source: "service", note: `The read was not reviewed: the review could not run (${cut(why)}).` };
+        // The read kept is unreviewed, and says so. A verdict on the draft before it is no verdict on this one:
+        // the earlier rounds stay in `reviews` as what happened, and nothing of them is said of this read.
+        const revision = reviews.length ? " It is a revision: the reviews on record are of the drafts before it." : "";
+        reviewNote = { kind: "tool", source: "service", note: `The read was not reviewed: the review could not run (${cut(why)}).${revision}` };
+        unread = [];
         break;
       }
       unread = judged.left;
