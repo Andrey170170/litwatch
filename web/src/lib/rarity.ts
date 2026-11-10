@@ -22,7 +22,6 @@ export const RARITY_NAME: Record<Rarity, string> = {
   common: "Common",
 };
 export const GRADE_NAME: Record<Grade, string> = { must_read: "must read", relevant: "relevant", adjacent: "adjacent", none: "none" };
-export const WEIGHT_NAME: Record<Weight, string> = { landmark: "landmark", solid: "solid", incremental: "incremental" };
 export const DEPTH_NAME: Record<Depth, string> = { focus: "Focus", area: "Area", field: "Field" };
 export const CADENCE: Record<Depth, string> = { focus: "daily and weekly digests", area: "daily and weekly digests", field: "weekly digest" };
 export const CONTRIBUTION_NAME: Record<Schemas["Contribution"], string> = {
@@ -36,11 +35,6 @@ export const CONTRIBUTION_NAME: Record<Schemas["Contribution"], string> = {
 
 /** The CSS colour of a rarity, or the line colour for none. */
 export const rc = (r: Rarity | null | undefined): string => (r ? `var(--r-${r})` : "var(--line)");
-
-/** The rarity a Weight alone gives, the floor an ungraded paper has in a mixed list (pipeline.md, section 5). */
-export function weightFloor(w: Weight | null | undefined): Rarity {
-  return w === "landmark" ? "rare" : w === "solid" ? "uncommon" : "common";
-}
 
 /** "must read · landmark" for a topic row; the grade alone otherwise. */
 export function gradeLine(grade: Grade | null | undefined, weight: Weight | null | undefined): string {
