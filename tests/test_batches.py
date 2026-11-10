@@ -163,8 +163,12 @@ async def test_a_batch_that_cannot_be_sent_goes_as_normal_calls(monkeypatch):
 async def test_an_account_error_in_a_batch_is_never_asked_again_nor_down_the_list(conn, debug):
     gw, anthropic, openrouter, _ = batching(Together(conn, await runs.start(conn, "nightly"), 2))
     gw.debug = debug  # which keeps the text of a reply it could not use, and here there is none
-    asked = await asyncio.gather(
-        gw.ask("brief", ask("account")), gw.ask("brief", ask(0)), return_exceptions=True
+    # Bounded: a call that fails before the barrier would leave the other waiting there.
+    asked = await asyncio.wait_for(
+        asyncio.gather(
+            gw.ask("brief", ask("account")), gw.ask("brief", ask(0)), return_exceptions=True
+        ),
+        5,
     )
     assert isinstance(asked[0], CallError) and asked[0].kind == "account"
     assert asked[1].value.yes
