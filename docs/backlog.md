@@ -11,7 +11,9 @@ plan's notes or a `Later` placeholder in the web app.
 the paper's figures, rebuilt tables and diagrams, sections as rungs of the paper page; written by the `deep` agent
 with a `render` tool, checks in `submit` and a reviewer. Also: written only for the topics the paper is graded in,
 which ends the CoT extensions on unrelated papers; Notion's short form; Zotero drops the card. Shaped 2026-11-09 in
-[`specs/deep-read.md`](specs/deep-read.md); the build plan is next.
+[`specs/deep-read.md`](specs/deep-read.md), planned in [`plans/deep-read.md`](plans/deep-read.md) (P1–P5).
+Afterwards: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the prose rules shared
+between `writing.py` and the deep prompt instead of copied.
 
 Then the first of v1's unbuilt parts below.
 
