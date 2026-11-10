@@ -152,10 +152,16 @@ export function serviceNotes(seen: ReadonlyMap<Held, { count: number; url?: stri
   return [...seen].map(([held, { count, url }]) => ({ ...text[held](count), source: "service", ...(url ? { url } : {}) }));
 }
 
-/** A read `submit` accepted: laid out, with what its checks left to the reviewer. */
+/** A read `submit` accepted: laid out, with what its checks left to the reviewer, and the figures it shows or
+ * cites for plot values as they were when it was accepted. A figure made again under the same name afterwards, in
+ * a revision that is then not accepted, is no part of it. */
 interface Accepted extends Pick<Checked, "plots" | "unverified"> {
   read: Read;
+  figures: ReadonlyMap<string, Made>;
 }
+
+/** The names of the figures a read shows. */
+const figuresOf = (read: Read): string[] => read.sections.flatMap((s) => ("blocks" in s ? s.blocks.flatMap((b) => (b.type === "fig" ? [b.name] : [])) : []));
 
 export async function processPaper(
   paper: PaperInput,
@@ -249,9 +255,11 @@ export async function processPaper(
     if (shape.length) return { errors: shape };
     const { errors, plots, unverified } = checked(input as Draft);
     if (errors.length) return { errors };
+    // the figures as they are now: each record is replaced, never changed, when its name is made again
+    const kept = new Map([...figuresOf(input as Read), ...plots].flatMap((name) => (figures.made.has(name) ? [[name, figures.made.get(name)!] as const] : [])));
     const read = await layout(input as Draft);
     const stored = readErrors(read);
-    return stored.length ? { errors: stored.map((e) => `after the diagrams were laid out, ${e}`) } : { read, plots, unverified };
+    return stored.length ? { errors: stored.map((e) => `after the diagrams were laid out, ${e}`) } : { read, plots, unverified, figures: kept };
   };
 
   const hosts: Record<string, HostFn> = {
@@ -263,7 +271,7 @@ export async function processPaper(
       if (errors.length) throw new Error(`the draft cannot be drawn until these are fixed:\n${errors.slice(0, 30).join("\n")}`);
       const read = await layout(draft as Draft);
       // only figures this session made: a name it did not make draws as the page's placeholder
-      const cited = new Set(read.sections.flatMap((s) => ("blocks" in s ? s.blocks.flatMap((b) => (b.type === "fig" ? [b.name] : [])) : [])));
+      const cited = new Set(figuresOf(read));
       const urls = Object.fromEntries([...cited].flatMap((name) => (figures.made.has(name) ? [[name, `data:image/webp;base64,${figures.made.get(name)!.webp.toString("base64")}`]] : [])));
       const made = await imaging.render(read, urls, renderTarget(target), renderWidth(width));
       shown.push(...made.shots);
@@ -391,9 +399,9 @@ export async function processPaper(
           paper,
           read: next.read,
           selections: spec.selections,
-          // each figure with the view kept beside its name, and the paper's number for it where the session has one
+          // each figure as it was when the read was accepted, with the paper's number for it where the session has one
           plots: next.plots.flatMap((name) => {
-            const made = figures.made.get(name);
+            const made = next.figures.get(name);
             return made ? [{ name, ...(made.label === undefined ? {} : { number: `Figure ${made.label}` }), shot: made.view }] : [];
           }),
           unverified: next.unverified,
@@ -451,7 +459,7 @@ export async function processPaper(
   const error = kept ? undefined : (failure ?? (stats.cells >= opts.maxCells ? "cell budget exhausted without a submit" : "the model stopped without submitting"));
   return {
     result,
-    figures: result ? returned(result, figures.made) : [],
+    figures: result && kept ? returned(result, kept.figures) : [],
     reviews: reviews.length ? reviews : null,
     trace,
     stats,
@@ -469,8 +477,7 @@ function withServiceNotes(read: Read, notes: ProcessNote[]): Read {
 
 /** The figures the read shows, each once, as the job returns them. */
 function returned(read: Read, made: ReadonlyMap<string, Made>): ReturnedFigure[] {
-  const names = new Set(read.sections.flatMap((s) => ("blocks" in s ? s.blocks.flatMap((b) => (b.type === "fig" ? [b.name] : [])) : [])));
-  return [...names].flatMap((name) => (made.has(name) ? [{ name, mime: "image/webp" as const, data: made.get(name)!.webp.toString("base64") }] : []));
+  return [...new Set(figuresOf(read))].flatMap((name) => (made.has(name) ? [{ name, mime: "image/webp" as const, data: made.get(name)!.webp.toString("base64") }] : []));
 }
 
 function renderTarget(target: unknown): RenderTarget {

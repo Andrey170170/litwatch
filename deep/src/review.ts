@@ -129,7 +129,8 @@ export async function review(
   const { text, left } = reviewerText(input.paper, paperRoom(model.contextWindow, JSON.stringify(input.read).length, input.plots.length));
   const content: (TextContent | ImageContent)[] = [{ type: "text", text: reviewerMessage(input.paper, text, left, input.read, input.unverified) }];
   for (const { name, number, shot } of input.plots) {
-    const what = `${number ? `The paper's ${number} (figure "${name}" of the writer's session)` : `The read's figure "${name}"`}, which the read gives values read off:`;
+    // the number is the writer's word for which figure this is, not something code confirmed
+    const what = `The writer's figure "${name}"${number ? `, made as the paper's ${number}` : ""}, which the read gives values read off:`;
     content.push({ type: "text", text: what }, { type: "image", data: shot.data, mimeType: shot.mimeType });
   }
   const messages: Message[] = [{ role: "user", content, timestamp: Date.now() }];

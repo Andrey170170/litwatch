@@ -61,6 +61,16 @@ test("the reviewer's prompt carries the rubric, the pass rule and the topics", (
   assert.ok(p.includes('- "cot-faithfulness" · CoT faithfulness (graded must read)'));
 });
 
+test("the reviewer's prompt says what code left unchecked: the places it names, and the numbers its check leaves out", () => {
+  const p = reviewerPrompt(selections);
+  const unchecked = p.slice(p.indexOf("What code has not checked, which is yours:"), p.indexOf("Findings point at a place"));
+  assert.ok(unchecked.includes("The places the message lists as not confirmed."));
+  for (const anchor of ["equation", "algorithm", "theorem", "footnote", "page", "read from its PDF", "numbering the source sets itself"]) assert.ok(unchecked.includes(anchor), anchor);
+  // every exemption of the number check (src/checks.ts), so the reviewer checks those numbers itself
+  for (const exempt of ["whole numbers under ten", "years", "every number in Related work", "an equation's TeX", "the reading time", "a table caption's counts of the rows and columns the read kept", "the read's own headings and labels"])
+    assert.ok(unchecked.includes(exempt), exempt);
+});
+
 test("the findings reach the writer most important first, with what is left", () => {
   const review = {
     ...PASSING,

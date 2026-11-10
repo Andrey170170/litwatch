@@ -209,6 +209,20 @@ test("a read that passes its review is returned with the round, and the reviewer
   assert.deepEqual(system!.toolsAdded?.map((t) => t.name), ["review"]);
   assert.ok(textOf(user!).includes("The paper's text, whole:") && textOf(user!).includes(BODY), "the paper's whole text, the appendix included");
   assert.ok(textOf(user!).includes(JSON.stringify(draft())), "the read as JSON");
+  assert.ok(!textOf(user!).includes("Not confirmed by code"), "every place the read cites was found");
+});
+
+test("the reviewer is told by name the places code could not look up", async () => {
+  const { models: m, faux } = models();
+  const sent: Sent[] = [];
+  const read = changed((d) => ((d.sections[3] as unknown as { claims: { where: string }[] }).claims[0]!.where = "Eq. 9999 and Algorithm 9999, p. 9999"));
+  faux.setResponses([submits(read), seeing(reviews(PASSING), sent)]);
+  const outcome = await run(m);
+  assert.deepEqual(outcome.trace.filter((e) => e.type === "submit").map((s) => s.ok), [true], "no place the source rules out: the read is taken");
+  assert.ok(
+    textOf(sent[0]!.messages[1]!).endsWith("Not confirmed by code, which could not tell whether the paper has these places the read cites: Eq. 9999; Algorithm 9999; p. 9999. Check each against the paper."),
+    textOf(sent[0]!.messages[1]!).slice(-300),
+  );
 });
 
 /** `BODY` with `chars` more characters of appendix before its last sentence. */
@@ -401,7 +415,7 @@ test("the reviewer is shown the figures the read cites for values read off a plo
     assert.equal(outcome.error, undefined);
     const user = sent[0]!.messages[1]!;
     assert.deepEqual(imagesOf(user), [view(png(8, 8).length)], "the figure as the writer saw it, and not the one the read does not cite");
-    assert.ok(textOf(user).includes('The read\'s figure "probe", which the read gives values read off:'));
+    assert.ok(textOf(user).includes('The writer\'s figure "probe", which the read gives values read off:'));
     assert.deepEqual(outcome.figures, [{ name: "probe", mime: "image/webp", data: WEBP.toString("base64") }], "a figure made and not shown is not returned");
     assert.equal(outcome.result?.process_notes, undefined, "the e-print was the version's: nothing to note");
   });
@@ -422,8 +436,54 @@ test("a plot value is refused until the session has its figure's image, which th
     assert.equal(submitted[0]!.errors?.[0], "/sections/1/blocks/0/text: 0.84 is not in the paper's text, and this session has no image of Figure 1 to check it against");
     const user = sent[0]!.messages[1]!;
     assert.deepEqual(imagesOf(user), [view(png(8, 8).length)]);
-    assert.ok(textOf(user).includes('The paper\'s Figure 1 (figure "probe" of the writer\'s session), which the read gives values read off:'));
+    assert.ok(textOf(user).includes('The writer\'s figure "probe", made as the paper\'s Figure 1, which the read gives values read off:'));
     assert.deepEqual(outcome.figures, [], "the read shows no figure, so the job returns none");
+  });
+});
+
+test("a revision that fails its submit leaves the accepted read its figures as they were when it was accepted", async () => {
+  await withSite(async ({ url }) => {
+    const { models: m, faux } = models();
+    // an imaging whose stored picture differs with what it was made from
+    const base = fakeImaging().imaging;
+    const stored = (bytes: number) => Buffer.concat([WEBP, Buffer.from(String(bytes))]).toString("base64");
+    const imaging: Imaging = { ...base, picture: async (data, mime, crop) => ({ ...(await base.picture(data, mime, crop)), webp: Buffer.from(stored(data.length), "base64") }) };
+    const refused = changed((d) => (blocks(d, "method")[0]!.text = "The probe reaches 99.9% accuracy."));
+    const second: Sent[] = [];
+    faux.setResponses([
+      cell(`await figure("figs/probe.png", "probe"); await submit(${JSON.stringify(showing("probe"))})`),
+      reviews(FAILING),
+      // the revision makes another picture under the same name, and its submit is refused
+      cell(`await figure("a/setup.png", "probe"); await submit(${JSON.stringify(refused)})`),
+      ...stopping,
+    ]);
+    const outcome = await run(m, { hosts: local(url), imaging });
+    assert.deepEqual(outcome.trace.filter((e) => e.type === "submit").map((s) => s.ok), [true, false]);
+    assert.deepEqual(outcome.result?.sections, showing("probe").sections, "the accepted read");
+    assert.deepEqual(outcome.figures, [{ name: "probe", mime: "image/webp", data: stored(png(8, 8).length) }], "with the picture it was accepted and reviewed with");
+
+    // a revision that is accepted is reviewed and returned with the picture as it then stands
+    const again = models();
+    again.faux.setResponses([
+      cell(`await figure("figs/probe.png", "probe"); await submit(${JSON.stringify(showing("probe"))})`),
+      reviews(FAILING),
+      cell(`await figure("a/setup.png", "probe"); await submit(${JSON.stringify(showing("probe"))})`),
+      seeing(reviews(PASSING), second),
+    ]);
+    const replaced = await run(again.models, { hosts: local(url), imaging });
+    assert.deepEqual(imagesOf(second[0]!.messages[1]!), [view(png(4, 4).length)]);
+    assert.deepEqual(replaced.figures, [{ name: "probe", mime: "image/webp", data: stored(png(4, 4).length) }]);
+
+    // a picture made again after the submit, in the same cell, is no part of the read that was accepted
+    const after = models();
+    const first: Sent[] = [];
+    after.faux.setResponses([
+      cell(`await figure("figs/probe.png", "probe"); await submit(${JSON.stringify(showing("probe"))}); await figure("a/setup.png", "probe")`),
+      seeing(reviews(PASSING), first),
+    ]);
+    const late = await run(after.models, { hosts: local(url), imaging });
+    assert.deepEqual(imagesOf(first[0]!.messages[1]!), [view(png(8, 8).length)], "the reviewer sees the picture the read was accepted with");
+    assert.deepEqual(late.figures, [{ name: "probe", mime: "image/webp", data: stored(png(8, 8).length) }]);
   });
 });
 

@@ -213,16 +213,17 @@ What submit checks beyond the schema:
 - Structure: the sections in the order above; one lens per topic listed and no other; ids unique; each table row with as \
 many cells as the table has columns; each edge between nodes the diagram has.
 - Places: a fig block's name is a figure figure() or crop() made in this session, and its number is the paper's ("Figure \
-6"). Every figure and table the read cites exists in the paper. Every where names a place the paper has: a section or an \
-appendix by its number as sections() gives it ("§3.2", "Appendix B.1") or by its title, a figure or table, an equation, a \
-page; a number the paper's outline lacks is refused.
+6"). Every where names a place: a section or an appendix by its number as sections() gives it ("§3.2", "Appendix B.1") or \
+by its title, a figure or table, an equation, a page. A figure, table or section number that a LaTeX source's own numbering \
+rules out is refused; a place code cannot look up goes to the reviewer by name.
 - Numbers: every number written in digits that the read gives as the paper's (a result, a setting, a count) appears in the \
 paper's text, in any common form (0.34 or 34%, .95 or 0.95, 1,200 or 1.2k, rounded to fewer places): in prose, captions, \
 facts and their tags, tables and diagrams. A value read off a plot cites its figure in the same sentence ("about 0.7 at \
 layer 12 (Fig. 6)"), and this session has that figure's image, made by figure() or crop() with its number or shown in a fig \
 block: the reviewer checks the value against the image. Your own arithmetic, such as a difference or a ratio the paper does \
 not state, and what you found outside the paper (a repository's file count) are given through the paper's own numbers or in \
-words. Whole numbers under ten, years, the reading time and other papers' numbers in Related work are not checked.
+words. A value cited to several figures needs the image of each. Not checked: whole numbers under ten, years, the reading \
+time, other papers' numbers in Related work, and a table caption's counts of the rows and columns kept ("11 of its 12 rows").
 - Equations: every eq block and every $inline formula$ parses in KaTeX.
 - Diagrams: leave a diagram's coordinates out and it is laid out for you; render it to see the result, and place the nodes \
 yourself (x, y, w, h on every node, at least 40 tall) only where the layout does not serve.
@@ -291,10 +292,18 @@ ${RUBRIC}
 The three prose faults, which a clarity finding names:
 ${FAULTS}
 
-Code has already checked that the read fits its schema, that its numbers appear in the paper's text, that the figures, \
-tables and sections it cites exist (the message lists any it could not tell), and that every verdict and CARD note names a \
-place: do not repeat those checks. Check what code cannot: whether a number is the right one for what the read says of it, \
-whether a value read off a plot matches the plot you are shown, whether a claim's verdict is fair.
+What code has checked, which you need not repeat: the read fits its schema; each number it gives as the paper's appears \
+somewhere in the paper's text; and, where the paper's LaTeX source shows them, the figures, tables and sections it cites \
+exist.
+What code has not checked, which is yours:
+- The places the message lists as not confirmed. Code looks up no equation, algorithm, theorem, footnote, page or line, no \
+place of a paper read from its PDF that the text does not itself name, and no label under numbering the source sets itself: \
+it names each for you to check against the paper.
+- These numbers, which the number check leaves out: whole numbers under ten; years; every number in Related work; an \
+equation's TeX; the reading time; a table caption's counts of the rows and columns the read kept; the read's own headings \
+and labels (section titles, sub-headings, fact names).
+- Whether a number is the right one for what the read says of it, whether a value read off a plot matches the plot you are \
+shown, whether a figure made as one of the paper's is that figure, whether a claim's verdict is fair.
 
 Findings point at a place in the read (where: a section's id, or "<section id>.<n>" for its n-th block counted from 0) and \
 say what is wrong and what would fix it. A clarity finding names its fault, quotes the sentence and gives a rewrite. Give \
@@ -336,7 +345,7 @@ export function reviewerMessage(paper: PaperInput, text: string, left: string[],
     "",
     JSON.stringify(read),
     ...(left.length ? ["", "What the read says of the parts of the paper left out above cannot be checked here: do not count it for or against the read."] : []),
-    ...(unverified.length ? ["", `Code could not tell from the paper's text whether these places the read cites exist: ${unverified.join(", ")}. Check each against the paper.`] : []),
+    ...(unverified.length ? ["", `Not confirmed by code, which could not tell whether the paper has these places the read cites: ${unverified.join("; ")}. Check each against the paper.`] : []),
   ].join("\n");
 }
 

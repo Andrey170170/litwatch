@@ -22,7 +22,9 @@ the session (`paper`), wherever they sit in the text, to be read where the read 
 once per run (`src/paper.ts`): the session's `sections()` gives them, the first message's outline lists them, and
 the checks look sections up in them. A LaTeX source's carry their numbers (`3.2`, `A.1` from `\appendix` on); a
 PDF's text is read in the two forms litwatch's archive writes, Markdown with bold headings (`## **References**`)
-and plain text, where only the References line and the appendix's first line after it are told as headings.
+and plain text, where only two lines are told as headings: the References line, and the appendix's first, which
+is a line that names it (`Appendix`, `Appendix A: Proofs`) anywhere past the Introduction, or a lettered line
+(`A Additional samples`) after the references.
 Besides the paper's text (`sections()`, `section()`, `find()`, `refs()`), litwatch's papers (`store.search`),
 Semantic Scholar (`s2.lookup`) and the open web (`fetch`), the session has:
 
@@ -49,30 +51,41 @@ images of its latest cells, and older ones are replaced by a line. A figure is s
 under the name the read cites it by; a run makes at most 60, 24 MiB together, within what litwatch takes of a job.
 
 `submit` takes the read's schema (`src/read.ts`) in a draft's form: the model's own process notes only, and a
-diagram's coordinates optional. It then checks in code (`src/checks.ts`) what a model need not judge:
+diagram's coordinates optional. It then checks in code (`src/checks.ts`) what a model need not judge. A check
+refuses only on evidence: a place a LaTeX source's own numbering rules out, a number the paper's text lacks. What
+code cannot settle either way is neither passed in silence nor refused; it goes to the reviewer by name.
 
 - the sections in their order, one lens per topic the read is written for and no other, ids unique, each table row
   with as many cells as the table has columns, each edge between nodes the diagram has, a placed node at least 40 px
   tall;
 - every `fig` block naming a figure this session made, under the number it was made as, and every figure and table
-  cited being the paper's. A label is read whole (`3`, `A.1`, `S2`), by one parser for every lookup
-  (`src/places.ts`). A LaTeX source's floats are counted, and one with no table has none; a PDF's text has a
-  figure when it mentions it;
-- every `where` (a claim's verdict, a CARD note, a diagram's part) naming a place the paper has: a section or an
-  appendix whose number is in the paper's outline at its depth (`§2.3` needs section 2 to have a third
-  subsection), a figure or table, a numbered equation, algorithm, theorem, footnote or page, or a section by its
-  title;
+  cited, a `fig` block's number included however it is written (`Figure 6`, `6`). A label is read whole (`3`,
+  `A.1`, `S2`), by one parser for every lookup (`src/places.ts`). A LaTeX source's floats are counted: a number
+  past the count is refused, and a source with no table has none;
+- every `where` (a claim's verdict, a CARD note, a diagram's part) naming a place: a section or an appendix by its
+  number, a figure or table, a numbered equation, algorithm, theorem, footnote, page or line, or a section by its
+  title, whole at any length (`PPO`) or in part where the part is long enough not to match by chance. A LaTeX
+  source numbered by LaTeX's defaults carries its outline, so a section number it lacks is refused (`§2.3` needs
+  section 2 to have a third subsection), and so is a `where` that names nothing of these;
 - every equation and inline formula through KaTeX;
 - every number given as the paper's being in the paper's text, in any common form (`src/numbers.ts`: 0.34 or 34%,
   .95 or 0.95, 1,200 or 1.2k, rounded to the read's precision): in prose, captions, facts and their tags, tables
   with their group headings, and diagrams. A value the text lacks passes when its sentence cites a figure this
   session has an image of, made with that number or shown in a `fig` block: it was read off a plot, and the reviewer
-  is shown that image. Not checked: whole numbers under ten, years from 1950 to next year, the reading time, other
-  papers' numbers in Related work, an equation's own TeX (notation, not values), and the read's own labels (section
-  titles, `h3`, fact names).
+  is shown that image. A sentence, or a table's caption, that cites several figures needs the image of each. Not
+  checked: whole numbers under ten, years from 1950 to next year, the reading time, other papers' numbers in
+  Related work, an equation's own TeX (notation, not values), a table caption's counts of the rows and columns the
+  read kept (`11 of its 12 rows`), and the read's own labels (section titles, `h3`, fact names). The reviewer's
+  prompt names these, so it checks them itself.
 
-What the text cannot tell either way is left to the reviewer, by name: an appendix figure of a LaTeX source, whose
-number the source does not carry; a section number of a PDF whose lines show no numbering.
+What goes to the reviewer by name, since code can neither confirm it nor rule it out:
+
+- any figure, table, section or appendix of a PDF's text that the text does not itself name or number on a line,
+  and a `where` of such a paper that names nothing code knows;
+- an equation, algorithm, theorem, footnote, page or line, which code does not look up;
+- in a LaTeX source: a figure or table past the main text's count and within the source's whole count, an
+  appendix's own labels (`A.1`, `S2`), any label where the source sets the counter or its form itself, an appendix
+  where no command starts one, and a `fig` block's number with no number in it.
 
 A draft that passes is laid out: a diagram without coordinates gets them from ELK's layered algorithm
 (`src/layout.ts`), so the stored read always carries them.
@@ -85,7 +98,9 @@ five checks (`anchors`, `experiments`, `why_boxes`, `voice`, `length`) and its f
 score is at least 4 and every check passed. Otherwise the findings go into the writer's own conversation and it
 revises: the first write plus at most two revisions. A read that still fails is kept, with a `review` process note
 saying what it failed on; a review that could not run leaves the read with a `tool` note saying it was not
-reviewed. The job returns each round in `reviews`, and the figures the read shows in `figures`.
+reviewed. The job returns each round in `reviews`, and the figures the read shows in `figures`. Both the review
+and the job take a read's figures as they were when `submit` accepted it: a figure made again under the same name
+in a revision that is then not accepted does not change the read that is kept.
 
 A job's `trace` (in `GET /jobs/<id>`) is what the run did, each event with `t`, milliseconds since it
 started: the model's `assistant` turns (text, reasoning summary, stop reason, usage), `cell`s (code,

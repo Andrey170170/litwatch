@@ -4,10 +4,10 @@
  * reading of a label ("3", "A.1", "S2") serves every lookup: a cite in the read, a `fig` block's number, the number
  * a figure is made under.
  *
- * What an index knows depends on the text. A LaTeX source shows its floats and its section commands, so their
- * numbers are counted; a PDF's text shows only what it says, so a place is there when the text names it. Where
- * neither can tell (an appendix figure of a LaTeX source, whose number the source does not carry) the answer is
- * "unknown", and the cite is left to the reviewer.
+ * An answer is "there" or a refusal only on evidence. A LaTeX source numbered by LaTeX's defaults shows its floats
+ * and its section commands, so a number past them is refused and one within them is there. Everything else is
+ * "unknown" and left to the reviewer by name: any place of a PDF's text that the text does not itself name, a label
+ * under numbering the source sets itself, an appendix's own numbering, a float the count cannot place.
  */
 
 import { PaperNumbers } from "./numbers.ts";
@@ -90,42 +90,53 @@ const words = (text: string): string =>
     .join(" ")} `;
 /** A line of a PDF's text that opens with a section number: "3.1 Setup", "## **2 Method**", "A Additional samples". */
 const NUMBERED_LINE = /^[ \t#]*\**[ \t]*((?:\d{1,2}|[A-Z])(?:\.\d{1,2}){0,3})\.?\**[ \t]+\**[A-Z]/gm;
+/** A LaTeX source that numbers a kind of float its own way: a counter set, its form redefined, or chapters. */
+const renumbered = (text: string, kind: Kind): boolean =>
+  new RegExp(`\\\\(?:setcounter|numberwithin|counterwithin\\*?)\\s*\\{${kind}\\}|\\\\the${kind}(?![a-zA-Z])|\\\\chapter\\*?\\s*[[{]`).test(text);
 
 export class PaperIndex {
   /** The paper's text, a LaTeX source's without its comments. */
   readonly text: string;
-  private readonly latex: boolean;
-  /** How many figures and tables a LaTeX source numbers. */
-  private readonly counts: Record<Kind, number> = { figure: 0, table: 0 };
+  /** Whether the paper's headings are all known, as a LaTeX source's are: a location that names none of them names
+   * no place. A PDF's are unevenly found. */
+  readonly outlined: boolean;
+  /** How many figures and tables a LaTeX source numbers: at least `sure`, numbered from 1 in its main text, and at
+   * most `most` in all. */
+  private readonly floats: Record<Kind, { sure: number; most: number }> = { figure: { sure: 0, most: 0 }, table: { sure: 0, most: 0 } };
   /** The labels the text itself cites, by kind ("Tables 2–3" names both). */
   private readonly mentioned: Record<Kind, Set<string>> = { figure: new Set(), table: new Set() };
-  /** The paper's section numbers, as keys; undefined when the text does not show its numbering. */
-  private readonly sections: Set<string> | undefined;
+  /** The section numbers the text shows, as keys: a LaTeX source's own, or those a PDF's lines open with. */
+  private readonly sections: Set<string>;
+  /** Whether `sections` is the paper's whole numbered outline: a LaTeX source numbered by LaTeX's defaults. */
+  private readonly numbered: boolean;
   /** The titles of its headings, as `words` gives them. */
   private readonly titles: string[];
   private readonly hasAppendix: boolean;
   private found: PaperNumbers | undefined;
 
   constructor(paper: string, source?: string | null) {
-    this.latex = isLatex(paper, source);
-    this.text = this.latex ? uncommented(paper) : paper;
+    this.outlined = isLatex(paper, source);
+    this.text = this.outlined ? uncommented(paper) : paper;
     for (const c of cites(this.text)) this.mentioned[c.kind].add(labelKey(c.label));
     const heads = headings(paper, source);
-    this.hasAppendix = splitPaper(paper, source).cuts.some((c) => c.part === "appendix");
-    if (this.latex) {
-      for (const kind of ["figure", "table"] as const) this.counts[kind] = this.count(kind);
-      const numbers = heads.flatMap((h) => (h.number ? [labelKey(h.number)] : []));
-      this.sections = numbers.length ? new Set(numbers) : undefined;
-      this.titles = heads.map((h) => words(h.title));
+    const appendix = splitPaper(paper, source).cuts.find((c) => c.part === "appendix");
+    this.hasAppendix = appendix !== undefined;
+    let titles: string[];
+    if (this.outlined) {
+      for (const kind of ["figure", "table"] as const) this.floats[kind] = this.count(kind, appendix?.start ?? Infinity);
+      // `headings` numbers a source only where its numbering is LaTeX's own
+      this.sections = new Set(heads.flatMap((h) => (h.number ? [labelKey(h.number)] : [])));
+      this.numbered = this.sections.size > 0;
+      titles = heads.map((h) => h.title);
     } else {
-      // a PDF's headings are unevenly found, so any line that opens with a number counts; a text with no "1 …"
-      // line is not visibly numbered
-      const numbers = new Set([...this.text.matchAll(NUMBERED_LINE)].map((m) => labelKey(m[1]!)));
-      this.sections = numbers.has("1") ? numbers : undefined;
+      // a PDF's headings are unevenly found: a number a line opens with is there, and any other may be too
+      this.sections = new Set([...this.text.matchAll(NUMBERED_LINE)].map((m) => labelKey(m[1]!)));
+      this.numbered = false;
       // the Markdown headings, and the lines set bold alone, as a PDF's smaller headings come
-      const bold = [...this.text.matchAll(/^[ \t]*\*\*([^*\n]{3,100})\*\*[ \t]*$/gm)].map((m) => m[1]!);
-      this.titles = [...heads.map((h) => h.title), ...bold].map((t) => words(t.replace(/^(?:\d{1,2}|[A-Z])(?:\.\d{1,2})*\.?\s+/, "")));
+      const bold = [...this.text.matchAll(/^[ \t]*\*\*([^*\n]{2,100})\*\*[ \t]*$/gm)].map((m) => m[1]!);
+      titles = [...heads.map((h) => h.title), ...bold].map((t) => t.replace(/^(?:\d{1,2}|[A-Z])(?:\.\d{1,2})*\.?\s+/, ""));
     }
+    this.titles = titles.map(words).filter((t) => t.trim() !== "");
   }
 
   /** The paper's numbers (`numbers.ts`), read once. */
@@ -133,56 +144,64 @@ export class PaperIndex {
     return (this.found ??= new PaperNumbers(this.text));
   }
 
-  /** The numbered captions of a kind: each environment's captions outside its sub-floats (one for an environment
-   * with none, so the count errs high), and each \captionof. */
-  private count(kind: Kind): number {
-    let n = 0;
+  /** The numbered floats of a kind, between two bounds. Each environment's captions outside its sub-floats and
+   * each \captionof count; an environment with no caption may be captioned by a macro, so it counts toward `most`
+   * only. `sure` holds the main text's, before `appendix`, since numbering runs on from 1 there in every class;
+   * it is 0 where the source numbers the kind its own way. */
+  private count(kind: Kind, appendix: number): { sure: number; most: number } {
+    let sure = 0;
+    let most = 0;
+    const add = (at: number, captions: number, floor: number) => {
+      most += Math.max(floor, captions);
+      if (at < appendix) sure += captions;
+    };
     const env = new RegExp(`\\\\begin\\{(${ENVIRONMENTS[kind]})\\}([\\s\\S]*?)\\\\end\\{\\1\\}`, "g");
     for (const m of this.text.matchAll(env)) {
       const body = m[2]!.replace(/\\begin\{(sub(?:figure|table)|minipage)\}[\s\S]*?\\end\{\1\}/g, (sub, name: string) => (name === "minipage" ? sub : ""));
-      n += Math.max(1, (body.match(/\\caption\s*[[{]/g) ?? []).length);
+      add(m.index, (body.match(/\\caption\s*[[{]/g) ?? []).length, 1);
     }
-    return n + (this.text.match(new RegExp(`\\\\captionof\\s*\\{${kind}\\}`, "g")) ?? []).length;
+    for (const m of this.text.matchAll(new RegExp(`\\\\captionof\\s*\\{${kind}\\}`, "g"))) add(m.index, 1, 1);
+    return { sure: renumbered(this.text, kind) ? 0 : sure, most };
   }
 
   /** Whether the paper has the figure or table of this label. */
   float(kind: Kind, label: string): Answer {
     const key = labelKey(label);
     if (this.mentioned[kind].has(key)) return "there";
-    const name = `${kind === "figure" ? "Figure" : "Table"} ${label}`;
-    if (!this.latex) return { no: `the paper's text never mentions ${name}` };
-    const count = this.counts[kind];
+    // a PDF's text may hold a figure it never names as the read does
+    if (!this.outlined) return "unknown";
+    const { sure, most } = this.floats[kind];
     // a source with no such environment has none: every cite is wrong, an appendix's too
-    if (count === 0) return { no: `the paper's source has no ${kind}` };
+    if (most === 0) return { no: `the paper's source has no ${kind}` };
     // A.1, S2, 3.4: an appendix's or a section's own numbering, which the source does not carry
     if (!/^\d+$/.test(key)) return "unknown";
-    return Number(key) <= count ? "there" : { no: `the paper's source has ${count} ${kind}${count === 1 ? "" : "s"}` };
+    if (Number(key) > most) return { no: `the paper's source has ${sure === most ? "" : "at most "}${most} ${kind}${most === 1 ? "" : "s"}` };
+    return Number(key) <= sure ? "there" : "unknown";
   }
 
-  /** Whether the paper has an appendix. A LaTeX source starts one by a command or a heading, so one without
-   * either has none; a PDF's text may hold one under a heading that was not found. */
+  /** Whether the paper has an appendix: it does where one was found, and may where none was. */
   appendix(): Answer {
-    return this.hasAppendix ? "there" : this.latex ? { no: "the paper's text has no appendix" } : "unknown";
+    return this.hasAppendix ? "there" : "unknown";
   }
 
   /** Whether the paper has the section or appendix of this label ("3.2", "A.1", "B"). */
   section(label: string): Answer {
     const key = labelKey(label);
-    const appendix = /^[A-Z]/.test(key);
-    if (this.sections?.has(key)) return "there";
-    if (appendix && !this.hasAppendix) return this.appendix();
-    if (!this.sections) return "unknown";
-    // an appendix that is not lettered in the text: its parts cannot be told apart
-    if (appendix && ![...this.sections].some((n) => /^[A-Z]/.test(n))) return "unknown";
-    return { no: `the paper has no ${appendix ? "appendix" : "section"} ${label}` };
+    if (this.sections.has(key)) return "there";
+    if (!this.numbered) return "unknown";
+    // a lettered part of a source that letters none: an appendix under headings of its own
+    if (/^[A-Z]/.test(key) && ![...this.sections].some((n) => /^[A-Z]/.test(n))) return "unknown";
+    return { no: `the paper has no ${/^[A-Z]/.test(key) ? "appendix" : "section"} ${label}` };
   }
 
-  /** Whether a location names a section by its title: the title is in it, or one of its parts is in a title
-   * ("Discussion" for "Discussion and limitations"). The abstract is every paper's. */
+  /** Whether a location names a section by its title: it is the title, whole or as one of its parts, however
+   * short ("PPO"); or the title is in it, or one of its parts is in a title ("Discussion" for "Discussion and
+   * limitations"), where the match is long enough not to be chance. The abstract is every paper's. */
   named(where: string): boolean {
     if (/\babstract\b/i.test(where)) return true;
     const said = words(where);
     const parts = where.split(/[,;:()–—]|\band\b/).map((part) => words(part.replace(/\b(?:the|section|appendix|paper|of|in)\b/gi, " ")));
-    return this.titles.some((title) => title.length >= 6 && (said.includes(title) || parts.some((part) => part.length >= 6 && !/\d/.test(part) && title.includes(part))));
+    const partly = (title: string) => title.length >= 6 && (said.includes(title) || parts.some((part) => part.length >= 6 && !/\d/.test(part) && title.includes(part)));
+    return this.titles.some((title) => said === title || parts.includes(title) || partly(title));
   }
 }

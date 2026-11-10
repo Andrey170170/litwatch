@@ -6,13 +6,18 @@
  * number given as the paper's against the paper's text (`numbers.ts`). What the paper has is the index's to say
  * (`places.ts`).
  *
+ * A check refuses only on evidence: a place a LaTeX source's own numbering rules out, a number the paper's text
+ * lacks. What code cannot settle either way (a PDF's sections, an equation or a page, a label under numbering the
+ * source sets itself) is neither passed in silence nor refused: it goes to the reviewer by name
+ * (`Checked.unverified`).
+ *
  * A number the paper's text lacks passes when its sentence cites a figure this session has an image of: it was read
  * off a plot, and the reviewer checks it against that image (`Checked.plots`).
  */
 
 import katex from "katex";
 import { numbersIn, plainText } from "./numbers.ts";
-import { cites, figureLabel, labelKey, sectionCites, type PaperIndex } from "./places.ts";
+import { cites, figureLabel, labelKey, sectionCites, type Answer, type PaperIndex } from "./places.ts";
 import type { Draft, DraftBlock, DraftDiagram, DraftSection } from "./read.ts";
 import { amongErrors, isWebUrl, type Found } from "./schema.ts";
 
@@ -31,7 +36,7 @@ export interface Checked {
   errors: string[];
   /** The figures, by name, that the read cites for values the paper's text lacks: the reviewer is shown each. */
   plots: string[];
-  /** The places cited that the paper's text can neither confirm nor rule out, as cited: the reviewer's to check. */
+  /** The places cited that code can neither confirm nor rule out, as cited: the reviewer's to check. */
   unverified: string[];
 }
 
@@ -46,10 +51,11 @@ const MAX_LISTED = 40;
  * given as the paper's, so they are checked. A number the paper's text lacks may have been read off a plot: off
  * `figure` (by name), which the whole text is about, as a figure's own caption is; or off the paper's figures the
  * text is said to be built from (`figures`, by label), as a table's cells are whose caption cites one; or off a
- * figure its own sentence cites.
+ * figure its own sentence cites. `cut`: a table's caption, whose counts of the rows and columns kept are the read's.
  *
  * Not checked for numbers: the read's own presentation (a section's title and id, an `h3`, a fact's name, a
- * figure's number), the reading time, and Related work, whose numbers are other papers'. */
+ * figure's number), the reading time, and Related work, whose numbers are other papers'. The reviewer's prompt
+ * names every exemption (`prompt.ts`), so it checks those itself. */
 interface Unit {
   path: string;
   text: string;
@@ -58,6 +64,7 @@ interface Unit {
   where?: boolean;
   figure?: string;
   figures?: string[];
+  cut?: boolean;
 }
 
 /** The glance fact that is the read's own: the reading time. */
@@ -97,8 +104,7 @@ function* blockUnits(b: DraftBlock, at: string): Generator<Unit> {
       if (b.caption !== undefined) yield { path: `${at}/caption`, text: b.caption, ...prose };
       break;
     case "fig":
-      yield { path: `${at}/number`, text: b.number };
-      // a figure's caption gives what the figure shows: its values are the plot's
+      // a figure's caption gives what the figure shows: its values are the plot's; its number is looked up in check()
       yield { path: `${at}/caption`, text: b.caption, ...prose, figure: b.name };
       break;
     case "xp":
@@ -108,7 +114,7 @@ function* blockUnits(b: DraftBlock, at: string): Generator<Unit> {
       }
       break;
     case "table": {
-      if (b.caption !== undefined) yield { path: `${at}/caption`, text: b.caption, ...prose };
+      if (b.caption !== undefined) yield { path: `${at}/caption`, text: b.caption, ...prose, cut: true };
       // a figure the caption cites is where the cells were read off
       const figures = b.caption === undefined ? [] : cites(plainText(b.caption)).filter((c) => c.kind === "figure").map((c) => c.label);
       const cells = { numbers: true, ...(figures.length ? { figures } : {}) };
@@ -276,9 +282,12 @@ function inlineTex(text: string): string[] {
   return out;
 }
 
-/** A numbered place the paper's text does not let code look up: an equation, an algorithm, a theorem, a footnote,
- * a page, a line. It counts as a place; whether it is the right one is the reviewer's. */
-const OTHER_PLACE = /\b(?:Eqs?\.?|Equations?|Alg(?:orithm|\.)s?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|pp?\.|[Pp]ages?|[Ll]ines?)\s*\(?[A-Z]?\.?\d/;
+/** A numbered place code does not look up: an equation, an algorithm, a theorem, a footnote, a page, a line. It
+ * has the form of a place; whether the paper has it is the reviewer's to check, by name. */
+const OTHER_PLACE = /\b(?:Eqs?\.?|Equations?|Alg(?:orithm|\.)s?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|pp?\.|[Pp]ages?|[Ll]ines?)\s*\(?[A-Z]?\.?\d+(?:\.\d+)*[a-z]?\)?/g;
+/** How a table's caption says the read cut the paper's table, which the spec asks it to say: the rows and columns
+ * kept, counted ("11 of its 12 rows", "the first 5 columns"). The counts are the read's own. */
+const CUT_COUNTS = /(?<![\d.,])\d+(?:\s+of\s+(?:(?:its|the|all)\s+)?\d+)?\s+(?:[a-z-]+\s+)?(?:rows?|columns?)\b/gi;
 
 // What a number is no value of: a place in the paper, an arXiv id, a link.
 const LOCATION = /(?:§+\s*|\b(?:Sections?|Secs?\.?|Appendi(?:x|ces)|Apps?\.?|Eqs?\.?|Equations?|Algorithms?|Algs?\.?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|Pages?|pp?\.|Lines?)(?:\s|~)*)\(?(?:[A-Z]\.?)?\d+(?:\.\d+)*[a-z]?\)?(?:\s*(?:,|and|&|–|—|-|to)\s*§*\s*\(?(?:[A-Z]\.?)?\d+(?:\.\d+)*[a-z]?\)?)*/gi;
@@ -316,6 +325,12 @@ export function check(read: Draft, ctx: CheckContext): Checked {
   const unverified = new Set<string>();
   const absent = new Map<string, string[]>();
   const unseen = new Map<string, { texts: string[]; figures: Set<string> }>();
+  /** What the index says of a place cited at `path`: refused where the paper has none, the reviewer's where it
+   * cannot tell. */
+  const settle = (path: string, name: string, answer: Answer): void => {
+    if (answer === "unknown") unverified.add(name);
+    else if (answer !== "there") errors.push(`${path}: cites ${name}, but ${answer.no}`);
+  };
 
   for (const [i, s] of read.sections.entries()) {
     const at = `/sections/${i}`;
@@ -330,10 +345,13 @@ export function check(read: Draft, ctx: CheckContext): Checked {
         } else if (b.type === "fig") {
           const made = ctx.figures.get(b.name);
           if (!made) errors.push(`${here}/name: this session made no figure "${b.name}"; figure() or crop() makes one under the name you give it`);
+          // the number is the paper's however it is written ("Figure 6", "6"); one with no number in it cannot be looked up
           const label = figureLabel(b.number);
-          if (made && label !== undefined) {
-            if (made.label !== undefined && labelKey(made.label) !== labelKey(label)) errors.push(`${here}/number: "${b.number}", but figure "${b.name}" was made as the paper's Figure ${made.label}`);
-            else image(label, b.name);
+          if (label === undefined) unverified.add(`the figure numbered "${b.number}"`);
+          else {
+            settle(`${here}/number`, `Figure ${label}`, index.float("figure", label));
+            if (made?.label !== undefined && labelKey(made.label) !== labelKey(label)) errors.push(`${here}/number: "${b.number}", but figure "${b.name}" was made as the paper's Figure ${made.label}`);
+            else if (made) image(label, b.name);
           }
         }
       }
@@ -349,31 +367,27 @@ export function check(read: Draft, ctx: CheckContext): Checked {
         }
       const text = plainText(unit.text);
       const cited = cites(text);
-      // a location is one when it names a place the paper has, or may have
-      let anchored = false;
-      let refused = false;
-      const settle = (name: string, answer: ReturnType<PaperIndex["float"]>) => {
-        if (answer === "unknown") unverified.add(name);
-        if (answer === "there" || answer === "unknown") anchored = true;
-        else {
-          refused = true;
-          errors.push(`${unit.path}: cites ${name}, but ${answer.no}`);
-        }
-      };
-      for (const c of cited) settle(`${c.kind === "figure" ? "Figure" : "Table"} ${c.label}`, index.float(c.kind, c.label));
+      for (const c of cited) settle(unit.path, `${c.kind === "figure" ? "Figure" : "Table"} ${c.label}`, index.float(c.kind, c.label));
       if (unit.where) {
-        for (const c of sectionCites(text)) {
-          if (c.label !== undefined) settle(c.appendix ? `Appendix ${c.label}` : `§${c.label}`, index.section(c.label));
-          else settle("the appendix", index.appendix());
+        const sections = sectionCites(text);
+        for (const c of sections) {
+          if (c.label !== undefined) settle(unit.path, c.appendix ? `Appendix ${c.label}` : `§${c.label}`, index.section(c.label));
+          else settle(unit.path, "the appendix", index.appendix());
         }
-        if (!anchored && !refused && !OTHER_PLACE.test(text) && !index.named(text))
-          errors.push(`${unit.path}: "${unit.text}" names no place in the paper: give a numbered section, figure, table, appendix, equation or page of the paper, or a section by its title`);
+        const others = [...text.matchAll(OTHER_PLACE)].map((m) => m[0].replace(/\s+/g, " "));
+        for (const other of others) unverified.add(other);
+        // nothing in it has the form of a place, and no heading is named: no place where the paper's headings are
+        // all known, and the reviewer's to judge where they are not
+        if (cited.length + sections.length + others.length === 0 && !index.named(text)) {
+          if (index.outlined) errors.push(`${unit.path}: "${unit.text}" names no place in the paper: give a numbered section, figure, table, appendix, equation or page of the paper, or a section by its title`);
+          else unverified.add(`the location "${unit.text}"`);
+        }
       }
       if (!unit.numbers) continue;
       // blank out what is no value, keeping every index
       let values = text;
       for (const c of cited) values = values.slice(0, c.index) + " ".repeat(c.end - c.index) + values.slice(c.end);
-      for (const pattern of NOT_VALUES) values = values.replace(pattern, (m) => " ".repeat(m.length));
+      for (const pattern of unit.cut ? [...NOT_VALUES, CUT_COUNTS] : NOT_VALUES) values = values.replace(pattern, (m) => " ".repeat(m.length));
       const missing: string[] = [];
       for (const n of numbersIn(values)) {
         if ((n.bare && n.value < 10) || isYear(n) || index.numbers.has(n)) continue;
@@ -382,16 +396,18 @@ export function check(read: Draft, ctx: CheckContext): Checked {
           if (ctx.figures.has(unit.figure)) plots.add(unit.figure);
           continue;
         }
-        // read off a plot: the figures the whole text is built from, or those its sentence cites
+        // read off a plot: the figures the whole text is built from, or those its sentence cites. Every one of them
+        // needs its image, since the value may be any one's.
         const labels = unit.figures ?? cites(sentence(text, n.index)).filter((c) => c.kind === "figure").map((c) => c.label);
-        const names = labels.flatMap((label) => [...(imaged.get(labelKey(label)) ?? [])]);
-        if (names.length) for (const name of names) plots.add(name);
-        else if (labels.length) {
+        const lacking = labels.filter((label) => !imaged.has(labelKey(label)));
+        if (labels.length === 0) missing.push(n.text);
+        else if (lacking.length === 0) for (const label of labels) for (const name of imaged.get(labelKey(label))!) plots.add(name);
+        else {
           const entry = unseen.get(unit.path) ?? { texts: [], figures: new Set<string>() };
           entry.texts.push(n.text);
-          for (const label of labels) entry.figures.add(`Figure ${label}`);
+          for (const label of lacking) entry.figures.add(`Figure ${label}`);
           unseen.set(unit.path, entry);
-        } else missing.push(n.text);
+        }
       }
       if (missing.length) absent.set(unit.path, missing);
     }

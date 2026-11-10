@@ -53,7 +53,7 @@ const MARKDOWN = [
   "## **A Additional Samples** ", "", "See Table 6.", "", "### **A.1 BBH** ", "", "More.", "",
 ].join("\n");
 const PLAIN = [
-  "Probes read the trace", "Contents", "References", "Appendix", "1 Method", "We probe 3 models, see", "Appendix A for more details). Then we compare", "2 Ghost Whispers", "References",
+  "Probes read the trace", "Contents", "1 Introduction", "References", "Appendix", "1 Introduction", "We probe 3 models, see", "Appendix A for more details). Then we compare", "2 Ghost Whispers", "References",
   "A. Vaswani, N. Shazeer. Attention is all you need.", "J. Andreas. Language models as agent models. 2022.", "15", "A Additional Samples", "See Table 6.", "C.1 BBH", "More.", "",
 ].join("\n");
 
@@ -75,11 +75,12 @@ test("a PDF's text is cut at the bold headings its Markdown form has: References
   assert.ok(kept.main.includes("## **Methods**") && !kept.main.includes("Turpin"));
 });
 
-test("a PDF's plain text is cut at its References line and at the appendix's first line after it", () => {
+test("a PDF's plain text is cut at its References line, and at the appendix's: lettered after it, or named anywhere", () => {
   const { main, cuts } = splitPaper(PLAIN, "pdf");
   const references = PLAIN.lastIndexOf("References");
-  // the last line that reads References is the heading, not the table of contents' entry; a line of prose that
-  // starts "Appendix A" is no heading, nor is a line of the bibliography that starts with an initial
+  // the last line that reads References is the heading, not the table of contents' entry, and the contents'
+  // Appendix line, before the Introduction, is none either; a line of prose that starts "Appendix A" is no
+  // heading, nor is a line of the bibliography that starts with an initial
   assert.deepEqual(cuts, [
     { part: "references", start: references, end: PLAIN.indexOf("A Additional Samples") },
     { part: "appendix", start: PLAIN.indexOf("A Additional Samples"), end: PLAIN.length },
@@ -94,6 +95,19 @@ test("a PDF's plain text is cut at its References line and at the appendix's fir
   // no appendix: the references run to the end
   const none = PLAIN.slice(0, PLAIN.indexOf("15\n"));
   assert.deepEqual(splitPaper(none, "pdf").cuts, [{ part: "references", start: references, end: none.length }]);
+
+  // an appendix that says so needs no References before it: it may stand ahead of them, or the paper have none
+  for (const line of ["Appendix", "Appendix A", "Appendix A: Training Details"]) {
+    const ahead = ["Probes read the trace", "1 Introduction", "We probe 3 models.", line, "Probes train for 5 epochs.", "References", "A. Vaswani, N. Shazeer. Attention is all you need.", ""].join("\n");
+    const start = ahead.indexOf(`${line}\n`);
+    assert.deepEqual(splitPaper(ahead, "pdf"), { main: ahead.slice(0, start), cuts: [{ part: "appendix", start, end: ahead.length }] }, `${line}, ahead of the references`);
+    const alone = ahead.slice(0, ahead.indexOf("References"));
+    assert.deepEqual(splitPaper(alone, "pdf"), { main: alone.slice(0, start), cuts: [{ part: "appendix", start, end: alone.length }] }, `${line}, with no references`);
+    assert.deepEqual(headings(alone, "pdf").map((h) => h.title), [line]);
+  }
+  // a lettered line reads as a heading only after the references
+  const lettered = ["Probes read the trace", "1 Introduction", "We probe 3 models.", "A Additional Samples", "See Table 6.", ""].join("\n");
+  assert.deepEqual(splitPaper(lettered, "pdf"), { main: lettered, cuts: [] });
 });
 
 test("a LaTeX source's headings carry its numbers: sections counted, lettered from the appendix on, starred ones bare", () => {
