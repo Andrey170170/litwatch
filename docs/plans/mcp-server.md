@@ -34,7 +34,8 @@ owner's dotfiles.
 - **The token.** `LITWATCH_MCP_TOKEN` (or `LITWATCH_MCP_TOKEN_FILE`, read through `config.secret`), as a bearer
   header only. With it unset, `/mcp` is not served. `/mcp` refuses the web app's token and the read token (which
   `deep` uses), and `/api` refuses the MCP token, so revoking it touches nothing else.
-- **Seven tools**, all annotated read-only:
+- **Seven tools**, all annotated read-only (an eighth, `read_deep`, came with the Deep read:
+  [deep-read.md](deep-read.md), P3):
 
   | Tool | What it does |
   | --- | --- |

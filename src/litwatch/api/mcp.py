@@ -1,8 +1,8 @@
 """The MCP server at `/mcp` (mcp.md, decisions 83–87): the owner's research agents search the
-archive and the collection, read what litwatch made of a paper or wrote in a digest, and read a
-paper itself, outline first, and its PDF's pages. A thin adapter over the reading code /api calls
-(docs/plans/mcp-server.md, D2) and `mcp_reading`, that shapes its own answers, compact Markdown
-for an agent to read.
+archive and the collection, read what litwatch made of a paper or wrote in a digest, a paper's
+Deep read section by section, and a paper itself, outline first, and its PDF's pages. A thin
+adapter over the reading code /api calls (docs/plans/mcp-server.md, D2), `mcp_reading` and
+`mcp_deep`, that shapes its own answers, compact Markdown for an agent to read.
 
 It writes nothing: its connections are read-only, and its one effect outside the process is a
 request to the archive. Streamable HTTP, stateless with plain JSON answers, behind its own bearer
@@ -39,17 +39,18 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from litwatch import store
 from litwatch.api import digests as digests_api
 from litwatch.api import integrations as integrations_api
-from litwatch.api import mcp_reading
+from litwatch.api import mcp_deep, mcp_reading
 from litwatch.api import reading as reading_api
 from litwatch.api import schemas as s
 from litwatch.api.deps import _same
 from litwatch.api.monitor import McpCalls
 from litwatch.archive import ArchiveError, PaperText, pages
-from litwatch.core import Grade, Hand, Paper, ReactionValue, Taxonomy, Weight
+from litwatch.core import Grade, Hand, Paper, ReactionValue, Taxonomy, Weight, deepread
 from litwatch.core.digests import DigestPeriod, DigestRole, week_of
 from litwatch.intake.search import id_from_url
 from litwatch.publications.bibtex import Cited
 from litwatch.store import fulltext as fulltext_store
+from litwatch.store import integrations as integrations_store
 from litwatch.store import papers as papers_store
 from litwatch.store import reading
 from litwatch.store import taxonomy as taxonomy_store
@@ -61,7 +62,7 @@ INSTRUCTIONS = """\
 litwatch is the owner's literature watch over arXiv. It reads every new paper in its categories, \
 sorts it into the owner's topics and judges it, and keeps what it made of each paper it \
 processed: a one-sentence Gist, a Weight (landmark, solid, incremental), a grade per followed \
-topic (must read, relevant, adjacent, none), a Brief and a Deep card for some, and the owner's \
+topic (must read, relevant, adjacent, none), a Brief and a Deep read for some, and the owner's \
 own word and thumbs. It writes each topic's digests, daily or weekly. Beyond its collection it \
 searches the archive, a store of almost all of arXiv.
 
@@ -69,6 +70,12 @@ Use it before the web for any arXiv paper. The owner often remembers a paper vag
 digest or a topic ("the SAE paper from last week's interpretability digest", "the landmark one \
 on probing", "the one I gave a thumb up"): find it with search_papers and its filters, or with \
 list_digests and read_digest; then get_paper for everything litwatch has on it and its citation.
+
+A Deep read is litwatch's own account of a paper, close to the paper's detail: its method and \
+results, a verdict on each of its claims, its limitations. get_paper shows its At a glance and \
+lists its sections; read_deep gives one section in full. Read it before the paper when it \
+answers the question; it is a model's reading, so go to the paper's text for anything that \
+must be exact.
 
 To read a paper, call paper_outline first: its sections (or a PDF's pages) with their sizes, \
 and where its text comes from. Then read_paper the part you need, by its number in the outline \
@@ -95,6 +102,7 @@ MAX_OFFSET = 10_000
 MAX_TEXT = 100_000_000  # a character offset
 MAX_PART = 100_000  # an outline entry, or a PDF page
 CAPTION_CHARS = 40
+SECTION_CHARS = 80  # a Deep read's section id
 MAX_LISTED = 300  # outline entries an answer lists
 OUTLINE_FOOTER = 200  # the room an outline's answer keeps for the line saying where to go on
 RENDER_SECONDS = 20.0  # the bound on rendering one page, waiting for the executor included
@@ -337,10 +345,11 @@ def build(state: State) -> MCPServer:
         paper_id: Annotated[Text, Field(description="An arXiv id or link, e.g. 2610.01234.")],
     ) -> str:
         """Everything litwatch has on one arXiv paper: its metadata and abstract; where litwatch
-        processed it, its Gist, Brief, Deep card, Weight, grade and Fit per topic; whether it is
-        in the owner's library, and the owner's word, labels, misses and thumbs, on topics no
-        longer followed too; and its citation as BibTeX (the published version where one is known).
-        A paper litwatch has not processed shows the archive's record."""
+        processed it, its Gist, Brief, Weight, grade and Fit per topic, and its Deep read's At a
+        glance and sections (read one with read_deep; an older Deep card is shown whole); whether
+        it is in the owner's library, and the owner's word, labels, misses and thumbs, on topics
+        no longer followed too; and its citation as BibTeX (the published version where one is
+        known). A paper litwatch has not processed shows the archive's record."""
         try:
             pid = id_from_url(paper_id)
         except ValueError as exc:
@@ -363,6 +372,41 @@ def build(state: State) -> MCPServer:
                 cited = Cited(id=page.id, title=page.title, authors=page.authors, year=year)
                 citation = await reading_api._bibtex(c, [], [cited])
         return _paper_answer(page, citation)
+
+    async def read_deep(
+        paper_id: Annotated[Text, Field(description="An arXiv id or link, e.g. 2610.01234.")],
+        section: Annotated[
+            Text,
+            Field(max_length=SECTION_CHARS, description="A section's id, as get_paper lists it."),
+        ],
+    ) -> str:
+        """One section of the paper's Deep read, in full: litwatch's account of the paper at close
+        to the paper's own detail. Its tables come as Markdown, the paper's figures as their
+        numbers and captions (view_pdf_page shows one), a diagram as what its nodes and edges
+        do. get_paper lists the sections with one line each."""
+        try:
+            pid = id_from_url(paper_id)
+        except ValueError as exc:
+            raise NotFoundError(f"No arXiv id in {paper_id!r}.") from exc
+        async with await connect(state.dsn) as c:
+            paper = await papers_store.get(c, pid)
+            stored = await integrations_store.card(c, pid)
+        if paper is None:
+            raise NotFoundError(f"litwatch has no paper {pid}.")
+        read = stored and stored["card"]
+        if not read:
+            raise NotFoundError(f"arXiv:{pid} has no Deep read.")
+        if not deepread.is_read(read):
+            raise NotFoundError(
+                f"arXiv:{pid} has a Deep card from before Deep reads, which has no sections: "
+                "get_paper shows it whole."
+            )
+        text = mcp_deep.section_text(read, section)
+        if text is None:
+            raise ArgumentError(
+                f"No section {section!r}: the read's sections are {', '.join(mcp_deep.ids(read))}."
+            )
+        return "\n".join([f"# {_one_line(paper.title)}", f"Deep read of arXiv:{pid}", "", *text])
 
     async def list_digests(
         topic: Annotated[
@@ -555,6 +599,7 @@ def build(state: State) -> MCPServer:
     tools = (
         search_papers,
         get_paper,
+        read_deep,
         list_digests,
         read_digest,
         paper_outline,
@@ -764,11 +809,14 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
             c.arxiv_version is not None and p.version is not None and c.arxiv_version != p.version
         )
         written = f", {_day(c.written_at)}" if c.written_at else ""
+        # A Deep read gives its At a glance and its sections; a Deep card from before, all of it.
+        is_read = deepread.is_read(c.card)
         out += [
             "",
-            f"## Deep card ({c.source or 'source unknown'}, read {', '.join(read)}{written})",
+            f"## Deep {'read' if is_read else 'card'} "
+            f"({c.source or 'source unknown'}, read {', '.join(read)}{written})",
             *([OLDER_CARD] if older else []),
-            *_card(c.card),
+            *(mcp_deep.summary(c.card) if is_read else _card(c.card)),
         ]
     if p.publication and (p.publication.venue or p.publication.doi):
         pub = p.publication

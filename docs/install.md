@@ -347,8 +347,8 @@ curl -s -H "Authorization: Bearer $M" -H 'Accept: application/json, text/event-s
   http://127.0.0.1:8080/mcp
 ```
 
-answers JSON listing `search_papers`, `get_paper`, `list_digests`, `read_digest`, `paper_outline`, `read_paper`
-and `view_pdf_page`.
+answers JSON listing `search_papers`, `get_paper`, `read_deep`, `list_digests`, `read_digest`, `paper_outline`,
+`read_paper` and `view_pdf_page`.
 
 **Your own integration.** A Python module named with `use`; [`docs/integrations.md`](integrations.md) is the guide.
 
