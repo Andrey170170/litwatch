@@ -173,12 +173,14 @@ export interface TarEntry {
   type?: string;
   /** Written in ustar's prefix field, before the name. */
   prefix?: string;
+  /** An old GNU header, whose bytes past the name hold its access and change times, not a prefix. */
+  gnuTimes?: boolean;
 }
 
 /** A ustar archive of the entries, ended as tar ends one. */
 export function tar(entries: TarEntry[]): Buffer {
   const blocks: Buffer[] = [];
-  for (const { path, data = Buffer.alloc(0), type = "0", prefix = "" } of entries) {
+  for (const { path, data = Buffer.alloc(0), type = "0", prefix = "", gnuTimes = false } of entries) {
     const header = Buffer.alloc(512);
     header.write(path, 0, 100, "utf8");
     header.write("0000644\0", 100);
@@ -188,9 +190,15 @@ export function tar(entries: TarEntry[]): Buffer {
     header.write("00000000000\0", 136);
     header.write("        ", 148);
     header.write(type, 156);
-    header.write("ustar\0", 257);
-    header.write("00", 263);
-    header.write(prefix, 345, 155, "utf8");
+    if (gnuTimes) {
+      header.write("ustar  \0", 257);
+      header.write("15123456701\0", 345);
+      header.write("15123456702\0", 357);
+    } else {
+      header.write("ustar\0", 257);
+      header.write("00", 263);
+      header.write(prefix, 345, 155, "utf8");
+    }
     header.write(`${header.reduce((sum, b) => sum + b, 0).toString(8).padStart(6, "0")}\0 `, 148);
     blocks.push(header, data, Buffer.alloc((512 - (data.length % 512)) % 512));
   }

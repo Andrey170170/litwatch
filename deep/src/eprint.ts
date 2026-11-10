@@ -54,7 +54,8 @@ export function untar(tar: Buffer, keep: (path: string) => boolean): EprintFile[
       const path = /(?:^|\n)\d+ path=([^\n]*)\n/.exec(data.toString("utf8"));
       if (path) longName = path[1];
     } else {
-      const prefix = text(header, 257, 262) === "ustar" ? text(header, 345, 500) : "";
+      // POSIX ustar's prefix; an old GNU header ("ustar  \0") keeps its times there
+      const prefix = header.toString("latin1", 257, 263) === "ustar\0" ? text(header, 345, 500) : "";
       const name = longName ?? (prefix ? `${prefix}/${text(header, 0, 100)}` : text(header, 0, 100));
       longName = undefined;
       const path = type === "0" || type === "\0" ? safe(name) : undefined;

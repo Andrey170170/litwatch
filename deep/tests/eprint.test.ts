@@ -44,10 +44,11 @@ test("long names are read in ustar's, GNU's and pax's forms", () => {
       { path: "truncated", data: image },
       { path: "PaxHeader", type: "x", data: Buffer.from("21 path=pax/name.png\n") },
       { path: "short", data: image },
+      { path: "figs/gnu.png", gnuTimes: true, data: image },
     ]),
     () => true,
   );
-  assert.deepEqual(files.map((f) => f.path), ["figs/deep/figure.png", long, "pax/name.png"]);
+  assert.deepEqual(files.map((f) => f.path), ["figs/deep/figure.png", long, "pax/name.png", "figs/gnu.png"], "an old GNU header's times are no prefix");
 });
 
 test("an e-print that is one TeX file or a PDF has no figure files, and a broken one says so", () => {
