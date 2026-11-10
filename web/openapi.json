@@ -276,51 +276,6 @@
         }
       }
     },
-    "/api/papers/{paper_id}/pdf": {
-      "get": {
-        "summary": "Pdf",
-        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record\nof it. arXiv's PDF without an archive, for a paper neither holds, or when the archive\ncannot get it in time. The database is read before the wait, which holds no connection.",
-        "operationId": "pdf_api_papers__paper_id__pdf_get",
-        "parameters": [
-          {
-            "name": "paper_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Paper Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The PDF, from the archive",
-            "content": {
-              "application/pdf": {}
-            }
-          },
-          "401": {
-            "description": "Missing or wrong token"
-          },
-          "403": {
-            "description": "The read token, outside reading papers"
-          },
-          "307": {
-            "description": "arXiv's PDF: no archive, or none it could get in time"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/papers/{paper_id}/deep/figures/{name}": {
       "get": {
         "summary": "Deep Figure",
@@ -377,6 +332,51 @@
           },
           "404": {
             "description": "The paper's Deep read has no figure of that name, or `v` names a read written over since"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/papers/{paper_id}/pdf": {
+      "get": {
+        "summary": "Pdf",
+        "description": "The paper's PDF as the owner opens it: from the archive, which is asked for it urgently\n(the storage policy fetches PDFs it does not keep when opened, archive.md) and waited on\nfor its `wait_seconds`. A paper litwatch has not fetched is known by the archive's record\nof it. arXiv's PDF without an archive, for a paper neither holds, or when the archive\ncannot get it in time. The database is read before the wait, which holds no connection.",
+        "operationId": "pdf_api_papers__paper_id__pdf_get",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The PDF, from the archive",
+            "content": {
+              "application/pdf": {}
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "307": {
+            "description": "arXiv's PDF: no archive, or none it could get in time"
           },
           "422": {
             "description": "Validation Error",

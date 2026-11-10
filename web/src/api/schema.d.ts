@@ -44,6 +44,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/papers/{paper_id}/deep/figures/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deep Figure
+         * @description One of the paper's figures its Deep read shows, by the name the read's `fig` block
+         *     cites. With `v` (when the read was written, as the paper page asks) it is that read's figure
+         *     or none, and the answer may be kept; without it, the current read's, fetched again each
+         *     time.
+         */
+        get: operations["deep_figure_api_papers__paper_id__deep_figures__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/papers/{paper_id}/pdf": {
         parameters: {
             query?: never;
@@ -60,29 +83,6 @@ export interface paths {
          *     cannot get it in time. The database is read before the wait, which holds no connection.
          */
         get: operations["pdf_api_papers__paper_id__pdf_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/papers/{paper_id}/deep/figures/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Deep Figure
-         * @description One of the paper's figures its Deep read shows, by the name the read's `fig` block
-         *     cites. With `v` (when the read was written, as the paper page asks) it is that read's figure
-         *     or none, and the answer may be kept; without it, the current read's, fetched again each
-         *     time.
-         */
-        get: operations["deep_figure_api_papers__paper_id__deep_figures__name__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3460,58 +3460,6 @@ export interface operations {
             };
         };
     };
-    pdf_api_papers__paper_id__pdf_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                paper_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The PDF, from the archive */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/pdf": unknown;
-                };
-            };
-            /** @description arXiv's PDF: no archive, or none it could get in time */
-            307: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing or wrong token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The read token, outside reading papers */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     deep_figure_api_papers__paper_id__deep_figures__name__get: {
         parameters: {
             query?: {
@@ -3551,6 +3499,58 @@ export interface operations {
             };
             /** @description The paper's Deep read has no figure of that name, or `v` names a read written over since */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pdf_api_papers__paper_id__pdf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The PDF, from the archive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description arXiv's PDF: no archive, or none it could get in time */
+            307: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
