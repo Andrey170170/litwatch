@@ -14,7 +14,7 @@ ARG REVISION=unknown
 ARG SOURCE=https://github.com/Andrey170170/litwatch
 
 LABEL org.opencontainers.image.title="litwatch-deep" \
-      org.opencontainers.image.description="Deep processor for litwatch: a Pi agent with one JavaScript REPL tool" \
+      org.opencontainers.image.description="Deep processor for litwatch: a Pi agent that writes a paper's Deep read, with a browser and poppler for its images" \
       org.opencontainers.image.source="${SOURCE}" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
@@ -22,10 +22,20 @@ LABEL org.opencontainers.image.title="litwatch-deep" \
 
 ENV NODE_ENV=production \
     HOME=/var/lib/litwatch-deep \
-    DEEP_AUTH_FILE=/var/lib/litwatch-deep/auth.json
+    DEEP_AUTH_FILE=/var/lib/litwatch-deep/auth.json \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
 WORKDIR /app
 COPY --from=deps --chown=0:0 /app/node_modules ./node_modules
+
+# What makes a run's images (src/imaging.ts): poppler draws a PDF's pages, and Chromium's headless shell, at the
+# revision the pinned playwright-core drives, draws a draft on litwatch's render page. `--with-deps` adds the
+# libraries and fonts the browser needs.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends poppler-utils && \
+    node node_modules/playwright-core/cli.js install --with-deps chromium-headless-shell && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --chown=0:0 package.json ./
 COPY --chown=0:0 src ./src
 COPY --chown=0:0 LICENSE ./

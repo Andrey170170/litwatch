@@ -142,4 +142,14 @@ function refs() {
 var store = { search: function (query, limit) { return __call('store.search', [query, limit || 10]); } };
 var s2 = { lookup: function (q) { return __call('s2.lookup', [q]); } };
 function fetch(url) { return __call('fetch', [url]); }
-function submit(result) { return __call('submit', [result]); }
+
+// -- the paper's figures, and looking at the draft -----------------------------------------------
+// Each image these make comes back with the output of the cell that called them.
+
+function figures() { return __call('figures', []); }
+function figure(file, name) { return __call('figure', [file, name]); }
+function pdfPage(n) { return __call('pdfPage', [n]); }
+function crop(page, box, name) { return __call('crop', [page, box, name]); }
+function render(read, target, width) { return __call('render', [read, target, width]); }
+function check(read) { return __call('check', [read]); }
+function submit(read) { return __call('submit', [read]); }

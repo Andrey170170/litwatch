@@ -246,7 +246,7 @@ read from its historical LaTeX). The service takes the paper's figures from that
 | --- | --- | --- |
 | `result` | The Deep read, an object whose `format` is `"read"`, valid against the service's schema (`deep/src/read.ts`). A result with no `format` is a Deep card, the format from before | `deep_cards.card`, as returned |
 | `figures` | The paper's figures the read shows, a list of `{"name", "mime", "data"}`: `name` as the read's `fig` blocks cite it (letters, digits, `.`, `_` and `-`, starting with a letter or digit, each name once), `mime` `image/webp`, `data` the image in base64, at most 1600 px wide. Absent or empty: no figures | `deep_figures`, one row per figure, replacing the paper's earlier ones in the transaction that writes the read |
-| `reviews` | The review rounds the read went through, in order, a list of `{"round", "passed", "scores", "checks", "findings"}`: `scores` the rubric's (`faithfulness`, `clarity`, `depth`, `calibration`, 1 to 5), `checks` the reviewer's structure checks by name (anchors, experiments, WHY boxes, voice, proportional length; true: passed), apart from the schema and code checks submit runs before any review, `findings` each `{"about", "where", "text"}` with an optional `rewrite`. Absent or null: no review ran | `deep_attempts.reviews`, as returned, for a failed job too |
+| `reviews` | The review rounds the read went through, in order, a list of `{"round", "passed", "scores", "checks", "findings"}`: `scores` the rubric's (`faithfulness`, `clarity`, `depth`, `calibration`, 1 to 5), `checks` the reviewer's structure checks by name (`anchors`, `experiments`, `why_boxes`, `voice`, `length`; true: passed), apart from the schema and code checks submit runs before any review, `findings` each `{"about", "where", "text"}` with an optional `rewrite` (`about` the score or check it counts against, `where` a section's id in the read, or `<section id>.<n>` for its n-th block). A round passed when every score is at least 4 and every check passed; the first write and at most two revisions make at most three rounds. Absent or null: no review gave a verdict | `deep_attempts.reviews`, as returned, for a failed job too |
 
 `figures` and `reviews` are the job's fields, not the read's: the read's schema takes no others.
 
@@ -262,6 +262,9 @@ the Deep queue pauses and tries the pass again, as for any failure of the servic
 adds a process note `{"kind": "review", "source": "service", "note": ...}` to it. Needs you lists
 it with the read's other process notes, the Notion export opens the read's short form with a line
 saying so, and the MCP server's `get_paper` says so above the read.
+A read whose review could not run at all (the reviewer's call failed, or it gave no valid
+verdict) is stored too, with `reviews` null and a note of kind `tool` saying it was not
+reviewed: it is unreviewed, not failed.
 
 **The figures** are served to the web app at `GET /api/papers/<id>/deep/figures/<name>` (the web
 app's token, as a cookie or a bearer header; the read token is refused, and an unknown name is

@@ -1,44 +1,106 @@
 # litwatch-deep
 
-The deep-card service: an agent with one JavaScript REPL tool reads a paper and writes the lab's
-reading card. litwatch's `deep` integration submits papers to it (`POST /process`) and polls
-for the result (`GET /jobs/<id>`).
+The deep service: an agent with one JavaScript REPL tool reads a paper and writes its Deep read
+([`docs/specs/deep-read.md`](../docs/specs/deep-read.md)), a reviewer on the same model scores the read, and the
+writer revises it at most twice. litwatch's `deep` integration submits papers to it (`POST /process`) and polls for
+the result (`GET /jobs/<id>`); what a finished job carries is in [`docs/integrations.md`](../docs/integrations.md).
+The service writes reads only. A Deep card from before the read stays as litwatch stored it.
 
 A submission may carry an `Idempotency-Key` header (litwatch sends its attempt): a key the
 service still has is answered `200` with that key's job instead of starting another, so a
 submission sent again after a lost reply never runs twice; `GET /keys/<key>` finds that job
 (404 when the service has none). A failed job (`status: "error"`)
 says whose failure it was in `failure`: `service` when the model call failed (the sign-in, a
-usage limit, the provider) or the job could not start, `paper` when no valid card was submitted
+usage limit, the provider) or the job could not start, `paper` when no valid read was submitted
 within the budget or the content filter stopped the model. Jobs and keys live in memory: a
 restart forgets them.
 
+## A run
+
+The writer's first message carries the paper's outline and its main text; the bibliography and the appendix stay in
+the session (`paper`), wherever they sit in the text, to be read where the read needs them. Besides the paper's text
+(`sections()`, `find()`, `refs()`), litwatch's papers (`store.search`), Semantic Scholar (`s2.lookup`) and the open
+web (`fetch`), the session has:
+
+- `figures()`, `figure(file, name?)`: the figure files of the paper's e-print, fetched from arXiv once per run at the
+  version litwatch's text is of (`paper.body_version`), and one of them kept as a figure of the read. With no
+  version from litwatch the latest e-print is taken and the read carries a process note saying so. PDF, PNG, JPEG
+  and GIF files convert; EPS does not.
+- `pdfPage(n)`, `crop(n, [left, top, right, bottom], name)`: a page of the paper's PDF, which litwatch serves
+  (`GET /api/papers/<id>/pdf`, with the read token) or sends on to arXiv for when its archive has none, and a part
+  of one kept as a figure: for a paper with no source, an EPS figure, or a figure in several files.
+- `render(read, target?, width?)`: the draft drawn by the web app's own components on litwatch's render page
+  (`<LITWATCH_URL>/render.html`), whole, one section or one block, at the desktop's width or the phone's. It draws
+  only the figures this session made.
+- `check(read)`, `submit(read)`: the checks below, without and with submitting.
+
+Every image a function makes goes back to the model with the output of the cell that called it; the model keeps the
+images of its latest cells, and older ones are replaced by a line. A figure is stored as WebP, at most 1600 px wide,
+under the name the read cites it by; a run makes at most 60, 24 MiB together, within what litwatch takes of a job.
+
+`submit` takes the read's schema (`src/read.ts`) in a draft's form: the model's own process notes only, and a
+diagram's coordinates optional. It then checks in code (`src/checks.ts`) what a model need not judge:
+
+- the sections in their order, one lens per topic the read is written for and no other, ids unique, each table row
+  with as many cells as the table has columns, each edge between nodes the diagram has, a placed node at least 40 px
+  tall;
+- every `fig` block naming a figure this session made, and every figure and table cited being the paper's;
+- every `where` (a claim's verdict, a CARD note, a diagram's part) naming a place in the paper, and no section
+  number past the main text's last;
+- every equation and inline formula through KaTeX;
+- every number given as the paper's being in the paper's text, in any common form (`src/numbers.ts`: 0.34 or 34%,
+  1,200 or 1.2k, rounded to the read's precision). A value the text lacks passes when its sentence cites a figure:
+  it was read off a plot, and the reviewer is shown that figure. Whole numbers under ten, years, the reading time,
+  what the read found in the repository, and other papers' numbers in Related work are not checked.
+
+A draft that passes is laid out: a diagram without coordinates gets them from ELK's layered algorithm
+(`src/layout.ts`), so the stored read always carries them.
+
+Then the reviewer: one call, no session, with the paper's text, the read, and the figures the read cites for plot
+values. It answers through a `review` tool with four scores (faithfulness, clarity, depth, calibration, 1 to 5),
+five checks (`anchors`, `experiments`, `why_boxes`, `voice`, `length`) and its findings. A read passes when every
+score is at least 4 and every check passed. Otherwise the findings go into the writer's own conversation and it
+revises: the first write plus at most two revisions. A read that still fails is kept, with a `review` process note
+saying what it failed on; a review that could not run leaves the read with a `tool` note saying it was not
+reviewed. The job returns each round in `reviews`, and the figures the read shows in `figures`.
+
 A job's `trace` (in `GET /jobs/<id>`) is what the run did, each event with `t`, milliseconds since it
 started: the model's `assistant` turns (text, reasoning summary, stop reason, usage), `cell`s (code,
-output, error, time, and `timedOut` on the one that ran past its limit, which ends the session), `host`
-calls (name, arguments cut to 200 characters, time, `ok`, the characters returned, and a failed call's
-`error`, cut to 300), `submit`s, and the service's `system` nudges. A `fetch` call adds `fetch`: each
-redirect it was answered with (`hops`, URL and status), then the `url` and `status` that answered and the
-`bytes` of body read. The model is asked for detailed reasoning summaries. litwatch keeps every
-attempt's trace and reads it with `litwatch deep trace`.
+output, error, time, how many `images` came back, and `timedOut` on the one that ran past its limit, which ends
+the session), `host` calls (name, arguments cut to 200 characters, time, `ok`, the characters returned, and a
+failed call's `error`, cut to 300), `submit`s (with the errors of a rejected one), `review`s (the round, whether
+it passed, its usage), and the `system` messages the service sent the writer: a nudge to submit, or a review's
+findings. A `fetch` call adds `fetch`: each redirect it was answered with (`hops`, URL and status), then the `url`
+and `status` that answered and the `bytes` of body read. The model is asked for detailed reasoning summaries.
+litwatch keeps every attempt's trace and reads it with `litwatch deep trace`.
 
-A card may carry `process_notes`, `[{kind, source, note, url?}]`: what the agent could not do because of its
-tools, access, budget or input (`kind` access, tool, budget or input), as against `limitations`, the paper's own.
+A read may carry `process_notes`, `[{kind, source, note, url?}]`: what the agent could not do because of its
+tools, access, budget or input (`kind` access, tool, budget or input), as against the limitations, the paper's own.
 The model may give up to six (`source: "model"`, a note of at least 20 characters, a `url` only absolute http(s)),
-validated with the card. The service adds its own (`source: "service"`) once the run is over, after `submit`'s
+validated with the read. The service adds its own (`source: "service"`) once the run is over, after `submit`'s
 validation, so the model can neither forge nor drop them, and what happened after the submit counts too: one note
 per kind of event, with how many times and the first URL concerned, for a fetch the network guard refused, a fetch
 failed on the network (DNS, the connection, a timeout, a body cut off; never an HTTP status, which is an answer),
-the fetch budget used up, and a cell timeout. litwatch shows them folded on the card and in Needs you's Deep notes,
-and `litwatch deep notes` lists them; they go to neither Zotero nor Notion.
+the fetch budget used up, a cell timeout, an image the browser or the render page was not there to make, and
+figures taken from the latest e-print; and the `review` note above. litwatch shows them folded on the read and in Needs you's Deep
+notes, and `litwatch deep notes` lists them; they go to neither Zotero nor Notion.
 
-The card places the paper among litwatch's collection (`among_collection`): papers it agrees with,
+The read places the paper among litwatch's collection (`among_collection`): papers it agrees with,
 contradicts, extends or supersedes. `submit` takes only ids a `store.search` in the same session
 returned from the collection. `paper` is the archive's LaTeX source, or the PDF's text as markdown.
 
-`src/read.ts` is the schema of the Deep read (`docs/specs/deep-read.md`), the format that replaces the card; the
-agent does not write it yet. `npm run read-schema` exports it to `web/src/deepread/read.schema.json`, from which the
-web app's types are generated (`pnpm generate:read` in `web/`); run both after changing it.
+A read's lens names its topic by the topic's slug (`selections[].slug`), or by its name when the submission
+carries no slug. The extensions a submission asks for (`faithfulness`, `monitoring`) add that topic's questions to
+its lens; they are no longer objects of their own.
+
+`npm run read-schema` exports the stored read's schema to `web/src/deepread/read.schema.json`, from which the web
+app's types are generated (`pnpm generate:read` in `web/`); run both after changing `src/read.ts`.
+
+## Running it
+
+The images need poppler (`pdftoppm`, `pdfinfo`) and Chromium's headless shell at the revision the pinned
+`playwright-core` drives; the image has both. On a development machine: poppler-utils from the system, and
+`npx playwright-core install chromium-headless-shell`. The tests that use them skip where they are missing.
 
 ```sh
 npm ci
@@ -53,16 +115,16 @@ node src/main.ts serve
 | --- | --- | --- |
 | `DEEP_PORT` | `8081` | Port to listen on |
 | `DEEP_AUTH_FILE` | `/var/lib/litwatch-deep/auth.json` | Where `login` keeps the model session |
-| `DEEP_MODEL`, `DEEP_EFFORT` | `gpt-6.1-sol`, `medium` | The agent's model and reasoning effort |
-| `DEEP_MAX_CELLS` | `40` | REPL cells per paper |
+| `DEEP_MODEL`, `DEEP_EFFORT` | `gpt-6.1-sol`, `high` | The model and reasoning effort, the writer's and the reviewer's |
+| `DEEP_MAX_CELLS` | `150` | REPL cells per paper, revisions included |
 | `DEEP_CELL_TIMEOUT_S` | `90` | One cell's time limit |
-| `DEEP_WALL_CLOCK_MIN` | `30` | One paper's time limit; keep it below litwatch's `[integrations.deep] timeout_minutes` (45), past which litwatch ends a running job as stuck and may start a duplicate |
+| `DEEP_WALL_CLOCK_MIN` | `120` | One paper's time limit, its review and revisions included; keep it below litwatch's `[integrations.deep] timeout_minutes` (135), past which litwatch ends a running job as stuck and may start a duplicate |
 | `DEEP_MAX_OUTPUT_CHARS` | `8000` | Output kept per cell |
 | `DEEP_MAX_FETCH_CHARS` | `200000` | Text kept per `fetch` |
 | `DEEP_MAX_FETCH_MB` | `2` | MiB read per `fetch`, fractions allowed; the rest of the body is never read |
 | `DEEP_MAX_FETCHES` | `60` | `fetch` calls per paper; the next one fails in the cell |
-| `LITWATCH_URL` | `http://litwatch:8080` | litwatch v1, for the agent's `store.search` (`GET /api/papers`) |
-| `LITWATCH_TOKEN` | | litwatch's read token (`LITWATCH_READ_TOKEN` there), which may only search and read papers and fetch a paper's PDF |
+| `LITWATCH_URL` | `http://litwatch:8080` | litwatch v1, for the agent's `store.search` (`GET /api/papers`), the paper's PDF (`GET /api/papers/<id>/pdf`) and the render page (`/render.html`) |
+| `LITWATCH_TOKEN` | | litwatch's read token (`LITWATCH_READ_TOKEN` there), which may only search and read papers and fetch a paper's PDF; the render page takes none |
 | `S2_API_KEY` | | Semantic Scholar key; without one `s2.lookup` is rate-limited |
 | `DEEP_CONTACT` | | An address the fetched sites can write to, sent in the User-Agent (arXiv asks for one) |
 
@@ -79,6 +141,17 @@ holds, or the service refuses to start. Redirects are followed by hand, at most 
 request a second at most (arXiv and Semantic Scholar slower). anonymous.4open.science links are read through
 its JSON API, since its pages are built in the browser. `store.search` and `s2.lookup` don't go through this
 guard: litwatch itself is on a private address.
+
+The paper's e-print comes from arXiv through the same guard, pacing and User-Agent, whole and in memory (at most
+150 MiB); only its regular figure files are read, never written to disk under their own names. The paper's PDF
+comes from litwatch, with the token; where litwatch redirects to arXiv's PDF, that is fetched as any public file,
+without the token.
+
+The browser (`src/imaging.ts`) has no business on the network beyond the render page. Every request to another
+origin is refused, names other than the render page's host do not resolve, and service workers and WebSockets are
+off; figures reach the page as data URLs, and a page is given three minutes at most. It also encodes the figures (WebP on a canvas), so it decodes images from
+arXiv: it runs without Chromium's own sandbox, as Playwright starts it in a container, and the container is its
+boundary.
 
 `store.search` asked litwatch 0.x's `/papers/search` before v1; a 0.14 deployment keeps running
 the image it was built with.

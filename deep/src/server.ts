@@ -6,8 +6,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { JobQueue } from "./jobs.ts";
-import type { PaperInput, SelectionContext } from "./prompt.ts";
-import { EXTENSIONS } from "./schema.ts";
+import { LENS_QUESTIONS, type PaperInput, type SelectionContext } from "./prompt.ts";
 
 export interface ServerDeps {
   jobs: JobQueue;
@@ -66,7 +65,12 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
       throw new HttpError(422, "paper.id, paper.title, and paper.body are required");
     const extensions = body.extensions ?? [];
     for (const name of extensions)
-      if (!(name in EXTENSIONS)) throw new HttpError(400, `unknown extension "${name}"; known: ${Object.keys(EXTENSIONS).join(", ")}`);
+      if (!Object.hasOwn(LENS_QUESTIONS, name)) throw new HttpError(400, `unknown extension "${name}"; known: ${Object.keys(LENS_QUESTIONS).join(", ")}`);
+    // The version the text is of, which the figures are taken at: a whole number from 1, or null when litwatch
+    // cannot say. Anything else is a submission gone wrong, not a paper with no version.
+    const version = paper.body_version ?? null;
+    if (version !== null && !(typeof version === "number" && Number.isInteger(version) && version >= 1))
+      throw new HttpError(422, "paper.body_version is the text's arXiv version, a whole number from 1, or null");
     const job = deps.jobs.submit(
       {
         id: paper.id,
@@ -77,6 +81,7 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
         url: paper.url ?? null,
         body: paper.body,
         body_source: paper.body_source ?? null,
+        body_version: version,
       },
       extensions,
       body.selections ?? [],

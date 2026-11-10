@@ -18,8 +18,11 @@
     "@earendil-works/pi-agent-core": "1.0.0",
     "@earendil-works/pi-ai": "1.0.0",
     "acorn": "^8.15.0",
+    "elkjs": "0.12.1",
     "ipaddr.js": "2.5.0",
     "isolated-vm": "7.0.1",
+    "katex": "0.19.1",
+    "playwright-core": "1.64.0",
     "typebox": "^1.0.0",
     "undici": "8.12.3"
   },

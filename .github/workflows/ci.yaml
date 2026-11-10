@@ -58,6 +58,11 @@ jobs:
           cache-dependency-path: deep/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
+      - name: Poppler and the browser, which the imaging tests drive and skip without
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          npx playwright-core install --with-deps chromium-headless-shell
       - run: npm test
 
   archive:
@@ -123,6 +128,10 @@ jobs:
           --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m
           litwatch:ci --help
       - run: docker build --tag litwatch-deep:ci --build-arg VERSION=ci --build-arg REVISION="${GITHUB_SHA}" deep
+      - name: The deep image's browser starts and its poppler is there, as its user
+        run: >-
+          docker run --rm --cap-drop=ALL --security-opt=no-new-privileges --entrypoint sh litwatch-deep:ci -c
+          'pdftoppm -v && node -e "import(\"playwright-core\").then(async ({ chromium }) => { const b = await chromium.launch(); console.log(\"chromium\", b.version()); await b.close(); })"'
       - run: docker build --tag litwatch-archive:ci archive
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:

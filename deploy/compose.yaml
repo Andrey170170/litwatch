@@ -91,7 +91,8 @@ services:
     restart: unless-stopped
     environment:
       LITWATCH_URL: http://litwatch:8080
-      # Without it deep cannot search litwatch for "Among the collection" (deploy/README.md).
+      # Without it deep can neither search litwatch for "Among the collection" nor take a paper's PDF for the
+      # figures of one with no LaTeX source (deploy/README.md).
       LITWATCH_TOKEN: ${LITWATCH_READ_TOKEN:-}
       S2_API_KEY: ${S2_API_KEY:-}
       DEEP_CONTACT: ${ARXIV_CONTACT:-}

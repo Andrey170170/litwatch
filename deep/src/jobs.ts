@@ -1,7 +1,8 @@
 /**
  * In-memory job registry: one paper at a time, recent jobs kept for inspection. A submission may carry a key (litwatch
  * sends its attempt): a key already known is answered with its job, so a submission sent again after a lost reply
- * never starts a second job while that job is kept.
+ * never starts a second job while that job is kept. A finished job carries what litwatch stores of it
+ * (docs/integrations.md): the read in `result`, its `figures` and its `reviews`.
  */
 
 import { randomUUID } from "node:crypto";
@@ -24,13 +25,18 @@ export interface Job {
   last_event?: string;
   last_activity: string;
   result?: Outcome["result"];
+  /** The figures the read shows; absent when it shows none. */
+  figures?: Outcome["figures"];
+  /** The review rounds; null when no review gave a verdict. */
+  reviews?: Outcome["reviews"];
   trace?: TraceEvent[];
   error?: string;
   failure?: Failure; // whose failure an `error` job's was
   key?: string;
 }
 
-/** What a job carries into the run: the paper, the requested extensions, and the selections it is in. */
+/** What a job carries into the run: the paper, the lens questions asked for (`extensions`), and the topics the read
+ * is written for. */
 export interface JobInput {
   paper: PaperInput;
   extensions: string[];
@@ -88,11 +94,11 @@ export class JobQueue {
     return id === undefined ? undefined : this.jobs.get(id);
   }
 
-  /** Newest first, without traces and results. */
-  list(): Omit<Job, "trace" | "result">[] {
+  /** Newest first, without traces, results, figures and reviews. */
+  list(): Omit<Job, "trace" | "result" | "figures" | "reviews">[] {
     return [...this.jobs.values()]
       .reverse()
-      .map(({ trace: _t, result: _r, ...rest }) => rest);
+      .map(({ trace: _t, result: _r, figures: _f, reviews: _v, ...rest }) => rest);
   }
 
   get active(): { running: string | null; queued: number } {
@@ -120,6 +126,8 @@ export class JobQueue {
       job.model = outcome.model;
       job.stats = outcome.stats;
       job.result = outcome.result;
+      if (outcome.figures.length) job.figures = outcome.figures;
+      job.reviews = outcome.reviews;
       job.trace = outcome.trace;
       job.error = outcome.error;
       job.failure = outcome.failure;
@@ -153,9 +161,11 @@ function describe(event: TraceEvent): string {
       return `${event.name}${event.ok ? "" : " failed"} ${event.ms}ms`;
     case "submit":
       return event.ok ? "submitted" : `submit rejected: ${event.errors?.length ?? 0} errors`;
+    case "review":
+      return `review ${event.round}${event.error ? " failed" : event.passed ? " passed" : " not passed"}`;
     case "assistant":
       return `turn (${event.stop})`;
     case "system":
-      return "nudge";
+      return "message to the writer";
   }
 }

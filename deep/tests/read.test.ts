@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { Value } from "typebox/value";
-import { ReadSchema, SECTION_KINDS, type Read } from "../src/read.ts";
+import { DraftSchema, draftErrors, ReadSchema, readErrors, SECTION_KINDS, type Read } from "../src/read.ts";
 
 const WEB = path.resolve(import.meta.dirname, "../../web/src/deepread");
 const fixture = (name: string): Read => JSON.parse(readFileSync(path.join(WEB, "fixtures", `${name}.json`), "utf8"));
-const errors = (value: unknown) => [...Value.Errors(ReadSchema, value)].map((e) => `${e.instancePath}: ${e.message}`);
+const errors = readErrors;
 
 for (const name of ["read-icl", "read-scarce"]) {
   test(`the ${name} fixture is a Deep read`, () => {
@@ -58,4 +57,26 @@ test("a read is rejected for what the page cannot draw or the spec forbids", () 
   // a colour is one of the app's names, never CSS
   assert.notDeepEqual(changed((r) => (node(r).colour = "url(https://example.org/x)")), []);
   assert.notDeepEqual(changed((r) => ((r as Loose).extra = 1)), []);
+});
+
+test("what submit takes differs from what is stored only in the coordinates and the notes", () => {
+  const read = fixture("read-scarce");
+  type Loose = Record<string, unknown>;
+  const diagram = (r: Read) => r.sections.flatMap((s) => ("blocks" in s ? s.blocks : [])).find((b) => b.type === "diagram") as unknown as { nodes: Loose[]; edges: Loose[] } & Loose;
+  const { process_notes: _, ...model } = structuredClone(read);
+  assert.deepEqual(draftErrors(model), [], "a stored read without the service's notes is a draft");
+  // a draft's diagram may leave its coordinates to the layout; a stored one may not
+  const bare = structuredClone(model);
+  for (const n of diagram(bare as Read).nodes) for (const key of ["x", "y", "w", "h"]) delete n[key];
+  delete diagram(bare as Read).width;
+  delete diagram(bare as Read).height;
+  assert.deepEqual(draftErrors(bare), []);
+  assert.ok(readErrors(bare).some((e) => /\/nodes\/0\/x: is required$/.test(e)), readErrors(bare).join("\n"));
+  // the service's notes are the stored read's only
+  const review = { kind: "review", source: "service", note: "The read did not pass its review: scores below 4: clarity 3." };
+  assert.deepEqual(readErrors({ ...model, process_notes: [review] }), []);
+  assert.ok(draftErrors({ ...model, process_notes: [review] }).some((e) => e.startsWith("/process_notes/0/source")));
+  // one schema, built twice: everything else is the same
+  const strip = (schema: unknown) => JSON.stringify(schema, (key, value: unknown) => (key === "process_notes" || key === "description" ? undefined : value)).replace(/"required":\[[^\]]*\]/g, "");
+  assert.equal(strip(DraftSchema), strip(ReadSchema));
 });

@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { processPaper, type RunOptions } from "./agent.ts";
 import { authState, buildModels, login } from "./auth.ts";
 import type { HostConfig } from "./hosts.ts";
+import { Studio } from "./imaging.ts";
 import { JobQueue } from "./jobs.ts";
 import type { PaperInput, SelectionContext } from "./prompt.ts";
 import { buildServer } from "./server.ts";
@@ -49,10 +50,10 @@ const config = {
   } satisfies HostConfig,
   run: {
     model: env("DEEP_MODEL", "gpt-6.1-sol"),
-    effort: env("DEEP_EFFORT", "medium") as RunOptions["effort"],
-    maxCells: whole("DEEP_MAX_CELLS", 40),
+    effort: env("DEEP_EFFORT", "high") as RunOptions["effort"],
+    maxCells: whole("DEEP_MAX_CELLS", 150),
     cellTimeoutMs: whole("DEEP_CELL_TIMEOUT_S", 90, 1000, MAX_TIMER_MS),
-    wallClockMs: whole("DEEP_WALL_CLOCK_MIN", 30, 60_000, MAX_TIMER_MS),
+    wallClockMs: whole("DEEP_WALL_CLOCK_MIN", 120, 60_000, MAX_TIMER_MS),
     maxOutputChars: whole("DEEP_MAX_OUTPUT_CHARS", 8000),
   } satisfies RunOptions,
 };
@@ -62,6 +63,8 @@ const log = (msg: string) => console.log(`${new Date().toISOString()} ${msg}`);
 async function main(): Promise<void> {
   const [command = "serve", arg] = process.argv.slice(2);
   const models = buildModels(config.authFile);
+  // The browser and poppler, started by the first run that needs them; the render page is litwatch's.
+  const studio = new Studio(config.hosts.litwatchUrl);
 
   if (command === "login") {
     await login(models, config.authFile, console.log);
@@ -74,21 +77,21 @@ async function main(): Promise<void> {
       extensions?: string[];
       selections?: SelectionContext[];
     };
-    const outcome = await processPaper(paper, { extensions, selections }, models, config.hosts, config.run, (event, stats) =>
+    const outcome = await processPaper(paper, { extensions, selections }, models, config.hosts, config.run, studio, (event, stats) =>
       log(`${event.type} cells=${stats.cells} turns=${stats.turns} tokens=${stats.input}/${stats.output} $${stats.list_cost.toFixed(2)}`),
-    );
+    ).finally(() => studio.close());
     const out = arg.replace(/\.json$/, "") + ".outcome.json";
     writeFileSync(out, JSON.stringify(outcome, null, 2));
-    console.log(JSON.stringify({ error: outcome.error, stats: outcome.stats, result: outcome.result }, null, 2));
+    console.log(JSON.stringify({ error: outcome.error, stats: outcome.stats, reviews: outcome.reviews, figures: outcome.figures.map((f) => f.name), result: outcome.result }, null, 2));
     console.log(`trace written to ${out}`);
     return;
   }
 
   if (command !== "serve") throw new Error(`unknown command ${command}`);
   const jobs = new JobQueue(({ paper, extensions, selections }, progress) =>
-    processPaper(paper, { extensions, selections }, models, config.hosts, config.run, (event, stats) => {
+    processPaper(paper, { extensions, selections }, models, config.hosts, config.run, studio, (event, stats) => {
       progress(event, stats);
-      if (event.type === "cell" || event.type === "submit" || event.type === "system")
+      if (event.type === "cell" || event.type === "submit" || event.type === "review" || event.type === "system")
         log(`${paper.id} ${event.type}${event.type === "cell" ? ` ${event.n}` : ""} cells=${stats.cells} turns=${stats.turns} $${stats.list_cost.toFixed(2)}`);
     }),
   );
@@ -97,7 +100,7 @@ async function main(): Promise<void> {
     health: async () => ({ ok: true, model: `${config.run.model}@${config.run.effort}`, auth: await authState(models) }),
   });
   server.listen(config.port, () => log(`litwatch-deep listening on ${config.port} (auth file ${config.authFile})`));
-  const stop = () => server.close(() => process.exit(0));
+  const stop = () => server.close(() => void studio.close().finally(() => process.exit(0)));
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
 }

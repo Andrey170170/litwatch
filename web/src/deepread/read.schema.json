@@ -639,7 +639,7 @@
                               "h": {
                                 "type": "number",
                                 "exclusiveMinimum": 0,
-                                "description": "The box's height."
+                                "description": "The box's height, at least 40."
                               },
                               "tip": {
                                 "type": "string",
@@ -1418,7 +1418,7 @@
                               "h": {
                                 "type": "number",
                                 "exclusiveMinimum": 0,
-                                "description": "The box's height."
+                                "description": "The box's height, at least 40."
                               },
                               "tip": {
                                 "type": "string",

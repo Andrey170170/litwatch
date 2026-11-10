@@ -6,6 +6,8 @@ import type { Outcome } from "../src/agent.ts";
 
 const outcome = (id: string): Outcome => ({
   result: null,
+  figures: [],
+  reviews: null,
   trace: [{ t: 1, type: "system", text: `ran ${id}` }],
   stats: { cells: 2, turns: 1, input: 10, output: 5, reasoning: 0, cache_read: 0, list_cost: 0.01, seconds: 1 },
   model: "fake",
@@ -125,4 +127,44 @@ test("a key is forgotten with its job", async () => {
   jobs.submit(paper, [], [], "3:a"); // prunes the first, keeping one finished
   assert.equal(jobs.byKey("1:a"), undefined);
   assert.notEqual(jobs.submit(paper, [], [], "1:a").id, first.id);
+});
+
+test("a finished job carries the read, its figures and its reviews, and the text's version reaches the run", async () => {
+  const read = { format: "read", sections: [], among_collection: [] } as unknown as NonNullable<Outcome["result"]>;
+  const figures: Outcome["figures"] = [{ name: "fig-1", mime: "image/webp", data: "UklGRg==" }];
+  const reviews: Outcome["reviews"] = [
+    { round: 1, passed: true, scores: { faithfulness: 5, clarity: 4, depth: 4, calibration: 5 }, checks: { anchors: true, experiments: true, why_boxes: true, voice: true, length: true }, findings: [] },
+  ];
+  const versions: unknown[] = [];
+  const jobs = new JobQueue(async ({ paper }) => {
+    versions.push(paper.body_version);
+    // the second paper's read shows no figure and was never reviewed
+    return { ...outcome(paper.id), result: read, error: undefined, failure: undefined, ...(paper.id === "a" ? { figures, reviews } : {}) };
+  });
+  const server = buildServer({ jobs, health: async () => ({ ok: true }) });
+  await new Promise<void>((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const submit = (paper: Record<string, unknown>) => fetch(`${base}/process`, { method: "POST", body: JSON.stringify({ paper: { title: "T", body: "# T", ...paper } }) });
+  const finished = async (id: string) => {
+    let job: Record<string, unknown> = {};
+    for (let i = 0; i < 50 && job.status !== "done"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      job = (await (await fetch(`${base}/jobs/${id}`)).json()) as Record<string, unknown>;
+    }
+    return job;
+  };
+  try {
+    for (const body_version of ["2", 0, 1.5, -1, true]) assert.equal((await submit({ id: "x", body_version })).status, 422, `body_version ${JSON.stringify(body_version)}`);
+    const a = await finished(((await (await submit({ id: "a", body_version: 3 })).json()) as { id: string }).id);
+    assert.deepEqual([a.result, a.figures, a.reviews], [read, figures, reviews]);
+    const b = await finished(((await (await submit({ id: "b", body_version: null })).json()) as { id: string }).id);
+    assert.ok(!("figures" in b), "no figures field for a read that shows none");
+    assert.equal(b.reviews, null);
+    await finished(((await (await submit({ id: "c" })).json()) as { id: string }).id);
+    assert.deepEqual(versions, [3, null, null], "the version as litwatch sent it; null when it cannot say");
+    const list = (await (await fetch(`${base}/jobs`)).json()) as Record<string, unknown>[];
+    assert.ok(list.every((j) => !("figures" in j) && !("reviews" in j) && !("result" in j)), "the list stays light");
+  } finally {
+    server.close();
+  }
 });
