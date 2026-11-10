@@ -12,7 +12,7 @@ import { Value } from "typebox/value";
 // model needs the whole list to fix a rejected submit in one round.
 Settings.Set({ maxErrors: 256 });
 
-const enumOf = <T extends string>(values: readonly T[], description: string) =>
+export const enumOf = <T extends string>(values: readonly T[], description: string) =>
   Type.Union(
     values.map((v) => Type.Literal(v)),
     { description },

@@ -1,0 +1,1321 @@
+{
+  "format": "read",
+  "sections": [
+    {
+      "id": "glance",
+      "kind": "glance",
+      "title": "At a glance",
+      "claim": "In three 3–4B base models, few-shot classification with arbitrary labels runs as a gated key–value lookup: label tokens become slots keyed by their sentence's class, upper-layer heads look them up by the query's class, and a repeat signal decides whether the lookup happens at all.",
+      "points": [
+        "Each label token becomes a memory **slot**: its value is the label, its key the class of the sentence before it, written by about 20 middle-layer heads.",
+        "About 90 upper-layer **readers** look the slots up through a plain softmax. When no label has repeated, a **gate** leaves their attention on the position-0 sink, and nothing is copied.",
+        "24 **brake** heads cancel the readers' pull toward the most recent label. The answer's accounting closes to 0.045 nats, but the circuit needed 189 heads to be complete.",
+        "The same algorithm appears in three families, at 0.6B to 8B, and in a toy model trained from scratch, which grows the gate only when training penalises blind retrieval."
+      ],
+      "facts": [
+        {
+          "name": "Kind",
+          "text": "analysis · mechanistic"
+        },
+        {
+          "name": "Models",
+          "text": "Qwen3-4B-Base, SmolLM3-3B-Base, Llama-3.2-3B; Qwen3 0.6B–8B and 4B instruct; OLMo-2 1B/7B checkpoints; a 3.4M toy model"
+        },
+        {
+          "name": "Task",
+          "text": "two-class sentence classification from ≤12 demonstrations, invented labels (foo/bar) and natural word labels"
+        },
+        {
+          "name": "Methods",
+          "text": "patching between token-aligned twin prompts, mean-ablation against random heads from the same layers, steering at the model's own dose, holds"
+        },
+        {
+          "name": "Code",
+          "tags": [
+            {
+              "text": "code",
+              "state": "yes"
+            },
+            {
+              "text": "batteries",
+              "state": "yes"
+            },
+            {
+              "text": "toy model",
+              "state": "yes"
+            }
+          ]
+        },
+        {
+          "name": "Read",
+          "text": "about 15 minutes; the paper is 106k characters before its appendix"
+        }
+      ]
+    },
+    {
+      "id": "problem",
+      "kind": "problem",
+      "title": "Problem and approach",
+      "takeaway": "Known pieces of ICL (induction heads, task vectors, label tokens) had never been composed into one working algorithm.",
+      "blocks": [
+        {
+          "type": "p",
+          "text": "Show a base model a dozen lines like `The soup was cold -> bar` and it answers the next one correctly, though nothing in pretraining taught it what `bar` means. The mapping is learned in one forward pass. The paper asks exactly how, for the simplest form of this: two classes, short sentences, single-token labels."
+        },
+        {
+          "type": "p",
+          "text": "Several parts were known: induction heads copy what followed an earlier copy of a token; task and function vectors carry a compact task description to the query; label tokens are where task information accumulates; recency bias has been traced to query–key similarity with label positions. What was missing is how these compose: what is written at the label tokens, on which side of attention it is read, what switches the read on, and which parts are single heads versus populations."
+        },
+        {
+          "type": "why",
+          "text": "Arbitrary labels (`foo`/`bar`, `quil`/`zorp`) force the model to acquire a mapping it cannot have memorised, so whatever carries the answer must be built from the prompt. Natural word labels are added later to see what changes when the label has a meaning of its own."
+        },
+        {
+          "type": "h3",
+          "text": "Setup"
+        },
+        {
+          "type": "list",
+          "items": [
+            "**Batteries.** `concept` (6 demonstrations, sentence axes such as topic, sentiment, language, question vs statement), `concept12` (12), `slotgate` (4, token-identical pairs differing only in whether labels repeat), `manyclass` (2–6 classes), later `concept12n` with natural concepts and four label kinds.",
+            "**Score.** The margin: log-probability of the correct label minus the other, in nats. An effect is the paired change in margin, with a 95% paired-bootstrap interval (4000 resamples).",
+            "**Interventions.** Handoff (patch one activation from a twin), knockout (mean-ablate a head over the battery), steering (add a direction at the dose the model itself uses), hold (freeze a downstream component while a handoff runs)."
+          ]
+        },
+        {
+          "type": "why",
+          "text": "Twin prompts differ only inside one span (one sentence, one label, the query), so any activation can be moved between them at the same position, and the share of the difference it carries is well defined. Mean-ablation removes what a head writes without pushing the residual to an unseen zero."
+        },
+        {
+          "type": "why",
+          "text": "Every head set chosen on one draw of prompts is confirmed on a fresh draw with another seed, and the leading numbers come from the fresh draw. Every set is compared with random heads from the same layers, every direction with a random direction of the same norm."
+        }
+      ]
+    },
+    {
+      "id": "circuit",
+      "kind": "method",
+      "title": "The circuit",
+      "takeaway": "Writers build slots, readers look them up by class, a repeat signal opens the read, brakes cancel recency, late heads write the logit.",
+      "blocks": [
+        {
+          "type": "p",
+          "text": "The whole account on one diagram, drawn for Qwen3-4B-Base. The top lane is what happens at the label tokens while the prompt is read, the bottom lane what happens at the query arrow, where the answer is produced."
+        },
+        {
+          "type": "diagram",
+          "width": 820,
+          "height": 410,
+          "nodes": [
+            {
+              "id": "demos",
+              "label": "Demonstrations",
+              "sub": "sentence → label ×12",
+              "colour": "neutral",
+              "x": 10,
+              "y": 40,
+              "w": 110,
+              "h": 48,
+              "tip": "Twelve lines of the form `sentence -> label`. Two facts about each must reach the query: the class of its sentence, and the label that followed it."
+            },
+            {
+              "id": "query",
+              "label": "Query",
+              "sub": "sentence →",
+              "colour": "neutral",
+              "x": 10,
+              "y": 298,
+              "w": 110,
+              "h": 48,
+              "tip": "The sentence to classify, then an arrow; the model's next token is its answer."
+            },
+            {
+              "id": "dup",
+              "label": "Duplicate-token heads",
+              "sub": "16 heads · L1–9",
+              "colour": "purple",
+              "x": 150,
+              "y": 34,
+              "w": 150,
+              "h": 44,
+              "tip": "Attend from each label token to earlier copies of the same label: the first half of the induction circuit, reused. Ablating all 16 takes the gate projection from +18.3 to −0.3, half way to the unique-label −21; 16 random heads move it by at most 0.7.",
+              "where": "§5"
+            },
+            {
+              "id": "writers",
+              "label": "Writer heads",
+              "sub": "~20 heads · L10–23",
+              "colour": "orange",
+              "x": 150,
+              "y": 110,
+              "w": 150,
+              "h": 44,
+              "tip": "Attend from a label token back to its own sentence and write the class direction u into it. None carries more than 5%; the top 20 carry 64–92%. Six named writers knocked out do no more than six random ones.",
+              "where": "§3"
+            },
+            {
+              "id": "slot",
+              "label": "Slot",
+              "sub": "V = label · K = class",
+              "colour": "red",
+              "x": 340,
+              "y": 72,
+              "w": 130,
+              "h": 50,
+              "tip": "The residual stream at a label token, acting as one cell of a key–value memory. Exchanging the labels runs through its values (86% via the 72 KV groups of L21–29); changing the sentence runs through its keys (−2.35 of −2.87 nats).",
+              "where": "§3"
+            },
+            {
+              "id": "pool",
+              "label": "Pooling heads → g",
+              "sub": "gate · L20–23",
+              "colour": "green",
+              "x": 340,
+              "y": 228,
+              "w": 130,
+              "h": 44,
+              "tip": "Flat heads that attend evenly over the slots and pool their repeat flags into one direction g at the arrow: about +18 when labels repeat, −21 when none do, held-out sign agreement 1.00. Their values carry 93–100% of it.",
+              "where": "§5"
+            },
+            {
+              "id": "qheads",
+              "label": "Query heads",
+              "sub": "L22h10 · L23h26",
+              "colour": "amber",
+              "x": 340,
+              "y": 300,
+              "w": 130,
+              "h": 44,
+              "tip": "Compute the query's class. Their outputs carry 40% of a query flip (−0.53 of −1.33 nats); random pairs carry under 0.05. What they write is not u (cosine 0.07) but lies in the span of the readers' match functionals (64% of its energy, 4% for random).",
+              "where": "§6"
+            },
+            {
+              "id": "sink",
+              "label": "Sink",
+              "sub": "position 0",
+              "colour": "neutral",
+              "x": 700,
+              "y": 150,
+              "w": 110,
+              "h": 40,
+              "tip": "A softmax has to put its mass somewhere; the readers put unspent attention on position 0 (here the prompt's first word) and copy nothing in particular. Zeroing its value at every layer removes the sink and costs 0.76 / 0.43 nats.",
+              "where": "§5, §8.3"
+            },
+            {
+              "id": "readers",
+              "label": "Reader heads",
+              "sub": "~90 · L21–29",
+              "colour": "red",
+              "x": 540,
+              "y": 234,
+              "w": 130,
+              "h": 60,
+              "tip": "Attend from the arrow to slots whose key matches the query's class and copy their values: induction heads keyed on a class. Twenty knocked out together cost −0.74 nats (random +0.02); no single reader costs more than 0.09.",
+              "where": "§4, §7"
+            },
+            {
+              "id": "brakes",
+              "label": "Brake heads",
+              "sub": "24 · L22–34",
+              "colour": "blue",
+              "x": 540,
+              "y": 350,
+              "w": 130,
+              "h": 44,
+              "tip": "Write against the label seen most recently. Knocking them out raises the margin by +1.39 (random +0.22), nearly tripling it, and leaves the model preferring whichever label came last.",
+              "where": "§7"
+            },
+            {
+              "id": "copiers",
+              "label": "Copier heads",
+              "sub": "L30–35",
+              "colour": "cyan",
+              "x": 700,
+              "y": 228,
+              "w": 110,
+              "h": 44,
+              "tip": "Read what the readers collected and write the logits: attention in L30–35 writes +0.66 of the intact +0.68 margin, and −1.12 of a −1.33 flip.",
+              "where": "§8"
+            },
+            {
+              "id": "mlps",
+              "label": "Late MLPs",
+              "sub": "frequency prior",
+              "colour": "neutral",
+              "x": 700,
+              "y": 286,
+              "w": 110,
+              "h": 40,
+              "tip": "Act as a prior toward the label seen most often and push against the flip (+0.25 nats under a −1.33 flip).",
+              "where": "§8"
+            },
+            {
+              "id": "logits",
+              "label": "Answer logit",
+              "colour": "accent",
+              "x": 700,
+              "y": 350,
+              "w": 110,
+              "h": 40,
+              "tip": "Direct contributions of every head and MLP add up to the model's own margin within 0.045 nats (Qwen) and 0.048 (SmolLM3), on every prompt.",
+              "where": "§8"
+            }
+          ],
+          "edges": [
+            {
+              "from": "demos",
+              "to": "dup",
+              "points": [
+                [
+                  120,
+                  56
+                ],
+                [
+                  150,
+                  56
+                ]
+              ],
+              "tip": "Each label token looks back for an earlier copy of itself."
+            },
+            {
+              "from": "demos",
+              "to": "writers",
+              "points": [
+                [
+                  120,
+                  76
+                ],
+                [
+                  135,
+                  76
+                ],
+                [
+                  135,
+                  132
+                ],
+                [
+                  150,
+                  132
+                ]
+              ],
+              "tip": "Writers attend from a label token back to the words of its own sentence."
+            },
+            {
+              "from": "dup",
+              "to": "slot",
+              "label": "repeat flag",
+              "title": "Repeat flag",
+              "points": [
+                [
+                  300,
+                  56
+                ],
+                [
+                  320,
+                  56
+                ],
+                [
+                  320,
+                  84
+                ],
+                [
+                  340,
+                  84
+                ]
+              ],
+              "label_at": {
+                "x": 304,
+                "y": 48,
+                "anchor": "start"
+              },
+              "tip": "A label token whose label appeared before is marked."
+            },
+            {
+              "from": "writers",
+              "to": "slot",
+              "label": "key = class",
+              "title": "Writing the key",
+              "points": [
+                [
+                  300,
+                  132
+                ],
+                [
+                  320,
+                  132
+                ],
+                [
+                  320,
+                  110
+                ],
+                [
+                  340,
+                  110
+                ]
+              ],
+              "label_at": {
+                "x": 304,
+                "y": 148,
+                "anchor": "start"
+              },
+              "tip": "One direction u per task, the same for both labels (held-out sign agreement 0.95–1.00): a two-class key needs one dimension. Spreading the write over four layers beats one (+0.56 vs +0.37 nats in SmolLM3)."
+            },
+            {
+              "from": "slot",
+              "to": "pool",
+              "label": "flags",
+              "title": "Pooling the flags",
+              "points": [
+                [
+                  405,
+                  122
+                ],
+                [
+                  405,
+                  228
+                ]
+              ],
+              "label_at": {
+                "x": 412,
+                "y": 180,
+                "anchor": "start"
+              },
+              "tip": "Pooling heads read the repeat flags from every slot, through their values."
+            },
+            {
+              "from": "slot",
+              "to": "readers",
+              "label": "K: match · V: copy",
+              "title": "The lookup",
+              "points": [
+                [
+                  470,
+                  92
+                ],
+                [
+                  600,
+                  92
+                ],
+                [
+                  600,
+                  234
+                ]
+              ],
+              "label_at": {
+                "x": 535,
+                "y": 84
+              },
+              "tip": "Readers compare the query code with each slot's key (through W_K) and copy the matching slots' labels (through W_V). Patching only the eight sharpest readers' values carries −2.16 of a label exchange; their keys carry +0.56, the wrong way."
+            },
+            {
+              "from": "pool",
+              "to": "readers",
+              "label": "g",
+              "title": "The gate",
+              "style": "dash",
+              "points": [
+                [
+                  470,
+                  250
+                ],
+                [
+                  540,
+                  250
+                ]
+              ],
+              "label_at": {
+                "x": 505,
+                "y": 244
+              },
+              "tip": "g lowers each reader's sink logit relative to its match logit: by 1.75 (L24h8), 3.25 (L28h0) and 3.65 nats (L29h11), 0.74 across the population; a random direction moves it at most 0.2. Removing g from the readers' queries alone takes back a quarter to a third of its effect on the answer."
+            },
+            {
+              "from": "qheads",
+              "to": "readers",
+              "label": "query code",
+              "title": "Query code",
+              "points": [
+                [
+                  470,
+                  322
+                ],
+                [
+                  505,
+                  322
+                ],
+                [
+                  505,
+                  282
+                ],
+                [
+                  540,
+                  282
+                ]
+              ],
+              "label_at": {
+                "x": 509,
+                "y": 312,
+                "anchor": "start"
+              },
+              "tip": "Read by the attention queries of L24–35: holding them at their intact values removes 93% of the pair's effect."
+            },
+            {
+              "from": "query",
+              "to": "qheads",
+              "points": [
+                [
+                  120,
+                  322
+                ],
+                [
+                  340,
+                  322
+                ]
+              ],
+              "tip": "The query sentence's class is computed at the arrow."
+            },
+            {
+              "from": "sink",
+              "to": "readers",
+              "label": "null action",
+              "title": "Null action",
+              "style": "dot",
+              "points": [
+                [
+                  700,
+                  170
+                ],
+                [
+                  645,
+                  170
+                ],
+                [
+                  645,
+                  234
+                ]
+              ],
+              "label_at": {
+                "x": 690,
+                "y": 210,
+                "anchor": "end"
+              },
+              "tip": "With no repeated label the sink wins the softmax: L29h11 puts 0.91 of its attention there and reads nothing. With repeats it puts 0.21 there."
+            },
+            {
+              "from": "slot",
+              "to": "brakes",
+              "label": "last label",
+              "title": "Recency",
+              "style": "dot",
+              "points": [
+                [
+                  470,
+                  112
+                ],
+                [
+                  520,
+                  112
+                ],
+                [
+                  520,
+                  372
+                ],
+                [
+                  540,
+                  372
+                ]
+              ],
+              "label_at": {
+                "x": 515,
+                "y": 395,
+                "anchor": "end"
+              },
+              "tip": "Readers favour recent slots by 0.5–0.85 nats from first to last; brakes read the most recent label and write against it."
+            },
+            {
+              "from": "readers",
+              "to": "copiers",
+              "points": [
+                [
+                  670,
+                  250
+                ],
+                [
+                  700,
+                  250
+                ]
+              ],
+              "tip": "A quarter to a third of the readers' output is read by late attention, about 40% by the late MLPs, and the remaining third goes straight to the logits."
+            },
+            {
+              "from": "readers",
+              "to": "mlps",
+              "points": [
+                [
+                  670,
+                  280
+                ],
+                [
+                  685,
+                  280
+                ],
+                [
+                  685,
+                  306
+                ],
+                [
+                  700,
+                  306
+                ]
+              ],
+              "tip": "About 40% of what the readers write is read by the late MLPs."
+            },
+            {
+              "from": "copiers",
+              "to": "logits",
+              "points": [
+                [
+                  790,
+                  272
+                ],
+                [
+                  790,
+                  350
+                ]
+              ],
+              "tip": "The copier band writes almost all of the intact margin."
+            },
+            {
+              "from": "brakes",
+              "to": "logits",
+              "points": [
+                [
+                  670,
+                  372
+                ],
+                [
+                  700,
+                  372
+                ]
+              ],
+              "tip": "Brakes write against the last label's logit."
+            },
+            {
+              "from": "mlps",
+              "to": "logits",
+              "points": [
+                [
+                  730,
+                  326
+                ],
+                [
+                  730,
+                  350
+                ]
+              ],
+              "tip": "The late MLPs oppose the flip."
+            }
+          ],
+          "lanes": [
+            {
+              "text": "at the label tokens",
+              "x": 150,
+              "y": 22
+            },
+            {
+              "text": "at the query arrow",
+              "x": 150,
+              "y": 212
+            }
+          ],
+          "caption": "Drawn by the read from the paper's Figures 2–3; the paper's own drawing is below."
+        },
+        {
+          "type": "fig",
+          "name": "fig1_circuit",
+          "number": "Figure 2",
+          "caption": "The paper's drawing of the circuit in Qwen3-4B-Base, with layer.head numbers under each class of heads."
+        }
+      ]
+    },
+    {
+      "id": "slot",
+      "kind": "finding",
+      "title": "Finding 1 · The slot",
+      "takeaway": "The label token stores two things: the label as a value, read in the upper layers, and the sentence's class as a key, written in the middle layers.",
+      "blocks": [
+        {
+          "type": "xp",
+          "label": "1a",
+          "question": "Where does the label's identity live?",
+          "did": "Exchange `foo` and `bar` throughout, then patch the label tokens' keys and values from the exchanged prompt, restricted by layer band and by side.",
+          "found": "In Qwen the values of the 72 KV groups of L21–29 carry **86%** of the exchange. The eight sharpest readers' values carry **−2.16** nats while their keys carry **+0.56**, the wrong way. Three KV groups (24.5, 29.2, 22.5) carry about half; group 24.5 alone a quarter.",
+          "means": "The label is read on the value side of the slot, in the upper layers, and is concentrated in a few groups.",
+          "not_shown": "Patching every layer reproduces the flip exactly (−7.18 nats in Qwen), but that holds for any transformer by induction over layers; the paper says so and does not count it (App. D)."
+        },
+        {
+          "type": "xp",
+          "label": "1b",
+          "question": "Where does the sentence's class live?",
+          "did": "Replace one demonstration's sentence with one of the other class, keeping its label; patch label-token keys and values.",
+          "found": "The move (**−2.87** nats on six demonstrations) runs through the keys: label-token keys in L21–29 carry **−2.35**; the eight sharpest readers' keys **−0.55**, their values **+0.10**. In Llama only the middle bands carry it: L7–13 and L14–20 each **−0.15** of **−0.23**, the outer bands −0.02 and −0.04.",
+          "means": "The class is the slot's key: written in the middle layers, read through the readers' W_K.",
+          "not_shown": "The control holds: a same-class sentence of the same length moves the answer by +0.08, and every handoff from it stays within ±0.06. Only the class reaches the answer."
+        },
+        {
+          "type": "fig",
+          "name": "fig2_slot",
+          "number": "Figure 6",
+          "caption": "Value and key dissociate in all three models; (c) the same-class control. Grey bars are size-matched random controls."
+        },
+        {
+          "type": "xp",
+          "label": "1c",
+          "question": "Who writes the key, and how?",
+          "did": "Attribution and knockouts over writer candidates; adding the class direction u to the label tokens at one layer or spread over four.",
+          "found": "About 20 heads in L10–23; none carries more than 5%, the top 20 carry 64–92%. u is one direction per task (held-out sign agreement 0.95–1.00). In SmolLM3 a dose at layer 16 gains **+0.37** [+0.29, +0.46]; the same dose over layers 12, 14, 16 and 18 gains **+0.56** [+0.48, +0.65]. At double dose the single-layer write falls to +0.20 while the spread one climbs to +0.69.",
+          "means": "A diffuse population writes a one-dimensional key, and the write has to be spread across depth.",
+          "not_shown": "Reading the depth effect as 'contextualisation heads' is the authors' interpretation; it is not tested further."
+        },
+        {
+          "type": "xp",
+          "label": "1d",
+          "question": "Is the slot a bottleneck?",
+          "did": "Take features that never bind however many demonstrations are given (word parity, a word's third letter, digit rules) and write u into their slots by hand.",
+          "found": "Accuracy rises from **50%** to **71%**; key-only, query-only and random directions stay within ±0.1.",
+          "means": "When the key is present the rest of the circuit uses it; when the encoder cannot represent the class, nothing downstream makes up for it.",
+          "not_shown": "The link between linear readability and binding is correlational (the authors say so)."
+        }
+      ]
+    },
+    {
+      "id": "read",
+      "kind": "finding",
+      "title": "Finding 2 · A softmax law for the read",
+      "takeaway": "Each reader's attention to matching slots follows a three-constant softmax law that transfers to fewer slots per class, but fails on longer prompts.",
+      "blocks": [
+        {
+          "type": "p",
+          "text": "A reader is an ordinary softmax over positions, and the sink at position 0 competes like any other position. With $n_m$ matching slots of logit $L$, $N - n_m$ non-matching slots at logit 0, other positions contributing $n_{\\mathrm{rest}}$, and the sink at $L_{\\mathrm{sink}}$, the mass on matching slots is:"
+        },
+        {
+          "type": "eq",
+          "tex": "m \\;=\\; \\frac{n_m e^{L}}{n_m e^{L} + (N-n_m) + n_{\\mathrm{rest}} + e^{L_{\\mathrm{sink}}}}",
+          "caption": "Proposition 1. As algebra it is trivial; the claim is empirical: three constants per head, fitted once, describe the head as the prompt changes. Only two are identifiable, since $n_{\\mathrm{rest}}$ and $e^{L_{\\mathrm{sink}}}$ enter only as a sum."
+        },
+        {
+          "type": "table",
+          "columns": [
+            "Regime",
+            "Qwen3-4B",
+            "Llama-3.2-3B"
+          ],
+          "rows": [
+            {
+              "group": "fitted: 12 demonstrations, 2–6 classes"
+            },
+            {
+              "cells": [
+                "Heads fit within 0.1",
+                {
+                  "value": "127 / 140",
+                  "note": "Heads with at least 0.03 of their attention on slots."
+                },
+                {
+                  "value": "124 / 125",
+                  "note": "Median maximum error 0.02."
+                }
+              ]
+            },
+            {
+              "group": "held out: one slot per class"
+            },
+            {
+              "cells": [
+                "Median error",
+                "0.07",
+                "0.04"
+              ]
+            },
+            {
+              "cells": [
+                "Heads within 0.1",
+                "69%",
+                "83%"
+              ]
+            },
+            {
+              "group": "held out: 18 demonstrations (criterion: median below 0.07)"
+            },
+            {
+              "cells": [
+                "Median error",
+                {
+                  "value": "0.15",
+                  "note": "Fails the criterion the authors set in advance."
+                },
+                {
+                  "value": "0.13",
+                  "note": "Fails the criterion the authors set in advance."
+                }
+              ]
+            },
+            {
+              "cells": [
+                "Heads over-predicted",
+                "92–94%",
+                "92–94%"
+              ]
+            }
+          ],
+          "caption": "Rebuilt from §4. Hover a cell for its note."
+        },
+        {
+          "type": "p",
+          "text": "The failure is informative. A head's attention to the sink is a constant of the head: the sharpest Qwen readers put 0.34–0.36 on it at every slot count and both prompt lengths, Llama's 0.42–0.45. Its total attention to matching slots is nearly constant too: L29h11 puts 0.18 on six matching slots and 0.19 on nine. Extra slots divide a fixed class budget, which the 12-demonstration fit had absorbed into its constants."
+        },
+        {
+          "type": "fig",
+          "name": "fig3_law",
+          "number": "Figure 9",
+          "caption": "Measured against predicted matching mass, one point per head and slot count: (a) fitted regime, (b) one slot per class, held out, (c) eighteen demonstrations, where the prediction fails."
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "kind": "finding",
+      "title": "Finding 3 · The gate and the null action",
+      "takeaway": "Whether any label has repeated is pooled into one direction g, which opens the read by lowering the readers' sink logit; without it they read nothing.",
+      "blocks": [
+        {
+          "type": "p",
+          "text": "What pointed to a gate is how accuracy depends on repetition: with one demonstration per class the right label comes back about **20%** of the time, with two **60–80%**, with six **96%**. And it is a property of the whole prompt: a label seen once is retrieved fine as long as the other labels repeat."
+        },
+        {
+          "type": "xp",
+          "label": "3a",
+          "question": "Is the switch one direction?",
+          "did": "Fit a direction at the query arrow in layer 23 that separates repeated-label prompts from their token-identical unique-label twins.",
+          "found": "Held-out sign agreement **1.00**; repeated prompts project at about **+18**, unique twins at **−21**; orthogonal to the key direction u. Pooling heads (L20–23) carry 93–100% of the projection through their values. Ablating the 16 duplicate-token heads moves it from +18.3 to −0.3; the 16 highest-induction-score heads move it 4.2, random heads at most 0.7.",
+          "means": "A repeat detector early in the network feeds one gate direction at the query.",
+          "not_shown": "The duplicate heads explain half of the separation. The other half, in the authors' words, 'comes from elsewhere, and we do not know where'."
+        },
+        {
+          "type": "xp",
+          "label": "3b",
+          "question": "What does the gate act on?",
+          "did": "Add g at the arrow of unique-label prompts at the model's own dose; measure each reader's sink logit and match logits. Then remove g from the readers' queries only.",
+          "found": "Sink-minus-match drops by **1.75** (L24h8), **3.25** (L28h0) and **3.65** nats (L29h11), 0.74 across the population (1.41 at double dose); random directions at most 0.2. Match-minus-other widens only +0.34 to +0.48, about a seventh. Opening the gate raises the margin +0.58 (one unit) and +0.90 (two); with g removed from the readers' queries, +0.43 and +0.61.",
+          "means": "The gate acts mainly on the null logit, and a quarter to a third of its effect on the answer travels through the readers' queries, the route the account draws.",
+          "not_shown": "Where the other two thirds of g's effect go: 'through heads and MLPs we have not named'."
+        },
+        {
+          "type": "why",
+          "text": "Why the gate has to work this way (Corollary 1): if the sink's logit beats the matching slots', the reader returns the sink's value. A signal that exists only at the query can change that competition only through the reader's query. A signal at the slots would enter through the keys, which is not what g does."
+        },
+        {
+          "type": "fig",
+          "name": "fig12_reader_rows",
+          "number": "Figure 11",
+          "caption": "Three Qwen readers reading when labels repeat (top), partly back on the sink with the repeat detectors ablated (middle), and on the sink when no label repeats (bottom)."
+        },
+        {
+          "type": "note",
+          "text": "Llama's gate is much weaker: 67% of its unique-label prompts still get a label, against 10% in Qwen, and in Llama the heads a generic induction score picks out hold the readers on the sink instead of releasing them.",
+          "where": "§5, Table 3"
+        }
+      ]
+    },
+    {
+      "id": "pop",
+      "kind": "finding",
+      "title": "Finding 4 · Query code, readers and brakes",
+      "takeaway": "Two named heads write the query code; reading and braking are populations, because no single head has enough output gain.",
+      "blocks": [
+        {
+          "type": "xp",
+          "label": "4a",
+          "question": "What does the query bring to the match?",
+          "did": "Replace the query sentence with one of the other class; patch single activations at the arrow; hold downstream components.",
+          "found": "Attention outputs of L21–29 carry **−1.10** [−1.39, −0.82] of a **−1.33** flip; just L22h10 and L23h26 carry **−0.53** (40%), random pairs under 0.05. Holding the attention queries of L24–35 leaves −0.04 of the pair's effect; holding the late MLPs alone makes it larger (−0.66).",
+          "means": "A query code of its own, written in the readers' coordinates, read by their queries, and opposed by the late MLPs.",
+          "not_shown": "SmolLM3 and Llama spread the query computation over many heads; the two-head result is Qwen's."
+        },
+        {
+          "type": "xp",
+          "label": "4b",
+          "question": "Are readers and brakes single heads or sets?",
+          "did": "Select sets on one draw, knock them out together on a fresh draw, against random sets of the same size and layers.",
+          "found": "Twenty readers: **−0.74** [−0.95, −0.55] (random +0.02). Twenty-four brakes: **+1.39** [+0.88, +1.88] (random +0.22). No single head is necessary: the largest single-head costs are 0.14 (a query head) and 0.09 (a reader).",
+          "means": "Both act as populations with opposite signs."
+        },
+        {
+          "type": "p",
+          "text": "**Why populations.** One reader already separates the classes in its own attention (a class bias of 0.2–0.4 nats against a per-slot spread of about 0.5). What it lacks is output gain: no head writes more than 0.2 nats of the answer directly, so a 1.3-nat margin needs at least seven heads, and a flip, where contributions can change sign, at least four (Proposition 2). In practice 14 heads carry half of the flip and 46 carry 80%."
+        },
+        {
+          "type": "xp",
+          "label": "4c",
+          "question": "Can a few amplified readers replace the rest?",
+          "did": "Multiply three readers' outputs (24:21, 29:11, 22:20) on a fresh seed; knock out the other seventeen.",
+          "found": "×2: **+0.40** / +0.25 (random +0.04); ×8 breaks the model (−0.56 / −0.84). With the other seventeen knocked out (−0.89 / −0.50), ×4 recovers only to −0.46 / −0.44.",
+          "means": "The writes add, but the other heads carry information these three lack.",
+          "not_shown": "Why training spreads the read this way remains open."
+        },
+        {
+          "type": "p",
+          "text": "**What the brakes do.** Permuting the demonstrations leaves the mean margin unchanged but moves it by more than a nat on half the prompts. Readers favour recent slots by 0.5–0.85 nats from first to last; without the brakes the model follows that gradient. One prediction here failed: knocking out the seven largest direct movers was predicted to remove 0.3–0.5 nats and removed −0.16 [−0.56, +0.24]."
+        }
+      ]
+    },
+    {
+      "id": "account",
+      "kind": "finding",
+      "title": "Finding 5 · Accounting and completeness",
+      "takeaway": "Every nat is assigned to a component, but whether the named heads 'suffice' depends heavily on the ablation reference and on which heads are counted.",
+      "blocks": [
+        {
+          "type": "p",
+          "text": "The final residual is a sum of components, so the margin decomposes exactly (Proposition 3); computed from hooks it matches the model within 0.045 nats (Qwen). On intact 12-demonstration prompts (+0.68): attention in L30–35 writes **+0.66**, L21–29 **+0.14**, late MLPs **−0.11**. Under a −1.33 flip: copiers −1.12, readers −0.36, MLPs +0.25."
+        },
+        {
+          "type": "fig",
+          "name": "fig9_waterfall",
+          "number": "Figure 16",
+          "caption": "The intact margin built band by band (left) and the change under the exact class flip (right)."
+        },
+        {
+          "type": "p",
+          "text": "Faithfulness is tested by keeping only the named heads at the query and replacing every other head's output with a reference value. Slots are built intact, so this certifies the readout, not slot construction."
+        },
+        {
+          "type": "table",
+          "columns": [
+            "Kept at the query",
+            "Symbol labels",
+            "Rare labels"
+          ],
+          "rows": [
+            {
+              "group": "reference: mean over natural text · margins (intact +0.55 / +1.13)"
+            },
+            {
+              "cells": [
+                "Named 67 heads",
+                "−0.88",
+                "−0.79"
+              ]
+            },
+            {
+              "cells": [
+                "Random set, same size",
+                "−0.79",
+                "−0.83"
+              ]
+            },
+            {
+              "cells": [
+                "No heads",
+                "−0.81",
+                "−0.82"
+              ]
+            },
+            {
+              "group": "reference: same-pair resample · change from intact"
+            },
+            {
+              "cells": [
+                {
+                  "value": "Named + screened, 79 heads",
+                  "note": "The 67 named heads, 8 from a screen of L20–27 and 4 early heads from L0–19."
+                },
+                "−0.28",
+                "−0.47"
+              ]
+            },
+            {
+              "cells": [
+                "Random set, ~79 heads",
+                "−0.65",
+                "−0.98"
+              ]
+            },
+            {
+              "cells": [
+                "No heads",
+                "−0.69",
+                "−0.95"
+              ]
+            },
+            {
+              "group": "final set, after the word-label study · change from intact"
+            },
+            {
+              "cells": [
+                {
+                  "value": "189 heads",
+                  "note": "The 79 plus 110 readers and brakes found by screening the natural-label prompts."
+                },
+                "+0.89",
+                "+1.26"
+              ]
+            },
+            {
+              "cells": [
+                "Random set, same size",
+                "−0.64",
+                "−0.98"
+              ]
+            }
+          ],
+          "caption": "Rebuilt from §8.2 and §10. With a natural-text mean the test cannot rank head sets at all; the authors' first matched control mixed label pairs and moved results by up to a nat (App. K)."
+        },
+        {
+          "type": "note",
+          "text": "The 189-head set beats the intact model because removing the remaining late heads, which act as brakes, helps. Its 110 extra heads were found by screening the natural-label prompts; the paper does not report a fresh-draw check of the natural-label closure that follows. Minimality in Wang et al.'s conditional sense was not run.",
+          "where": "§8.2, §10"
+        }
+      ]
+    },
+    {
+      "id": "general",
+      "kind": "finding",
+      "title": "Finding 6 · How far it holds",
+      "takeaway": "Same algorithm in three families and at 0.6B–8B; flipped-label following grows as readers and brakes outpull word meaning; a toy model grows the gate only under pressure.",
+      "blocks": [
+        {
+          "type": "p",
+          "text": "The authors say in advance which parts are forced by attention (a sink, a key read through keys, the read law) and which are left to training (which heads, how many, gate strength, depth). A link counts as replicated when the same intervention has the same sign with an interval excluding zero and the control stays in noise; magnitudes may differ, and do, by up to three times."
+        },
+        {
+          "type": "list",
+          "items": [
+            "**Three families.** Slot dissociation and the read law replicate in SmolLM3 and Llama; Llama's readers sit in L14–27 of 28, its gate is weaker, and its brakes are invisible head by head (271 of 288 heads within ±0.03) yet a 24-head set gives +1.90 [+1.12, +2.67].",
+            "**Natural labels.** With the concept's own words as labels the margin triples (5.4 nats in Qwen and SmolLM3). Pairing natural and exchanged labels splits it into a part that follows the demonstrations (R ≈ 2.7–2.9) and one that follows word meaning (P ≈ 2.2–2.7); the meaning part runs outside the circuit, through MLPs and late brakes.",
+            "**Training order.** Across OLMo-2 checkpoints, copying a repeated label appears first, the null action second, class-selective readers last; the 1B model never develops the readers and never learns the task.",
+            "**Instruction tuning.** The base model's 189 heads still carry retrieval in Qwen3-4B instruct (79% of R); both parts of the word-label margin grow about 2.5× with their ratio unchanged (0.92 vs 0.88). Post-training added braking around the readers rather than rewiring them."
+          ]
+        },
+        {
+          "type": "table",
+          "columns": [
+            "Qwen3 base",
+            "0.6B",
+            "1.7B",
+            "4B",
+            "8B"
+          ],
+          "rows": [
+            {
+              "cells": [
+                "Intact margin, symbol / rare",
+                "0.32 / 0.62",
+                "0.87 / 1.12",
+                "1.62 / 1.57",
+                "2.43 / 1.88"
+              ]
+            },
+            {
+              "cells": [
+                "Natural / flipped word labels",
+                "2.18 / −0.03",
+                {
+                  "value": "3.30 / +0.14",
+                  "note": "Predicted negative; the interval crosses zero."
+                },
+                "5.40 / +0.35",
+                {
+                  "value": "6.74 / +1.05",
+                  "note": "Wei et al. (2023) saw flipped-label following only in large models; here it rises inside one family."
+                }
+              ]
+            },
+            {
+              "cells": [
+                "R / P",
+                "1.07 / 1.10",
+                "1.72 / 1.58",
+                "2.87 / 2.52",
+                "3.90 / 2.85"
+              ]
+            },
+            {
+              "cells": [
+                "Readers: count, summed effect",
+                "70, −2.08",
+                "48, −2.60",
+                "89, −4.69",
+                "103, −5.94"
+              ]
+            },
+            {
+              "cells": [
+                "Largest reader, % of intact",
+                "22",
+                "18",
+                "18",
+                "15"
+              ]
+            },
+            {
+              "cells": [
+                "Brakes: count, summed effect",
+                "13, +0.82",
+                "13, +1.21",
+                "56, +3.76",
+                {
+                  "value": "32, +3.27",
+                  "note": "Fewer heads cross the threshold at 8B; the predicted monotone rise missed."
+                }
+              ]
+            },
+            {
+              "cells": [
+                "Brakes on word meaning: count, ΔP",
+                "23, +1.73",
+                "24, +2.06",
+                "54, +3.61",
+                "74, +4.03"
+              ]
+            },
+            {
+              "cells": [
+                "Gate dose, single / double",
+                "+1.75 / +1.96",
+                "+0.95 / +1.71",
+                {
+                  "value": "+0.25 / +0.78",
+                  "note": "The single dose's interval reaches zero; predicted to clear zero at every size."
+                },
+                {
+                  "value": "+1.11 / +1.10",
+                  "note": "Adding saturates at 8B, while removing still doubles."
+                }
+              ]
+            },
+            {
+              "cells": [
+                "Gate removed, single / double",
+                "−1.35 / −2.87",
+                "−0.69 / −1.68",
+                "−0.72 / −1.80",
+                "−1.07 / −3.02"
+              ]
+            }
+          ],
+          "caption": "Rebuilt from Table 5. Each size has its own census; no heads or directions are carried between sizes. Hover the underlined cells."
+        },
+        {
+          "type": "xp",
+          "label": "6a",
+          "question": "Would a model trained from scratch build the same parts?",
+          "did": "A 4-layer, 8-head Llama-style model (3.4M parameters) on a synthetic version of the task, under three training distributions, several seeds each.",
+          "found": "Slots (swaps move the answer 7–11 nats) and one or two last-layer readers in every seed. No gate under mixed or recurring-only training (sign accuracy 0.45–0.62). When unique-label prompts carry an unpredictable query label, 4 of 5 seeds learn and all 4 grow a gate: decodable at 0.81–1.00, and steering along it drops a recurring prompt's margin from 9 to 0.7 and 1.1 in two seeds (random: 7.0, 5.8).",
+          "means": "A gate forms when, and only when, blind retrieval on unique-label prompts is penalised: the authors' account of why pretrained models have one.",
+          "not_shown": "Which side of the gate can be steered varies by seed. A hand-set three-layer version reproduces the law exactly, which shows sufficiency only."
+        },
+        {
+          "type": "fig",
+          "name": "fig23_scale",
+          "number": "Figure 19",
+          "caption": "One census at four sizes: margins, reader and brake populations, and the brakes' hold on word meaning against the flipped-label margin."
+        }
+      ]
+    },
+    {
+      "id": "claims",
+      "kind": "claims",
+      "title": "Claims",
+      "takeaway": "The core mechanism holds up well; the abstract's read-law and sufficiency claims are narrower in the body than they sound.",
+      "claims": [
+        {
+          "text": "The label token holds the label as its value and the preceding sentence's class as its key, read on opposite sides of attention.",
+          "verdict": "holds",
+          "evidence": "Label exchange runs through values (86% via the KV groups of L21–29), sentence change through keys (−2.35 of −2.87); the same-class control stays within ±0.06; replicated in SmolLM3 and Llama.",
+          "where": "§3, Fig. 6"
+        },
+        {
+          "text": "A softmax law with two identifiable constants per head, fitted on one prompt distribution, predicts another.",
+          "verdict": "partly",
+          "evidence": "It predicts the regime with fewer slots per class (median error 0.07 Qwen, 0.04 Llama) and fails on longer prompts (0.15 / 0.13 against the authors' own 0.07 criterion; 92–94% of heads over-predicted). The abstract states the success and omits the failure; the body reports both.",
+          "where": "§4, Fig. 9"
+        },
+        {
+          "text": "An early repeat signal gates the read by lowering the readers' sink logit.",
+          "verdict": "partly",
+          "evidence": "In Qwen the direction is clean (sign agreement 1.00; sink logits drop 1.75–3.65 nats at the sharpest readers, random at most 0.2). But the duplicate heads explain half the gate projection, only a quarter to a third of g's effect on the answer runs through the readers' queries, and the duplicate-heads-to-behaviour link holds in Qwen only.",
+          "where": "§5, §8.3, Table 3"
+        },
+        {
+          "text": "Sixty percent of a class flip passes through twenty readers, and a few amplified readers cannot replace the rest.",
+          "verdict": "holds",
+          "evidence": "Qwen −1.08 of −1.80 (rare) and −0.54 of −0.95 (symbol) on fresh draws; SmolLM3's readers carry all of it, Llama's 45–54%. Three readers ×4 recover only to −0.46 / −0.44 with the other seventeen knocked out.",
+          "where": "§8.3, Tables 2–3"
+        },
+        {
+          "text": "The named heads alone reproduce the behaviour.",
+          "verdict": "partly",
+          "evidence": "Depends on the reference and the set: with a natural-text mean no set can be ranked; 79 heads keep about 60% of the margin; only the 189-head set, grown by screening the word-label prompts, matches or beats intact. Minimality in the conditional sense was not tested.",
+          "where": "§8.2, §10"
+        },
+        {
+          "text": "A transformer trained from scratch grows the same parts, and the gate only when retrieval on unique-label prompts is penalised.",
+          "verdict": "holds",
+          "evidence": "Slots and last-layer readers in every seed; no gate in all six control runs (0.45–0.62); a gate in all four of five seeds that learned the penalised task (0.81–1.00). Which side can be steered varies by seed.",
+          "where": "§12, Table 7"
+        },
+        {
+          "text": "From 0.6B to 8B the brakes' hold on word meaning rises with the flipped-label margin.",
+          "verdict": "partly",
+          "evidence": "It rises at every size (1.73, 2.06, 3.61, 4.03 nats) as the flipped margin goes from −0.03 to +1.05: a correlation over four points in one family. The overall brake count does not rise monotonically (56 at 4B, 32 at 8B), which the authors had predicted it would.",
+          "where": "§11, Table 5"
+        },
+        {
+          "text": "The gate suggests how a model decides whether to consult its context at all.",
+          "verdict": "not shown",
+          "evidence": "Offered in the last paragraph as a possibility; nothing beyond labelled demonstrations was tested.",
+          "where": "§14"
+        }
+      ]
+    },
+    {
+      "id": "lens-circuits",
+      "kind": "lens",
+      "topic": "circuits",
+      "title": "Circuits",
+      "takeaway": "A complete circuit where diffuse steps get direction-level tests, with a gain bound for why they cannot be single heads.",
+      "blocks": [
+        {
+          "type": "p",
+          "text": "Beyond the circuit itself, the paper is a worked example of reporting a mechanism that is partly sparse and partly diffuse. Each step is labelled named or population; populations are characterised by the direction they read or write and tested against random subspaces of the same dimension; and Proposition 2 turns 'no single head is necessary' from a failure into a prediction."
+        },
+        {
+          "type": "list",
+          "items": [
+            "Twins aligned token for token make each handoff's share well defined; the paper uses five kinds.",
+            "The ablation reference decides whether a circuit-only test can rank head sets at all; App. K documents a control the authors first got wrong.",
+            "Predictions written down before data collection, with misses reported (read-law up-transfer, brake count at 8B, many-shot LoRA, direct-mover knockout)."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "lens-interpretability",
+      "kind": "lens",
+      "topic": "interpretability",
+      "title": "Interpretability",
+      "takeaway": "In this setting ICL is retrieval, not rule fitting, and a scale effect comes from a shifting balance between existing parts.",
+      "blocks": [
+        {
+          "type": "p",
+          "text": "No step resembles fitting a rule or taking a gradient step: the model binds labels to classes and looks the class up. What it can learn in context is bounded by what its encoder already represents linearly at the arrow. The flipped-label ability Wei et al. tied to scale appears here without a new component, as readers and brakes gain on the word-meaning prior. Post-training, in the one model checked, changed gain rather than wiring."
+        }
+      ]
+    },
+    {
+      "id": "limits",
+      "kind": "limits",
+      "title": "Limitations",
+      "takeaway": "Narrow task, 3–8B models; gate half explained; completeness needed heads found on the test prompts.",
+      "limitations": [
+        {
+          "by": "paper",
+          "text": "Two-class retrieval with short sentences and single-token labels, at most twelve demonstrations; instructions, long-form tasks and many-class binding are out of scope."
+        },
+        {
+          "by": "paper",
+          "text": "Base models of 3–4B parameters, sizes up to 8B in one family, and a single instruct model."
+        },
+        {
+          "by": "paper",
+          "text": "The read law does not extrapolate to longer prompts, and why each head's budgets stay fixed is unexplained."
+        },
+        {
+          "by": "paper",
+          "text": "400 LoRA steps of many-shot fine-tuning were predicted to strengthen the brakes; they tripled the readers' necessity and left the brakes unchanged (+1.32 vs +1.44)."
+        },
+        {
+          "by": "read",
+          "text": "The gate's origin is half explained: duplicate heads move the projection half way, and most of g's effect on the answer runs through unnamed components."
+        },
+        {
+          "by": "read",
+          "text": "In SmolLM3 and Llama the duplicate-heads-to-gate link holds for the gate feature but not for the margin (+0.90, −0.39), because those heads carry other information."
+        },
+        {
+          "by": "read",
+          "text": "The natural-label closure uses 110 heads screened on the natural-label prompts; no fresh-draw check of that closure is reported."
+        }
+      ]
+    },
+    {
+      "id": "related",
+      "kind": "related",
+      "title": "Related work",
+      "takeaway": "Builds on induction heads, IOI's circuit criteria, task vectors and label-word work.",
+      "prior_work": [
+        {
+          "title": "In-context Learning and Induction Heads (Olsson et al., 2022)",
+          "relation": "The duplicate-token detectors are the first half of the induction circuit put to a second use; the readers are induction heads keyed on a class, and the emergence order extends the induction phase change by two stages.",
+          "arxiv_id": "2209.11895"
+        },
+        {
+          "title": "Interpretability in the Wild: a Circuit for Indirect Object Identification (Wang et al., 2022)",
+          "relation": "Source of the faithfulness, completeness and minimality criteria and of negative name movers; the brakes are a negative-head population with a measured job.",
+          "arxiv_id": "2211.00593"
+        },
+        {
+          "title": "In-Context Learning Creates Task Vectors (Hendel et al., 2023)",
+          "relation": "The query code is the same kind of object seen from its consumers: two heads write it, and it lies in the span of the readers' match functionals.",
+          "arxiv_id": "2310.15916"
+        },
+        {
+          "title": "Function Vectors in Large Language Models (Todd et al., 2023)",
+          "relation": "As above: a compact task description carried by a few heads to the query.",
+          "arxiv_id": "2310.15213"
+        },
+        {
+          "title": "Larger Language Models Do In-Context Learning Differently (Wei et al., 2023)",
+          "relation": "Found flipped-label following only in large models; reproduced here inside one family, and traced to the readers and brakes outpulling word meaning.",
+          "arxiv_id": "2303.03846"
+        },
+        {
+          "title": "Efficient Streaming Language Models with Attention Sinks (Xiao et al., 2023)",
+          "relation": "Described the sink as a position that absorbs attention; here it is the null position whose logit the gate controls.",
+          "arxiv_id": "2309.17453"
+        }
+      ]
+    },
+    {
+      "id": "repro",
+      "kind": "repro",
+      "title": "Reproducibility",
+      "takeaway": "Code, batteries and toy model released; public base models; single H100s.",
+      "facts": [
+        {
+          "name": "Code",
+          "text": "[github.com/andrewgcodes/in-context-learning-circuit](https://github.com/andrewgcodes/in-context-learning-circuit): reachable, with the `icl` package, batteries, toy model, tests, figures and paper (checked 9 Nov)"
+        },
+        {
+          "name": "Models",
+          "text": "public base checkpoints (Qwen3, SmolLM3, Llama-3.2, OLMo-2); the toy model is trained by the released code"
+        },
+        {
+          "name": "Compute",
+          "text": "single H100s, bfloat16, forward hooks on the HuggingFace implementations"
+        },
+        {
+          "name": "Data",
+          "text": "four batteries released; one verbatim prompt per battery in App. G"
+        },
+        {
+          "name": "Statistics",
+          "text": "paired bootstrap over prompts, 4000 resamples, 95% intervals; every set confirmed on a fresh draw"
+        }
+      ]
+    }
+  ],
+  "among_collection": [],
+  "code_url": "https://github.com/andrewgcodes/in-context-learning-circuit"
+}

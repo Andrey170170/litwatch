@@ -106,9 +106,10 @@ export type FailedDigest = {
   note?: string;
 };
 
-/** A process note on a Deep card (GLOSSARY.md): what the Deep agent could not do, as the model or the service wrote
- * it. `url`, when given, is linked only if it is http(s). */
-export type ProcessNote = { kind: "access" | "tool" | "budget" | "input"; source: "model" | "service"; note: string; url?: string };
+/** A process note on a Deep read or a Deep card (GLOSSARY.md): what the Deep agent could not do, as the model or the
+ * service wrote it. `url`, when given, is linked only if it is http(s). `review` is a read's alone: the service's
+ * note on a read that still failed its review (plans/deep-read.md). */
+export type ProcessNote = { kind: "access" | "tool" | "budget" | "input" | "review"; source: "model" | "service"; note: string; url?: string };
 
 /** A Deep card with process notes (`store.integrations.deep_notes`): Needs you's Deep notes, which wait on nothing.
  * `written_at` names the card, for Acknowledge: a card written again since is another. */

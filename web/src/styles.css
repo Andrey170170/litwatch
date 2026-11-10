@@ -187,7 +187,7 @@ html[data-theme="dark"] .st::before { box-shadow: 0 0 6px currentColor; }
 .side .foot { margin-top: auto; }
 .main { flex: 1; min-width: 0; overflow-y: auto; position: relative; }
 .inner { max-width: 860px; padding: 18px 24px 40px; }
-.inner:has(.pg) { max-width: 1080px; } /* the paper page: reading column and rail */
+.inner:has(.pg) { max-width: 1080px; } /* the paper page: reading column and rail; 1200px with a Deep read (deepread.css) */
 .back { display: inline-block; font-size: 13px; color: var(--fg2); margin-bottom: 10px; }
 .back:hover { color: var(--fg); }
 /* going deeper or back: the page slides in 28px from the side it comes from; a top-level switch fades */
@@ -554,12 +554,13 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 .note b { font-weight: 600; }
 .note .acts { display: flex; gap: 6px; flex-wrap: wrap; }
 .note .err { font: 11.5px var(--font-mono); color: var(--fg2); }
-/* the ladder: each rung a name in a narrow side column and a body */
+/* the ladder: each rung a name in a narrow side column and a body; the column is wide enough for a Deep read's
+   section names, on every paper, so the Gist and Brief sit in the same place from one paper to the next */
 .rung { margin: 0 0 22px; }
 .rung .rl { display: flex; align-items: center; gap: 10px; font: 700 12px var(--font-name); letter-spacing: 0.2em; text-transform: uppercase; color: var(--sig); margin-bottom: 6px; }
 @container (min-width: 900px) {
   /* the name sits on the first line of its body, whatever that line's size */
-  .rung { display: grid; grid-template-columns: 104px 1fr; gap: 16px; align-items: baseline; }
+  .rung { display: grid; grid-template-columns: 128px 1fr; gap: 16px; align-items: baseline; }
   .rung .rl { flex-direction: column; align-items: flex-start; }
 }
 .prose { font-size: 14.5px; line-height: 1.6; margin: 0 0 10px; }

@@ -1,0 +1,1937 @@
+{
+  "type": "object",
+  "required": [
+    "format",
+    "sections",
+    "among_collection"
+  ],
+  "properties": {
+    "format": {
+      "type": "string",
+      "const": "read",
+      "description": "Marks a Deep read; a Deep card from before has no format."
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "kind",
+              "claim",
+              "points",
+              "facts"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "The section's name within the read, unique in it; the page links to it and a render targets it."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section's name as shown (\"Finding 2 · A softmax law for the read\")."
+              },
+              "kind": {
+                "type": "string",
+                "const": "glance"
+              },
+              "claim": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The paper's key claim in one sentence."
+              },
+              "points": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "One point that carries the paper's argument."
+                },
+                "minItems": 2,
+                "maxItems": 6
+              },
+              "facts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "What the fact is about (\"Models\", \"Code\")."
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The fact."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "text"
+                        ],
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "A few words (\"code\", \"labelled traces\")."
+                          },
+                          "state": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "yes"
+                              },
+                              {
+                                "type": "string",
+                                "const": "no"
+                              }
+                            ],
+                            "description": "Whether the thing named is there (yes) or missing (no); left out for a plain tag."
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "description": "Short marks in place of, or after, the text: what is released and what is not."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              }
+            },
+            "additionalProperties": false,
+            "description": "At a glance, always first: the key claim, the points and the facts (kind, models, task or data, methods, code, reading time)."
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "kind",
+              "takeaway",
+              "blocks"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "The section's name within the read, unique in it; the page links to it and a render targets it."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section's name as shown (\"Finding 2 · A softmax law for the read\")."
+              },
+              "kind": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "problem"
+                  },
+                  {
+                    "type": "string",
+                    "const": "method"
+                  },
+                  {
+                    "type": "string",
+                    "const": "finding"
+                  }
+                ],
+                "description": "What the section is: the problem and motivation, the method, or one finding."
+              },
+              "takeaway": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section in one line; the contents of the read outside the web app show it."
+              },
+              "blocks": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "p"
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "A paragraph."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "h3"
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "A subheading inside a section, plain text."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "items"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "list"
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "One item."
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "why"
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The paper's reason for a choice, placed at the choice it explains."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text",
+                        "where"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "note"
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The read's own sceptical remark, where the paper's text does not say it."
+                        },
+                        "where": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Where in the paper this rests: a section, figure or table, as the paper numbers it (\"§5.3, Table 2\")."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "tex"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "eq"
+                        },
+                        "tex": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The equation in TeX, as KaTeX reads it in display mode, without delimiters."
+                        },
+                        "caption": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What the equation says, and what is empirical about it."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "name",
+                        "number",
+                        "caption"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "fig"
+                        },
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                          "description": "The figure's name among the read's figures; its image is stored with the read under this name."
+                        },
+                        "number": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The figure's number in the paper, as the paper labels it (\"Figure 6\")."
+                        },
+                        "caption": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "A caption in the read's own words."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "question",
+                        "did",
+                        "found",
+                        "means"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "xp"
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "A short tag for the experiment (\"1a\")."
+                        },
+                        "question": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The question the experiment answers."
+                        },
+                        "did": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What was done."
+                        },
+                        "found": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The result, with its numbers."
+                        },
+                        "means": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What the result shows."
+                        },
+                        "not_shown": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What it leaves open, including the controls that hold."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "columns",
+                        "rows"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "table"
+                        },
+                        "columns": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "A column's header, plain text."
+                          },
+                          "minItems": 2
+                        },
+                        "rows": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "group"
+                                ],
+                                "properties": {
+                                  "group": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "A heading across the table, over the rows that follow it."
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "cells"
+                                ],
+                                "properties": {
+                                  "cells": {
+                                    "type": "array",
+                                    "items": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "value",
+                                            "note"
+                                          ],
+                                          "properties": {
+                                            "value": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "number"
+                                                }
+                                              ]
+                                            },
+                                            "note": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "A short note on this cell, shown on hover or tap; plain text."
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      ],
+                                      "description": "A cell: its value (plain text or a number; an empty string for an empty cell), or its value with a note."
+                                    },
+                                    "minItems": 1,
+                                    "description": "One cell per column."
+                                  },
+                                  "sum": {
+                                    "type": "boolean",
+                                    "description": "True for a totals row, set in bold."
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ],
+                            "description": "A row of cells, or a group heading."
+                          },
+                          "minItems": 1
+                        },
+                        "heat": {
+                          "type": "object",
+                          "required": [
+                            "max"
+                          ],
+                          "properties": {
+                            "max": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "The value coloured at full strength."
+                            },
+                            "colour": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "neutral"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "accent"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "red"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "orange"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "amber"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "green"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "cyan"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "blue"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "purple"
+                                }
+                              ],
+                              "description": "The heat's colour; red when left out."
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Colours each numeric cell after the first column by its value, where the values compare."
+                        },
+                        "caption": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Where the table comes from and how it was cut (\"Rebuilt from Table 1, eleven of its 22 rows\")."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "width",
+                        "height",
+                        "nodes",
+                        "edges"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "diagram"
+                        },
+                        "width": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "The drawing's width in its own units; coordinates run from 0 to it."
+                        },
+                        "height": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "The drawing's height in its own units."
+                        },
+                        "nodes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "label",
+                              "x",
+                              "y",
+                              "w",
+                              "h",
+                              "tip"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9-]*$",
+                                "description": "The node's name within its diagram, which edges refer to."
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The node's name, plain text, one line."
+                              },
+                              "sub": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "A second, smaller line under the name."
+                              },
+                              "colour": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "neutral"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "accent"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "red"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "orange"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "amber"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "green"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "cyan"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "blue"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "purple"
+                                  }
+                                ],
+                                "description": "The node's colour; neutral when left out."
+                              },
+                              "x": {
+                                "type": "number",
+                                "description": "The left edge of the node's box."
+                              },
+                              "y": {
+                                "type": "number",
+                                "description": "The top edge of the node's box."
+                              },
+                              "w": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "description": "The box's width."
+                              },
+                              "h": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "description": "The box's height."
+                              },
+                              "tip": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "What the node does and the numbers behind it, shown when it is clicked."
+                              },
+                              "where": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Where the paper shows it."
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "minItems": 1
+                        },
+                        "edges": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "from",
+                              "to",
+                              "tip"
+                            ],
+                            "properties": {
+                              "from": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The id of the node the edge leaves."
+                              },
+                              "to": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The id of the node the edge points at."
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "A few words drawn beside the edge, plain text."
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The heading of the edge's explanation; its label when left out, else the two nodes' names."
+                              },
+                              "style": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "solid"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "dash"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "dot"
+                                  }
+                                ],
+                                "description": "How the line is drawn; solid when left out."
+                              },
+                              "points": {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "additionalItems": false,
+                                  "items": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "number"
+                                    }
+                                  ],
+                                  "minItems": 2,
+                                  "description": "A point, [x, y], in the diagram's units."
+                                },
+                                "minItems": 2,
+                                "description": "The edge's path from start to end, through its waypoints. Left out, it is a straight line between the two boxes."
+                              },
+                              "label_at": {
+                                "type": "object",
+                                "required": [
+                                  "x",
+                                  "y"
+                                ],
+                                "properties": {
+                                  "x": {
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "type": "number"
+                                  },
+                                  "anchor": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "start"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "middle"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "end"
+                                      }
+                                    ],
+                                    "description": "Which part of the label sits at the point; middle when left out."
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "description": "Where the label is drawn; the middle of the path when left out."
+                              },
+                              "tip": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "What passes along the edge and the numbers behind it, shown when it is clicked."
+                              },
+                              "where": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Where the paper shows it."
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "lanes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "text",
+                              "x",
+                              "y"
+                            ],
+                            "properties": {
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The lane's name."
+                              },
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "description": "Names of the diagram's bands, each drawn at its point."
+                        },
+                        "caption": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What the diagram was drawn from."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "A diagram the read draws: nodes and edges, each explained. A stored read always carries coordinates: the deep service lays a diagram out before it stores the read, and the web app only draws."
+                    }
+                  ]
+                },
+                "minItems": 1,
+                "description": "The section's content, in reading order."
+              }
+            },
+            "additionalProperties": false,
+            "description": "A section of the paper's own story, made of blocks."
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "kind",
+              "takeaway",
+              "claims"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "The section's name within the read, unique in it; the page links to it and a render targets it."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section's name as shown (\"Finding 2 · A softmax law for the read\")."
+              },
+              "kind": {
+                "type": "string",
+                "const": "claims"
+              },
+              "takeaway": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section in one line; the contents of the read outside the web app show it."
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "text",
+                    "verdict",
+                    "evidence",
+                    "where"
+                  ],
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The claim, as the paper makes it."
+                    },
+                    "verdict": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "holds"
+                        },
+                        {
+                          "type": "string",
+                          "const": "partly"
+                        },
+                        {
+                          "type": "string",
+                          "const": "not shown"
+                        },
+                        {
+                          "type": "string",
+                          "const": "overclaimed"
+                        }
+                      ],
+                      "description": "Whether the paper shows what it claims."
+                    },
+                    "evidence": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "What the verdict rests on."
+                    },
+                    "where": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Where in the paper this rests: a section, figure or table, as the paper numbers it (\"§5.3, Table 2\")."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "description": "One entry per main claim of the paper."
+              }
+            },
+            "additionalProperties": false,
+            "description": "The claims ledger."
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "kind",
+              "topic",
+              "takeaway",
+              "blocks"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "The section's name within the read, unique in it; the page links to it and a render targets it."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section's name as shown (\"Finding 2 · A softmax law for the read\")."
+              },
+              "kind": {
+                "type": "string",
+                "const": "lens"
+              },
+              "topic": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The slug of the topic the paper is graded in; the section takes that topic's colour."
+              },
+              "takeaway": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section in one line; the contents of the read outside the web app show it."
+              },
+              "blocks": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "p"
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "A paragraph."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "h3"
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "A subheading inside a section, plain text."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "items"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "list"
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "One item."
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "why"
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The paper's reason for a choice, placed at the choice it explains."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "text",
+                        "where"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "note"
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The read's own sceptical remark, where the paper's text does not say it."
+                        },
+                        "where": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Where in the paper this rests: a section, figure or table, as the paper numbers it (\"§5.3, Table 2\")."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "tex"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "eq"
+                        },
+                        "tex": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The equation in TeX, as KaTeX reads it in display mode, without delimiters."
+                        },
+                        "caption": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What the equation says, and what is empirical about it."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "name",
+                        "number",
+                        "caption"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "fig"
+                        },
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                          "description": "The figure's name among the read's figures; its image is stored with the read under this name."
+                        },
+                        "number": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The figure's number in the paper, as the paper labels it (\"Figure 6\")."
+                        },
+                        "caption": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "A caption in the read's own words."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "question",
+                        "did",
+                        "found",
+                        "means"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "xp"
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "A short tag for the experiment (\"1a\")."
+                        },
+                        "question": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The question the experiment answers."
+                        },
+                        "did": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What was done."
+                        },
+                        "found": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The result, with its numbers."
+                        },
+                        "means": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What the result shows."
+                        },
+                        "not_shown": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What it leaves open, including the controls that hold."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "columns",
+                        "rows"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "table"
+                        },
+                        "columns": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "A column's header, plain text."
+                          },
+                          "minItems": 2
+                        },
+                        "rows": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "group"
+                                ],
+                                "properties": {
+                                  "group": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "description": "A heading across the table, over the rows that follow it."
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "cells"
+                                ],
+                                "properties": {
+                                  "cells": {
+                                    "type": "array",
+                                    "items": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "value",
+                                            "note"
+                                          ],
+                                          "properties": {
+                                            "value": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "number"
+                                                }
+                                              ]
+                                            },
+                                            "note": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "A short note on this cell, shown on hover or tap; plain text."
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      ],
+                                      "description": "A cell: its value (plain text or a number; an empty string for an empty cell), or its value with a note."
+                                    },
+                                    "minItems": 1,
+                                    "description": "One cell per column."
+                                  },
+                                  "sum": {
+                                    "type": "boolean",
+                                    "description": "True for a totals row, set in bold."
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ],
+                            "description": "A row of cells, or a group heading."
+                          },
+                          "minItems": 1
+                        },
+                        "heat": {
+                          "type": "object",
+                          "required": [
+                            "max"
+                          ],
+                          "properties": {
+                            "max": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "The value coloured at full strength."
+                            },
+                            "colour": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "neutral"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "accent"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "red"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "orange"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "amber"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "green"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "cyan"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "blue"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "purple"
+                                }
+                              ],
+                              "description": "The heat's colour; red when left out."
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Colours each numeric cell after the first column by its value, where the values compare."
+                        },
+                        "caption": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Where the table comes from and how it was cut (\"Rebuilt from Table 1, eleven of its 22 rows\")."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "width",
+                        "height",
+                        "nodes",
+                        "edges"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "diagram"
+                        },
+                        "width": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "The drawing's width in its own units; coordinates run from 0 to it."
+                        },
+                        "height": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "The drawing's height in its own units."
+                        },
+                        "nodes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "label",
+                              "x",
+                              "y",
+                              "w",
+                              "h",
+                              "tip"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9-]*$",
+                                "description": "The node's name within its diagram, which edges refer to."
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The node's name, plain text, one line."
+                              },
+                              "sub": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "A second, smaller line under the name."
+                              },
+                              "colour": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "neutral"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "accent"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "red"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "orange"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "amber"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "green"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "cyan"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "blue"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "purple"
+                                  }
+                                ],
+                                "description": "The node's colour; neutral when left out."
+                              },
+                              "x": {
+                                "type": "number",
+                                "description": "The left edge of the node's box."
+                              },
+                              "y": {
+                                "type": "number",
+                                "description": "The top edge of the node's box."
+                              },
+                              "w": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "description": "The box's width."
+                              },
+                              "h": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "description": "The box's height."
+                              },
+                              "tip": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "What the node does and the numbers behind it, shown when it is clicked."
+                              },
+                              "where": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Where the paper shows it."
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "minItems": 1
+                        },
+                        "edges": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "from",
+                              "to",
+                              "tip"
+                            ],
+                            "properties": {
+                              "from": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The id of the node the edge leaves."
+                              },
+                              "to": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The id of the node the edge points at."
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "A few words drawn beside the edge, plain text."
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The heading of the edge's explanation; its label when left out, else the two nodes' names."
+                              },
+                              "style": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "solid"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "dash"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "dot"
+                                  }
+                                ],
+                                "description": "How the line is drawn; solid when left out."
+                              },
+                              "points": {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "additionalItems": false,
+                                  "items": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "number"
+                                    }
+                                  ],
+                                  "minItems": 2,
+                                  "description": "A point, [x, y], in the diagram's units."
+                                },
+                                "minItems": 2,
+                                "description": "The edge's path from start to end, through its waypoints. Left out, it is a straight line between the two boxes."
+                              },
+                              "label_at": {
+                                "type": "object",
+                                "required": [
+                                  "x",
+                                  "y"
+                                ],
+                                "properties": {
+                                  "x": {
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "type": "number"
+                                  },
+                                  "anchor": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "start"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "middle"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "end"
+                                      }
+                                    ],
+                                    "description": "Which part of the label sits at the point; middle when left out."
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "description": "Where the label is drawn; the middle of the path when left out."
+                              },
+                              "tip": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "What passes along the edge and the numbers behind it, shown when it is clicked."
+                              },
+                              "where": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Where the paper shows it."
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "lanes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "text",
+                              "x",
+                              "y"
+                            ],
+                            "properties": {
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "The lane's name."
+                              },
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "description": "Names of the diagram's bands, each drawn at its point."
+                        },
+                        "caption": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "What the diagram was drawn from."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "A diagram the read draws: nodes and edges, each explained. A stored read always carries coordinates: the deep service lays a diagram out before it stores the read, and the web app only draws."
+                    }
+                  ]
+                },
+                "minItems": 1,
+                "description": "The section's content, in reading order."
+              }
+            },
+            "additionalProperties": false,
+            "description": "What the paper means for one topic's question; its title is the topic's name."
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "kind",
+              "takeaway",
+              "limitations"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "The section's name within the read, unique in it; the page links to it and a render targets it."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section's name as shown (\"Finding 2 · A softmax law for the read\")."
+              },
+              "kind": {
+                "type": "string",
+                "const": "limits"
+              },
+              "takeaway": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section in one line; the contents of the read outside the web app show it."
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "by",
+                    "text"
+                  ],
+                  "properties": {
+                    "by": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "paper"
+                        },
+                        {
+                          "type": "string",
+                          "const": "read"
+                        }
+                      ],
+                      "description": "Whose it is: one the paper states, or one the read sees."
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The limitation."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "kind",
+              "takeaway",
+              "prior_work"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "The section's name within the read, unique in it; the page links to it and a render targets it."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section's name as shown (\"Finding 2 · A softmax law for the read\")."
+              },
+              "kind": {
+                "type": "string",
+                "const": "related"
+              },
+              "takeaway": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section in one line; the contents of the read outside the web app show it."
+              },
+              "prior_work": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "title",
+                    "relation"
+                  ],
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 5
+                    },
+                    "relation": {
+                      "type": "string",
+                      "minLength": 20,
+                      "description": "What this paper takes from it or claims to improve on."
+                    },
+                    "arxiv_id": {
+                      "type": "string",
+                      "pattern": "^(?:\\d{4}\\.\\d{4,5}|[a-z-]+(?:\\.[A-Z]{2})?/\\d{7})$"
+                    }
+                  }
+                },
+                "minItems": 1,
+                "maxItems": 6,
+                "description": "The closest prior work the paper builds on or claims to improve on."
+              }
+            },
+            "additionalProperties": false,
+            "description": "The closest prior work. The page shows the read's among_collection under it."
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "kind",
+              "takeaway",
+              "facts"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "The section's name within the read, unique in it; the page links to it and a render targets it."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section's name as shown (\"Finding 2 · A softmax law for the read\")."
+              },
+              "kind": {
+                "type": "string",
+                "const": "repro"
+              },
+              "takeaway": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The section in one line; the contents of the read outside the web app show it."
+              },
+              "facts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "What the fact is about (\"Models\", \"Code\")."
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The fact."
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "text"
+                        ],
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "A few words (\"code\", \"labelled traces\")."
+                          },
+                          "state": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "yes"
+                              },
+                              {
+                                "type": "string",
+                                "const": "no"
+                              }
+                            ],
+                            "description": "Whether the thing named is there (yes) or missing (no); left out for a plain tag."
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "description": "Short marks in place of, or after, the text: what is released and what is not."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              }
+            },
+            "additionalProperties": false,
+            "description": "Reproducibility: what was checked, not assumed (code, data, models, compute, statistics)."
+          }
+        ]
+      },
+      "minItems": 1,
+      "description": "The read, in order: At a glance; the paper's own sections; Claims; one lens per graded topic; Limitations; Related work; Reproducibility."
+    },
+    "among_collection": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "arxiv_id",
+          "title",
+          "relation",
+          "note"
+        ],
+        "properties": {
+          "arxiv_id": {
+            "type": "string",
+            "pattern": "^(?:\\d{4}\\.\\d{4,5}|[a-z-]+(?:\\.[A-Z]{2})?/\\d{7})$",
+            "description": "As store.search returned it."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 5
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "agrees"
+              },
+              {
+                "type": "string",
+                "const": "contradicts"
+              },
+              {
+                "type": "string",
+                "const": "extends"
+              },
+              {
+                "type": "string",
+                "const": "supersedes"
+              }
+            ],
+            "description": "How this paper stands to that one."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 400,
+            "description": "One sentence on where the two meet: the shared question and what differs."
+          }
+        }
+      },
+      "maxItems": 8,
+      "description": "Papers the lab's collection holds (store.search hits with in_collection true), recent and on the same question, that this paper agrees with, contradicts, extends or supersedes. Only relations both papers' texts support; empty when none does."
+    },
+    "code_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "process_notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "source",
+          "note"
+        ],
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "access"
+              },
+              {
+                "type": "string",
+                "const": "tool"
+              },
+              {
+                "type": "string",
+                "const": "budget"
+              },
+              {
+                "type": "string",
+                "const": "input"
+              },
+              {
+                "type": "string",
+                "const": "review"
+              }
+            ],
+            "description": "What held the run back."
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "model"
+              },
+              {
+                "type": "string",
+                "const": "service"
+              }
+            ],
+            "description": "Who wrote the note: the agent, or the service after the run."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "description": "One sentence: what could not be done or checked, and what the read says because of it."
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^https?://\\S+$",
+            "description": "The page concerned, an absolute http(s) URL."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "What the run could not do because of its tools, access or budget, not what the paper lacks."
+    }
+  },
+  "additionalProperties": false,
+  "title": "Read",
+  "description": "A Deep read. Its prose fields are inline text: **bold**, *italic*, `code`, $tex$ for inline maths and [words](https://…) for a link, and nothing else; HTML is shown as written. Names, labels, headers, table cells, cell notes and paper locations are plain text."
+}

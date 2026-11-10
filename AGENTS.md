@@ -44,7 +44,8 @@ CI (`.github/workflows/ci.yaml`) runs all of these; run the ones your change tou
   `.venv/bin/python -m unittest discover -s tests` (setup in its README).
 
 After an API change, regenerate the client types: `uv run litwatch openapi web/openapi.json`, then `pnpm generate` in
-`web/`.
+`web/`. After a change to the Deep read's schema (`deep/src/read.ts`): `npm run read-schema` in `deep/`, then
+`pnpm generate:read` in `web/`.
 
 ## On the owner's server
 
