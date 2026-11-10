@@ -29,10 +29,12 @@ export const topicsQuery = queryOptions({
   staleTime: 60_000,
 });
 
+/** A paper's page. Its read runs to its end even when its page is left (no `signal`, see `listOptions`): a write on
+ * the paper settles the Needs you page from it (`settled`). */
 export const paperQuery = (id: string) =>
   queryOptions({
     queryKey: ["paper", id],
-    queryFn: async ({ signal }) => ok(await api.GET("/api/papers/{paper_id}", { signal, params: { path: { paper_id: id } } })),
+    queryFn: async () => ok(await api.GET("/api/papers/{paper_id}", { params: { path: { paper_id: id } } })),
   });
 
 /** The search box's reach beyond the collection: the archive's size, which changes slowly. */
@@ -67,9 +69,10 @@ const loaded = (pages: { rows: unknown[] }[]) => pages.reduce((n, p) => n + p.ro
 
 /** A list keeps its order for the visit (DESIGN.md, "Positions stay put"): never refetched on its own, not on focus,
  * reconnect or the way back from a paper, and kept half an hour after the reader leaves it. Actions patch rows in
- * place or invalidate on purpose; a page load starts afresh. Every read hands React Query's `signal` to its fetch,
- * so a read nobody shows any more (an outdated search, a page left before its read landed) is aborted, and asked
- * again only if its page is shown again. */
+ * place or invalidate on purpose; a page load starts afresh. A read hands React Query's `signal` to its fetch, so a
+ * read nobody shows any more (an outdated search, a page left before its read landed) is aborted, and asked again
+ * only if its page is shown again. The exceptions are the reads a write reconciles from once they land (a paper,
+ * a digest, a Calibrate session): aborted, they would hand the write the data from before it. */
 const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
 /** A page reached going forward (a link, not Back) is a fresh visit: its cached reads are marked stale, so the page
@@ -145,7 +148,8 @@ export const dayQuery = (day: string) => digestRead(["day", day], async ({ signa
 /** The week holding `day`. */
 export const weekQuery = (day: string) => digestRead(["week", day], async ({ signal }) => ok(await api.GET("/api/digests/weeks/{day}", { signal, params: { path: { day } } })));
 
-export const digestQuery = (id: number) => digestRead([String(id)], async ({ signal }) => ok(await api.GET("/api/digests/{digest_id}", { signal, params: { path: { digest_id: id } } })));
+/** A digest's own read, run to its end even when its page is left (no `signal`): a refused write restripes from it. */
+export const digestQuery = (id: number) => digestRead([String(id)], async () => ok(await api.GET("/api/digests/{digest_id}", { params: { path: { digest_id: id } } })));
 
 /** History back from `until`, a span of days at a time (`SPAN`), older pages as the reader scrolls until the
  * archive's start. */
@@ -192,8 +196,10 @@ export const missesQuery = settingsRead("misses", "list", async ({ signal }) => 
 
 export const sessionsQuery = (page: "calibrate" | "overview") => settingsRead(page, "sessions", async ({ signal }) => ok(await api.GET("/api/settings/calibrate", { signal })) as unknown as SessionRow[]);
 
+/** A Calibrate session, run to its end even when its page is left (no `signal`): a write patches the session lists
+ * from it (`sessionChanged`). */
 export const sessionQuery = (id: number) =>
-  settingsRead(`calibrate/${id}`, "session", async ({ signal }) => ok(await api.GET("/api/settings/calibrate/{session_id}", { signal, params: { path: { session_id: id } } })) as unknown as Session);
+  settingsRead(`calibrate/${id}`, "session", async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })) as unknown as Session);
 
 export const runsQuery = (page: "overview" | "runs") => settingsRead(page, "runs", async ({ signal }) => ok(await api.GET("/api/settings/runs", { signal })) as unknown as Run[]);
 

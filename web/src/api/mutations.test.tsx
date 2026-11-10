@@ -1,4 +1,4 @@
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { Profiler } from "react";
 import { describe, expect, it } from "vitest";
@@ -58,6 +58,32 @@ describe("a write on a paper", () => {
     release();
     await waitFor(() => expect(result.current.save.isPending).toBe(false));
     expect((result.current.page.data as { saved: boolean }).saved).toBe(true);
+  });
+
+  it("reconciles from the refetched page even when the page is left before the refetch lands", async () => {
+    let gets = 0;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    scriptFetch({
+      "PUT /api/library/2610.00001": { message: null, saved: true, grades: {} },
+      "GET /api/papers/2610.00001": async () => {
+        if (gets++ === 0) return { id: "2610.00001", saved: false };
+        await held;
+        return { id: "2610.00001", saved: true };
+      },
+    });
+    // The app's client keeps a read nobody shows (the harness's drops it at once).
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const page = renderHook(() => ({ page: useQuery(paperQuery("2610.00001")), save: useSave("2610.00001") }), { wrapper });
+    await waitFor(() => expect(page.result.current.page.data).toBeTruthy());
+    act(() => page.result.current.save.mutate(true));
+    await waitFor(() => expect(gets).toBe(2));
+    // The reader leaves the paper while its refetch is in flight; the write still settles from what it returns.
+    page.unmount();
+    release();
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    expect(client.getQueryData<{ saved: boolean }>(["paper", "2610.00001"])?.saved).toBe(true);
   });
 
   it("is seen as pending by a control that opened after it started", async () => {
