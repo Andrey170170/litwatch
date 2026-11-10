@@ -60,6 +60,10 @@ test("the paper's numbers pass in the forms a read gives them", () => {
     "Turpin et al. (2023) introduced the setup; see §3 and arXiv 2305.04388.", // a year, a place, an id
   ])
     assert.deepEqual(errors(saying(text)), [], text);
+  // an exponent ending the paper's sentence, and a number the paper spells in several words
+  const spelled = BODY.replace("\\end{document}", "The learning rate is 5e-5. We ran two hundred and fifty trials, one thousand two hundred in all.\n\\end{document}");
+  for (const text of ["The learning rate is 0.00005.", "It runs 250 trials.", "It runs 1,200 trials in all."])
+    assert.deepEqual(errors(saying(text), { paper: spelled }), [], text);
 });
 
 test("a decimal written from its point is the same number as one written with its zero, both ways", () => {
@@ -224,6 +228,9 @@ test("a LaTeX source with no table has none: every cite of one is rejected, an a
   const cited = errors(draft(), { paper: none });
   assert.ok(has(cited, "/sections/2/blocks/1/caption: cites Table 1, but the paper's source has no table"), cited.join("\n"));
   assert.ok(has(cited, "/sections/3/claims/0/where: cites Table 1, but the paper's source has no table"));
+  // the space LaTeX allows after \begin hides no table
+  const spaced = BODY.replace("\\begin{table}", "\\begin {table}").replace("\\end{table}", "\\end {table}");
+  assert.deepEqual(errors(resting("Table 1"), { paper: spaced }), []);
   assert.ok(has(errors(saying("The totals are in Table A.1."), { paper: none }), "/sections/1/blocks/0/text: cites Table A.1, but the paper's source has no table"));
   // where the source has tables, an appendix's own numbering is not in it: the cite is the reviewer's to check
   const unknown = check(saying("The totals are in Table A.1."), ctx());
@@ -307,6 +314,10 @@ test("a place code does not look up is the reviewer's, by name: an equation, an 
   // a list, in any case, is named whole
   assert.deepEqual(left("equations 9999 and 8888"), [[], ["equations 9999 and 8888"]]);
   assert.deepEqual(left("pp. 3–9"), [[], ["pp. 3–9"]]);
+  // a place's word in capitals is the same place
+  assert.deepEqual(check(resting("SECTION 3"), ctx()), { errors: [], plots: [], unverified: [] });
+  assert.deepEqual(check(resting("SEC. 3"), ctx()), { errors: [], plots: [], unverified: [] });
+  assert.deepEqual(left("TABLE II", { paper: ieee }), [[], ["§3", "TABLE II"]]);
 });
 
 test("the paper's places in prose go to the reviewer where code cannot confirm them, and Related work's are other papers'", () => {

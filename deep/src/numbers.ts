@@ -29,7 +29,7 @@ const NUMBER = new RegExp(
   "(?<![\\w.])(?:" +
     "10\\s*\\^\\s*\\{?\\s*([-+−]?\\d+)\\s*\\}?" +
     "|(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?|\\.\\d+)" +
-    "(?:\\s*(?:×|x|\\*|·)\\s*10\\s*\\^\\s*\\{?\\s*([-+−]?\\d+)\\s*\\}?|[eE]([-+−]?\\d+)(?![\\w.]))?" +
+    "(?:\\s*(?:×|x|\\*|·)\\s*10\\s*\\^\\s*\\{?\\s*([-+−]?\\d+)\\s*\\}?|[eE]([-+−]?\\d+)(?!\\w|\\.\\d))?" +
     "(?:\\s?(%|percent\\b)|\\s?(thousand|million|billion|trillion)\\b|([kKMB])(?![A-Za-z0-9]))?" +
     ")",
   "g",
@@ -85,6 +85,29 @@ function spelled(text: string): number[] {
       const base = tens ? (TENS.indexOf(tens) + 2) * 10 + (unit ? UNITS.indexOf(unit) : 0) : UNITS.indexOf(small!);
       out.push(times ? base * MULTIPLES[times]! : base);
     }
+  }
+  return [...out, ...compounds(text)];
+}
+
+const VALUES = new Map<string, number>([...UNITS.map((w, i) => [w, i] as const), ...TENS.map((w, i) => [w, (i + 2) * 10] as const)]);
+const POWERS = new Map<string, number>([["thousand", 1e3], ["million", 1e6], ["billion", 1e9]]);
+const COMPOUND = new RegExp(`\\b(?:${[...VALUES.keys(), "hundred", ...POWERS.keys()].join("|")})(?:(?:[-\\s]+(?:and\\s+)?)(?:${[...VALUES.keys(), "hundred", ...POWERS.keys()].join("|")}))+\\b`, "gi");
+
+/** The whole values of numbers spelled in several words: two hundred and fifty, one thousand two hundred. */
+function compounds(text: string): number[] {
+  const out: number[] = [];
+  for (const m of text.matchAll(COMPOUND)) {
+    let total = 0;
+    let current = 0;
+    for (const word of m[0].toLowerCase().split(/[-\s]+/)) {
+      if (word === "and") continue;
+      if (word === "hundred") current = (current || 1) * 100;
+      else if (POWERS.has(word)) {
+        total += (current || 1) * POWERS.get(word)!;
+        current = 0;
+      } else current += VALUES.get(word)!;
+    }
+    out.push(total + current);
   }
   return out;
 }

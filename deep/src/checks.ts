@@ -284,7 +284,7 @@ function inlineTex(text: string): string[] {
 }
 
 /** A figure or table numbered in Roman numerals (IEEEtran's tables), or a list of them, which code does not look up. */
-const ROMAN_FLOATS = /\b(?:Fig(?:ure)?s?\.?|Tables?|Tabs?\.)\s*[IVX]{1,6}(?:\s*(?:,|and|&|–|—|-|to)\s*[IVX]{1,6})*\b(?!\/)/g;
+const ROMAN_FLOATS = /\b(?i:fig(?:ure)?s?\.?|tables?|tabs?\.)\s*[IVX]{1,6}(?:\s*(?:,|and|&|–|—|-|to)\s*[IVX]{1,6})*\b(?!\/)/g;
 /** How a table's caption says the read cut the paper's table, which the spec asks it to say: the rows and columns
  * kept, counted ("11 of its 12 rows", "the first 5 columns"). The counts are the read's own. */
 const CUT_COUNTS = /(?<![\d.,])\d+(?:\s+of\s+(?:(?:its|the|all)\s+)?\d+)?\s+(?:[a-z-]+\s+)?(?:rows?|columns?)\b/gi;

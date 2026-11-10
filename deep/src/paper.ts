@@ -38,7 +38,7 @@ export interface Heading {
 
 /** Whether the text is a LaTeX source: litwatch says so, or it reads like one. */
 export const isLatex = (body: string, source?: string | null): boolean =>
-  source === "latex" || (source !== "pdf" && /\\begin\{document\}|\\section\*?\s*\{/.test(body));
+  source === "latex" || (source !== "pdf" && /\\begin\s*\{document\}|\\section\*?\s*\{/.test(body));
 
 /** Whether the match at `at` sits on a LaTeX comment line: an unescaped % before it. */
 function commented(body: string, at: number): boolean {
@@ -92,7 +92,7 @@ export function ownNumbering(tex: string, counters: readonly string[], also?: Re
 export const ownFloatNumbering = (tex: string, kind: string): boolean => ownNumbering(tex, [kind], CONTINUED);
 
 /** Where a LaTeX source starts its appendix by command: from here its sections are lettered. */
-const APPENDIX_COMMAND = /\\appendi(?:x|ces)(?![a-zA-Z])|\\begin\{appendi(?:x|ces)\}/g;
+const APPENDIX_COMMAND = /\\appendi(?:x|ces)(?![a-zA-Z])|\\begin\s*\{appendi(?:x|ces)\}/g;
 
 /** The text between the brace at `open` and its match. */
 function braced(body: string, open: number): string {
@@ -141,7 +141,7 @@ function latexHeadings(body: string): Bare[] {
     }
     out.push(heading);
   }
-  for (const m of body.matchAll(/\\begin\{(abstract|thebibliography)\}/g))
+  for (const m of body.matchAll(/\\begin\s*\{(abstract|thebibliography)\}/g))
     if (!commented(body, m.index)) out.push({ level: 1, title: m[1] === "abstract" ? "Abstract" : "References", start: m.index });
   return out;
 }

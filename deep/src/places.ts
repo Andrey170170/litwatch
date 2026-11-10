@@ -76,7 +76,7 @@ export function cites(text: string): Cite[] {
 
 // A Roman numeral first ("Sec. IV", as IEEEtran and REVTeX number), then a letter or a number.
 const SECTION_LABEL = "(?:[IVX]{2,6}(?:\\.\\d+)*(?![A-Za-z])|[A-Z](?:\\.?\\d+(?:\\.\\d+)*)?(?![A-Za-z])|\\d+(?:\\.\\d+)*)";
-const SECTION = new RegExp(`(§+|\\b(?:[Ss]ections?|[Ss]ecs?\\.?|[Aa]ppendi(?:x|ces)|[Aa]pps?\\.))\\s*(${SECTION_LABEL}(?:${JOIN}§*\\s*${SECTION_LABEL})*)?`, "g");
+const SECTION = new RegExp(`(§+|\\b(?i:sections?|secs?\\.?|appendi(?:x|ces)|apps?\\.))\\s*(${SECTION_LABEL}(?:${JOIN}§*\\s*${SECTION_LABEL})*)?`, "g");
 
 /** The sections and appendices a location names, each by its label; a bare "Appendix" has none. */
 export function sectionCites(text: string): { appendix: boolean; label?: string }[] {
@@ -176,9 +176,10 @@ export class PaperIndex {
       most += Math.max(floor, captions);
       if (at < appendix) sure += captions;
     };
-    const env = new RegExp(`\\\\begin\\{(${ENVIRONMENTS[kind]})\\}([\\s\\S]*?)\\\\end\\{\\1\\}`, "g");
+    // LaTeX takes space between \begin and its brace
+    const env = new RegExp(`\\\\begin\\s*\\{(${ENVIRONMENTS[kind]})\\}([\\s\\S]*?)\\\\end\\s*\\{\\1\\}`, "g");
     for (const m of this.text.matchAll(env)) {
-      const body = m[2]!.replace(/\\begin\{(sub(?:figure|table)|minipage)\}[\s\S]*?\\end\{\1\}/g, (sub, name: string) => (name === "minipage" ? sub : ""));
+      const body = m[2]!.replace(/\\begin\s*\{(sub(?:figure|table)|minipage)\}[\s\S]*?\\end\s*\{\1\}/g, (sub, name: string) => (name === "minipage" ? sub : ""));
       add(m.index, (body.match(/\\caption\s*[[{]/g) ?? []).length, 1);
     }
     for (const m of this.text.matchAll(new RegExp(`\\\\captionof\\s*\\{${kind}\\}`, "g"))) add(m.index, 1, 1);
