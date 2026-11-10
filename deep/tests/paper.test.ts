@@ -15,6 +15,11 @@ test("a LaTeX paper's bibliography is cut where it sits before the appendix, and
   assert.equal(BODY.slice(cuts[0]!.start, cuts[0]!.end).trim(), BODY.slice(BODY.indexOf("\\begin{thebibliography}"), BODY.indexOf("\\appendix")).trim());
   assert.equal(cuts[1]!.end, BODY.length);
   assert.equal(main.length + cuts.reduce((n, c) => n + c.end - c.start, 0), BODY.length, "nothing is lost or kept twice");
+  // the space LaTeX allows after \begin and \end moves neither bound
+  const spaced = BODY.replace("\\begin{thebibliography}", "\\begin {thebibliography}").replace("\\end{thebibliography}", "\\end {thebibliography}");
+  const both = splitPaper(spaced, "latex").cuts;
+  assert.deepEqual(both.map((c) => c.part), ["references", "appendix"]);
+  assert.equal(spaced.slice(both[0]!.start, both[0]!.end).trim(), spaced.slice(spaced.indexOf("\\begin {thebibliography}"), spaced.indexOf("\\appendix")).trim());
 });
 
 test("a paper with no appendix loses only its bibliography, and one with neither is all main text", () => {

@@ -78,6 +78,8 @@ interface Unit {
   figure?: string;
   figures?: string[];
   cut?: boolean;
+  /** Related work's: the places it cites are other papers', not looked up in this one. */
+  theirs?: boolean;
 }
 
 /** The glance fact that is the read's own: the reading time. */
@@ -88,6 +90,8 @@ type Fact = { name: string; text?: string; tags?: { text: string }[] };
 function* factUnits(facts: readonly Fact[], at: string): Generator<Unit> {
   for (const [i, fact] of facts.entries()) {
     const numbers = !READING_TIME.test(fact.name.trim());
+    // a fact's name is the read's own label, but a place it cites is the paper's
+    yield { path: `${at}/facts/${i}/name`, text: fact.name };
     if (fact.text !== undefined) yield { path: `${at}/facts/${i}/text`, text: fact.text, inline: true, numbers };
     for (const [j, tag] of (fact.tags ?? []).entries()) yield { path: `${at}/facts/${i}/tags/${j}/text`, text: tag.text, numbers };
   }
@@ -155,6 +159,7 @@ function* blockUnits(b: DraftBlock, at: string): Generator<Unit> {
       }
       for (const [i, e] of b.edges.entries()) {
         if (e.label !== undefined) yield { path: `${at}/edges/${i}/label`, text: e.label, numbers: true };
+        if (e.title !== undefined) yield { path: `${at}/edges/${i}/title`, text: e.title };
         yield { path: `${at}/edges/${i}/tip`, text: e.tip, ...prose };
         if (e.where !== undefined) yield { path: `${at}/edges/${i}/where`, text: e.where, where: true };
       }
@@ -164,6 +169,8 @@ function* blockUnits(b: DraftBlock, at: string): Generator<Unit> {
 
 function* sectionUnits(s: DraftSection, at: string): Generator<Unit> {
   const prose = { inline: true, numbers: true };
+  // the section's name is the read's own label, but a place it cites is the paper's
+  yield { path: `${at}/title`, text: s.title, ...(s.kind === "related" ? { theirs: true } : {}) };
   switch (s.kind) {
     case "glance":
       yield { path: `${at}/claim`, text: s.claim, ...prose };
@@ -183,8 +190,8 @@ function* sectionUnits(s: DraftSection, at: string): Generator<Unit> {
       for (const [i, l] of s.limitations.entries()) yield { path: `${at}/limitations/${i}/text`, text: l.text, ...prose };
       break;
     case "related":
-      // other papers' numbers are not this paper's
-      yield { path: `${at}/takeaway`, text: s.takeaway, inline: true };
+      // other papers' numbers and places are not this paper's
+      yield { path: `${at}/takeaway`, text: s.takeaway, inline: true, theirs: true };
       break;
     case "repro":
       // what the paper says of its code, data and compute is the paper's, numbers included
@@ -384,11 +391,11 @@ export function check(read: Draft, ctx: CheckContext): Checked {
       const text = plainText(unit.text);
       const cited = cites(text);
       // Related work's figures and tables are other papers'
-      if (unit.where || unit.numbers) for (const c of cited) settle(unit.path, `${c.kind === "figure" ? "Figure" : "Table"} ${c.label}`, index.float(c.kind, c.label));
+      if (!unit.theirs) for (const c of cited) settle(unit.path, `${c.kind === "figure" ? "Figure" : "Table"} ${c.label}`, index.float(c.kind, c.label));
       // the paper's places in a location, and in prose given as the paper's (Related work cites other papers'). Prose
       // may name another paper's section, or read as one ("5 sec. 12 probes"): what the paper may lack there is the
       // reviewer's, and only a location is refused.
-      if (unit.where || unit.numbers) {
+      if (!unit.theirs) {
         const look = (name: string, answer: Answer) => (unit.where ? settle(unit.path, name, answer) : answer !== "there" && unverified.add(name));
         const sections = sectionCites(text);
         for (const c of sections) {
@@ -424,10 +431,10 @@ export function check(read: Draft, ctx: CheckContext): Checked {
         const lacking = labels.filter((label) => !imaged.has(labelKey(label)));
         if (unit.figure === undefined && labels.length === 0) {
           if (!standsBy(n.text)) missing.push(n.text);
-        } else if (lacking.length > 0 && standsBy(n.text)) continue;
-        else if (lacking.length === 0) {
+        } else if (lacking.length === 0 || standsBy(n.text)) {
+          // a value stood by keeps the images the session has of the figures it cites, for the reviewer
           if (unit.figure !== undefined) plots.add(unit.figure);
-          for (const label of labels) for (const name of imaged.get(labelKey(label))!) plots.add(name);
+          for (const label of labels) for (const name of imaged.get(labelKey(label)) ?? []) plots.add(name);
         } else {
           const entry = unseen.get(unit.path) ?? { texts: [], figures: new Set<string>() };
           entry.texts.push(n.text);

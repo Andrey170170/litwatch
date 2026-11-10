@@ -367,6 +367,18 @@ test("a refused place or number the writer stands by is the reviewer's instead; 
   assert.ok(stood.errors.length === 1 && stood.errors[0]!.includes("KaTeX cannot parse"), stood.errors.join("\n"));
 });
 
+test("a stood-by plot value keeps the images the session has, and the read's own labels still cite the paper's places", () => {
+  const plot = saying("Accuracy peaks at 0.84 (Figures 1 and 2).");
+  const stood = check(plot, ctx({ paper: APPENDIX_FIGURE, figures: { probe: { label: "1" } }, standing: ["0.84"] }));
+  assert.deepEqual([stood.errors, stood.stood, stood.plots], [[], ["0.84"], ["probe"]], "Figure 1's image goes to the reviewer though Figure 2's is missing");
+  const labelled = changed((d) => {
+    blocks(d, "method").push({ type: "h3", text: "The result in Table 9999" });
+    d.sections[1]!.title = "Method (Table 8888)";
+  });
+  const cited = errors(labelled);
+  assert.ok(has(cited, "/sections/1/blocks/2/text: cites Table 9999") && has(cited, "/sections/1/title: cites Table 8888"), cited.join("\n"));
+});
+
 test("TeX that KaTeX cannot parse is rejected, in an equation and inline", () => {
   const eq = (tex: string) => changed((d) => blocks(d, "method").push({ type: "eq", tex }));
   const block = errors(eq(String.raw`\frac{a}{`));

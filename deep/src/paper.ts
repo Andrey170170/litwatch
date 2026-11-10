@@ -149,10 +149,12 @@ function latexHeadings(body: string): Bare[] {
 function latexCuts(body: string): Cut[] {
   const cuts: Cut[] = [];
   // the archive inlines the bibliography as a thebibliography environment, often before the appendix
-  const open = first(body, /\\begin\{thebibliography\}/g);
+  const open = first(body, /\\begin\s*\{thebibliography\}/g);
   if (open) {
-    const close = body.indexOf("\\end{thebibliography}", open.index);
-    cuts.push({ part: "references", start: open.index, end: close === -1 ? body.length : close + "\\end{thebibliography}".length });
+    const close = /\\end\s*\{thebibliography\}/g;
+    close.lastIndex = open.index;
+    const end = close.exec(body);
+    cuts.push({ part: "references", start: open.index, end: end ? end.index + end[0].length : body.length });
   }
   const appendix = first(body, new RegExp(`${APPENDIX_COMMAND.source}|\\\\section\\*?\\s*(?:\\[[^\\]]*\\])?\\s*\\{\\s*(?:Appendi(?:x|ces)|Supplementa(?:ry|l)\\b)`, "g"));
   if (appendix) cuts.push({ part: "appendix", start: appendix.index, end: body.length });

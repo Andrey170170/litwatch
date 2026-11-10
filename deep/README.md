@@ -44,7 +44,10 @@ saying so. Each figure made is one record (`src/figures.ts`): its WebP, the view
 - `render(read, target?, width?)`: the draft drawn by the web app's own components on litwatch's render page
   (`<LITWATCH_URL>/render.html`), whole, one section or one block, at the desktop's width or the phone's. It draws
   only the figures this session made.
-- `check(read)`, `submit(read)`: the checks below, without and with submitting.
+- `check(read, standBy?)`, `submit(read, standBy?)`: the checks below, without and with submitting. `standBy` lists
+  refused places and numbers the writer has checked, each as the refusal quoted it ("Table 2", "0.00005"): each is
+  then not refused but sent to the reviewer by name, and the trace keeps it on the submit. Structural errors, KaTeX
+  and figures the session did not make cannot be stood by.
 
 Every image a function makes goes back to the model with the output of the cell that called it; the model keeps the
 images of its latest cells, and older ones are replaced by a line. A figure is stored as WebP, at most 1600 px wide,
