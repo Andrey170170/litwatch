@@ -1,11 +1,12 @@
 """The role rules over the import graph (docs/specs/architecture.md, "Layout and enforcement").
 `lint-imports` checks which role may import which, by the contracts in `pyproject.toml`; this
 file keeps those contracts' package lists in step with the packages, and checks that no two
-Service packages import each other in a cycle, function-level imports included. The cycle list
+Service packages import each other in a cycle, function-level imports included. A cycle can't
+pass through the other roles, whose contracts forbid them to import Services, but through the
+violations those contracts list. The cycle list
 only shrinks: an import that leaves a cycle comes off it."""
 
 import tomllib
-from collections import deque
 from functools import cache
 from pathlib import Path
 
@@ -27,6 +28,7 @@ NOT_SERVICES = {
     "writing": "shared",
 }
 ENTRIES = {"api", "cli"}
+SHARED = {"config", "logs", "concurrency", "writing"}
 
 # Imports from one Service package into another that lie on a cycle, before the rule: the
 # imported package imports back, directly or through other Services. To be broken.
@@ -62,20 +64,19 @@ def _services() -> set[str]:
     return _packages() - set(NOT_SERVICES)
 
 
-def _contract(name: str) -> dict:
+def _forbidden(source: str) -> set[str]:
+    """What the forbidden contract on a module forbids it, by top-level module."""
     contracts = tomllib.loads(PYPROJECT.read_text())["tool"]["importlinter"]["contracts"]
-    (contract,) = (c for c in contracts if c.get("source_modules") == [f"litwatch.{name}"])
-    return contract
-
-
-def _forbidden(name: str) -> set[str]:
-    return {_top(m) for m in _contract(name)["forbidden_modules"]}
+    (contract,) = (c for c in contracts if f"litwatch.{source}" in c.get("source_modules", []))
+    return {_top(m) for m in contract["forbidden_modules"]}
 
 
 def test_contracts_name_every_package():
     assert set(NOT_SERVICES) <= _packages()
     assert _forbidden("store") == _packages() - {"store", "core"}
     assert _forbidden("llm") == _services() | ENTRIES
+    for shared in SHARED:
+        assert _forbidden(shared) == _packages() - SHARED - {"core"}
 
 
 def _service_imports() -> dict[tuple[str, str], list[str]]:
@@ -93,29 +94,17 @@ def _service_imports() -> dict[tuple[str, str], list[str]]:
     return found
 
 
-def _path(edges: set[tuple[str, str]], start: str, end: str) -> list[str] | None:
-    """The shortest path from one package to another along the edges, if there is one."""
-    came_from: dict[str, str | None] = {start: None}
-    queue = deque([start])
-    while queue:
-        at = queue.popleft()
-        if at == end:
-            path = [at]
-            while (at := came_from[at]) is not None:
-                path.append(at)
-            return path[::-1]
-        for a, b in sorted(edges):
-            if a == at and b not in came_from:
-                came_from[b] = at
-                queue.append(b)
-    return None
-
-
 def test_services_form_no_cycle():
     imports = _service_imports()
-    edges = set(imports)
-    on_cycle = {(a, b): _path(edges, b, a) for a, b in edges}
-    on_cycle = {edge: back for edge, back in on_cycle.items() if back}
+    packages = grimp.ImportGraph()
+    for a, b in imports:
+        packages.add_import(importer=a, imported=b)
+    # Each import a -> b that lies on a cycle, with the way back from b to a.
+    on_cycle = {
+        (a, b): back
+        for a, b in imports
+        if (back := packages.find_shortest_chain(importer=b, imported=a))
+    }
 
     problems = [
         f"{a} -> {' -> '.join(on_cycle[a, b])} is a cycle between Services; break it at:\n"

@@ -60,8 +60,8 @@ testpaths = ["tests"]
 
 # The role rules (docs/specs/architecture.md, "Roles"), by package: `core` is Records and
 # Policies, `store` Repositories, `llm` the Model gate, `api` and `cli` Entries, and every other
-# package a Service. `config`, `logs`, `concurrency` and `writing` are shared modules any role but
-# `core` and `store` may import. `tests/test_roles.py` keeps the lists below in step with the
+# package a Service. `config`, `logs`, `concurrency` and `writing` are shared modules: they import
+# only `core`, and any role but `core` and `store` may import them. `tests/test_roles.py` keeps the lists below in step with the
 # packages, and checks that Services form no cycle. `ignore_imports` lists today's violations: it
 # only shrinks, and an entry that no longer matches an import fails the check.
 [tool.importlinter]
@@ -127,6 +127,31 @@ forbidden_modules = [
     "litwatch.publications",
     "litwatch.quality",
     "litwatch.seeds",
+]
+
+[[tool.importlinter.contracts]]
+name = "shared modules import only core"
+type = "forbidden"
+source_modules = ["litwatch.concurrency", "litwatch.config", "litwatch.logs", "litwatch.writing"]
+forbidden_modules = [
+    "litwatch.analysis",
+    "litwatch.api",
+    "litwatch.archive",
+    "litwatch.classification",
+    "litwatch.cli",
+    "litwatch.digests",
+    "litwatch.events",
+    "litwatch.feedback",
+    "litwatch.fulltext",
+    "litwatch.grading",
+    "litwatch.intake",
+    "litwatch.integrations",
+    "litwatch.jobs",
+    "litwatch.llm",
+    "litwatch.publications",
+    "litwatch.quality",
+    "litwatch.seeds",
+    "litwatch.store",
 ]
 
 [[tool.importlinter.contracts]]
