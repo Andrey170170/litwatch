@@ -12,11 +12,12 @@ import type { AssistantMessage, ImageContent, Models, TextContent, ThinkingLevel
 import { Type } from "typebox";
 import { PROVIDER, requireSubscription } from "./auth.ts";
 import { check, drawErrors, type Checked } from "./checks.ts";
-import { Figures } from "./figures.ts";
+import { Figures, type Made } from "./figures.ts";
 import { BudgetError, buildHosts, NetworkError, pacer, RefusedError, type FetchRecord, type HostConfig, type StoreHit } from "./hosts.ts";
 import { RenderUnavailable, type Imaging, type RenderTarget, type RenderWidth, type Shot } from "./imaging.ts";
 import { layout } from "./layout.ts";
-import type { Heading } from "./paper.ts";
+import { headings } from "./paper.ts";
+import { PaperIndex } from "./places.ts";
 import { findingsMessage, systemPrompt, topicKey, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
 import { draftErrors, readErrors, type Draft, type Read } from "./read.ts";
 import { Repl, type HostDetail, type HostFn } from "./repl.ts";
@@ -133,7 +134,7 @@ export function withoutOldImages(messages: AgentMessage[], keep = KEEP_IMAGE_CEL
 
 /** What the service itself saw hold a run back, by kind of event: a fetch the network guard refused, one that
  * failed on the network, the fetch budget used up, a cell timeout, an image the browser or litwatch's render page
- * was not there to make, and figures taken from the latest e-print for want of the text's version. */
+ * was not there to make, and figures taken from arXiv's latest version for want of the text's. */
 export type Held = "refused" | "network" | "budget" | "timeout" | "imaging" | "latest";
 
 /** The service's process notes: one per kind of event the run saw, with how many times and the first URL
@@ -146,15 +147,14 @@ export function serviceNotes(seen: ReadonlyMap<Held, { count: number; url?: stri
     budget: (n) => ({ kind: "budget", note: `The fetch budget of ${hostCfg.maxFetches} per paper was used up; ${times(n, "one more fetch was", "more fetches were")} refused.` }),
     timeout: () => ({ kind: "tool", note: `A cell ran past its ${opts.cellTimeoutMs / 1000} s limit, which ended the session and lost its state.` }),
     imaging: (n) => ({ kind: "tool", note: `${times(n, "An image", "images")} could not be made: the browser or litwatch's render page was not available, so the writer could not look at a figure or at what it drew.` }),
-    latest: () => ({ kind: "input", note: "litwatch could not say which arXiv version its text is of, so the figures were taken from the paper's latest e-print." }),
+    latest: () => ({ kind: "input", note: "litwatch could not say which arXiv version its text is of, so the figures were taken from the paper's latest version on arXiv." }),
   };
   return [...seen].map(([held, { count, url }]) => ({ ...text[held](count), source: "service", ...(url ? { url } : {}) }));
 }
 
-/** A read `submit` accepted: laid out, with what its number check left to the reviewer. */
-interface Accepted {
+/** A read `submit` accepted: laid out, with what its checks left to the reviewer. */
+interface Accepted extends Pick<Checked, "plots" | "unverified"> {
   read: Read;
-  plots: Checked["plots"];
 }
 
 export async function processPaper(
@@ -232,41 +232,31 @@ export async function processPaper(
   // Ends with the paper: what the agent left fetching or queued stops with it.
   const session = new AbortController();
   const pace = pacer(session.signal);
-  // The images the running cell's functions made, which go back with its output, and each figure as the model saw it.
+  // The images the running cell's functions made, which go back with its output.
   let shown: Shot[] = [];
-  const views = new Map<string, Shot>();
   const figures = new Figures(paper, hostCfg, imaging, (shot) => shown.push(shot), pace, session.signal);
-  const figureHosts = figures.hosts();
-  /** A function that makes a figure also keeps its view, for the reviewer. */
-  const viewed = (fn: HostFn): HostFn => async (args, detail) => {
-    const before = shown.length;
-    const made = (await fn(args, detail)) as { name: string };
-    if (shown.length > before) views.set(made.name, shown[shown.length - 1]!);
-    return made;
-  };
 
+  // The paper's headings and places, read once: the session's sections() and the checks share them.
+  const heads = headings(paper.body, paper.body_source);
+  const index = new PaperIndex(paper.body, paper.body_source);
   // The collection's papers the agent was shown: among_collection may name only these.
   const collection = new Set<string>();
   const topics = spec.selections.map(topicKey);
-  const checked = (draft: Draft): Checked =>
-    check(draft, { paper: paper.body, source: paper.body_source, found: { collection, self: paper.id }, topics, figures: new Set(figures.made.keys()) });
+  const checked = (draft: Draft): Checked => check(draft, { index, found: { collection, self: paper.id }, topics, figures: figures.made });
   /** A draft through the schema, the code checks and the layout: the read to store, or what is wrong with it. */
   const examine = async (input: unknown): Promise<{ errors: string[] } | Accepted> => {
     const shape = draftErrors(input);
     if (shape.length) return { errors: shape };
-    const { errors, plots } = checked(input as Draft);
+    const { errors, plots, unverified } = checked(input as Draft);
     if (errors.length) return { errors };
     const read = await layout(input as Draft);
     const stored = readErrors(read);
-    return stored.length ? { errors: stored.map((e) => `after the diagrams were laid out, ${e}`) } : { read, plots };
+    return stored.length ? { errors: stored.map((e) => `after the diagrams were laid out, ${e}`) } : { read, plots, unverified };
   };
 
   const hosts: Record<string, HostFn> = {
     ...buildHosts(hostCfg, session.signal, pace),
-    figures: figureHosts.figures!,
-    figure: viewed(figureHosts.figure!),
-    pdfPage: figureHosts.pdfPage!,
-    crop: viewed(figureHosts.crop!),
+    ...figures.hosts(),
     render: async ([draft, target, width]) => {
       const errors = draftErrors(draft);
       if (errors.length === 0) errors.push(...drawErrors(draft as Draft));
@@ -274,7 +264,7 @@ export async function processPaper(
       const read = await layout(draft as Draft);
       // only figures this session made: a name it did not make draws as the page's placeholder
       const cited = new Set(read.sections.flatMap((s) => ("blocks" in s ? s.blocks.flatMap((b) => (b.type === "fig" ? [b.name] : [])) : [])));
-      const urls = Object.fromEntries([...cited].flatMap((name) => (figures.made.has(name) ? [[name, `data:image/webp;base64,${figures.made.get(name)!.toString("base64")}`]] : [])));
+      const urls = Object.fromEntries([...cited].flatMap((name) => (figures.made.has(name) ? [[name, `data:image/webp;base64,${figures.made.get(name)!.webp.toString("base64")}`]] : [])));
       const made = await imaging.render(read, urls, renderTarget(target), renderWidth(width));
       shown.push(...made.shots);
       return { target: target ?? "read", width: renderWidth(width), images: made.shots.length, height: made.height, ...(made.cut ? { cut: "only the top is shown: render a section or a block" } : {}) };
@@ -306,6 +296,7 @@ export async function processPaper(
     {
       paper: paper.body,
       __meta: JSON.stringify({ id: paper.id, title: paper.title, authors: paper.authors, published: paper.published ?? null, url: paper.url ?? null }),
+      __headings: JSON.stringify(heads),
     },
     hosts,
     { cellTimeoutMs: opts.cellTimeoutMs, maxOutputChars: opts.maxOutputChars },
@@ -385,10 +376,10 @@ export async function processPaper(
   const reviews: Review[] = [];
   // What the run's end leaves to say on the read about its review, if anything.
   let reviewNote: ProcessNote | undefined;
+  // What of the paper the reviewer of the kept read was not given, for want of room in the model's context.
+  let unread: string[] = [];
   try {
-    // the outline is the session's own, so the first message and sections() agree
-    const headings = JSON.parse(await repl.value("JSON.stringify(sections().map(function (s) { return { level: s.level, title: s.title, start: s.start, chars: s.chars }; }))")) as Heading[];
-    await write(userMessage(paper, headings));
+    await write(userMessage(paper, heads));
     for (let round = 1; ; round++) {
       const next = take();
       if (!next) break;
@@ -400,12 +391,15 @@ export async function processPaper(
           paper,
           read: next.read,
           selections: spec.selections,
-          plots: next.plots.shown.flatMap((name) => (views.has(name) ? [{ name, shot: views.get(name)! }] : [])),
-          unshown: next.plots.unshown,
+          // each figure with the view kept beside its name, and the paper's number for it where the session has one
+          plots: next.plots.flatMap((name) => {
+            const made = figures.made.get(name);
+            return made ? [{ name, ...(made.label === undefined ? {} : { number: `Figure ${made.label}` }), shot: made.view }] : [];
+          }),
+          unverified: next.unverified,
         },
         { effort: opts.effort, signal: session.signal, onPayload: detailedSummaries },
-        // a call that throws (the sign-in gone) is a review that could not run, like one that answers with an error
-      ).catch((e: unknown) => ({ verdict: undefined, error: e instanceof Error ? e.message : String(e), calls: [] }));
+      );
       const usage = judged.calls.map(spent).reduce<TurnUsage>((sum, u) => ({ input: sum.input + u.input, output: sum.output + u.output, reasoning: sum.reasoning + u.reasoning, cache_read: sum.cache_read + u.cache_read, list_cost: sum.list_cost + u.list_cost }), { input: 0, output: 0, reasoning: 0, cache_read: 0, list_cost: 0 });
       if (!judged.verdict) {
         const why = failure ?? judged.error ?? "it gave no verdict";
@@ -416,6 +410,7 @@ export async function processPaper(
           : { kind: "tool", source: "service", note: `The read was not reviewed: the review could not run (${cut(why)}).` };
         break;
       }
+      unread = judged.left;
       const passed = passes(judged.verdict);
       const entry: Review = { round, passed, ...judged.verdict };
       reviews.push(entry);
@@ -447,7 +442,11 @@ export async function processPaper(
   stats.seconds = Math.round((Date.now() - started) / 1000);
   if (figures.usedLatest) saw("latest");
   const kept = accepted as Accepted | null;
-  const notes = [...serviceNotes(seen, hostCfg, opts), ...(reviewNote ? [reviewNote] : [])];
+  // a review of part of the paper is not a silent pass: the read says what its reviewer did not see
+  const partial: ProcessNote[] = unread.length
+    ? [{ kind: "tool", source: "service", note: `The reviewer was not given the whole paper: ${unread.join(" and ")} did not fit the model's context, so what the read says of that part was not reviewed.` }]
+    : [];
+  const notes = [...serviceNotes(seen, hostCfg, opts), ...(reviewNote ? [reviewNote] : []), ...partial];
   const result = kept ? withServiceNotes(kept.read, notes) : null;
   const error = kept ? undefined : (failure ?? (stats.cells >= opts.maxCells ? "cell budget exhausted without a submit" : "the model stopped without submitting"));
   return {
@@ -469,9 +468,9 @@ function withServiceNotes(read: Read, notes: ProcessNote[]): Read {
 }
 
 /** The figures the read shows, each once, as the job returns them. */
-function returned(read: Read, made: ReadonlyMap<string, Buffer>): ReturnedFigure[] {
+function returned(read: Read, made: ReadonlyMap<string, Made>): ReturnedFigure[] {
   const names = new Set(read.sections.flatMap((s) => ("blocks" in s ? s.blocks.flatMap((b) => (b.type === "fig" ? [b.name] : [])) : [])));
-  return [...names].flatMap((name) => (made.has(name) ? [{ name, mime: "image/webp" as const, data: made.get(name)!.toString("base64") }] : []));
+  return [...names].flatMap((name) => (made.has(name) ? [{ name, mime: "image/webp" as const, data: made.get(name)!.webp.toString("base64") }] : []));
 }
 
 function renderTarget(target: unknown): RenderTarget {

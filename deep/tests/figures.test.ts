@@ -47,7 +47,7 @@ test("figure() keeps a file of the e-print as a figure and shows it", async () =
     try {
       // as \includegraphics names it: no extension
       assert.deepEqual(await hosts.figure!(["figs/probe"]), { name: "probe", file: "figs/probe.png", width: 800, height: 400 });
-      assert.deepEqual(figures.made.get("probe"), WEBP, "the WebP litwatch stores");
+      assert.deepEqual(figures.made.get("probe"), { webp: WEBP, view: shown[0] }, "the WebP litwatch stores, with the view the model was shown");
       assert.equal(shown.length, 1, "the model is shown what was kept");
       assert.equal(shown[0]!.mimeType, "image/jpeg");
       assert.deepEqual(calls.pictures.at(-1), { mime: "image/png", crop: undefined, bytes: png(8, 8).length });
@@ -81,7 +81,7 @@ test("pdfPage() shows a page of litwatch's PDF and crop() keeps a part of one as
       assert.deepEqual(await hosts.crop!([3, [0.1, 0.2, 0.9, 0.5], "fig-3"]), { name: "fig-3", page: 3, width: 800, height: 400 });
       assert.deepEqual(calls.pages.at(-1), { page: 3, width: 2200 }, "cut from a page drawn at twice the view's width");
       assert.deepEqual(calls.pictures.at(-1)!.crop, [0.1, 0.2, 0.9, 0.5]);
-      assert.deepEqual(figures.made.get("fig-3"), WEBP);
+      assert.deepEqual(figures.made.get("fig-3"), { webp: WEBP, view: shown[1] });
       assert.equal(shown.length, 2);
       assert.deepEqual(asked, ["/api/papers/2610.00001/pdf Bearer secret"], "the PDF is litwatch's, fetched once, and no e-print was needed");
 
@@ -106,16 +106,55 @@ test("an e-print arXiv does not give fails the call, and the next call asks agai
   }, { eprintStatus: 404 });
 });
 
-test("a PDF litwatch does not hold is taken where it sends the reader, without the token", async () => {
+test("a PDF litwatch does not hold is arXiv's at the version of litwatch's text, taken without the token", async () => {
   await withSite(async ({ url, asked }) => {
+    // the text is of version 2, and arXiv's latest is version 5, which litwatch's redirect points at
     const { figures, hosts } = session(url, 2);
     try {
-      assert.deepEqual(await hosts.pdfPage!([1]), { page: 1, pages: 3, width: 800, height: 400 });
-      assert.deepEqual(asked, ["/api/papers/2610.00001/pdf Bearer secret", "/pdf/2610.00001"], "the token goes to litwatch only");
+      assert.deepEqual(await hosts.pdfPage!([1]), { page: 1, pages: 2, width: 800, height: 400 }, "version 2's two pages, not the latest's five");
+      assert.deepEqual(asked, ["/api/papers/2610.00001/pdf Bearer secret", "/pdf/2610.00001v2"], "the token goes to litwatch only");
+      assert.equal(figures.usedLatest, false);
+      await assert.rejects(hosts.crop!([3, [0, 0, 1, 1], "fig-9"]), /the PDF has pages 1 to 2; got 3/, "a page only the latest version has is not there to crop");
     } finally {
       await figures.dispose();
     }
   }, { archived: false });
+});
+
+test("with no version from litwatch the PDF arXiv is asked for is its latest, and the run says so", async () => {
+  await withSite(async ({ url, asked }) => {
+    const { figures, hosts } = session(url, null);
+    try {
+      assert.deepEqual(await hosts.pdfPage!([5]), { page: 5, pages: 5, width: 800, height: 400 });
+      assert.equal(asked.at(-1), "/pdf/2610.00001");
+      assert.equal(figures.usedLatest, true);
+    } finally {
+      await figures.dispose();
+    }
+  }, { archived: false });
+});
+
+test("a figure is kept as one record: its image, the view the model saw, and the paper's label it was made as", async () => {
+  await withSite(async ({ url }) => {
+    const { figures, hosts } = session(url, 2);
+    // the first figure asked for is the last made, as two figure() calls in one cell may finish
+    const picture = figures["imaging"].picture;
+    figures["imaging"].picture = async (data, ...rest) => {
+      if (data.length === png(8, 8).length) await new Promise((r) => setTimeout(r, 50));
+      return picture(data, ...rest);
+    };
+    const view = (bytes: number) => Buffer.from(`view of ${bytes} bytes`).toString("base64");
+    try {
+      const [slow, fast] = await Promise.all([hosts.figure!(["figs/probe.png", "probe", "Figure 1"]), hosts.figure!(["a/setup.png", "setup", "Fig. A.1b"])]);
+      assert.deepEqual([slow, fast].map((f) => (f as { number: string }).number), ["Figure 1", "Figure A.1"]);
+      assert.deepEqual([...figures.made].map(([name, f]) => [name, f.label, f.view.data]), [["setup", "A.1", view(png(4, 4).length)], ["probe", "1", view(png(8, 8).length)]], "each name with its own view, whichever finished first");
+      await hosts.crop!([1, [0, 0, 1, 0.5], "fig-s2", "S2"]);
+      assert.equal(figures.made.get("fig-s2")!.label, "S2");
+      await assert.rejects(hosts.figure!(["figs/probe.png", "probe", "the main result"]), /a figure's number is the paper's own for it, such as "Figure 6"/);
+    } finally {
+      await figures.dispose();
+    }
+  });
 });
 
 test("the figures a run makes stay within what litwatch takes of a job", async () => {

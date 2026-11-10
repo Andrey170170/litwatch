@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { headings } from "../src/paper.ts";
 import { Repl } from "../src/repl.ts";
 
 const PAPER = `# A Title
@@ -16,8 +17,11 @@ We probe things.
 - [2] Second ref.
 `;
 
+/** A session's globals as the service sets them for a paper's text. */
+const globals = (paper: string) => ({ paper, __meta: JSON.stringify({ id: "2601.00001" }), __headings: JSON.stringify(headings(paper)) });
+
 async function repl(hosts = {}, opts = {}) {
-  return Repl.create({ paper: PAPER, __meta: JSON.stringify({ id: "2601.00001" }) }, hosts, opts);
+  return Repl.create(globals(PAPER), hosts, opts);
 }
 
 test("state persists, the last expression is echoed, and console output is captured", async () => {
@@ -67,6 +71,15 @@ test("paper helpers see the injected markdown", async () => {
   } finally {
     r.dispose();
   }
+  // the headings as litwatch's archive writes a PDF's: bold
+  const bold = await Repl.create(globals(PAPER.replace(/^(#+) (.*)$/gm, "$1 **$2** ")), {}, {});
+  try {
+    assert.equal((await bold.run("sections().map(s => s.title).join('|')")).output, "A Title|Method|References");
+    assert.equal((await bold.run("refs().length")).output, "2", "the bibliography is found under a bold heading");
+    assert.match((await bold.run("section('references')")).output, /Second ref/);
+  } finally {
+    bold.dispose();
+  }
 });
 
 const LATEX = String.raw`\begin{abstract}
@@ -93,10 +106,12 @@ More.
 `;
 
 test("paper helpers read LaTeX source: sections, nesting, comments and the bibliography", async () => {
-  const r = await Repl.create({ paper: LATEX, __meta: JSON.stringify({ id: "2601.00001" }) }, {}, {});
+  const r = await Repl.create(globals(LATEX), {}, {});
   try {
     const titles = "Abstract|Introduction|Method & probes|Setup|Results|References|Extra";
     assert.equal((await r.run("sections().map(s => s.title).join('|')")).output, titles);
+    assert.equal((await r.run("sections().map(s => s.number || '-').join('|')")).output, "-|1|2|-|3|-|A", "each numbered section with its number");
+    assert.match((await r.run("section('A')")).output, /More\./, "a section is found by its number too");
     assert.match((await r.run("section('method')")).output, /We probe things/, "a section holds its subsections");
     assert.doesNotMatch((await r.run("section('method')")).output, /Numbers/);
     assert.equal((await r.run("find('needle')[0].section")).output, "Introduction");

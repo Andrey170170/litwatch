@@ -62,7 +62,7 @@ export class Repl {
     this.isolate = new ivm.Isolate({ memoryLimit: opts.memoryMb });
   }
 
-  /** `globals` are string-valued (the paper markdown and JSON metadata); see prelude.js. */
+  /** `globals` are string-valued (the paper's text, its metadata and its headings as JSON); see prelude.js. */
   static async create(
     globals: Record<string, string>,
     hosts: Record<string, HostFn>,
@@ -143,12 +143,6 @@ export class Repl {
       }
     }
     return done([...this.prints, last].filter(Boolean).join("\n"), error);
-  }
-
-  /** The value of an expression that evaluates to a string, whole: for the service's own questions of the
-   * session, which are no cell and are not cut as a cell's output is. */
-  async value(expression: string): Promise<string> {
-    return String(await this.context.eval(expression, { timeout: this.opts.cellTimeoutMs }));
   }
 
   /** Marks the session dead and frees the isolate; returns the message cells report. */

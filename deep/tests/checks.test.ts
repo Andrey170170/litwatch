@@ -3,17 +3,36 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { check, drawErrors, type CheckContext } from "../src/checks.ts";
+import { PaperIndex, figureLabel } from "../src/places.ts";
 import { draftErrors, type Draft } from "../src/read.ts";
 import { BODY, blocks, changed, draft } from "./support.ts";
 
-const ctx = (over: Partial<CheckContext> = {}): CheckContext => ({ paper: BODY, source: "latex", found: { collection: new Set(), self: "2610.00001" }, topics: [], figures: new Set(), ...over });
-const errors = (d: Draft, over?: Partial<CheckContext>) => check(d, ctx(over)).errors;
+type Loose = Record<string, unknown>;
+type Over = Partial<Omit<CheckContext, "figures">> & { paper?: string; source?: string; figures?: Record<string, { label?: string }> };
+/** The check's context: `BODY` as the paper, or another text; the session's figures by name. */
+const ctx = ({ paper = BODY, source = "latex", figures = {}, ...over }: Over = {}): CheckContext => ({
+  index: new PaperIndex(paper, source),
+  found: { collection: new Set(), self: "2610.00001" },
+  topics: [],
+  figures: new Map(Object.entries(figures)),
+  ...over,
+});
+const errors = (d: Draft, over?: Over) => check(d, ctx(over)).errors;
 /** The draft with one paragraph of its method section saying `text`. */
 const saying = (text: string) => changed((d) => (blocks(d, "method")[0]!.text = text));
+/** The draft with its one claim resting on `where`. */
+const resting = (where: string) => changed((d) => ((d.sections[3] as unknown as { claims: Loose[] }).claims[0]!.where = where));
 const has = (list: string[], start: string, part = "") => list.some((e) => e.startsWith(start) && e.includes(part));
 
+/** `BODY` with a subsection under its second section, with a figure in its appendix, and without its appendix. */
+const NESTED = BODY.replace("\\section{Results}", "\\subsection{Probe training}\nThe probe trains.\n\\section{Results}");
+const APPENDIX_FIGURE = BODY.replace("The learning rate is", "\\begin{figure}\n\\includegraphics{figs/loss.pdf}\n\\caption{Training loss.}\n\\end{figure}\nThe learning rate is");
+const NO_APPENDIX = BODY.slice(0, BODY.indexOf("\\appendix")) + "\\end{document}\n";
+/** A PDF's text of the same paper, numbered as a PDF's headings are. */
+const PDF = "# Probes read the trace\n\n## 1 Introduction\n\nFigure 2 shows the probe.\n\n## 2 Method\n\n### 2.1 Probe training\n\nLayer 12 of Qwen3-8B, 1,200 traces.\n\n## 3 Results\n\nTables 1–3 give 71.3% against 50%.\n";
+
 test("a draft whose numbers, cites and locations are the paper's passes", () => {
-  assert.deepEqual(errors(draft()), []);
+  assert.deepEqual(check(draft(), ctx()), { errors: [], plots: [], unverified: [] });
 });
 
 test("a number the paper's text lacks is rejected, in whatever form the paper does not give it", () => {
@@ -32,6 +51,7 @@ test("a number the paper's text lacks is rejected, in whatever form the paper do
 test("the paper's numbers pass in the forms a read gives them", () => {
   for (const text of [
     "The probe reaches 0.713 accuracy.", // the paper's 71.3%, as a fraction
+    "The probe reaches .713 accuracy.", // written from its point
     "The probe reaches about 71% accuracy.", // rounded to the read's precision
     "The probe is trained on 1.2k traces.", // 1{,}200 in the source
     "The probe is trained on 1200 traces from layer 12.",
@@ -42,44 +62,138 @@ test("the paper's numbers pass in the forms a read gives them", () => {
     assert.deepEqual(errors(saying(text)), [], text);
 });
 
-test("what the read says of its own is not held to the paper's numbers", () => {
+test("a decimal written from its point is the same number as one written with its zero, both ways", () => {
+  // the paper writes .95 and 0.05; the read writes 0.95 and .05
+  const paper = BODY.replace("against 50\\% for a random direction", "against 50\\% for a random direction, at p < 0.05 and a rank correlation of .95");
+  for (const text of ["The rank correlation is 0.95.", "The rank correlation is .95.", "The difference holds at p < .05.", "The difference holds at p < 0.05.", "The correlation is 95%, significant at 5%."])
+    assert.deepEqual(errors(saying(text), { paper }), [], text);
+  assert.ok(has(errors(saying("The rank correlation is .59."), { paper }), "/sections/1/blocks/0/text: .59 is not in the paper's text"));
+  assert.ok(has(errors(saying("The rank correlation is .95.")), "/sections/1/blocks/0/text: .95"), "a paper without it does not hold it");
+});
+
+test("what the read says of its own is not held to the paper's numbers: the reading time, Related work, years, small counts", () => {
   const own = changed((d) => {
-    const s = d.sections as unknown as Record<string, unknown>[];
-    (s[0]!.facts as Record<string, unknown>[])[1]!.text = "about 14 minutes";
-    s[5]!.takeaway = "It builds on work that reported 62.5% on another benchmark.";
-    s[6]!.takeaway = "The repository holds 37 notebooks and no training code.";
+    const s = d.sections as unknown as Loose[];
+    (s[0]!.facts as Loose[])[1]!.text = "about 14 minutes";
+    s[5]!.takeaway = "It builds on work from 2023 that reported 62.5% on another benchmark.";
   });
   assert.deepEqual(errors(own), []);
 });
 
-test("a figure or table the paper does not have is rejected where it is cited", () => {
-  const figure = errors(saying("Accuracy rises with depth, as Figure 4 shows."));
-  assert.ok(has(figure, "/sections/1/blocks/0/text: cites Figure 4, but the paper's text has 1 figure"), figure.join("\n"));
-  const table = errors(changed((d) => (blocks(d, "result")[2]!.where = "§3, Table 3")));
-  assert.ok(has(table, "/sections/2/blocks/2/where: cites Table 3, but the paper's text has 1 table"), table.join("\n"));
-  assert.deepEqual(errors(saying("Accuracy rises with depth (Fig. 1), and Table 1 gives the totals.")), []);
-  // a PDF's text has no environments to count: a label passes when the text mentions it
-  const pdf = "# Probes\n\n## 1 Method\n\nFigure 2 shows the probe. Tables 1–3 give the results of 1,200 traces at 71.3% and 50%, layer 12.\n";
-  const cited = (text: string) => check(saying(text), ctx({ paper: pdf, source: "pdf" })).errors;
-  assert.deepEqual(cited("See Figure 2 and Table 3."), []);
-  assert.ok(has(cited("See Figure 5."), "/sections/1/blocks/0/text: cites Figure 5, but the paper's text never mentions Figure 5"));
+test("a year is one only in the range a paper's could be, and Reproducibility's numbers are the paper's", () => {
+  assert.deepEqual(errors(saying("The setup follows work from 1997 and 2023.")), []);
+  for (const number of ["2048", "1949", String(new Date().getFullYear() + 2)]) {
+    const beyond = errors(saying(`The context holds ${number} tokens.`));
+    assert.ok(has(beyond, `/sections/1/blocks/0/text: ${number} is not in the paper's text`), beyond.join("\n"));
+  }
+  const repro = errors(changed((d) => ((d.sections[6] as Loose).takeaway = "The repository holds 37 notebooks and no training code.")));
+  assert.ok(has(repro, "/sections/6/takeaway: 37 is not in the paper's text"), repro.join("\n"));
+  const fact = errors(changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "Trained for 64 GPU hours.")));
+  assert.ok(has(fact, "/sections/6/facts/0/text: 64"), fact.join("\n"));
+  assert.deepEqual(errors(changed((d) => ((d.sections[6] as Loose).takeaway = "Training runs for 40 epochs; no code is released."))), [], "what the paper says of its training passes");
 });
 
-test("a verdict and a CARD note each name a place in the paper", () => {
-  type Loose = Record<string, unknown>;
+test("captions, fact tags and a table's group headings give the paper's numbers; the read's own labels and an equation's TeX do not", () => {
+  const table = errors(changed((d) => (blocks(d, "result")[1]!.caption = "Rebuilt from Table 1, keeping 88.8% of its rows.")));
+  assert.ok(has(table, "/sections/2/blocks/1/caption: 88.8%"), table.join("\n"));
+  const group = errors(changed((d) => (blocks(d, "result")[1]!.rows as unknown[]).unshift({ group: "Layer 99" })));
+  assert.ok(has(group, "/sections/2/blocks/1/rows/0/group: 99"), group.join("\n"));
+  const diagram = errors(
+    changed((d) => blocks(d, "method").push({ type: "diagram", caption: "The pipeline, over 4,096 traces.", nodes: [{ id: "probe", label: "Linear probe", tip: "Reads layer 12 of the residual stream." }], edges: [] })),
+  );
+  assert.ok(has(diagram, "/sections/1/blocks/2/caption: 4,096"), diagram.join("\n"));
+  const tags = (i: number) => changed((d) => ((d.sections[i] as unknown as { facts: Loose[] }).facts[0]!.tags = [{ text: "Qwen3-77B" }, { text: "Qwen3-8B" }]));
+  assert.ok(has(errors(tags(0)), "/sections/0/facts/0/tags/0/text: 77B"), errors(tags(0)).join("\n"));
+  assert.ok(has(errors(tags(6)), "/sections/6/facts/0/tags/0/text: 77B"));
+  assert.equal(errors(tags(0)).filter((e) => e.startsWith("/sections/")).length, 1, "the paper's own model name passes");
+
+  const labels = changed((d) => {
+    (d.sections[2] as Loose).title = "Finding · 99 probes";
+    (d.sections[0] as unknown as { facts: Loose[] }).facts[0]!.name = "Kind 99";
+    blocks(d, "method").push({ type: "h3", text: "Step 99" }, { type: "eq", tex: String.raw`\hat{y} = \sigma(w^\top h_{4096} + \tfrac{1}{99})`, caption: "The probe on layer 12." });
+  });
+  assert.deepEqual(errors(labels), []);
+  const caption = errors(changed((d) => blocks(d, "method").push({ type: "eq", tex: "y = wx", caption: "The probe on layer 99." })));
+  assert.ok(has(caption, "/sections/1/blocks/2/caption: 99"), "an equation's caption is prose");
+});
+
+test("a figure or table the paper does not have is rejected where it is cited", () => {
+  const figure = errors(saying("Accuracy rises with depth, as Figure 4 shows."));
+  assert.ok(has(figure, "/sections/1/blocks/0/text: cites Figure 4, but the paper's source has 1 figure"), figure.join("\n"));
+  const table = errors(changed((d) => (blocks(d, "result")[2]!.where = "§3, Table 3")));
+  assert.deepEqual(table, ["/sections/2/blocks/2/where: cites Table 3, but the paper's source has 1 table"]);
+  assert.deepEqual(errors(saying("Accuracy rises with depth (Fig. 1), and Table 1 gives the totals.")), []);
+  // a PDF's text has no environments to count: a label is the paper's when the text mentions it
+  assert.deepEqual(errors(saying("See Figure 2 and Table 3."), { paper: PDF, source: "pdf" }), []);
+  assert.ok(has(errors(saying("See Figure 5."), { paper: PDF, source: "pdf" }), "/sections/1/blocks/0/text: cites Figure 5, but the paper's text never mentions Figure 5"));
+});
+
+test("a LaTeX source with no table has none: every cite of one is rejected, an appendix's too", () => {
+  const none = BODY.replace(/\\begin\{table\}[\s\S]*?\\end\{table\}\n/, "");
+  const cited = errors(draft(), { paper: none });
+  assert.ok(has(cited, "/sections/2/blocks/1/caption: cites Table 1, but the paper's source has no table"), cited.join("\n"));
+  assert.ok(has(cited, "/sections/3/claims/0/where: cites Table 1, but the paper's source has no table"));
+  assert.ok(has(errors(saying("The totals are in Table A.1."), { paper: none }), "/sections/1/blocks/0/text: cites Table A.1, but the paper's source has no table"));
+  // where the source has tables, an appendix's own numbering is not in it: the cite is the reviewer's to check
+  const unknown = check(saying("The totals are in Table A.1."), ctx());
+  assert.deepEqual([unknown.errors, unknown.unverified], [[], ["Table A.1"]]);
+});
+
+test("a paper's Figure 1 and its Figure A.1 are two figures: a label is read whole", () => {
+  assert.deepEqual(["Figure A.1", "Fig. 3", "Figure S2 (left)", "3b", "Figure A1", "Extended Data Fig. 4"].map(figureLabel), ["A.1", "3", "S2", "3", "A1", "4"]);
+  const plot = (label: string) => saying(`Loss falls to about 0.31 by epoch 9 (Fig. ${label}). The probe is linear.`);
+  // the session made the appendix's figure, not the main text's
+  const made = { paper: APPENDIX_FIGURE, figures: { loss: { label: "A.1" } } };
+  const appendix = check(plot("A.1"), ctx(made));
+  assert.deepEqual([appendix.errors, appendix.plots, appendix.unverified], [[], ["loss"], ["Figure A.1"]]);
+  assert.deepEqual(check(plot("A1"), ctx(made)).plots, ["loss"], "A1 and A.1 are one label");
+  const main = errors(plot("1"), made);
+  assert.ok(has(main, "/sections/1/blocks/0/text: 0.31 is not in the paper's text, and this session has no image of Figure 1"), main.join("\n"));
+  // a fig block's number is held to the label its figure was made as
+  const showing = (number: string) => changed((d) => blocks(d, "method").push({ type: "fig", name: "loss", number, caption: "Training loss by epoch." }));
+  assert.deepEqual(errors(showing("Figure A.1"), made), []);
+  assert.deepEqual(errors(showing("Figure 1"), made), ['/sections/1/blocks/2/number: "Figure 1", but figure "loss" was made as the paper\'s Figure A.1']);
+});
+
+test("a location names a place the paper has: a numbered one that exists, or a section by its title", () => {
   const claim = (d: Draft) => (d.sections[3] as unknown as { claims: Loose[] }).claims[0]!;
   // left out: the schema's
   assert.ok(has(draftErrors(changed((d) => delete claim(d).where)), "/sections/3/claims/0/where: is required"));
   assert.ok(has(draftErrors(changed((d) => delete blocks(d, "result")[2]!.where)), "/sections/2/blocks/2/where: is required"));
   // given, but no place
-  const vague = errors(changed((d) => (claim(d).where = "throughout the results")));
-  assert.ok(has(vague, '/sections/3/claims/0/where: "throughout the results" names no place in the paper'), vague.join("\n"));
+  for (const where of ["throughout the paper", "see above", "Section unavailable", "Equation unavailable", "Discussion"]) {
+    const vague = errors(resting(where));
+    assert.deepEqual(vague, [`/sections/3/claims/0/where: "${where}" names no place in the paper: give a numbered section, figure, table, appendix, equation or page of the paper, or a section by its title`], where);
+  }
   const note = errors(changed((d) => (blocks(d, "result")[2]!.where = "see above")));
   assert.ok(has(note, "/sections/2/blocks/2/where:", "names no place"), note.join("\n"));
-  // a section the paper's main text does not have
-  const beyond = errors(changed((d) => (claim(d).where = "§7")));
-  assert.ok(has(beyond, "/sections/3/claims/0/where: cites §7, but the paper's main text has 3 sections"), beyond.join("\n"));
-  for (const where of ["Appendix A", "Table 1", "§2", "Abstract", "p. 4", "Eq. 2"]) assert.deepEqual(errors(changed((d) => (claim(d).where = where))), [], where);
+  // a number the outline lacks, at any depth
+  assert.deepEqual(errors(resting("§7")), ["/sections/3/claims/0/where: cites §7, but the paper has no section 7"]);
+  assert.deepEqual(errors(resting("§2.999")), ["/sections/3/claims/0/where: cites §2.999, but the paper has no section 2.999"]);
+  assert.deepEqual(errors(resting("Sections 2.1 and 3")), ["/sections/3/claims/0/where: cites §2.1, but the paper has no section 2.1"], "section 2 has no subsection");
+  assert.deepEqual(errors(resting("§2.1"), { paper: NESTED }), [], "it has one here");
+  assert.deepEqual(errors(resting("§2.2"), { paper: NESTED }), ["/sections/3/claims/0/where: cites §2.2, but the paper has no section 2.2"]);
+  assert.deepEqual(errors(resting("Appendix B")), ["/sections/3/claims/0/where: cites Appendix B, but the paper has no appendix B"]);
+  assert.deepEqual(errors(resting("Appendix A.1")), ["/sections/3/claims/0/where: cites Appendix A.1, but the paper has no appendix A.1"]);
+  assert.deepEqual(errors(resting("Appendix A"), { paper: NO_APPENDIX }), ["/sections/3/claims/0/where: cites Appendix A, but the paper's text has no appendix"]);
+  assert.deepEqual(errors(resting("Appendix"), { paper: NO_APPENDIX }), ["/sections/3/claims/0/where: cites the appendix, but the paper's text has no appendix"]);
+  // places it has
+  for (const where of ["Appendix A", "App. A", "Appendix", "Table 1", "§2", "Sec. 3", "§1–3", "Abstract", "p. 4", "Eq. 2", "Results", "Method, second paragraph", "the Results section", "Probe training details"])
+    assert.deepEqual(errors(resting(where)), [], where);
+});
+
+test("a PDF's text is held to the numbers its lines open with, and one that shows no numbering is left to the reviewer", () => {
+  const pdf = { paper: PDF, source: "pdf" };
+  for (const where of ["§2.1", "Section 3", "Method", "Probe training"]) assert.deepEqual(errors(resting(where), pdf), [], where);
+  assert.deepEqual(errors(resting("§2.9"), pdf), ["/sections/3/claims/0/where: cites §2.9, but the paper has no section 2.9"]);
+  assert.deepEqual(errors(resting("§4"), pdf), ["/sections/3/claims/0/where: cites §4, but the paper has no section 4"]);
+  // headings without numbers: a number may be the writer's count of them, which code cannot check
+  const unnumbered = { paper: PDF.replace(/^(#+) [\d.]+ /gm, "$1 "), source: "pdf" };
+  const counted = check(resting("§4, Table 1"), ctx(unnumbered));
+  assert.deepEqual([counted.errors, counted.unverified], [[], ["§3", "§4"]], "the note's §3 and the claim's §4");
+  // an appendix a PDF's text shows no heading of may still be there
+  const lettered = check(resting("Appendix B"), ctx(pdf));
+  assert.deepEqual([lettered.errors, lettered.unverified], [[], ["Appendix B"]]);
 });
 
 test("TeX that KaTeX cannot parse is rejected, in an equation and inline", () => {
@@ -92,31 +206,45 @@ test("TeX that KaTeX cannot parse is rejected, in an equation and inline", () =>
   assert.deepEqual(errors(saying(String.raw`The probe is $\sigma(w^\top h + b)$ on layer 12, at a cost of \$3 a run.`)), []);
 });
 
-test("a value read off a plot passes with its figure cited in the same sentence, and goes to the reviewer", () => {
+test("a value read off a plot passes only with its figure cited in the same sentence and that figure's image in the session", () => {
   const plot = "Accuracy peaks near 0.84 at layer 9 (Fig. 1). The probe is linear.";
-  const unshown = check(saying(plot), ctx());
-  assert.deepEqual(unshown.errors, []);
-  assert.deepEqual(unshown.plots, { shown: [], unshown: ["Figure 1"] }, "the read shows no such figure");
+  const told = "/sections/1/blocks/0/text: 0.84 is not in the paper's text, and this session has no image of Figure 1 to check it against";
+  // cited, but the session has no image of it for the reviewer: with none made, and with one made as no figure of the paper's
+  assert.ok(has(errors(saying(plot)), told), errors(saying(plot)).join("\n"));
+  assert.ok(has(errors(saying(plot), { figures: { probe: {} } }), told));
+  assert.ok(has(errors(saying(plot), { figures: { probe: { label: "2" } } }), told), "another figure's image is no evidence");
+  assert.ok(has(errors(saying(plot)), "Numbers:", 'figure(file, name, "Figure 6")'), "the rule says how to give the image");
 
+  // made as the paper's Figure 1: the value goes to the reviewer with that image, whether or not the read shows it
+  const made = check(saying(plot), ctx({ figures: { probe: { label: "1" } } }));
+  assert.deepEqual([made.errors, made.plots], [[], ["probe"]]);
+  // made under a name only, and shown as Figure 1 by a fig block
   const showing = changed((d) => {
     blocks(d, "method")[0]!.text = plot;
     blocks(d, "method").push({ type: "fig", name: "probe", number: "Figure 1", caption: "Probe accuracy by layer, peaking at 0.84." });
   });
-  const shown = check(showing, ctx({ figures: new Set(["probe"]) }));
-  assert.deepEqual(shown.errors, [], "a figure's own caption gives what the plot shows");
-  assert.deepEqual(shown.plots, { shown: ["probe"], unshown: [] });
+  const shown = check(showing, ctx({ figures: { probe: {} } }));
+  assert.deepEqual([shown.errors, shown.plots], [[], ["probe"]], "a figure's own caption gives what the plot shows");
+  // a table built from a figure: its cells are read off it
+  const built = changed((d) => {
+    blocks(d, "result")[1]!.caption = "Read off Figure 1.";
+    (blocks(d, "result")[1]!.rows as { cells: unknown[] }[])[0]!.cells[1] = 0.84;
+  });
+  assert.deepEqual(check(built, ctx({ figures: { probe: { label: "1" } } })).plots, ["probe"]);
+  assert.ok(has(errors(built), "/sections/2/blocks/1/rows/0/cells/1: 0.84 is not in the paper's text, and this session has no image of Figure 1"));
 
   // without the cite, or with it in another sentence, the value is only a number the paper lacks
-  assert.ok(has(errors(saying("Accuracy peaks near 0.84 at layer 9.")), "/sections/1/blocks/0/text: 0.84"));
-  assert.ok(has(errors(saying("Accuracy peaks near 0.84 at layer 9. The curve is in Fig. 1.")), "/sections/1/blocks/0/text: 0.84"));
+  const imaged = { figures: { probe: { label: "1" } } };
+  assert.ok(has(errors(saying("Accuracy peaks near 0.84 at layer 9."), imaged), "/sections/1/blocks/0/text: 0.84 is not in the paper's text"));
+  assert.ok(has(errors(saying("Accuracy peaks near 0.84 at layer 9. The curve is in Fig. 1."), imaged), "/sections/1/blocks/0/text: 0.84 is not in the paper's text"));
   // a table cited is no plot
-  assert.ok(has(errors(saying("Accuracy peaks near 0.84 at layer 9 (Table 1).")), "/sections/1/blocks/0/text: 0.84"));
+  assert.ok(has(errors(saying("Accuracy peaks near 0.84 at layer 9 (Table 1)."), imaged), "/sections/1/blocks/0/text: 0.84 is not in the paper's text"));
 });
 
 test("a fig block shows only a figure this session made", () => {
   const d = changed((r) => blocks(r, "method").push({ type: "fig", name: "probe", number: "Figure 1", caption: "Probe accuracy by layer." }));
   assert.ok(has(errors(d), '/sections/1/blocks/2/name: this session made no figure "probe"'));
-  assert.deepEqual(errors(d, { figures: new Set(["probe"]) }), []);
+  assert.deepEqual(errors(d, { figures: { probe: {} } }), []);
 });
 
 const diagram = (over: Record<string, unknown> = {}) => ({
@@ -168,14 +296,14 @@ test("among_collection names only what a search in the session found", () => {
   assert.deepEqual(errors(among, { found: { collection: new Set(["2604.01234"]), self: "2610.00001" } }), []);
 });
 
-test("the web app's fixtures pass the checks against their own text", () => {
+test("the web app's fixture reads pass the checks, each read's own JSON standing for its paper's text", () => {
   for (const name of ["read-icl", "read-scarce"]) {
     const read = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "../../web/src/deepread/fixtures", `${name}.json`), "utf8")) as Draft;
     const { process_notes: _, ...model } = read;
-    const lenses = read.sections.flatMap((s) => (s.kind === "lens" ? [s.topic] : []));
-    const figures = new Set(read.sections.flatMap((s) => ("blocks" in s ? s.blocks.flatMap((b) => (b.type === "fig" ? [b.name] : [])) : [])));
+    const topics = read.sections.flatMap((s) => (s.kind === "lens" ? [s.topic] : []));
+    const figures = Object.fromEntries(read.sections.flatMap((s) => ("blocks" in s ? s.blocks.flatMap((b) => (b.type === "fig" ? [[b.name, {}]] : [])) : [])));
     const found = { collection: new Set(read.among_collection.map((a) => a.arxiv_id)), self: "0000.00000" };
-    // the read's own JSON stands for a paper that says everything the read does
-    assert.deepEqual(check(model, { paper: JSON.stringify(read), source: "pdf", found, topics: lenses, figures }).errors, [], name);
+    // a paper that says everything the read does, and shows no numbering to hold its locations to
+    assert.deepEqual(errors(model, { paper: JSON.stringify(read), source: "pdf", found, topics, figures }), [], name);
   }
 });

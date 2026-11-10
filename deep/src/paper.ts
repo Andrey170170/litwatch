@@ -1,7 +1,8 @@
 /**
- * The paper's text as the writer's first message carries it (docs/plans/deep-read.md, D4): the main text, with the
- * bibliography and the appendix cut out wherever they sit. Both stay in the session's `paper`, where the writer
- * reads them on demand (`section()`, `find()`, `refs()`).
+ * The paper's text as the run reads it: its headings, which the session's `sections()` gives and the checks look
+ * places up in (`places.ts`), and the split the writer's first message makes of it (docs/plans/deep-read.md, D4):
+ * the main text, with the bibliography and the appendix cut out wherever they sit. Both stay in the session's
+ * `paper`, where the writer reads them on demand (`section()`, `find()`, `refs()`).
  */
 
 export const MAX_BODY_CHARS_IN_CONTEXT = 200_000;
@@ -22,6 +23,19 @@ export interface Split {
   cuts: Cut[];
 }
 
+/** One heading of the paper, as the session's `sections()` gives it. */
+export interface Heading {
+  level: number;
+  title: string;
+  /** The heading's number in the paper ("3.2", "A.1"), where a LaTeX source's own numbering can be told. A PDF's
+   * text carries its numbers in the titles. */
+  number?: string;
+  start: number;
+  /** Where the section ends: at the next heading of its level or above. */
+  end: number;
+  chars: number;
+}
+
 /** Whether the text is a LaTeX source: litwatch says so, or it reads like one. */
 export const isLatex = (body: string, source?: string | null): boolean =>
   source === "latex" || (source !== "pdf" && /\\begin\{document\}|\\section\*?\s*\{/.test(body));
@@ -39,6 +53,74 @@ function first(body: string, pattern: RegExp): RegExpExecArray | null {
   return null;
 }
 
+type Bare = Omit<Heading, "end" | "chars">;
+
+/** The headings in the order of the text, each with where its section ends. */
+function sized(found: Bare[], length: number): Heading[] {
+  const sorted = [...found].sort((a, b) => a.start - b.start);
+  return sorted.map((h, i) => {
+    const end = sorted.slice(i + 1).find((next) => next.level <= h.level)?.start ?? length;
+    return { ...h, end, chars: end - h.start };
+  });
+}
+
+// ── a LaTeX source ──────────────────────────────────────────────────────────────────────────────────
+
+const TEX_LEVELS: Record<string, number> = { section: 1, subsection: 2, subsubsection: 3, paragraph: 4 };
+/** Where a LaTeX source starts its appendix by command: from here its sections are lettered. */
+const APPENDIX_COMMAND = /\\appendix(?![a-zA-Z])|\\begin\{appendi(?:x|ces)\}/g;
+
+/** The text between the brace at `open` and its match. */
+function braced(body: string, open: number): string {
+  for (let depth = 0, i = open; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "\\") i++;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return body.slice(open + 1, i);
+  }
+  return body.slice(open + 1);
+}
+
+const plain = (tex: string): string =>
+  tex
+    .replace(/\\label\{[^}]*\}/g, "")
+    .replace(/\\([&%$#_])/g, "$1")
+    .replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?/g, "")
+    .replace(/[{}~]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+function latexHeadings(body: string): Bare[] {
+  const out: Bare[] = [];
+  // Numbers are LaTeX's defaults: sections counted from 1, lettered from the appendix command on. A source that
+  // sets the counter or its form itself, or has chapters, is numbered some other way, which is not guessed at.
+  const numbered = !/\\chapter\*?\s*[[{]|\\setcounter\s*\{section\}|\\thesection|\\numberwithin\s*\{(?:sub)*section\}/.test(body);
+  const appendix = first(body, APPENDIX_COMMAND)?.index ?? Infinity;
+  const counters = [0, 0, 0];
+  let lettered = false;
+  const command = /\\(section|subsection|subsubsection|paragraph)(\*?)\s*(?:\[[^\]]*\])?\s*\{/g;
+  for (const m of body.matchAll(command)) {
+    if (commented(body, m.index)) continue;
+    const level = TEX_LEVELS[m[1]!]!;
+    const heading: Bare = { level, title: plain(braced(body, m.index + m[0].length - 1)), start: m.index };
+    if (numbered && level <= 3 && m[2] === "") {
+      if (!lettered && m.index > appendix) {
+        lettered = true;
+        counters.fill(0);
+      }
+      counters[level - 1]! += 1;
+      counters.fill(0, level);
+      const top = lettered ? String.fromCharCode(64 + counters[0]!) : String(counters[0]);
+      // a subsection before any section has no number worth giving
+      if (counters[0]! > 0 && counters[0]! <= 26) heading.number = [top, ...counters.slice(1, level)].join(".");
+    }
+    out.push(heading);
+  }
+  for (const m of body.matchAll(/\\begin\{(abstract|thebibliography)\}/g))
+    if (!commented(body, m.index)) out.push({ level: 1, title: m[1] === "abstract" ? "Abstract" : "References", start: m.index });
+  return out;
+}
+
 function latexCuts(body: string): Cut[] {
   const cuts: Cut[] = [];
   // the archive inlines the bibliography as a thebibliography environment, often before the appendix
@@ -47,28 +129,72 @@ function latexCuts(body: string): Cut[] {
     const close = body.indexOf("\\end{thebibliography}", open.index);
     cuts.push({ part: "references", start: open.index, end: close === -1 ? body.length : close + "\\end{thebibliography}".length });
   }
-  const appendix = first(body, /\\appendix(?![a-zA-Z])|\\begin\{appendi(?:x|ces)\}|\\section\*?\s*(?:\[[^\]]*\])?\s*\{\s*(?:Appendi(?:x|ces)|Supplementa(?:ry|l)\b)/g);
+  const appendix = first(body, new RegExp(`${APPENDIX_COMMAND.source}|\\\\section\\*?\\s*(?:\\[[^\\]]*\\])?\\s*\\{\\s*(?:Appendi(?:x|ces)|Supplementa(?:ry|l)\\b)`, "g"));
   if (appendix) cuts.push({ part: "appendix", start: appendix.index, end: body.length });
   return cuts;
 }
 
-function markdownCuts(body: string): Cut[] {
-  const headings = [...body.matchAll(/^(#{1,6})[ \t]+(.*)$/gm)].map((m) => ({ level: m[1]!.length, title: m[2]!.trim(), start: m.index }));
+// ── a PDF's text ────────────────────────────────────────────────────────────────────────────────────
+// litwatch's archive reads a PDF as Markdown (`## **3.1 Setup**`: its headings come bold) or, without that reader,
+// as plain text, whose headings are lines like any other (`3.1 Setup`).
+
+/** A heading's title without Markdown's emphasis. */
+const unmarked = (title: string): string => title.replace(/\*+/g, "").replace(/^_+|_+$/g, "").replace(/\s+/g, " ").trim();
+
+const REFERENCES = /^(?:(?:\d{1,2}|[IVX]+)\.?\s+)?(?:references|bibliography)$/i;
+/** A Markdown heading that starts the appendix by its name. */
+const APPENDIX_TITLE = /^(?:[A-Z]\.?\s+)?(?:appendi(?:x|ces)|supplementa(?:ry|l)\b)/i;
+/** The same on a line that is no Markdown heading, which has to be the whole line and read like a title. */
+const APPENDIX_LINE = /^(?:(?:[Aa]ppendi(?:x|ces)|APPENDI(?:X|CES))(?:\s+[A-Z])?(?:[:.]?\s+[A-Z][^.,;()]{0,80})?|[Ss]upplementa(?:ry|l)\s+[Mm]aterials?|SUPPLEMENTARY MATERIALS?)$/;
+/** A lettered heading, as an appendix's sections are numbered: "A Additional samples", "C.1 BBH". */
+const LETTERED = /^[A-Z](?:\.\d{1,2})*\.?\s+[A-Z]/;
+const LETTERED_LINE = /^[A-Z](?:\.\d{1,2})*\.?\s+[A-Z][^.,;()]{1,80}$/;
+
+interface PdfParts {
+  headings: Bare[];
+  references?: Bare;
+  appendix?: Bare;
+}
+
+/** A PDF text's headings, with the one that starts its bibliography and the one that starts its appendix. The
+ * Markdown headings are all taken; a line that is none counts only as one of those two, since nothing else tells a
+ * heading from a short line: the last line that reads "References", and after it the first that names the appendix
+ * or is lettered. (Plain text is not told by its having no Markdown heading: a table's "# Failed" column is one.) */
+function pdfParts(body: string): PdfParts {
+  const marked: Bare[] = [...body.matchAll(/^(#{1,6})[ \t]+(.*)$/gm)].map((m) => ({ level: m[1]!.length, title: unmarked(m[2]!), start: m.index })).filter((h) => h.title);
+  // below every Markdown heading, so the next one of any level ends it
+  const level = Math.max(1, ...marked.map((h) => h.level));
+  const lines = (): Bare[] => [...body.matchAll(/^[ \t]*(?!#)(\S.*)$/gm)].map((m) => ({ level, title: unmarked(m[1]!), start: m.index }));
+  const references = marked.find((h) => REFERENCES.test(h.title)) ?? lines().filter((h) => REFERENCES.test(h.title)).at(-1);
+  const after = (h: Bare) => references !== undefined && h.start > references.start;
+  const appendix =
+    marked.find((h) => APPENDIX_TITLE.test(h.title) || (after(h) && LETTERED.test(h.title))) ??
+    (references ? lines().find((h) => after(h) && (APPENDIX_LINE.test(h.title) || LETTERED_LINE.test(h.title))) : undefined);
+  const headings = [...marked];
+  for (const h of [references, appendix]) if (h && !marked.includes(h)) headings.push(h);
+  return { headings, references, appendix };
+}
+
+function pdfCuts(body: string): Cut[] {
+  const { headings, references, appendix } = pdfParts(body);
   const cuts: Cut[] = [];
-  const refs = headings.findIndex((h) => /^(?:\d+\.?\s+)?(?:references|bibliography)\s*$/i.test(h.title));
-  if (refs !== -1) {
-    const next = headings.slice(refs + 1).find((h) => h.level <= headings[refs]!.level);
-    cuts.push({ part: "references", start: headings[refs]!.start, end: next?.start ?? body.length });
-  }
-  const appendix = headings.find((h) => /^(?:[A-Z]\.?\s+)?(?:appendi(?:x|ces)|supplementa(?:ry|l)\b)/i.test(h.title));
+  if (references) cuts.push({ part: "references", start: references.start, end: sized(headings, body.length).find((h) => h.start === references.start)!.end });
   if (appendix) cuts.push({ part: "appendix", start: appendix.start, end: body.length });
   return cuts;
 }
 
+// ── both ────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The paper's headings in the order of its text. */
+export function headings(body: string, source?: string | null): Heading[] {
+  return sized(isLatex(body, source) ? latexHeadings(body) : pdfParts(body).headings, body.length);
+}
+
 /** The paper's main text and what was cut from it: the bibliography wherever it sits, and everything from the
- * appendix's start (LaTeX's \appendix, or an Appendix heading) to the end. A paper with neither is all main text. */
+ * appendix's start (LaTeX's \appendix, an Appendix heading, or the first lettered heading after a PDF's
+ * bibliography) to the end. A paper with neither is all main text. */
 export function splitPaper(body: string, source?: string | null): Split {
-  const found = (isLatex(body, source) ? latexCuts(body) : markdownCuts(body)).sort((a, b) => a.start - b.start);
+  const found = (isLatex(body, source) ? latexCuts(body) : pdfCuts(body)).sort((a, b) => a.start - b.start);
   // a bibliography inside the appendix is part of it; one the appendix starts inside ends where the appendix starts
   const cuts: Cut[] = [];
   for (const cut of found) {
@@ -86,22 +212,14 @@ export function splitPaper(body: string, source?: string | null): Split {
   return { main: main + body.slice(at), cuts: cuts.filter((c) => c.end > c.start) };
 }
 
-/** One heading of the paper, as the session's `sections()` gives it. */
-export interface Heading {
-  level: number;
-  title: string;
-  start: number;
-  chars: number;
-}
-
-/** The paper's outline for the first message: each heading with its size, and which part it is in when that part
- * was left out of the message. */
-export function outline(headings: Heading[], cuts: Cut[]): string {
+/** The paper's outline for the first message: each heading with its number where the source gives one and its
+ * size, and which part it is in when that part was left out of the message. */
+export function outline(headings: Pick<Heading, "level" | "title" | "number" | "start" | "chars">[], cuts: Cut[]): string {
   if (headings.length === 0) return "(no headings found; read the text with find())";
   return headings
     .map((h) => {
       const part = cuts.find((c) => h.start >= c.start && h.start < c.end)?.part;
-      return `${"  ".repeat(Math.max(0, h.level - 1))}- ${h.title} (${h.chars} characters${part ? `, ${part === "appendix" ? "appendix" : "bibliography"}: in the session only` : ""})`;
+      return `${"  ".repeat(Math.max(0, h.level - 1))}- ${h.number ? `${h.number} ` : ""}${h.title} (${h.chars} characters${part ? `, ${part === "appendix" ? "appendix" : "bibliography"}: in the session only` : ""})`;
     })
     .join("\n");
 }

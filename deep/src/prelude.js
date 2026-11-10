@@ -1,6 +1,6 @@
 // Injected into every REPL session before the first cell. Plain script, no module syntax:
-// top-level `var`/`function` here become globals the cells can see. `paper` and `__meta` are
-// set by the host before this runs; `_print` and `_host` are the only bridges out.
+// top-level `var`/`function` here become globals the cells can see. `paper`, `__meta` and
+// `__headings` are set by the host before this runs; `_print` and `_host` are the only bridges out.
 
 var __last;
 var meta = JSON.parse(__meta);
@@ -51,53 +51,14 @@ async function __call(name, args) {
 // -- text helpers over `paper` -------------------------------------------------------------------
 // `paper` is LaTeX source (inputs inlined, the bibliography in place), or the PDF's text as markdown.
 
-var __TEX_LEVELS = { section: 1, subsection: 2, subsubsection: 3, paragraph: 4 };
-
-// Whether the match at `at` sits on a LaTeX comment line (an unescaped % before it).
-function __commented(at) {
-  var line = paper.slice(paper.lastIndexOf('\n', at - 1) + 1, at);
-  return /(^|[^\\])%/.test(line);
-}
-
-// The text between the brace at `open` and its match.
-function __braced(open) {
-  for (var depth = 0, i = open; i < paper.length; i++) {
-    var ch = paper[i];
-    if (ch === '\\') { i++; continue; }
-    if (ch === '{') depth++;
-    else if (ch === '}' && --depth === 0) return paper.slice(open + 1, i);
-  }
-  return paper.slice(open + 1);
-}
-
-function __plain(tex) {
-  return tex.replace(/\\label\{[^}]*\}/g, '').replace(/\\([&%$#_])/g, '$1')
-    .replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?/g, '').replace(/[{}~]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function sections() {
-  var out = [], m;
-  var md = /^(#{1,6})[ \t]+(.*)$/gm;
-  while ((m = md.exec(paper)) !== null) out.push({ level: m[1].length, title: m[2].trim(), start: m.index });
-  var tex = /\\(section|subsection|subsubsection|paragraph)\*?\s*(?:\[[^\]]*\])?\s*\{/g;
-  while ((m = tex.exec(paper)) !== null)
-    if (!__commented(m.index)) out.push({ level: __TEX_LEVELS[m[1]], title: __plain(__braced(tex.lastIndex - 1)), start: m.index });
-  var env = /\\begin\{(abstract|thebibliography)\}/g;
-  while ((m = env.exec(paper)) !== null)
-    if (!__commented(m.index)) out.push({ level: 1, title: m[1] === 'abstract' ? 'Abstract' : 'References', start: m.index });
-  out.sort(function (x, y) { return x.start - y.start; });
-  for (var i = 0; i < out.length; i++) {
-    var end = paper.length;
-    for (var j = i + 1; j < out.length; j++) if (out[j].level <= out[i].level) { end = out[j].start; break; }
-    out[i].end = end;
-    out[i].chars = end - out[i].start;
-  }
-  return out;
-}
+// The paper's headings, found by the service (src/paper.ts) and the same ones its checks look places up in:
+// {level, title, number?, start, end, chars}. A fresh copy each call, so a cell cannot change them for the next.
+function sections() { return JSON.parse(__headings); }
 
 function section(title) {
   var t = String(title).toLowerCase(), all = sections();
-  var hit = all.find(function (s) { return s.title.toLowerCase() === t; }) ||
+  var hit = all.find(function (s) { return s.number !== undefined && s.number.toLowerCase() === t; }) ||
+    all.find(function (s) { return s.title.toLowerCase() === t; }) ||
     all.find(function (s) { return s.title.toLowerCase().indexOf(t) !== -1; });
   if (!hit) throw new Error('no section matching ' + JSON.stringify(title) + '; see sections()');
   return paper.slice(hit.start, hit.end);
@@ -147,9 +108,9 @@ function fetch(url) { return __call('fetch', [url]); }
 // Each image these make comes back with the output of the cell that called them.
 
 function figures() { return __call('figures', []); }
-function figure(file, name) { return __call('figure', [file, name]); }
+function figure(file, name, number) { return __call('figure', [file, name, number]); }
 function pdfPage(n) { return __call('pdfPage', [n]); }
-function crop(page, box, name) { return __call('crop', [page, box, name]); }
+function crop(page, box, name, number) { return __call('crop', [page, box, name, number]); }
 function render(read, target, width) { return __call('render', [read, target, width]); }
 function check(read) { return __call('check', [read]); }
 function submit(read) { return __call('submit', [read]); }

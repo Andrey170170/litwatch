@@ -264,7 +264,9 @@ it with the read's other process notes, the Notion export opens the read's short
 saying so, and the MCP server's `get_paper` says so above the read.
 A read whose review could not run at all (the reviewer's call failed, or it gave no valid
 verdict) is stored too, with `reviews` null and a note of kind `tool` saying it was not
-reviewed: it is unreviewed, not failed.
+reviewed: it is unreviewed, not failed. A read whose reviewer could not be given the whole paper
+(a text past the model's context loses its bibliography, then its end) carries a `tool` note
+saying what the reviewer did not see, whatever the verdict.
 
 **The figures** are served to the web app at `GET /api/papers/<id>/deep/figures/<name>` (the web
 app's token, as a cookie or a bearer header; the read token is refused, and an unknown name is

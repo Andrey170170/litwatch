@@ -4,6 +4,7 @@
  */
 
 import { deflateSync, gzipSync } from "node:zlib";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Models } from "@earendil-works/pi-ai";
@@ -202,7 +203,8 @@ export const eprint = (entries: TarEntry[]): Buffer => gzipSync(tar(entries));
 /** The smallest WebP header litwatch takes for one (`RIFF....WEBP`), for a stand-in's figures. */
 export const WEBP = Buffer.concat([Buffer.from("RIFF"), Buffer.from([4, 0, 0, 0]), Buffer.from("WEBP")]);
 
-/** A stand-in for the browser and poppler that records what it was asked for. */
+/** A stand-in for the browser and poppler that records what it was asked for. A picture's view says how many bytes
+ * it was made from, so a test can tell one picture's view from another's; a PDF has the pages its file has. */
 export function fakeImaging() {
   const calls = {
     pictures: [] as { mime: string; crop?: Box; bytes: number }[],
@@ -214,7 +216,7 @@ export function fakeImaging() {
       calls.pictures.push({ mime, crop, bytes: data.length });
       return { webp: WEBP, width: 800, height: 400, view: { data: Buffer.from(`view of ${data.length} bytes`).toString("base64"), mimeType: "image/jpeg", width: 800, height: 400 } };
     },
-    pdfPages: async () => 3,
+    pdfPages: async (file) => (readFileSync(file, "latin1").match(/\/Type \/Page\b/g) ?? []).length,
     pdfPage: async (_path, page, width) => {
       calls.pages.push({ page, width });
       return Buffer.from(`page ${page} at ${width}`);
@@ -230,9 +232,10 @@ export function fakeImaging() {
 
 // ── the model ───────────────────────────────────────────────────────────────────────────────────────
 
-/** Models whose `openai` provider is pi-ai's faux one, signed in to the subscription. */
-export function models(): { models: Models; faux: ReturnType<typeof fauxProvider> } {
-  const faux = fauxProvider({ provider: PROVIDER, models: [{ id: OPTS.model, input: ["text", "image"] }] });
+/** Models whose `openai` provider is pi-ai's faux one, signed in to the subscription. `contextWindow` is the
+ * model's, in tokens, for a test of what fits it. */
+export function models(contextWindow?: number): { models: Models; faux: ReturnType<typeof fauxProvider> } {
+  const faux = fauxProvider({ provider: PROVIDER, models: [{ id: OPTS.model, input: ["text", "image"], ...(contextWindow ? { contextWindow } : {}) }] });
   const m = createModels();
   m.setProvider(faux.provider);
   m.getAuth = (async () => ({ auth: { apiKey: "t" }, source: "OAuth" })) as Models["getAuth"];
@@ -287,15 +290,17 @@ export const EPRINT = eprint([
 ]);
 
 /** arXiv and litwatch as one local server: the e-print at any version (or `eprintStatus` in its place), and the
- * paper's three-page PDF, which litwatch serves itself or, with `archived` false, sends on to arXiv for. `asked`
- * keeps each request's path, with the authorization it carried. */
+ * paper's PDF, which litwatch serves itself (three pages) or, with `archived` false, sends on to arXiv's latest
+ * for. arXiv's PDF has as many pages as its version's number, and the latest is version 5. `asked` keeps each
+ * request's path, with the authorization it carried. */
 export async function withSite<T>(work: (site: { url: string; asked: string[] }) => Promise<T>, { eprintStatus = 200, archived = true } = {}): Promise<T> {
   const asked: string[] = [];
   const server = createServer((req, res) => {
     asked.push(`${req.url}${req.headers.authorization ? ` ${req.headers.authorization}` : ""}`);
     if (req.url?.startsWith("/e-print/")) res.writeHead(eprintStatus, { "content-type": "application/gzip" }).end(eprintStatus === 200 ? EPRINT : "");
     else if (req.url === `/api/papers/${PAPER.id}/pdf` && !archived) res.writeHead(307, { location: `/pdf/${PAPER.id}` }).end();
-    else if (req.url === `/api/papers/${PAPER.id}/pdf` || req.url === `/pdf/${PAPER.id}`) res.writeHead(200, { "content-type": "application/pdf" }).end(pdf(3));
+    else if (req.url === `/api/papers/${PAPER.id}/pdf`) res.writeHead(200, { "content-type": "application/pdf" }).end(pdf(3));
+    else if (req.url?.startsWith(`/pdf/${PAPER.id}`)) res.writeHead(200, { "content-type": "application/pdf" }).end(pdf(Number(/v(\d+)$/.exec(req.url)?.[1] ?? 5)));
     else res.writeHead(404).end();
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));

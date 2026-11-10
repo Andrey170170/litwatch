@@ -3,8 +3,9 @@
  * litwatch's render page and encodes pictures on a canvas, and poppler, which turns a PDF's page into an image.
  *
  * The browser has no business on the network beyond the render page: every request to another origin is refused,
- * names other than the render page's host do not resolve, and service workers and WebSockets are off. The page it
- * opens is litwatch's own, and what it draws is the model's text, which the page never interprets as HTML.
+ * and so is every redirect, which would lead to one; names other than the render page's host do not resolve, and
+ * service workers and WebSockets are off. The page it opens is litwatch's own, and what it draws is the model's
+ * text, which the page never interprets as HTML.
  */
 
 import { execFile } from "node:child_process";
@@ -128,14 +129,25 @@ export class Studio implements Imaging {
       .catch((e: unknown) => {
         throw new RenderUnavailable(`the browser could not start: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
       });
-    await context.route("**/*", (route) => {
+    await context.route("**/*", async (route) => {
       let origin: string | undefined;
       try {
         origin = new URL(route.request().url()).origin;
       } catch {
         // not a URL the page could have a business with
       }
-      return allowed !== undefined && origin === allowed ? route.continue() : route.abort("blockedbyclient");
+      if (allowed === undefined || origin !== allowed) return route.abort("blockedbyclient");
+      // The request is made here and its answer handed to the page. Left to the browser, a redirect would be
+      // followed without this handler being asked again, so a 307 from the allowed origin would lead anywhere.
+      // The render page and its files are served, never redirected to, so a redirect is refused whole.
+      try {
+        const answer = await route.fetch({ maxRedirects: 0 });
+        const redirect = answer.status() >= 300 && answer.status() < 400 && answer.status() !== 304;
+        await (redirect ? route.abort("blockedbyclient") : route.fulfill({ response: answer }));
+      } catch {
+        // the server is not there, or the context closed under the request
+        await route.abort("failed").catch(() => undefined);
+      }
     });
     await context.routeWebSocket("**", (ws) => void ws.close());
     const limit = setTimeout(() => void context.close().catch(() => undefined), limitMs);

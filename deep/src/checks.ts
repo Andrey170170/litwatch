@@ -2,36 +2,37 @@
  * The checks `submit` runs in code on a draft that fits the schema (docs/specs/deep-read.md, "Checks in code"):
  * what a model need not judge. The structure (anchors in their places, one lens per graded topic, unique ids, a
  * table row's cells against its columns, a diagram's edges against its nodes); every equation through KaTeX; every
- * figure and table cited against the paper; every location (`where`) naming a place in the paper; and every number
- * given as the paper's against the paper's text (`numbers.ts`).
+ * figure and table cited against the paper; every location (`where`) naming a place the paper has; and every
+ * number given as the paper's against the paper's text (`numbers.ts`). What the paper has is the index's to say
+ * (`places.ts`).
  *
- * A number the paper's text lacks passes when its sentence cites a figure: it was read off a plot, and the reviewer
- * checks it against that figure instead (`Checked.plots`).
+ * A number the paper's text lacks passes when its sentence cites a figure this session has an image of: it was read
+ * off a plot, and the reviewer checks it against that image (`Checked.plots`).
  */
 
 import katex from "katex";
-import { PaperNumbers, numbersIn, plainText } from "./numbers.ts";
-import { isLatex } from "./paper.ts";
+import { numbersIn, plainText } from "./numbers.ts";
+import { cites, figureLabel, labelKey, sectionCites, type PaperIndex } from "./places.ts";
 import type { Draft, DraftBlock, DraftDiagram, DraftSection } from "./read.ts";
 import { amongErrors, isWebUrl, type Found } from "./schema.ts";
 
 export interface CheckContext {
-  /** The paper's complete text. */
-  paper: string;
-  /** `latex` or `pdf`; anything else is told from the text. */
-  source?: string | null;
+  /** The paper's places and numbers. */
+  index: PaperIndex;
   found: Found;
   /** The topics the read is written for, as a lens names each (`Lens.topic`): one lens each. */
   topics: readonly string[];
-  /** The names of the figures this session made (`figure()`, `crop()`). */
-  figures: ReadonlySet<string>;
+  /** The figures this session made (`figure()`, `crop()`), by name, each with the paper's label it was made as
+   * when the writer gave one. */
+  figures: ReadonlyMap<string, { readonly label?: string }>;
 }
 
 export interface Checked {
   errors: string[];
-  /** The figures cited for values the paper's text lacks: `shown` by the names of the read's `fig` blocks,
-   * `unshown` as cited ("Figure 9") where the read shows no such figure. */
-  plots: { shown: string[]; unshown: string[] };
+  /** The figures, by name, that the read cites for values the paper's text lacks: the reviewer is shown each. */
+  plots: string[];
+  /** The places cited that the paper's text can neither confirm nor rule out, as cited: the reviewer's to check. */
+  unverified: string[];
 }
 
 /** Diagram nodes stay tappable on the phone. */
@@ -39,105 +40,38 @@ export const MIN_NODE_HEIGHT = 40;
 /** How many of a kind of error are listed before the rest are counted. */
 const MAX_LISTED = 40;
 
-// ── the paper's figures, tables and sections ────────────────────────────────────────────────────────
-
-/** LaTeX without its comments: an unescaped % to the end of its line. */
-const uncommented = (tex: string) => tex.replace(/((?:^|[^\\])(?:\\\\)*)%.*$/gm, "$1");
-
-type Kind = "figure" | "table";
-const ENVIRONMENTS: Record<Kind, string> = {
-  figure: "figure\\*?|wrapfigure|SCfigure\\*?|sidewaysfigure\\*?|teaserfigure",
-  table: "table\\*?|wraptable|sidewaystable\\*?|longtable\\*?|supertabular\\*?",
-};
-
-/** What the paper's text shows of its numbering: how many figures and tables a LaTeX source numbers (0: it cannot
- * be told), and how many top-level sections. A PDF's text is searched for each figure's and table's label instead. */
-class Places {
-  /** The paper's text, a LaTeX source's without its comments. */
-  readonly text: string;
-  private readonly latex: boolean;
-  private readonly counts: Partial<Record<Kind, number>> = {};
-  /** The labels the text itself cites, by kind ("Tables 2–3" names both). */
-  private mentioned: Record<Kind, Set<string>> | undefined;
-
-  constructor(paper: string, source?: string | null) {
-    this.latex = isLatex(paper, source);
-    this.text = this.latex ? uncommented(paper) : paper;
-  }
-
-  /** The numbered captions of a kind: each environment's captions outside its sub-floats (one for an environment
-   * with none, so the count errs high), and each \captionof. */
-  private count(kind: Kind): number {
-    const known = this.counts[kind];
-    if (known !== undefined) return known;
-    let n = 0;
-    const env = new RegExp(`\\\\begin\\{(${ENVIRONMENTS[kind]})\\}([\\s\\S]*?)\\\\end\\{\\1\\}`, "g");
-    for (const m of this.text.matchAll(env)) {
-      const body = m[2]!.replace(/\\begin\{(sub(?:figure|table)|minipage)\}[\s\S]*?\\end\{\1\}/g, (sub, name: string) => (name === "minipage" ? sub : ""));
-      n += Math.max(1, (body.match(/\\caption\s*[[{]/g) ?? []).length);
-    }
-    n += (this.text.match(new RegExp(`\\\\captionof\\s*\\{${kind}\\}`, "g")) ?? []).length;
-    return (this.counts[kind] = n);
-  }
-
-  /** Why a cited figure or table is not the paper's, or undefined when it is or cannot be told. */
-  missing(kind: Kind, label: string): string | undefined {
-    const n = /^(\d+)[a-z]?$/.exec(label);
-    if (!n) return undefined; // A1, S3, B.2: an appendix's own numbering, which the text does not show
-    if (!this.mentioned) {
-      this.mentioned = { figure: new Set(), table: new Set() };
-      for (const c of cites(this.text)) this.mentioned[c.kind].add(c.label.replace(/[a-z]$/, ""));
-    }
-    if (this.mentioned[kind].has(n[1]!)) return undefined;
-    if (!this.latex) return `the paper's text never mentions ${kind === "figure" ? "Figure" : "Table"} ${n[1]}`;
-    const count = this.count(kind);
-    return count === 0 || Number(n[1]) <= count ? undefined : `the paper's text has ${count} ${kind}${count === 1 ? "" : "s"}`;
-  }
-
-  /** How many numbered top-level sections a LaTeX source's main text has; 0 when it cannot be told, as for a PDF's
-   * text, whose headings are too unevenly found to count. */
-  sections(): number {
-    if (!this.latex) return 0;
-    const appendix = this.text.search(/\\appendix\b|\\begin\{appendi(?:x|ces)\}/);
-    const main = appendix === -1 ? this.text : this.text.slice(0, appendix);
-    return (main.match(/\\section\s*(?:\[[^\]]*\])?\s*\{/g) ?? []).length;
-  }
-}
-
 // ── the read's texts ────────────────────────────────────────────────────────────────────────────────
 
 /** One string of the read. `inline`: it takes the inline markup, so its $tex$ is parsed. `numbers`: its numbers are
- * given as the paper's, so they are checked; `plot`: unless the paper's text lacks them and this figure is cited
- * for the whole of it (a figure's own caption, a table whose caption cites one). */
+ * given as the paper's, so they are checked. A number the paper's text lacks may have been read off a plot: off
+ * `figure` (by name), which the whole text is about, as a figure's own caption is; or off the paper's figures the
+ * text is said to be built from (`figures`, by label), as a table's cells are whose caption cites one; or off a
+ * figure its own sentence cites.
+ *
+ * Not checked for numbers: the read's own presentation (a section's title and id, an `h3`, a fact's name, a
+ * figure's number), the reading time, and Related work, whose numbers are other papers'. */
 interface Unit {
   path: string;
   text: string;
   inline?: boolean;
   numbers?: boolean;
   where?: boolean;
-  plot?: string[];
+  figure?: string;
+  figures?: string[];
 }
 
-/** A glance fact that is the read's own: the reading time, and what the read found of the code. */
-const OWN_FACT = /^(read(ing)?( time)?|code|artifacts?|code and artifacts)$/i;
+/** The glance fact that is the read's own: the reading time. */
+const READING_TIME = /^read(ing)?( time)?$/i;
 
-const CITE = /\b(Figures?|Figs?\.?|Tables?|Tabs?\.?)(?:\s|~)*((?:[A-Z]\.?)?\d+[a-z]?(?:\s*(?:,|and|&|–|—|-|to)\s*(?:[A-Z]\.?)?\d+[a-z]?)*)/g;
-/** The figures and tables a text cites: a plural cites each label of its list, a singular its first only. */
-function cites(text: string): { kind: Kind; label: string; index: number; end: number }[] {
-  const out: { kind: Kind; label: string; index: number; end: number }[] = [];
-  for (const m of text.matchAll(CITE)) {
-    const kind: Kind = /^f/i.test(m[1]!) ? "figure" : "table";
-    const plural = /^(Figures|Figs\.?|Tables|Tabs\.?)$/i.test(m[1]!);
-    const labels = m[2]!.split(/\s*(?:,|and|&|–|—|-|to)\s*/);
-    const taken = plural ? labels : labels.slice(0, 1);
-    const end = plural ? m.index + m[0].length : m.index + m[0].length - (m[2]!.length - labels[0]!.length);
-    for (const label of taken) out.push({ kind, label, index: m.index, end });
+type Fact = { name: string; text?: string; tags?: { text: string }[] };
+/** A fact's text and tags, which give the paper's numbers like any prose. */
+function* factUnits(facts: readonly Fact[], at: string): Generator<Unit> {
+  for (const [i, fact] of facts.entries()) {
+    const numbers = !READING_TIME.test(fact.name.trim());
+    if (fact.text !== undefined) yield { path: `${at}/facts/${i}/text`, text: fact.text, inline: true, numbers };
+    for (const [j, tag] of (fact.tags ?? []).entries()) yield { path: `${at}/facts/${i}/tags/${j}/text`, text: tag.text, numbers };
   }
-  return out;
 }
-
-/** The text of a `fig` block's `number` as a label: "Figure 6" is 6. */
-const figureLabel = (number: string): string | undefined => /(\d+)[a-z]?\s*$/.exec(number.trim())?.[1];
 
 function* blockUnits(b: DraftBlock, at: string): Generator<Unit> {
   const prose = { inline: true, numbers: true };
@@ -157,12 +91,15 @@ function* blockUnits(b: DraftBlock, at: string): Generator<Unit> {
       yield { path: `${at}/where`, text: b.where, where: true };
       break;
     case "eq":
+      // The equation's own TeX is notation, not values given as the paper's: indices, exponents and the constants
+      // of a formula (the 2 of x^2, the 1 of 1 - p) are rarely written the same way in the paper's source, so
+      // checking them would only reject correct formulas. KaTeX checks that it parses; the caption is prose.
       if (b.caption !== undefined) yield { path: `${at}/caption`, text: b.caption, ...prose };
       break;
     case "fig":
       yield { path: `${at}/number`, text: b.number };
       // a figure's caption gives what the figure shows: its values are the plot's
-      yield { path: `${at}/caption`, text: b.caption, ...prose, plot: [b.name] };
+      yield { path: `${at}/caption`, text: b.caption, ...prose, figure: b.name };
       break;
     case "xp":
       for (const key of ["question", "did", "found", "means", "not_shown"] as const) {
@@ -171,13 +108,16 @@ function* blockUnits(b: DraftBlock, at: string): Generator<Unit> {
       }
       break;
     case "table": {
-      // how the read built the table is its own; a figure the caption cites is where the cells were read off
-      if (b.caption !== undefined) yield { path: `${at}/caption`, text: b.caption, inline: true };
-      const plot = b.caption === undefined ? [] : cites(b.caption).filter((c) => c.kind === "figure").map((c) => `#${c.label}`);
-      const cells = { numbers: true, ...(plot.length ? { plot } : {}) };
+      if (b.caption !== undefined) yield { path: `${at}/caption`, text: b.caption, ...prose };
+      // a figure the caption cites is where the cells were read off
+      const figures = b.caption === undefined ? [] : cites(plainText(b.caption)).filter((c) => c.kind === "figure").map((c) => c.label);
+      const cells = { numbers: true, ...(figures.length ? { figures } : {}) };
       for (const [i, column] of b.columns.entries()) yield { path: `${at}/columns/${i}`, text: column, ...cells };
       for (const [r, row] of b.rows.entries()) {
-        if ("group" in row) continue;
+        if ("group" in row) {
+          yield { path: `${at}/rows/${r}/group`, text: row.group, ...cells };
+          continue;
+        }
         for (const [c, cell] of row.cells.entries()) {
           const value = typeof cell === "object" ? cell.value : cell;
           yield { path: `${at}/rows/${r}/cells/${c}`, text: String(value), ...cells };
@@ -187,7 +127,7 @@ function* blockUnits(b: DraftBlock, at: string): Generator<Unit> {
       break;
     }
     case "diagram":
-      if (b.caption !== undefined) yield { path: `${at}/caption`, text: b.caption, inline: true };
+      if (b.caption !== undefined) yield { path: `${at}/caption`, text: b.caption, ...prose };
       for (const [i, n] of b.nodes.entries()) {
         yield { path: `${at}/nodes/${i}/label`, text: n.label, numbers: true };
         if (n.sub !== undefined) yield { path: `${at}/nodes/${i}/sub`, text: n.sub, numbers: true };
@@ -209,8 +149,7 @@ function* sectionUnits(s: DraftSection, at: string): Generator<Unit> {
     case "glance":
       yield { path: `${at}/claim`, text: s.claim, ...prose };
       for (const [i, point] of s.points.entries()) yield { path: `${at}/points/${i}`, text: point, ...prose };
-      for (const [i, fact] of s.facts.entries())
-        if (fact.text !== undefined) yield { path: `${at}/facts/${i}/text`, text: fact.text, inline: true, numbers: !OWN_FACT.test(fact.name.trim()) };
+      yield* factUnits(s.facts, at);
       break;
     case "claims":
       yield { path: `${at}/takeaway`, text: s.takeaway, ...prose };
@@ -229,9 +168,9 @@ function* sectionUnits(s: DraftSection, at: string): Generator<Unit> {
       yield { path: `${at}/takeaway`, text: s.takeaway, inline: true };
       break;
     case "repro":
-      // what the read found when it checked: the repository's own numbers, not the paper's
-      yield { path: `${at}/takeaway`, text: s.takeaway, inline: true };
-      for (const [i, fact] of s.facts.entries()) if (fact.text !== undefined) yield { path: `${at}/facts/${i}/text`, text: fact.text, inline: true };
+      // what the paper says of its code, data and compute is the paper's, numbers included
+      yield { path: `${at}/takeaway`, text: s.takeaway, ...prose };
+      yield* factUnits(s.facts, at);
       break;
     default:
       yield { path: `${at}/takeaway`, text: s.takeaway, ...prose };
@@ -337,14 +276,17 @@ function inlineTex(text: string): string[] {
   return out;
 }
 
-/** A place in the paper, as a location names one. */
-const PLACE = /§|\b(?:Sec(?:tion|s)?\.?|App(?:endix|endices|\.)|Fig(?:ure|s)?\.?|Tab(?:le|s)?\.?|Eqs?\.?|Equations?|Alg(?:orithm|\.)|Abstract|Introduction|Conclusions?|Discussion|Related work|Footnotes?|Listings?|Theorem|Lemma|Proposition|Definition|pp?\.|pages?)(?![a-z])/i;
+/** A numbered place the paper's text does not let code look up: an equation, an algorithm, a theorem, a footnote,
+ * a page, a line. It counts as a place; whether it is the right one is the reviewer's. */
+const OTHER_PLACE = /\b(?:Eqs?\.?|Equations?|Alg(?:orithm|\.)s?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|pp?\.|[Pp]ages?|[Ll]ines?)\s*\(?[A-Z]?\.?\d/;
 
 // What a number is no value of: a place in the paper, an arXiv id, a link.
 const LOCATION = /(?:§+\s*|\b(?:Sections?|Secs?\.?|Appendi(?:x|ces)|Apps?\.?|Eqs?\.?|Equations?|Algorithms?|Algs?\.?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|Pages?|pp?\.|Lines?)(?:\s|~)*)\(?(?:[A-Z]\.?)?\d+(?:\.\d+)*[a-z]?\)?(?:\s*(?:,|and|&|–|—|-|to)\s*§*\s*\(?(?:[A-Z]\.?)?\d+(?:\.\d+)*[a-z]?\)?)*/gi;
 const NOT_VALUES = [LOCATION, /\b\d{4}\.\d{4,5}(?:v\d+)?\b/g, /\]\(https?:\/\/[^\s()]+\)/g, /https?:\/\/\S+/g];
-/** A whole number that is a year, which a read may give of its own knowledge. */
-const isYear = (n: { value: number; bare: boolean; text: string }) => n.bare && /^\d{4}$/.test(n.text) && n.value >= 1900 && n.value <= 2100;
+/** A whole number that is a year, which a read may give of its own knowledge: one a paper or its prior work could
+ * carry, up to next year's. 2048 is a number like any other. */
+const FIRST_YEAR = 1950;
+const isYear = (n: { value: number; bare: boolean; text: string }) => n.bare && /^\d{4}$/.test(n.text) && n.value >= FIRST_YEAR && n.value <= new Date().getFullYear() + 1;
 
 const ABBREVIATION = /(?:\b(?:Figs?|Secs?|Apps?|Eqs?|Tabs?|Algs?|vs|cf|al|approx|resp|No|e\.g|i\.e|pp?)|\b[A-Z])\.$/;
 /** The sentence around `index`: from the last sentence end before it to the next one after it. */
@@ -365,13 +307,15 @@ function sentence(text: string, index: number): string {
 /** The check `submit` runs, and `check()` before it. Every error names the place in the read it is about. */
 export function check(read: Draft, ctx: CheckContext): Checked {
   const errors = structureErrors(read, ctx.topics);
-  const places = new Places(ctx.paper, ctx.source);
-  const numbers = new PaperNumbers(places.text);
-  const sectionCount = places.sections();
-  // the figures the read shows, by the paper's number of each
-  const shown = new Map<string, string>();
+  const { index } = ctx;
+  // The figures this session has an image of, by the paper's label: as each was made, or as a fig block shows it.
+  const imaged = new Map<string, Set<string>>();
+  const image = (label: string, name: string) => imaged.set(labelKey(label), (imaged.get(labelKey(label)) ?? new Set()).add(name));
+  for (const [name, made] of ctx.figures) if (made.label !== undefined) image(made.label, name);
   const plots = new Set<string>();
+  const unverified = new Set<string>();
   const absent = new Map<string, string[]>();
+  const unseen = new Map<string, { texts: string[]; figures: Set<string> }>();
 
   for (const [i, s] of read.sections.entries()) {
     const at = `/sections/${i}`;
@@ -384,9 +328,13 @@ export function check(read: Draft, ctx: CheckContext): Checked {
           const problem = tex(b.tex, true);
           if (problem) errors.push(`${here}/tex: KaTeX cannot parse it: ${problem}`);
         } else if (b.type === "fig") {
-          if (!ctx.figures.has(b.name)) errors.push(`${here}/name: this session made no figure "${b.name}"; figure() or crop() makes one under the name you give it`);
+          const made = ctx.figures.get(b.name);
+          if (!made) errors.push(`${here}/name: this session made no figure "${b.name}"; figure() or crop() makes one under the name you give it`);
           const label = figureLabel(b.number);
-          if (label !== undefined) shown.set(label, b.name);
+          if (made && label !== undefined) {
+            if (made.label !== undefined && labelKey(made.label) !== labelKey(label)) errors.push(`${here}/number: "${b.number}", but figure "${b.name}" was made as the paper's Figure ${made.label}`);
+            else image(label, b.name);
+          }
         }
       }
     }
@@ -401,15 +349,25 @@ export function check(read: Draft, ctx: CheckContext): Checked {
         }
       const text = plainText(unit.text);
       const cited = cites(text);
-      for (const c of cited) {
-        const problem = places.missing(c.kind, c.label);
-        if (problem) errors.push(`${unit.path}: cites ${c.kind === "figure" ? "Figure" : "Table"} ${c.label}, but ${problem}`);
-      }
+      // a location is one when it names a place the paper has, or may have
+      let anchored = false;
+      let refused = false;
+      const settle = (name: string, answer: ReturnType<PaperIndex["float"]>) => {
+        if (answer === "unknown") unverified.add(name);
+        if (answer === "there" || answer === "unknown") anchored = true;
+        else {
+          refused = true;
+          errors.push(`${unit.path}: cites ${name}, but ${answer.no}`);
+        }
+      };
+      for (const c of cited) settle(`${c.kind === "figure" ? "Figure" : "Table"} ${c.label}`, index.float(c.kind, c.label));
       if (unit.where) {
-        if (!PLACE.test(unit.text)) errors.push(`${unit.path}: "${unit.text}" names no place in the paper: give a section, figure, table, appendix, equation or page`);
-        if (sectionCount > 0)
-          for (const m of unit.text.matchAll(/(?:§+|\bSec(?:tion|s)?\.?)\s*(\d+)/g))
-            if (Number(m[1]) > sectionCount) errors.push(`${unit.path}: cites §${m[1]}, but the paper's main text has ${sectionCount} section${sectionCount === 1 ? "" : "s"}`);
+        for (const c of sectionCites(text)) {
+          if (c.label !== undefined) settle(c.appendix ? `Appendix ${c.label}` : `§${c.label}`, index.section(c.label));
+          else settle("the appendix", index.appendix());
+        }
+        if (!anchored && !refused && !OTHER_PLACE.test(text) && !index.named(text))
+          errors.push(`${unit.path}: "${unit.text}" names no place in the paper: give a numbered section, figure, table, appendix, equation or page of the paper, or a section by its title`);
       }
       if (!unit.numbers) continue;
       // blank out what is no value, keeping every index
@@ -418,35 +376,41 @@ export function check(read: Draft, ctx: CheckContext): Checked {
       for (const pattern of NOT_VALUES) values = values.replace(pattern, (m) => " ".repeat(m.length));
       const missing: string[] = [];
       for (const n of numbersIn(values)) {
-        if ((n.bare && n.value < 10) || isYear(n) || numbers.has(n)) continue;
-        // read off a plot: the figure the whole text is about, or one its sentence cites
-        const from = unit.plot ?? cites(sentence(text, n.index)).filter((c) => c.kind === "figure").map((c) => `#${c.label}`);
-        if (from.length) for (const f of from) plots.add(f);
-        else missing.push(n.text);
+        if ((n.bare && n.value < 10) || isYear(n) || index.numbers.has(n)) continue;
+        if (unit.figure !== undefined) {
+          // a figure's own caption; one the session did not make has its error already
+          if (ctx.figures.has(unit.figure)) plots.add(unit.figure);
+          continue;
+        }
+        // read off a plot: the figures the whole text is built from, or those its sentence cites
+        const labels = unit.figures ?? cites(sentence(text, n.index)).filter((c) => c.kind === "figure").map((c) => c.label);
+        const names = labels.flatMap((label) => [...(imaged.get(labelKey(label)) ?? [])]);
+        if (names.length) for (const name of names) plots.add(name);
+        else if (labels.length) {
+          const entry = unseen.get(unit.path) ?? { texts: [], figures: new Set<string>() };
+          entry.texts.push(n.text);
+          for (const label of labels) entry.figures.add(`Figure ${label}`);
+          unseen.set(unit.path, entry);
+        } else missing.push(n.text);
       }
       if (missing.length) absent.set(unit.path, missing);
     }
   }
 
-  const listed = [...absent].slice(0, MAX_LISTED).map(([path, texts]) => `${path}: ${[...new Set(texts)].join(", ")} ${texts.length === 1 ? "is" : "are"} not in the paper's text`);
-  if (listed.length) {
-    if (absent.size > MAX_LISTED) listed.push(`… and ${absent.size - MAX_LISTED} more places with numbers the paper's text lacks`);
+  const are = (texts: string[]) => `${[...new Set(texts)].join(", ")} ${new Set(texts).size === 1 ? "is" : "are"}`;
+  const listed = [
+    ...[...absent].map(([path, texts]) => `${path}: ${are(texts)} not in the paper's text`),
+    ...[...unseen].map(([path, { texts, figures }]) => `${path}: ${are(texts)} not in the paper's text, and this session has no image of ${[...figures].join(", ")} to check ${new Set(texts).size === 1 ? "it" : "them"} against`),
+  ];
+  if (listed.length > MAX_LISTED) listed.splice(MAX_LISTED, Infinity, `… and ${listed.length - MAX_LISTED} more places with numbers the paper's text lacks`);
+  if (listed.length)
     listed.push(
       "Numbers: give each number as the paper's text states it (0.34 and 34% are the same; rounding is fine). A value read off a plot " +
-        "cites its figure in the same sentence. Your own arithmetic (a difference, a ratio the paper does not state) is given through " +
-        "the paper's numbers or in words.",
+        'cites its figure in the same sentence, and this session has that figure\'s image: make it with figure(file, name, "Figure 6") or ' +
+        'crop(page, box, name, "Figure 6"), or show it in a fig block. Your own arithmetic (a difference, a ratio the paper does not ' +
+        "state) and what you found outside the paper are given through the paper's numbers or in words.",
     );
-  }
   errors.push(...listed, ...amongErrors(read.among_collection, ctx.found));
   for (const [i, n] of (read.process_notes ?? []).entries()) if (n.url !== undefined && !isWebUrl(n.url)) errors.push(`/process_notes/${i}/url: not an absolute http(s) URL`);
-
-  const names = new Set<string>();
-  const unshown = new Set<string>();
-  for (const plot of plots) {
-    // "#6" is the paper's Figure 6, cited; anything else is the name of a figure the read shows
-    const name = plot.startsWith("#") ? shown.get(/^#(\d+)/.exec(plot)?.[1] ?? "") : plot;
-    if (name !== undefined && ctx.figures.has(name)) names.add(name);
-    else if (plot.startsWith("#")) unshown.add(`Figure ${plot.slice(1)}`);
-  }
-  return { errors, plots: { shown: [...names], unshown: [...unshown] } };
+  return { errors, plots: [...plots], unverified: [...unverified] };
 }

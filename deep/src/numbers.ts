@@ -22,13 +22,13 @@ export interface Found {
 const SCALES: Record<string, number> = { k: 1e3, K: 1e3, M: 1e6, B: 1e9, thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12 };
 const SUPERSCRIPTS: Record<string, string> = { "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4", "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9", "⁻": "-", "⁺": "+" };
 
-// A power of ten on its own (10^{-4}), or a number: digits with thousands separators or plain, an optional
-// exponent (e-5, × 10^{-5}), then a percent sign or a suffix. Digits glued to a letter before them (Qwen3, L4H3)
-// are part of a name, not a number.
+// A power of ten on its own (10^{-4}), or a number: digits with thousands separators or plain, or a decimal
+// written from its point (.95), an optional exponent (e-5, × 10^{-5}), then a percent sign or a suffix. Digits
+// glued to a letter before them (Qwen3, L4H3) are part of a name, not a number.
 const NUMBER = new RegExp(
   "(?<![\\w.])(?:" +
     "10\\s*\\^\\s*\\{?\\s*([-+−]?\\d+)\\s*\\}?" +
-    "|(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?)" +
+    "|(\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?|\\.\\d+)" +
     "(?:\\s*(?:×|x|\\*|·)\\s*10\\s*\\^\\s*\\{?\\s*([-+−]?\\d+)\\s*\\}?|[eE]([-+−]?\\d+)(?![\\w.]))?" +
     "(?:\\s?(%|percent\\b)|\\s?(thousand|million|billion|trillion)\\b|([kKMB])(?![A-Za-z0-9]))?" +
     ")",

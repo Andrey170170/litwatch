@@ -167,7 +167,9 @@ no shell, no imports. The paper is already loaded.
 Session API:
 - paper: the full paper as a string, its LaTeX source (inputs inlined, the bibliography in place) or the text of its PDF as \
 markdown (the first message says which); meta: {id, title, authors, published, url}
-- sections(): headings with character offsets; section(title): the text of one section (substring match)
+- sections(): the paper's headings, [{level, title, number, start, end, chars}]; number is the section's own ("3.2", \
+"A.1") where a LaTeX source shows it, and is what a where cites ("§3.2"). section(title): the text of one section, by its \
+number or its title (substring match)
 - find(pattern, context = 200, limit = 20): matches of a string or RegExp with surrounding text and section
 - refs(): the bibliography as an array of strings, often with arXiv ids; empty when it is in another form, so read it with \
 find() or section()
@@ -185,12 +187,13 @@ through its API: /r/<id> lists the repository, /r/<id>/<path> returns a file. A 
 a read needs
 - await figures(): the figure files of the paper's source as arXiv holds it, [{file, kind, bytes}]; empty for a paper with no \
 LaTeX source. The text's \\includegraphics lines say which file is which figure
-- await figure(file, name?): one of those files as a figure of the read, kept under name (the file's own name when left \
-out) and shown to you. A PDF, PNG, JPEG or GIF file converts; an EPS file does not
+- await figure(file, name?, number?): one of those files as a figure of the read, kept under name (the file's own name \
+when left out) and shown to you. number says which of the paper's figures it is ("Figure 6", "Figure A.1"): give it for a \
+figure you read values off. A PDF, PNG, JPEG or GIF file converts; an EPS file does not
 - await pdfPage(n): page n of the paper's PDF, shown to you
-- await crop(n, [left, top, right, bottom], name): the part of page n inside the box, each edge a fraction of the page's \
-width or height from 0 to 1, kept as a figure under name and shown to you. This is how a figure is taken from a paper with \
-no source, from an EPS file, or when a figure is several files side by side
+- await crop(n, [left, top, right, bottom], name, number?): the part of page n inside the box, each edge a fraction of the \
+page's width or height from 0 to 1, kept as a figure under name and shown to you; number as for figure(). This is how a \
+figure is taken from a paper with no source, from an EPS file, or when a figure is several files side by side
 - await render(read, target?, width?): the draft as the lab will see it, drawn by the web app's own components and shown to \
 you. target: nothing for the whole read, a section's id, or "<section id>.<n>" for its n-th block, counted from 0; width: \
 "desktop" (the default) or "phone". A long target comes back as several images and is cut after eight: render a section or \
@@ -209,15 +212,17 @@ ${schemaJson()}
 What submit checks beyond the schema:
 - Structure: the sections in the order above; one lens per topic listed and no other; ids unique; each table row with as \
 many cells as the table has columns; each edge between nodes the diagram has.
-- Figures: a fig block's name is a figure figure() or crop() made in this session, and its number is the paper's ("Figure \
-6"). Every figure and table the read cites exists in the paper. Every where names a place in the paper: a section, figure, \
-table, appendix, equation or page.
+- Places: a fig block's name is a figure figure() or crop() made in this session, and its number is the paper's ("Figure \
+6"). Every figure and table the read cites exists in the paper. Every where names a place the paper has: a section or an \
+appendix by its number as sections() gives it ("§3.2", "Appendix B.1") or by its title, a figure or table, an equation, a \
+page; a number the paper's outline lacks is refused.
 - Numbers: every number written in digits that the read gives as the paper's (a result, a setting, a count) appears in the \
-paper's text, in any common form (0.34 or 34%, 1,200 or 1.2k, rounded to fewer places). A value read off a plot cites its \
-figure in the same sentence ("about 0.7 at layer 12 (Fig. 6)") and the read shows that figure: the reviewer checks the value \
-against it. Your own arithmetic, such as a difference or a ratio the paper does not state, is given through the paper's own \
-numbers or in words. The reading time, what you found in the repository, and other papers' numbers in Related work are yours \
-and are not checked.
+paper's text, in any common form (0.34 or 34%, .95 or 0.95, 1,200 or 1.2k, rounded to fewer places): in prose, captions, \
+facts and their tags, tables and diagrams. A value read off a plot cites its figure in the same sentence ("about 0.7 at \
+layer 12 (Fig. 6)"), and this session has that figure's image, made by figure() or crop() with its number or shown in a fig \
+block: the reviewer checks the value against the image. Your own arithmetic, such as a difference or a ratio the paper does \
+not state, and what you found outside the paper (a repository's file count) are given through the paper's own numbers or in \
+words. Whole numbers under ten, years, the reading time and other papers' numbers in Related work are not checked.
 - Equations: every eq block and every $inline formula$ parses in KaTeX.
 - Diagrams: leave a diagram's coordinates out and it is laid out for you; render it to see the result, and place the nodes \
 yourself (x, y, w, h on every node, at least 40 tall) only where the layout does not serve.
@@ -286,10 +291,10 @@ ${RUBRIC}
 The three prose faults, which a clarity finding names:
 ${FAULTS}
 
-Code has already checked that the read fits its schema, that its numbers appear in the paper's text, that the figures and \
-tables it cites exist, and that every verdict and CARD note names a place: do not repeat those checks. Check what code \
-cannot: whether a number is the right one for what the read says of it, whether a value read off a plot matches the plot you \
-are shown, whether a claim's verdict is fair.
+Code has already checked that the read fits its schema, that its numbers appear in the paper's text, that the figures, \
+tables and sections it cites exist (the message lists any it could not tell), and that every verdict and CARD note names a \
+place: do not repeat those checks. Check what code cannot: whether a number is the right one for what the read says of it, \
+whether a value read off a plot matches the plot you are shown, whether a claim's verdict is fair.
 
 Findings point at a place in the read (where: a section's id, or "<section id>.<n>" for its n-th block counted from 0) and \
 say what is wrong and what would fix it. A clarity finding names its fault, quotes the sentence and gives a rewrite. Give \
@@ -297,22 +302,41 @@ the findings last, most important first, and only those worth acting on: a write
 fixes among them. A read passes when every score is at least 4 and every check passes.`;
 }
 
-/** What the reviewer is given to read, before the plot figures. */
-export function reviewerMessage(paper: PaperInput, read: Read, unshown: string[]): string {
-  const body =
-    paper.body.length > MAX_BODY_CHARS_IN_CONTEXT ? `${paper.body.slice(0, MAX_BODY_CHARS_IN_CONTEXT)}\n\n[the paper's text is cut here, at ${MAX_BODY_CHARS_IN_CONTEXT} of ${paper.body.length} characters]` : paper.body;
+/** The paper's text as the reviewer gets it: whole, appendix and bibliography included, where `room` characters
+ * allow. A text past that loses its bibliography first, which holds no evidence for the read, and is then cut at
+ * its end; `left` names what was left out, for the reviewer and for the read's process note. */
+export function reviewerText(paper: PaperInput, room: number): { text: string; left: string[] } {
+  if (paper.body.length <= room) return { text: paper.body, left: [] };
+  const left: string[] = [];
+  let text = paper.body;
+  const refs = splitPaper(paper.body, paper.body_source).cuts.find((c) => c.part === "references");
+  if (refs) {
+    left.push(`its bibliography (${refs.end - refs.start} characters)`);
+    text = `${text.slice(0, refs.start)}[the bibliography stood here and is left out]\n${text.slice(refs.end)}`;
+  }
+  if (text.length > room) {
+    const cut = text.length - room;
+    left.push(`the last ${cut} characters of its text`);
+    text = `${text.slice(0, room)}\n\n[the paper's text is cut here; its last ${cut} characters are left out]`;
+  }
+  return { text, left };
+}
+
+/** What the reviewer is given to read, before the plot figures: `text` and `left` are `reviewerText`'s. */
+export function reviewerMessage(paper: PaperInput, text: string, left: string[], read: Read, unverified: string[]): string {
   return [
     `arXiv ${paper.id}: ${paper.title}`,
     `Text source: ${paper.body_source ?? "unknown"}`,
     "",
-    "The paper's text:",
+    left.length ? `The paper's text, without ${left.join(" and ")}, which the model's context has no room for:` : "The paper's text, whole:",
     "",
-    body,
+    text,
     "",
     "The Deep read, as JSON:",
     "",
     JSON.stringify(read),
-    ...(unshown.length ? ["", `The read cites ${unshown.join(", ")} for values read off a plot without showing ${unshown.length === 1 ? "it" : "them"}: those values could not be given to you to check.`] : []),
+    ...(left.length ? ["", "What the read says of the parts of the paper left out above cannot be checked here: do not count it for or against the read."] : []),
+    ...(unverified.length ? ["", `Code could not tell from the paper's text whether these places the read cites exist: ${unverified.join(", ")}. Check each against the paper.`] : []),
   ].join("\n");
 }
 

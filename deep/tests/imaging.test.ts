@@ -1,14 +1,14 @@
 /**
  * The real browser and poppler. These run where both are installed (the image, a developer's machine after
- * `npx playwright-core install chromium-headless-shell`) and skip where they are not.
+ * `npx playwright-core install chromium-headless-shell`) and skip where they are not. Installed is told by what is
+ * on disk, never by trying: a browser that is there and does not start, or a conversion that fails, fails the test.
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { RenderUnavailable, Studio } from "../src/imaging.ts";
@@ -16,12 +16,18 @@ import { layout } from "../src/layout.ts";
 import type { Read } from "../src/read.ts";
 import { blocks, changed, draft, pdf, png } from "./support.ts";
 
+/** The headless shell at the revision the pinned playwright-core drives, where Playwright keeps its browsers. */
+function shellInstalled(): boolean {
+  const pinned = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "../node_modules/playwright-core/browsers.json"), "utf8")) as { browsers: { name: string; revision: string }[] };
+  const revision = pinned.browsers.find((b) => b.name === "chromium-headless-shell")!.revision;
+  const kept = process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(homedir(), process.platform === "darwin" ? "Library/Caches" : ".cache", "ms-playwright");
+  return existsSync(path.join(kept, `chromium_headless_shell-${revision}`, "INSTALLATION_COMPLETE"));
+}
+const onPath = (program: string): boolean => (process.env.PATH ?? "").split(path.delimiter).some((dir) => dir && existsSync(path.join(dir, program)));
+
 const studio = new Studio("http://127.0.0.1:9");
-const browser = await studio.picture(png(2, 2), "image/png").then(
-  () => undefined,
-  (e: Error) => `Chromium is not installed here (${e.message.slice(0, 80)})`,
-);
-const poppler = spawnSync("pdftoppm", ["-v"]).error ? "poppler-utils is not installed here" : undefined;
+const browser = shellInstalled() ? undefined : "Chromium's headless shell is not installed here";
+const poppler = onPath("pdftoppm") && onPath("pdfinfo") ? undefined : "poppler-utils is not installed here";
 after(() => studio.close());
 
 const listen = async (server: Server): Promise<string> => {
@@ -62,16 +68,24 @@ test("poppler counts a PDF's pages and draws one at the width asked for", { skip
 });
 
 /** A render page of the test's own: it draws each section 100 px tall plus 50 px per block, 854 px wide, with the
- * web app's markers; and first tries to reach another origin, which makes the drawing 5000 px taller if it can. */
+ * web app's markers; and first tries to reach another origin, straight and through its own origin's redirects
+ * (/hop answers 307 to the other origin), which makes the drawing 5000 px taller if it can. */
 const page = (other: string) => `<!doctype html><meta charset="utf-8"><body style="margin:0"><script>
 window.renderRead = async (read) => {
-  const fetched = await fetch("${other}/leak").then(() => true, () => false);
-  const named = await fetch("http://other.example/leak").then(() => true, () => false);
-  const image = await new Promise((done) => { const i = new Image(); i.onload = () => done(true); i.onerror = () => done(false); i.src = "${other}/pixel.png"; });
+  const loads = (tag, url) => new Promise((done) => { const e = document.createElement(tag); e.onload = () => done(true); e.onerror = () => done(false); e.src = url; document.head.append(e); });
+  const reached = [
+    await fetch("${other}/leak").then(() => true, () => false),
+    await fetch("http://other.example/leak").then(() => true, () => false),
+    await loads("img", "${other}/pixel.png"),
+    await fetch("/hop").then(() => true, () => false),
+    await loads("img", "/hop.png"),
+    await loads("script", "/hop.js"),
+    window.hopped === true,
+  ];
   const root = document.createElement("div");
   root.className = "dread";
   root.style.cssText = "width: 854px; max-width: 100%; background: #fff";
-  if (fetched || named || image) root.style.paddingTop = "5000px";
+  if (reached.some(Boolean)) root.style.paddingTop = "5000px";
   for (const s of read.sections) {
     const section = document.createElement("section");
     section.dataset.section = s.id;
@@ -90,19 +104,25 @@ window.renderRead = async (read) => {
 
 test("a render draws the target in tiles at either width, and the browser reaches nothing but the render page", { skip: browser }, async () => {
   let asked = 0;
-  const other = createServer((_req, res) => {
+  const other = createServer((req, res) => {
     asked += 1;
-    res.writeHead(200, { "content-type": "image/png", "access-control-allow-origin": "*" }).end(png(1, 1));
+    if (req.url?.endsWith(".js")) res.writeHead(200, { "content-type": "text/javascript", "access-control-allow-origin": "*" }).end("window.hopped = true;");
+    else res.writeHead(200, { "content-type": "image/png", "access-control-allow-origin": "*" }).end(png(1, 1));
   });
   const otherUrl = await listen(other);
-  const site = createServer((req, res) => (req.url === "/render.html" ? res.writeHead(200, { "content-type": "text/html" }).end(page(otherUrl)) : res.writeHead(404).end()));
+  const site = createServer((req, res) => {
+    if (req.url === "/render.html") res.writeHead(200, { "content-type": "text/html" }).end(page(otherUrl));
+    // the allowed origin itself sending the browser elsewhere
+    else if (req.url?.startsWith("/hop")) res.writeHead(307, { location: `${otherUrl}${req.url}` }).end();
+    else res.writeHead(404).end();
+  });
   const local = new Studio(await listen(site));
   try {
     // glance, method (2 blocks), result (3), claims, limits, related, repro: 7 × 100 + 5 × 50
     const read = await layout(draft());
     const whole = await local.render(read, {}, {}, "desktop");
     assert.deepEqual({ shots: whole.shots.length, height: whole.height, cut: whole.cut }, { shots: 1, height: 950, cut: false }, "5000 px taller if the page reached another origin");
-    assert.equal(asked, 0, "no request left the render page's origin");
+    assert.equal(asked, 0, "no request left the render page's origin, by itself or by a redirect");
     assert.ok(isJpeg(whole.shots[0]!.data));
     assert.deepEqual([whole.shots[0]!.width, whole.shots[0]!.height], [854, 950]);
 

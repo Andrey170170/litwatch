@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { outline, splitPaper } from "../src/paper.ts";
+import { headings, outline, splitPaper } from "../src/paper.ts";
 import { BODY } from "./support.ts";
 
 /** `BODY` without its appendix. */
@@ -45,16 +45,72 @@ test("a PDF's text is cut at its References and Appendix headings", () => {
   assert.deepEqual(splitPaper(swapped, "pdf").cuts.map((c) => c.part), ["appendix"], "a bibliography inside the appendix goes with it");
 });
 
-test("the outline says which headings were left out of the message", () => {
-  const { cuts } = splitPaper(BODY, "latex");
-  const at = (text: string) => BODY.indexOf(text);
-  const text = outline(
-    [
-      { level: 1, title: "Results", start: at("\\section{Results}"), chars: 300 },
-      { level: 1, title: "References", start: at("\\begin{thebibliography}"), chars: 120 },
-      { level: 1, title: "Probe training details", start: at("\\section{Probe training"), chars: 90 },
-    ],
-    cuts,
+// The forms litwatch's archive gives a PDF's text (src/litwatch/archive/text.py): pymupdf4llm's Markdown, whose
+// headings come bold with a space after and whose appendix is lettered headings after the references; and, without
+// that reader, pypdfium2's plain text, whose headings are lines like any other.
+const MARKDOWN = [
+  "# **Probes read the trace** ", "", "## **1 Method** ", "", "We probe, see Appendix A for details.", "", "## **References** ", "", "- Turpin et al. Language models don't always say what they think.", "",
+  "## **A Additional Samples** ", "", "See Table 6.", "", "### **A.1 BBH** ", "", "More.", "",
+].join("\n");
+const PLAIN = [
+  "Probes read the trace", "Contents", "References", "Appendix", "1 Method", "We probe 3 models, see", "Appendix A for more details). Then we compare", "2 Ghost Whispers", "References",
+  "A. Vaswani, N. Shazeer. Attention is all you need.", "J. Andreas. Language models as agent models. 2022.", "15", "A Additional Samples", "See Table 6.", "C.1 BBH", "More.", "",
+].join("\n");
+
+test("a PDF's text is cut at the bold headings its Markdown form has: References, and the appendix by letter or by name", () => {
+  const { main, cuts } = splitPaper(MARKDOWN, "pdf");
+  assert.deepEqual(cuts.map((c) => [c.part, MARKDOWN.slice(c.start, c.start + 22)]), [["references", "## **References** \n\n- "], ["appendix", "## **A Additional Samp"]]);
+  assert.equal(main, MARKDOWN.slice(0, MARKDOWN.indexOf("## **References**")), "the main text ends where the references start");
+  assert.equal(cuts[1]!.end, MARKDOWN.length);
+  assert.deepEqual(headings(MARKDOWN, "pdf").map((h) => h.title), ["Probes read the trace", "1 Method", "References", "A Additional Samples", "A.1 BBH"], "a title is given without its emphasis");
+  // named, with the references after it or before it
+  const named = MARKDOWN.replace("## **A Additional Samples** ", "## **Appendix A: Additional Samples** ");
+  assert.deepEqual(splitPaper(named, "pdf").cuts.map((c) => c.part), ["references", "appendix"]);
+  const first = "# **Probes** \n\n## **1 Method** \n\nWe probe.\n\n## **Appendix** \n\nDetails.\n\n## **References** \n\n- Turpin et al.\n";
+  assert.deepEqual(splitPaper(first, "pdf").cuts.map((c) => [c.part, c.start]), [["appendix", first.indexOf("## **Appendix**")]]);
+  // what follows the references under a heading that is no appendix's stays main text
+  const methods = MARKDOWN.replace("## **A Additional Samples** ", "## **Methods** ").replace("### **A.1 BBH** ", "### **Probes** ");
+  const kept = splitPaper(methods, "pdf");
+  assert.deepEqual(kept.cuts.map((c) => c.part), ["references"]);
+  assert.ok(kept.main.includes("## **Methods**") && !kept.main.includes("Turpin"));
+});
+
+test("a PDF's plain text is cut at its References line and at the appendix's first line after it", () => {
+  const { main, cuts } = splitPaper(PLAIN, "pdf");
+  const references = PLAIN.lastIndexOf("References");
+  // the last line that reads References is the heading, not the table of contents' entry; a line of prose that
+  // starts "Appendix A" is no heading, nor is a line of the bibliography that starts with an initial
+  assert.deepEqual(cuts, [
+    { part: "references", start: references, end: PLAIN.indexOf("A Additional Samples") },
+    { part: "appendix", start: PLAIN.indexOf("A Additional Samples"), end: PLAIN.length },
+  ]);
+  assert.equal(main, PLAIN.slice(0, references));
+  assert.deepEqual(headings(PLAIN, "pdf").map((h) => h.title), ["References", "A Additional Samples"], "the two headings a plain text can be told to have");
+  // an appendix that says so
+  for (const line of ["Appendix", "Appendix A", "Appendix A: Additional Samples", "APPENDIX", "Supplementary Material"]) {
+    const named = PLAIN.replace("A Additional Samples", line);
+    assert.deepEqual(splitPaper(named, "pdf").cuts.map((c) => [c.part, c.start]), [["references", references], ["appendix", named.lastIndexOf(line)]], line);
+  }
+  // no appendix: the references run to the end
+  const none = PLAIN.slice(0, PLAIN.indexOf("15\n"));
+  assert.deepEqual(splitPaper(none, "pdf").cuts, [{ part: "references", start: references, end: none.length }]);
+});
+
+test("a LaTeX source's headings carry its numbers: sections counted, lettered from the appendix on, starred ones bare", () => {
+  const nested = BODY.replace("\\section{Results}", "\\subsection{Probe training}\nIt trains.\n\\subsection*{Aside}\nAn aside.\n\\subsection{Data}\nTraces.\n\\section{Results}");
+  assert.deepEqual(
+    headings(nested, "latex").map((h) => `${h.number ?? "-"} ${h.title}`),
+    ["- Abstract", "1 Introduction", "2 Method", "2.1 Probe training", "- Aside", "2.2 Data", "3 Results", "- References", "A Probe training details"],
   );
-  assert.equal(text, "- Results (300 characters)\n- References (120 characters, bibliography: in the session only)\n- Probe training details (90 characters, appendix: in the session only)");
+  // a source that numbers its sections its own way is not guessed at
+  const own = BODY.replace("\\appendix", "\\setcounter{section}{0}\\renewcommand{\\thesection}{S\\arabic{section}}");
+  assert.ok(headings(own, "latex").every((h) => h.number === undefined));
+});
+
+test("the outline gives each heading's number and says which were left out of the message", () => {
+  const { cuts } = splitPaper(BODY, "latex");
+  assert.equal(
+    outline(headings(BODY, "latex").slice(3), cuts).replace(/\d+ characters/g, "n characters"),
+    "- 3 Results (n characters)\n- References (n characters, bibliography: in the session only)\n- A Probe training details (n characters, appendix: in the session only)",
+  );
 });

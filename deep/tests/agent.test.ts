@@ -128,10 +128,10 @@ test("the first message carries the main text and leaves out the bibliography an
   assert.ok(message.includes("The probe reaches 71.3\\% accuracy"), "the results are in it");
   assert.ok(!message.includes("Turpin"), "no bibliography entry");
   assert.ok(!message.includes("learning rate"), "no appendix text");
-  // the outline is the session's sections(), marked where a part was left out
-  assert.match(message, /^- Results \(\d+ characters\)$/m);
+  // the outline is the session's sections(), each with its number, marked where a part was left out
+  assert.match(message, /^- 3 Results \(\d+ characters\)$/m);
   assert.match(message, /^- References \(\d+ characters, bibliography: in the session only\)$/m);
-  assert.match(message, /^- Probe training details \(\d+ characters, appendix: in the session only\)$/m);
+  assert.match(message, /^- A Probe training details \(\d+ characters, appendix: in the session only\)$/m);
   assert.match(message, /Left out of this message and kept in `paper` in the session: the bibliography \(\d+ characters\) and the appendix \(\d+ characters\)/);
 });
 
@@ -207,8 +207,44 @@ test("a read that passes its review is returned with the round, and the reviewer
   assert.equal(sent[0]!.messages.length, 2);
   assert.ok(textOf(system!).startsWith("You review a Deep read"));
   assert.deepEqual(system!.toolsAdded?.map((t) => t.name), ["review"]);
-  assert.ok(textOf(user!).includes("The learning rate is 0.003"), "the paper's whole text, the appendix included");
+  assert.ok(textOf(user!).includes("The paper's text, whole:") && textOf(user!).includes(BODY), "the paper's whole text, the appendix included");
   assert.ok(textOf(user!).includes(JSON.stringify(draft())), "the read as JSON");
+});
+
+/** `BODY` with `chars` more characters of appendix before its last sentence. */
+const long = (chars: number) => BODY.replace("The learning rate is 0.003", `${"The probe is linear. ".repeat(Math.ceil(chars / 21))}\nThe learning rate is 0.003`);
+
+test("the reviewer reads the whole paper where the model's context has room, past any fixed cut", async () => {
+  // 400,000 tokens of context: room for a text of 250,000 characters, whose appendix ends it
+  const { models: m, faux } = models(400_000);
+  const sent: Sent[] = [];
+  faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent)]);
+  const body = long(250_000);
+  const outcome = await run(m, { paper: { ...PAPER, body } });
+  assert.ok(textOf(sent[0]!.messages[1]!).includes(body), "all of it, the appendix's last sentence included");
+  assert.deepEqual(outcome.result, draft(), "a whole review leaves no note");
+});
+
+test("a paper past the model's context reaches the reviewer cut, with what was left out said to it and noted on the read", async () => {
+  // 64,000 tokens of context leave the paper the least it is given: 10,000 characters
+  const { models: m, faux } = models(64_000);
+  const sent: Sent[] = [];
+  faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent)]);
+  const body = long(40_000);
+  const outcome = await run(m, { paper: { ...PAPER, body } });
+  const message = textOf(sent[0]!.messages[1]!);
+  const bibliography = body.indexOf("\\appendix") - body.indexOf("\\begin{thebibliography}") - 1;
+  // what is left once a line stands in for the bibliography, past the first 10,000 characters
+  const left = `its bibliography (${bibliography} characters) and the last ${body.length - bibliography + "[the bibliography stood here and is left out]\n".length - 10_000} characters of its text`;
+  assert.ok(message.includes(`The paper's text, without ${left}, which the model's context has no room for:`), message.slice(0, 400));
+  assert.ok(message.includes("The probe reaches 71.3\\% accuracy") && message.includes("[the bibliography stood here and is left out]") && !message.includes("Language models don't always say"), "the bibliography goes first");
+  assert.ok(message.includes("[the paper's text is cut here;") && !message.includes("The learning rate is 0.003"), "then the end of the text");
+  assert.ok(message.includes("What the read says of the parts of the paper left out above cannot be checked here"));
+  // a pass on part of the paper is not a silent pass
+  assert.deepEqual(outcome.reviews?.map((r) => r.passed), [true]);
+  assert.deepEqual(outcome.result?.process_notes, [
+    { kind: "tool", source: "service", note: `The reviewer was not given the whole paper: ${left} did not fit the model's context, so what the read says of that part was not reviewed.` },
+  ]);
 });
 
 test("a failed review sends its findings into the writer's own conversation, and the revision is reviewed again", async () => {
@@ -285,6 +321,23 @@ test("a review that cannot run keeps the read, unreviewed; a verdict that does n
   assert.equal(lost.error, undefined);
   assert.deepEqual(lost.result?.process_notes, [{ kind: "tool", source: "service", note: "The read was not reviewed: the review could not run (no credential stored)." }]);
 
+  // a first answer that is no verdict, then a retry that throws: the first call was made and is counted
+  const half = models();
+  half.faux.setResponses([submits(draft()), reviews({ ...PASSING, scores: { ...PASSING.scores, clarity: 6 } })]);
+  const complete = half.models.completeSimple.bind(half.models);
+  let asked = 0;
+  half.models.completeSimple = (async (...args: Parameters<Models["completeSimple"]>) => {
+    if (++asked > 1) throw new Error("no credential stored");
+    return complete(...args);
+  }) as Models["completeSimple"];
+  const cut = await run(half.models);
+  assert.equal(asked, 2);
+  assert.equal(cut.stats.turns, 2, "the writer's turn and the reviewer's first call");
+  const judged = cut.trace.find((e) => e.type === "review")!;
+  assert.ok(judged.usage.output > 0 && judged.usage.input > 0, "the usage of the call that was answered is kept");
+  assert.equal(cut.stats.output, cut.trace.filter((e) => e.type === "assistant").reduce((n, e) => n + e.usage.output, 0) + judged.usage.output);
+  assert.deepEqual(cut.result?.process_notes, [{ kind: "tool", source: "service", note: "The read was not reviewed: the review could not run (no credential stored)." }]);
+
   const repaired = models();
   const sent: Sent[] = [];
   repaired.faux.setResponses([submits(draft()), reviews({ ...PASSING, scores: { ...PASSING.scores, clarity: 6 } }), seeing(reviews(PASSING), sent)]);
@@ -348,20 +401,49 @@ test("the reviewer is shown the figures the read cites for values read off a plo
     assert.equal(outcome.error, undefined);
     const user = sent[0]!.messages[1]!;
     assert.deepEqual(imagesOf(user), [view(png(8, 8).length)], "the figure as the writer saw it, and not the one the read does not cite");
-    assert.ok(textOf(user).includes('The figure the read shows as "probe":'));
+    assert.ok(textOf(user).includes('The read\'s figure "probe", which the read gives values read off:'));
     assert.deepEqual(outcome.figures, [{ name: "probe", mime: "image/webp", data: WEBP.toString("base64") }], "a figure made and not shown is not returned");
     assert.equal(outcome.result?.process_notes, undefined, "the e-print was the version's: nothing to note");
   });
 });
 
-test("a plot value whose figure the read does not show reaches the reviewer as words, with no image", async () => {
-  const { models: m, faux } = models();
-  const sent: Sent[] = [];
-  faux.setResponses([submits(showing()), seeing(reviews(PASSING), sent)]);
-  await run(m);
-  const user = sent[0]!.messages[1]!;
-  assert.deepEqual(imagesOf(user), []);
-  assert.ok(textOf(user).endsWith("The read cites Figure 1 for values read off a plot without showing it: those values could not be given to you to check."));
+test("a plot value is refused until the session has its figure's image, which then reaches the reviewer though the read shows no fig block", async () => {
+  await withSite(async ({ url }) => {
+    const { models: m, faux } = models();
+    const sent: Sent[] = [];
+    faux.setResponses([
+      submits(showing()),
+      cell(`await figure("figs/probe.png", "probe", "Figure 1"); await submit(${JSON.stringify(showing())})`),
+      seeing(reviews(PASSING), sent),
+    ]);
+    const outcome = await run(m, { hosts: local(url) });
+    const submitted = outcome.trace.filter((e) => e.type === "submit");
+    assert.deepEqual(submitted.map((s) => s.ok), [false, true]);
+    assert.equal(submitted[0]!.errors?.[0], "/sections/1/blocks/0/text: 0.84 is not in the paper's text, and this session has no image of Figure 1 to check it against");
+    const user = sent[0]!.messages[1]!;
+    assert.deepEqual(imagesOf(user), [view(png(8, 8).length)]);
+    assert.ok(textOf(user).includes('The paper\'s Figure 1 (figure "probe" of the writer\'s session), which the read gives values read off:'));
+    assert.deepEqual(outcome.figures, [], "the read shows no figure, so the job returns none");
+  });
+});
+
+test("figures made at once in one cell each reach the reviewer under their own name", async () => {
+  await withSite(async ({ url }) => {
+    const { models: m, faux } = models();
+    const sent: Sent[] = [];
+    // a paper with two figures, and a read with a value off each
+    const body = BODY.replace("\\section{Results}", "\\begin{figure}\n\\includegraphics{a/setup.png}\n\\caption{Loss by step.}\n\\end{figure}\n\\section{Results}");
+    const read = changed((d) => (blocks(d, "method")[0]!.text = "Accuracy peaks near 0.84 at layer 9 (Fig. 1). Loss falls to about 0.31 (Fig. 2)."));
+    faux.setResponses([
+      cell(`await Promise.all([figure("figs/probe.png", "probe", "Figure 1"), figure("a/setup.png", "setup", "Figure 2")]); await submit(${JSON.stringify(read)})`),
+      seeing(reviews(PASSING), sent),
+    ]);
+    const outcome = await run(m, { paper: { ...PAPER, body }, hosts: local(url) });
+    assert.equal(outcome.error, undefined);
+    const content = sent[0]!.messages[1]!.content as { type: string; text?: string; data?: string }[];
+    const shown = content.flatMap((c, i) => (c.type === "image" ? [[/figure "(\w+)"/.exec(content[i - 1]!.text!)![1], c.data]] : []));
+    assert.deepEqual(shown, [["probe", view(png(8, 8).length)], ["setup", view(png(4, 4).length)]]);
+  });
 });
 
 test("figures from the latest e-print, and a render that could not be made, are the service's notes on the read", async () => {
@@ -380,7 +462,7 @@ test("figures from the latest e-print, and a render that could not be made, are 
     assert.deepEqual(asked, ["/e-print/2610.00001"], "no version to ask for");
     assert.deepEqual(outcome.result?.process_notes, [
       { kind: "tool", source: "service", note: "An image could not be made: the browser or litwatch's render page was not available, so the writer could not look at a figure or at what it drew." },
-      { kind: "input", source: "service", note: "litwatch could not say which arXiv version its text is of, so the figures were taken from the paper's latest e-print." },
+      { kind: "input", source: "service", note: "litwatch could not say which arXiv version its text is of, so the figures were taken from the paper's latest version on arXiv." },
     ]);
   });
 });

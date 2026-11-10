@@ -8,7 +8,7 @@
 import type { AssistantMessage, ImageContent, Message, Model, Models, TextContent, ThinkingLevel } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import type { Shot } from "./imaging.ts";
-import { reviewerMessage, reviewerPrompt, type PaperInput, type SelectionContext } from "./prompt.ts";
+import { reviewerMessage, reviewerPrompt, reviewerText, type PaperInput, type SelectionContext } from "./prompt.ts";
 import type { Read } from "./read.ts";
 import { enumOf, schemaErrors } from "./schema.ts";
 
@@ -78,14 +78,32 @@ const TOOL = { name: "review", description: "Give the review's verdict: the four
 /** The reviewer is asked again this many times when its answer is no valid verdict. */
 const REPAIRS = 1;
 
+// The reviewer reads the whole paper where the model's context has room for it: the read cites the appendix, which
+// the writer read through section(). The room is the context less what the verdict and its reasoning, the prompt and
+// the figures take, at a low count of characters per token (LaTeX and numbers run short), less the read itself.
+const CHARS_PER_TOKEN = 3;
+const RESERVED_TOKENS = 60_000;
+const IMAGE_TOKENS = 2_000;
+/** The context taken for a model that does not say its own. */
+const DEFAULT_CONTEXT_TOKENS = 200_000;
+/** The reviewer is given at least this much of the paper, whatever the sum says. */
+const MIN_PAPER_CHARS = 10_000;
+
+/** How many characters of the paper's text the reviewer's call has room for. */
+export function paperRoom(contextWindow: number | undefined, readChars: number, images: number): number {
+  const tokens = (contextWindow || DEFAULT_CONTEXT_TOKENS) - RESERVED_TOKENS - images * IMAGE_TOKENS;
+  return Math.max(MIN_PAPER_CHARS, tokens * CHARS_PER_TOKEN - readChars);
+}
+
 export interface ReviewInput {
   paper: PaperInput;
   read: Read;
   selections: SelectionContext[];
-  /** The figures the read cites for values read off a plot, each as the model is shown it. */
-  plots: { name: string; shot: Shot }[];
-  /** Figures cited for such values that the read does not show. */
-  unshown: string[];
+  /** The figures the read cites for values read off a plot, each as the writer was shown it, with the paper's
+   * number for it where the session has one ("Figure 6"). */
+  plots: { name: string; number?: string; shot: Shot }[];
+  /** The places the read cites that code could not look up in the paper's text. */
+  unverified: string[];
 }
 
 export interface ReviewOutcome {
@@ -95,33 +113,44 @@ export interface ReviewOutcome {
   error?: string;
   /** Each model call made, for the run's usage and trace. */
   calls: AssistantMessage[];
+  /** What of the paper's text the reviewer was not given, for want of room in the model's context; empty when it
+   * read the whole. */
+  left: string[];
 }
 
-/** Ask the reviewer once; an answer that is no valid verdict is sent back with what is wrong with it, once. */
+/** Ask the reviewer once; an answer that is no valid verdict is sent back with what is wrong with it, once. A call
+ * that throws (the sign-in gone) ends the review like one answered with an error, with the calls made before it. */
 export async function review(
   models: Models,
   model: Model<string>,
   input: ReviewInput,
   opts: { effort: ThinkingLevel; signal?: AbortSignal; onPayload?: (payload: unknown) => unknown },
 ): Promise<ReviewOutcome> {
-  const content: (TextContent | ImageContent)[] = [{ type: "text", text: reviewerMessage(input.paper, input.read, input.unshown) }];
-  for (const { name, shot } of input.plots) {
-    content.push({ type: "text", text: `The figure the read shows as "${name}":` }, { type: "image", data: shot.data, mimeType: shot.mimeType });
+  const { text, left } = reviewerText(input.paper, paperRoom(model.contextWindow, JSON.stringify(input.read).length, input.plots.length));
+  const content: (TextContent | ImageContent)[] = [{ type: "text", text: reviewerMessage(input.paper, text, left, input.read, input.unverified) }];
+  for (const { name, number, shot } of input.plots) {
+    const what = `${number ? `The paper's ${number} (figure "${name}" of the writer's session)` : `The read's figure "${name}"`}, which the read gives values read off:`;
+    content.push({ type: "text", text: what }, { type: "image", data: shot.data, mimeType: shot.mimeType });
   }
   const messages: Message[] = [{ role: "user", content, timestamp: Date.now() }];
   const calls: AssistantMessage[] = [];
   for (let attempt = 0; ; attempt++) {
-    const answer = await models.completeSimple(
-      model,
-      { systemPrompt: reviewerPrompt(input.selections), tools: [TOOL], messages },
-      { reasoning: opts.effort, signal: opts.signal, onPayload: opts.onPayload },
-    );
+    let answer: AssistantMessage;
+    try {
+      answer = await models.completeSimple(
+        model,
+        { systemPrompt: reviewerPrompt(input.selections), tools: [TOOL], messages },
+        { reasoning: opts.effort, signal: opts.signal, onPayload: opts.onPayload },
+      );
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e), calls, left };
+    }
     calls.push(answer);
-    if (answer.stopReason === "error" || answer.stopReason === "aborted") return { error: answer.errorMessage ?? answer.stopReason, calls };
+    if (answer.stopReason === "error" || answer.stopReason === "aborted") return { error: answer.errorMessage ?? answer.stopReason, calls, left };
     const call = answer.content.find((c) => c.type === "toolCall" && c.name === TOOL.name);
     const errors = call?.type === "toolCall" ? schemaErrors(VerdictSchema, call.arguments) : ["no call of the review tool"];
-    if (call?.type === "toolCall" && errors.length === 0) return { verdict: call.arguments as Verdict, calls };
-    if (attempt >= REPAIRS) return { error: `the reviewer gave no valid verdict: ${errors.slice(0, 5).join("; ")}`, calls };
+    if (call?.type === "toolCall" && errors.length === 0) return { verdict: call.arguments as Verdict, calls, left };
+    if (attempt >= REPAIRS) return { error: `the reviewer gave no valid verdict: ${errors.slice(0, 5).join("; ")}`, calls, left };
     messages.push(answer);
     if (call?.type === "toolCall")
       messages.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: `The verdict does not fit the tool's schema:\n${errors.join("\n")}\nCall review again with a valid verdict.` }], isError: true, timestamp: Date.now() });

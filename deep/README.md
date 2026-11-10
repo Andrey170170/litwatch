@@ -18,17 +18,27 @@ restart forgets them.
 ## A run
 
 The writer's first message carries the paper's outline and its main text; the bibliography and the appendix stay in
-the session (`paper`), wherever they sit in the text, to be read where the read needs them. Besides the paper's text
-(`sections()`, `find()`, `refs()`), litwatch's papers (`store.search`), Semantic Scholar (`s2.lookup`) and the open
-web (`fetch`), the session has:
+the session (`paper`), wherever they sit in the text, to be read where the read needs them. The headings are found
+once per run (`src/paper.ts`): the session's `sections()` gives them, the first message's outline lists them, and
+the checks look sections up in them. A LaTeX source's carry their numbers (`3.2`, `A.1` from `\appendix` on); a
+PDF's text is read in the two forms litwatch's archive writes, Markdown with bold headings (`## **References**`)
+and plain text, where only the References line and the appendix's first line after it are told as headings.
+Besides the paper's text (`sections()`, `section()`, `find()`, `refs()`), litwatch's papers (`store.search`),
+Semantic Scholar (`s2.lookup`) and the open web (`fetch`), the session has:
 
-- `figures()`, `figure(file, name?)`: the figure files of the paper's e-print, fetched from arXiv once per run at the
-  version litwatch's text is of (`paper.body_version`), and one of them kept as a figure of the read. With no
-  version from litwatch the latest e-print is taken and the read carries a process note saying so. PDF, PNG, JPEG
-  and GIF files convert; EPS does not.
-- `pdfPage(n)`, `crop(n, [left, top, right, bottom], name)`: a page of the paper's PDF, which litwatch serves
-  (`GET /api/papers/<id>/pdf`, with the read token) or sends on to arXiv for when its archive has none, and a part
-  of one kept as a figure: for a paper with no source, an EPS figure, or a figure in several files.
+- `figures()`, `figure(file, name?, number?)`: the figure files of the paper's e-print, fetched from arXiv once per
+  run at the version litwatch's text is of (`paper.body_version`), and one of them kept as a figure of the read.
+  `number` says which of the paper's figures it is (`"Figure 6"`, `"Figure A.1"`). PDF, PNG, JPEG and GIF files
+  convert; EPS does not.
+- `pdfPage(n)`, `crop(n, [left, top, right, bottom], name, number?)`: a page of the paper's PDF, and a part of one
+  kept as a figure: for a paper with no source, an EPS figure, or a figure in several files. The PDF is litwatch's
+  (`GET /api/papers/<id>/pdf`, with the read token); where litwatch has none and answers with a redirect, it is
+  arXiv's at the version of litwatch's text (`arxiv.org/pdf/<id>v<version>`), not the latest the redirect points
+  at. The version of the PDF litwatch's own archive holds is litwatch's to match to the text.
+
+With no version from litwatch the e-print and arXiv's PDF are the latest, and the read carries a process note
+saying so. Each figure made is one record (`src/figures.ts`): its WebP, the view the model saw, and its number.
+
 - `render(read, target?, width?)`: the draft drawn by the web app's own components on litwatch's render page
   (`<LITWATCH_URL>/render.html`), whole, one section or one block, at the desktop's width or the phone's. It draws
   only the figures this session made.
@@ -44,20 +54,33 @@ diagram's coordinates optional. It then checks in code (`src/checks.ts`) what a 
 - the sections in their order, one lens per topic the read is written for and no other, ids unique, each table row
   with as many cells as the table has columns, each edge between nodes the diagram has, a placed node at least 40 px
   tall;
-- every `fig` block naming a figure this session made, and every figure and table cited being the paper's;
-- every `where` (a claim's verdict, a CARD note, a diagram's part) naming a place in the paper, and no section
-  number past the main text's last;
+- every `fig` block naming a figure this session made, under the number it was made as, and every figure and table
+  cited being the paper's. A label is read whole (`3`, `A.1`, `S2`), by one parser for every lookup
+  (`src/places.ts`). A LaTeX source's floats are counted, and one with no table has none; a PDF's text has a
+  figure when it mentions it;
+- every `where` (a claim's verdict, a CARD note, a diagram's part) naming a place the paper has: a section or an
+  appendix whose number is in the paper's outline at its depth (`§2.3` needs section 2 to have a third
+  subsection), a figure or table, a numbered equation, algorithm, theorem, footnote or page, or a section by its
+  title;
 - every equation and inline formula through KaTeX;
 - every number given as the paper's being in the paper's text, in any common form (`src/numbers.ts`: 0.34 or 34%,
-  1,200 or 1.2k, rounded to the read's precision). A value the text lacks passes when its sentence cites a figure:
-  it was read off a plot, and the reviewer is shown that figure. Whole numbers under ten, years, the reading time,
-  what the read found in the repository, and other papers' numbers in Related work are not checked.
+  .95 or 0.95, 1,200 or 1.2k, rounded to the read's precision): in prose, captions, facts and their tags, tables
+  with their group headings, and diagrams. A value the text lacks passes when its sentence cites a figure this
+  session has an image of, made with that number or shown in a `fig` block: it was read off a plot, and the reviewer
+  is shown that image. Not checked: whole numbers under ten, years from 1950 to next year, the reading time, other
+  papers' numbers in Related work, an equation's own TeX (notation, not values), and the read's own labels (section
+  titles, `h3`, fact names).
+
+What the text cannot tell either way is left to the reviewer, by name: an appendix figure of a LaTeX source, whose
+number the source does not carry; a section number of a PDF whose lines show no numbering.
 
 A draft that passes is laid out: a diagram without coordinates gets them from ELK's layered algorithm
 (`src/layout.ts`), so the stored read always carries them.
 
-Then the reviewer: one call, no session, with the paper's text, the read, and the figures the read cites for plot
-values. It answers through a `review` tool with four scores (faithfulness, clarity, depth, calibration, 1 to 5),
+Then the reviewer: one call, no session, with the paper's whole text, the read, the figures the read cites for plot
+values, and the places code could not look up. The text is cut only where the model's context (its `contextWindow`)
+has no room for it: the bibliography goes first, then the text's end; the reviewer is told what was left out, and
+the read carries a `tool` note saying so. It answers through a `review` tool with four scores (faithfulness, clarity, depth, calibration, 1 to 5),
 five checks (`anchors`, `experiments`, `why_boxes`, `voice`, `length`) and its findings. A read passes when every
 score is at least 4 and every check passed. Otherwise the findings go into the writer's own conversation and it
 revises: the first write plus at most two revisions. A read that still fails is kept, with a `review` process note
@@ -82,7 +105,7 @@ validation, so the model can neither forge nor drop them, and what happened afte
 per kind of event, with how many times and the first URL concerned, for a fetch the network guard refused, a fetch
 failed on the network (DNS, the connection, a timeout, a body cut off; never an HTTP status, which is an answer),
 the fetch budget used up, a cell timeout, an image the browser or the render page was not there to make, and
-figures taken from the latest e-print; and the `review` note above. litwatch shows them folded on the read and in Needs you's Deep
+figures taken from arXiv's latest version; and the review's notes above. litwatch shows them folded on the read and in Needs you's Deep
 notes, and `litwatch deep notes` lists them; they go to neither Zotero nor Notion.
 
 The read places the paper among litwatch's collection (`among_collection`): papers it agrees with,
@@ -100,7 +123,8 @@ app's types are generated (`pnpm generate:read` in `web/`); run both after chang
 
 The images need poppler (`pdftoppm`, `pdfinfo`) and Chromium's headless shell at the revision the pinned
 `playwright-core` drives; the image has both. On a development machine: poppler-utils from the system, and
-`npx playwright-core install chromium-headless-shell`. The tests that use them skip where they are missing.
+`npx playwright-core install chromium-headless-shell`. The tests that use them skip where they are missing, told
+by what is on disk; where they are installed, a browser that does not start fails the tests.
 
 ```sh
 npm ci
@@ -144,12 +168,13 @@ guard: litwatch itself is on a private address.
 
 The paper's e-print comes from arXiv through the same guard, pacing and User-Agent, whole and in memory (at most
 150 MiB); only its regular figure files are read, never written to disk under their own names. The paper's PDF
-comes from litwatch, with the token; where litwatch redirects to arXiv's PDF, that is fetched as any public file,
-without the token.
+comes from litwatch, with the token; where litwatch answers with a redirect, the redirect is not followed and
+arXiv's PDF of the text's version is fetched as any public file, without the token.
 
 The browser (`src/imaging.ts`) has no business on the network beyond the render page. Every request to another
-origin is refused, names other than the render page's host do not resolve, and service workers and WebSockets are
-off; figures reach the page as data URLs, and a page is given three minutes at most. It also encodes the figures (WebP on a canvas), so it decodes images from
+origin is refused; the service makes the allowed origin's requests itself and hands the page the answers, so a
+redirect is never followed and is refused whole; names other than the render page's host do not resolve, and
+service workers and WebSockets are off. Figures reach the page as data URLs, and a page is given three minutes at most. It also encodes the figures (WebP on a canvas), so it decodes images from
 arXiv: it runs without Chromium's own sandbox, as Playwright starts it in a container, and the container is its
 boundary.
 
