@@ -33,12 +33,15 @@ production since 2026-10-17, in place of release 0.14.
 - A write that can move a paper is a change (`feedback.word.change`): it takes the locks, taxonomy then papers in
   id order, checks and writes under them, and settles each paper once before commit. Taxonomy edits keep their own
   flow, with the taxonomy lock taken exclusively.
+- Which role may import which, and no cycle between Services, is checked (`lint-imports`, `tests/test_roles.py`)
+  against the roles in `docs/specs/architecture.md`. Their lists of today's violations only shrink.
 
 ## Checks
 
 CI (`.github/workflows/ci.yaml`) runs all of these; run the ones your change touches before committing.
 
 - `uv run ruff check src tests`, `uv run ruff format --check src tests`
+- `uv run lint-imports` (contracts in `pyproject.toml`) and `uv run pytest tests/test_roles.py`
 - `uv run pytest --strict-markers`. Tests that need PostgreSQL create and drop their own schema in
   `TEST_DATABASE_URL`, which must be a disposable database, and skip without it. Run one suite at a time per database
   cluster: the outbox reads the cluster-wide snapshot, so another run's open transactions hide fresh events.
