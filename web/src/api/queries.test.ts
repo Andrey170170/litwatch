@@ -9,7 +9,6 @@ import * as q from "./queries";
 /** Every read the app makes but those below, each with a key of its own. */
 const search = { q: "sparse autoencoders" };
 const reads: [string, { queryKey: readonly unknown[]; initialPageParam?: unknown }][] = [
-  ["summary", q.summaryQuery],
   ["topics", q.topicsQuery],
   ["search scope", q.searchScopeQuery],
   ["taxonomy", q.taxonomyQuery],
@@ -51,15 +50,17 @@ describe("a cancelled read", () => {
   });
 });
 
-/** The reads a write reconciles from once they land: a paper (`settled`), a digest (a refused write restripes
- * from it) and a Calibrate session (`sessionChanged`). */
+/** The reads that run to their end: those a write reconciles from once they land, a paper (`settled`), a digest
+ * (a refused write restripes from it) and a Calibrate session (`sessionChanged`); and the shell's summary, which a
+ * replaced sidebar does not ask again. */
 const kept: [string, { queryKey: readonly unknown[] }][] = [
+  ["summary", q.summaryQuery],
   ["paper", q.paperQuery("2610.00001")],
   ["digest", q.digestQuery(7)],
   ["session", q.sessionQuery(3)],
 ];
 
-describe("a read a write reconciles from", () => {
+describe("a read that runs to its end", () => {
   it.each(kept)("lands even when its page is left: %s", async (_name, options) => {
     let land!: () => void;
     const seen: AbortSignal[] = [];

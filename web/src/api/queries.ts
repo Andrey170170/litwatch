@@ -9,10 +9,11 @@ import { addDays, nextSpan } from "@/lib/digests";
 
 /** The shell's summary (the status line, the sidebar's topics, the Settings hints): one read on every page,
  * polled, refreshed on focus and after the owner's own writes that change a count (`refreshSummary`), and never by
- * navigation. Counts only; the pages keep their own reads. */
+ * navigation. Counts only; the pages keep their own reads. Its read runs to its end even when the sidebar is
+ * replaced meanwhile (no `signal`, see `listOptions`): the new sidebar does not ask again on mount. */
 export const summaryQuery = queryOptions({
   queryKey: ["summary"],
-  queryFn: async ({ signal }) => ok(await api.GET("/api/summary", { signal })),
+  queryFn: async () => ok(await api.GET("/api/summary")),
   staleTime: 30_000,
   refetchInterval: 60_000,
   // A sidebar mounting (the reading one for the Settings one, the phone's drawer) is navigation, not a reason.
@@ -71,8 +72,9 @@ const loaded = (pages: { rows: unknown[] }[]) => pages.reduce((n, p) => n + p.ro
  * reconnect or the way back from a paper, and kept half an hour after the reader leaves it. Actions patch rows in
  * place or invalidate on purpose; a page load starts afresh. A read hands React Query's `signal` to its fetch, so a
  * read nobody shows any more (an outdated search, a page left before its read landed) is aborted, and asked again
- * only if its page is shown again. The exceptions are the reads a write reconciles from once they land (a paper,
- * a digest, a Calibrate session): aborted, they would hand the write the data from before it. */
+ * only if its page is shown again. The exceptions run to their end: the reads a write reconciles from once they
+ * land (a paper, a digest, a Calibrate session), which aborted would hand the write the data from before it, and
+ * the shell's summary, which is not asked again on mount. */
 const listOptions = { staleTime: Infinity, gcTime: 30 * 60_000, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
 
 /** A page reached going forward (a link, not Back) is a fresh visit: its cached reads are marked stale, so the page
