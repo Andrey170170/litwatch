@@ -194,4 +194,7 @@
    column stays that wide in any desktop viewport, so a render's wrapping does not depend on the browser's size */
 .dr-render { max-width: 1200px; margin: 0 auto; padding: 18px 24px 40px; }
 .dr-render .ladder { width: min(854px, 100%); }
+/* on the desktop the page is never narrower than that column needs (900px inside, where rungs put their names beside
+   them), so a narrow desktop viewport scrolls instead of reflowing the read */
+@media (min-width: 56rem) { .dr-render { min-width: 948px; } }
 @media (max-width: 55.99rem) { .dr-render { padding: 12px; } }
