@@ -164,7 +164,8 @@ today, with these additions:
   (its text in reading order, WHY boxes' answers, tables and diagram labels included, and the figures it shows as
   images) and the reader described under "What a Deep read is". It retells the paper's argument in a few sentences,
   lists every place it lost the thread (a term before its definition, a detail before its reason, a section whose
-  point it could not tell), and scores followability. It reads in the same round as the reviewer: their findings go
+  point it could not tell, a reason the story needs that it found only in a folded WHY answer), and scores
+  followability. It reads in the same round as the reviewer: their findings go
   to the writer together and it revises once, so a read still has at most two revisions. Its retelling and findings
   are kept in the trace with the reviews, so the owner can set what it understood against the paper.
 
@@ -180,9 +181,11 @@ today, with these additions:
   it.
 - **Calibration**: verdicts and CARD notes are fair to the paper, neither credulous nor contrarian for show.
 - **Followability**, the blind reader's: a reader who knows the field broadly and has not read the paper follows the
-  read's argument. A 5 means it retells the paper's argument right and never loses the thread; a 4 allows isolated
+  read's argument. A 5 means it never loses the thread and can retell the argument; a 4 allows isolated
   stumbles, none hiding what a section is for or what a finding shows; a 3 or below means it lost the thread in a
-  section or could not tell what the paper found.
+  section or could not tell what the paper found. The blind reader cannot tell whether its retelling matches the
+  paper: the read's faithfulness is the reviewer's score, and the owner sets the retelling against the paper in the
+  trace.
 
 and pass/fail checks on the structure the writer's prompt already asks for: the anchors in their places; findings as
 experiments; WHY boxes and CARD notes only where they are meant (a reason the text leaves out, a remark bearing on a
