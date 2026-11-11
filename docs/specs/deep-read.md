@@ -1,6 +1,8 @@
 # Deep read
 
-Status (2026-11-09): **planned, not built**; the build plan is [`plans/deep-read.md`](../plans/deep-read.md). This replaces the Deep card (`deep` integration, [v1
+Status (2026-11-11): **built through P5, not deployed**; the build plan is [`plans/deep-read.md`](../plans/deep-read.md).
+Amended on 2026-11-11 so a read can be followed without the paper (its reader, story before detail, the blind
+reader); P6 builds that, and automatic reads switch on with it. This replaces the Deep card (`deep` integration, [v1
 integrations.md](v1/integrations.md), "Changed: deep"; [DESIGN.md](v1/DESIGN.md), "The ladder", rung 3) with the Deep
 read. The visual reference is [`deep-read/sketches/`](deep-read/sketches/index.html): R1 is the read on its own, R2
 puts it in the paper page. Where this spec and the sketches differ, this spec decides.
@@ -21,10 +23,18 @@ summary and two extension blocks of "not applicable".
 ## What a Deep read is
 
 The third rung, after the Gist (the point) and the Brief (enough to decide whether to go further). It is that further
-reading: the paper's method and results at close to the paper's own detail, without the general background and
-introduction the owner usually skips, but with the paper's reasons for doing things the way it did. It is organised
-so any part can be found at a glance, and it is more sceptical than the authors: where the paper claims more than it
-shows, the read says so and points at where.
+reading: the paper's method and results at close to the paper's own detail, with the paper's reasons for doing things
+the way it did. It is organised so any part can be found at a glance, and it is more sceptical than the authors: where
+the paper claims more than it shows, the read says so and points at where.
+
+**Its reader** knows the field broadly (language models, interpretability, the usual methods) and has not read the
+paper. The read leaves out general background, and introduces what this paper needs: its question, its idea, its own
+terms, and any specialised concept it goes deep into. A read is a story before it is a reference. The owner's read of
+the first real reads (`evals/2026-11-10-deep-reads.md`) found them right for someone who had read the paper and hard
+to follow for someone who had not: true facts one after another, in the paper's order, with nothing to say why the
+reader needed each. So the read follows the paper's argument in the order a newcomer understands it, and every
+section says what it is about before its details. A reader who knows the paper skims to the details, which are all
+still there.
 
 For most papers the read replaces reading the paper. The owner opens the paper itself only in the few cases that
 need every detail exactly, so the read accepts some LLM looseness of wording in exchange for detail and coverage. Its
@@ -37,14 +47,16 @@ reads (about 15 and 12 minutes) are the target.
 ## The shape of a read
 
 **Sections.** A read is a sequence of sections. A few anchors sit in fixed places on every read; the middle follows
-the paper's own story.
+the paper's argument in the order a newcomer understands it, which need not be the order of the paper's sections.
 
-- First: **At a glance**. The key claim, three or four points that carry the paper's argument, and the facts (kind,
-  models, task or data, methods, code and artifacts, reading time).
+- First: **At a glance**. The key claim, then the paper's arc in three or four points (the question, the idea, how it
+  is tested, what it found), and the facts (kind, models, task or data, methods, code and artifacts, reading time).
 - The middle, as the paper needs: a short **problem and motivation** section (what earlier work left open), the
   **method** (setup, environment, taxonomy, whatever the paper builds), and the **findings**, one section each. A
   method paper might go Problem, Method, Experiments; a benchmark Construction, Results, What it measures; an analysis
-  Question, then one section per finding.
+  Question, then one section per finding. Each section opens with a few sentences on what it covers and where it sits
+  in the arc; its details follow in the order that story needs them. Settings and exceptions (a list of models, a
+  setting changed for one model, which runs were left out) go in a table or at the section's end, not at its start.
 - Then **Claims**, then one **lens** section per topic the paper is graded in.
 - Last, in this order: **Limitations**, **Related work**, **Reproducibility**, then what the read was written from and
   when.
@@ -58,12 +70,14 @@ figures, diagrams, WHY boxes and CARD notes. Which blocks a section uses is the 
 
 - **Experiment**: the unit of a finding. Its question, then *Did* (what was done), *Found* (the result, with its
   numbers), *Means* (what it shows) and *Not shown* (what it leaves open, including the controls that hold).
-- **WHY box**: the paper's reason for a choice, at the choice it explains (why this benchmark, why mean ablation, why
-  negotiation time does not count). The reasons the owner would otherwise have to dig out of the introduction live
-  here.
+- **WHY box**: the paper's reason for a choice a careful reader would question and the text around it leaves out
+  (why this benchmark, why mean ablation, why one model is steered at a different depth). A reason the story needs to
+  make sense is said in the text, where it is needed; boxes are few, so the reader stops for each one. A box is shown
+  folded: its question in view, its answer opening on a click.
 - **CARD note**: the read's own sceptical remark, where the paper's text does not say it: a table that does not
   support the abstract, a test the paper does not report, an inconsistency. Every CARD note points at a place in the
-  paper.
+  paper. Notes are kept for remarks that bear on a claim's verdict or on how far a result can be trusted, and stay
+  open and highlighted, so the eye goes to them.
 - **Equation**: rendered (KaTeX in R1), with a line on what it says and what is empirical about it.
 
 **Claims.** One line per main claim of the paper, every claim shown, a verdict chip first: *holds*, *partly*, *not
@@ -103,7 +117,7 @@ data, models, compute, statistics. **Process notes** stay as they are (decisions
 The read is rung 3 of the ladder, named **Deep read**, with each of its sections as a rung of its own: the section's
 name in the ladder's side column with its colour square hanging to its left, the section's body beside it (R2,
 variant C). The side column is 128 px wide, so long section names wrap under themselves and keep the body's first
-line. The layout is open: every section is laid out in full, nothing folded but a claim's evidence and the process notes.
+line. The layout is open: every section is laid out in full, nothing folded but a claim's evidence, a WHY box's answer and the process notes.
 
 - A paper page with a Deep read is capped at 1200 px instead of 1080 px, so the reading column is wide enough for
   figures, tables and diagrams.
@@ -145,25 +159,39 @@ today, with these additions:
   as in code). A read that still fails after the second revision is kept, with a process note that names the failing
   scores and checks, so it shows on Needs you. The reviews, scores and findings are kept with the attempt and read through
   `litwatch deep trace`; the web app shows nothing more.
+- **A blind reader.** The reviewer reads with the paper beside it, so it cannot see what a reader without the paper
+  misses. A second call on the same model reads the draft without the paper: it gets the read as a reader meets it
+  (its text in reading order, WHY boxes' answers, tables and diagram labels included, and the figures it shows as
+  images) and the reader described under "What a Deep read is". It retells the paper's argument in a few sentences,
+  lists every place it lost the thread (a term before its definition, a detail before its reason, a section whose
+  point it could not tell), and scores followability. It reads in the same round as the reviewer: their findings go
+  to the writer together and it revises once, so a read still has at most two revisions. Its retelling and findings
+  are kept in the trace with the reviews, so the owner can set what it understood against the paper.
 
 **The rubric.** Scores from 1 to 5, each with findings that point at blocks:
 
 - **Faithfulness**: numbers, claims and setups match the paper; nothing misread or invented.
-- **Clarity**: a lab member could follow the method without the paper; terms defined before use; none of the three
-  prose faults below. Each clarity finding names its fault, quotes the sentence and gives a rewrite. A 5 means a lab
-  member never rereads a sentence; a 4 allows isolated faults, none hiding a method step or a result; a 3 or below
+- **Clarity**: none of the three prose faults below; terms defined before use. Whether the read can be followed as a
+  whole is the blind reader's score, not this one. Each clarity finding names its fault, quotes the sentence and gives
+  a rewrite. A 5 means a reader never rereads a sentence; a 4 allows isolated faults, none hiding a method step or a result; a 3 or below
   means faults recur across sections or hide one. A fault in an experiment's *Found* or *Means* or in the claims
   ranks above one in the prose around them.
 - **Depth**: method and results come close to the paper's detail; the read goes past the Brief rather than restating
   it.
 - **Calibration**: verdicts and CARD notes are fair to the paper, neither credulous nor contrarian for show.
+- **Followability**, the blind reader's: a reader who knows the field broadly and has not read the paper follows the
+  read's argument. A 5 means it retells the paper's argument right and never loses the thread; a 4 allows isolated
+  stumbles, none hiding what a section is for or what a finding shows; a 3 or below means it lost the thread in a
+  section or could not tell what the paper found.
 
 and pass/fail checks on the structure the writer's prompt already asks for: the anchors in their places; findings as
-experiments; the paper's reasons in WHY boxes; every CARD note and verdict citing a place; an objective voice (no "for
+experiments; WHY boxes and CARD notes only where they are meant (a reason the text leaves out, a remark bearing on a
+verdict or on a result's trust), with no quota; every CARD note and verdict citing a place; an objective voice (no "for
 you", no hype, as everywhere in litwatch's prose); a length in proportion to the paper, which code sets from its
-measure rather than the reviewer's estimate. A read passes when every score is 4 or above and every check passes.
+measure rather than the reviewer's estimate. A read passes when every score, the blind reader's included, is 4 or above and every check passes.
 
-**The writer's standards** (its prompt): everything above under "What a Deep read is" and "The shape of a read";
+**The writer's standards** (its prompt): everything above under "What a Deep read is" and "The shape of a read",
+its reader and story before detail first;
 specific methods, numbers and model names; no restating of the Brief beyond At a glance; every statement about the
 paper from its text; prior work and code checked, not assumed. And prose free of the three faults that make model
 writing hard to read (after Williams, *Style: The Basics of Clarity and Grace*, as measured in
@@ -205,6 +233,7 @@ names the ones to remake, through "Write again" or an agent, so no remake path i
 - A budget or cap on Deep reads: they run on the `deep` service's own subscription (decision 58).
 - A reviewer on a different model than the writer.
 - Changing which papers get a read.
+- Folding a section's details behind its story. If story-first prose is not enough on P6's reads, this comes next.
 
 ## Settled by the build plan
 
