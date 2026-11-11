@@ -99,7 +99,7 @@ test("a year is one only in the range a paper's could be, and Reproducibility's 
   const pinned = changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "The code is pinned at commit 9550e8c (full hash 9550e8ccde5d24602944c85e0a035ca46644d1bb)."));
   assert.deepEqual(errors(pinned), []);
   assert.deepEqual(errors(changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "The code is pinned at commit 9550E8CCDE5D24602944C85E0A035CA46644D1BB."))), [], "in capitals too");
-  assert.deepEqual(errors(changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "The code is pinned at commit 1234567, its weights at hash 12345e6, the data at commit `7654321` (digest: `7654321`); the hash is 7654321, pinned at commit \"7654321\", or commit:7654321."))), [], "and one named a hash, though it reads as a number");
+  assert.deepEqual(errors(changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "The code is pinned at commit 1234567, its weights at hash: 12345e6, the data at commit `7654321` (digest: `7654321`); the hash is 7654321, pinned at commit \"7654321\", or commit:7654321."))), [], "and one named a hash, though it reads as a number");
   assert.deepEqual(errors(changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "The weights' digest is 9550e8ccde5d24602944c85e0a035ca46644d1bb9550e8ccde5d24602944c85e."))), [], "and a 64-digit digest");
   // scientific notation is a value, though its digits and "e" could spell a hash
   const loss = errors(changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "Loss was 1.234567e-3 after 10000e3 steps, then 100000e−3, on 100000B tokens at 100000A.")));
@@ -107,6 +107,8 @@ test("a year is one only in the range a paper's could be, and Reproducibility's 
   assert.ok(has(loss, "/sections/6/facts/0/text: ", "100000e−3"), loss.join("\n"));
   assert.ok(has(loss, "/sections/6/facts/0/text: ", "100000B"), loss.join("\n"));
   assert.match(loss[0]!, /100000B, 100000 /, "100000A is a value with a unit");
+  const count = errors(changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "We hash 1000000 inputs.")));
+  assert.ok(has(count, "/sections/6/facts/0/text: 1000000"), count.join("\n"));
 });
 
 test("captions, fact tags and a table's group headings give the paper's numbers; the read's own labels and an equation's TeX do not", () => {
