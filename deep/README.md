@@ -105,7 +105,9 @@ Then the reviewer: one call, no session, with the paper's whole text, the read, 
 values, and the places code could not look up. The text is cut only where the model's context (its `contextWindow`)
 has no room for it: the bibliography goes first, then the text's end; the reviewer is told what was left out, and
 the read carries a `tool` note saying so. It answers through a `review` tool with four scores (faithfulness, clarity, depth, calibration, 1 to 5),
-five checks (`anchors`, `experiments`, `why_boxes`, `voice`, `length`) and its findings. A read passes when every
+five checks (`anchors`, `experiments`, `why_boxes`, `voice`, `length`) and its findings. `length` is code's, not the
+reviewer's: the read's text past 60% of the paper's main text fails it (`src/length.ts`), and both the writer, in
+`check()` and `submit()`, and the reviewer are told the measure. A read passes when every
 score is at least 4 and every check passed. Otherwise the findings go into the writer's own conversation and it
 revises: the first write plus at most two revisions. A read that still fails is kept, with a `review` process note
 saying what it failed on; a review that could not run leaves the read with a `tool` note saying it was not

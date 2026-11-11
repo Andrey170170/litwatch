@@ -45,6 +45,14 @@ round failed on a structure check alone.
     findings, Claims, the lenses and Limitations. In the same reviews, the reviewer asks for more method and result
     detail.
 
+## What changed after the first look
+
+The owner's first look: the length is right, the failed reads' included. So the length check moved into code. The
+read's text is measured against the paper's main text, and a read fails only past 60% of it; by that measure these five
+are at 43%, 32%, 45%, 44% and 46%. The writer and the reviewer are both told the measure, and the writer is told to state
+each caveat once. The budget became 100 cells and an hour (the most these used was 58 cells and 26 minutes), and the
+writer puts TeX in `String.raw`. The five are read again with these changes before the owner's full read.
+
 ## Owner's read
 
 To be filled in from the owner's read of the five reads.
