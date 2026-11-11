@@ -99,6 +99,9 @@ test("a PDF's text is cut at the bold headings its Markdown form has: References
   const stopped = "## **Contents** \n\n### **1 Introduction** \n\n### **References** \n\n### **Appendix A** \n\n" + MARKDOWN.replace("## **1 Method** ", "## **1. Introduction.** ");
   assert.deepEqual(splitPaper(stopped, "pdf").cuts.map((c) => c.part), ["references", "appendix"]);
   assert.ok(splitPaper(stopped, "pdf").main.includes("We probe, see Appendix A"));
+  // an appendix's own Introduction, a level below the paper's, moves neither cut
+  const nested = MARKDOWN.replace("## **1 Method** ", "## **1 Introduction** ") + "\n### **Introduction.** \n\nThe appendix opens.\n";
+  assert.deepEqual(splitPaper(nested, "pdf").cuts.map((c) => [c.part, c.start]), [["references", nested.indexOf("## **References**")], ["appendix", nested.indexOf("## **A Additional Samples**")]]);
 });
 
 test("a PDF's plain text is cut at its References line, and at the appendix's: lettered after it, or named anywhere", () => {

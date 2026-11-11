@@ -197,7 +197,11 @@ function pdfParts(body: string): PdfParts {
   // below every Markdown heading, so the next one of any level ends it
   const level = Math.max(1, ...marked.map((h) => h.level));
   const lines: Bare[] = [...body.matchAll(/^[ \t]*(?!#)(\S.*)$/gm)].map((m) => ({ level, title: unmarked(m[1]!), start: m.index }));
-  const introduction = Math.max(0, ...[...marked, ...lines].filter((h) => INTRODUCTION.test(h.title)).map((h) => h.start));
+  // the last Introduction at the shallowest level: a contents list's entries come before it, an appendix's own
+  // Introduction is a level below it
+  const intros = [...marked, ...lines].filter((h) => INTRODUCTION.test(h.title));
+  const top = Math.min(...intros.map((h) => h.level));
+  const introduction = Math.max(0, ...intros.filter((h) => h.level === top).map((h) => h.start));
   // a contents list in Markdown headings sits before the Introduction too
   const sections = marked.filter((h) => h.start >= introduction);
   const references = sections.find((h) => REFERENCES.test(h.title)) ?? lines.filter((h) => h.start >= introduction && REFERENCES.test(h.title)).at(-1);
