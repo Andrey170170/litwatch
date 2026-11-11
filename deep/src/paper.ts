@@ -176,7 +176,7 @@ const APPENDIX_LINE = /^(?:(?:[Aa]ppendi(?:x|ces)|APPENDI(?:X|CES))(?:\s+[A-Z])?
 /** A lettered heading, as an appendix's sections are numbered: "A Additional samples", "C.1 BBH". */
 const LETTERED = /^[A-Z](?:\.\d{1,2})*\.?\s+[A-Z]/;
 const LETTERED_LINE = /^[A-Z](?:\.\d{1,2})*\.?\s+[A-Z][^.,;()]{1,80}$/;
-const INTRODUCTION = /^(?:(?:1|I)\.?\s+)?introduction$/i;
+const INTRODUCTION = /^(?:(?:1|I)\.?\s+)?introduction\.?$/i;
 
 interface PdfParts {
   headings: Bare[];
