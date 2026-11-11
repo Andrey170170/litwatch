@@ -59,7 +59,7 @@ deep → litwatch: deep_cards.card (format "read"), deep_figures, deep_attempts.
   - In: the paper's text, the read as JSON, the rubric, and as image content the figures the read cites for values read off a plot, so those values can be checked against the plot.
   - Out: a verdict through a single `review` tool that its schema validates: four scores, the structure checks, and findings sorted by importance.
   - Its findings go to the writer as a new message in the writer's own conversation, so the writer keeps its context while revising.
-- **Budget:** 150 cells, a 120-minute wall clock (`DEEP_WALL_CLOCK_MIN`) and high effort (`DEEP_EFFORT`) for the writer. litwatch's `timeout_minutes` rises to 135, above that wall clock (the module docstring says why). All of these stay settings, and P5 measures them.
+- **Budget:** 150 cells, a 120-minute wall clock (`DEEP_WALL_CLOCK_MIN`) and high effort (`DEEP_EFFORT`) for the writer. litwatch's `timeout_minutes` rises to 135, above that wall clock (the module docstring says why). All of these stay settings, and P5 measures them; it set 100 cells, 60 minutes and a timeout of 75 (`evals/2026-11-10-deep-reads.md`).
 - **Stored reviews:** a new `deep_attempts.reviews` column (jsonb) holds each round's scores and findings, and `litwatch deep trace` prints them. A read still failing after two revisions gets a process note of a new kind, `review` (source `service`), naming the failing scores and checks. Needs you shows it like the others.
 - **Prose rules:** the writer's prompt takes the READER rules from `src/litwatch/writing.py` and adds the spec's three prose faults. They are copied into `deep/src/prompt.ts`, with a comment pointing back to `writing.py`.
 

@@ -200,7 +200,7 @@ function pdfParts(body: string): PdfParts {
   const introduction = Math.max(0, ...[...marked, ...lines].filter((h) => INTRODUCTION.test(h.title)).map((h) => h.start));
   // a contents list in Markdown headings sits before the Introduction too
   const sections = marked.filter((h) => h.start >= introduction);
-  const references = sections.find((h) => REFERENCES.test(h.title)) ?? lines.filter((h) => REFERENCES.test(h.title)).at(-1);
+  const references = sections.find((h) => REFERENCES.test(h.title)) ?? lines.filter((h) => h.start >= introduction && REFERENCES.test(h.title)).at(-1);
   const after = (h: Bare) => references !== undefined && h.start > references.start;
   const appendix =
     sections.find((h) => APPENDIX_TITLE.test(h.title) || (after(h) && LETTERED.test(h.title))) ??

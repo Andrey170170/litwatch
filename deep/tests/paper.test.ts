@@ -92,6 +92,9 @@ test("a PDF's text is cut at the bold headings its Markdown form has: References
   const contents = splitPaper(listed, "pdf");
   assert.deepEqual(contents.cuts.map((c) => [c.part, c.start]), [["references", listed.lastIndexOf("## **References**")], ["appendix", listed.indexOf("## **A Additional Samples**")]]);
   assert.ok(contents.main.includes("We probe, see Appendix A"), "the main text stays in the message");
+  // so does a plain contents line naming References, in a paper whose bibliography has no heading
+  const plain = "Probes\nContents\n1 Introduction\nReferences\n\n## **1 Introduction** \n\nWe probe the trace.\n\n## **2 Results** \n\nIt works.\n";
+  assert.deepEqual(splitPaper(plain, "pdf").cuts, []);
 });
 
 test("a PDF's plain text is cut at its References line, and at the appendix's: lettered after it, or named anywhere", () => {
