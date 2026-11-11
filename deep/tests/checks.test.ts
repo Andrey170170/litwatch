@@ -95,6 +95,9 @@ test("a year is one only in the range a paper's could be, and Reproducibility's 
   const fact = errors(changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "Trained for 64 GPU hours.")));
   assert.ok(has(fact, "/sections/6/facts/0/text: 64"), fact.join("\n"));
   assert.deepEqual(errors(changed((d) => ((d.sections[6] as Loose).takeaway = "Training runs for 40 epochs; no code is released."))), [], "what the paper says of its training passes");
+  // a commit hash names a version of the code, and its leading digits are no number
+  const pinned = changed((d) => ((d.sections[6] as unknown as { facts: Loose[] }).facts[0]!.text = "The code is pinned at commit 9550e8c (full hash 9550e8ccde5d24602944c85e0a035ca46644d1bb)."));
+  assert.deepEqual(errors(pinned), []);
 });
 
 test("captions, fact tags and a table's group headings give the paper's numbers; the read's own labels and an equation's TeX do not", () => {

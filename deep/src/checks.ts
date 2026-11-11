@@ -310,7 +310,8 @@ const CUT_COUNTS = /(?<![\d.,])\d+(?:\s+of\s+(?:(?:its|the|all)\s+)?\d+)?\s+(?:[
 
 // What a number is no value of: a place in the paper, an arXiv id, a link.
 const LOCATION = /(?:§+\s*|\b(?:Sections?|Secs?\.?|Appendi(?:x|ces)|Apps?\.?|Eqs?\.?|Equations?|Algorithms?|Algs?\.?|Theorems?|Lemmas?|Propositions?|Corollar(?:y|ies)|Definitions?|Footnotes?|Listings?|Pages?|pp?\.|Lines?)(?:\s|~)*)\(?(?:[A-Z]\.?)?\d+(?:\.\d+)*[a-z]?\)?(?:\s*(?:,|and|&|–|—|-|to)\s*§*\s*\(?(?:[A-Z]\.?)?\d+(?:\.\d+)*[a-z]?\)?)*/gi;
-const NOT_VALUES = [LOCATION, /\b\d{4}\.\d{4,5}(?:v\d+)?\b/g, /\]\(https?:\/\/[^\s()]+\)/g, /https?:\/\/\S+/g];
+// what is no value: places, arXiv ids, links, and commit hashes (9550e8c), whose leading digits read as a number
+const NOT_VALUES = [LOCATION, /\b\d{4}\.\d{4,5}(?:v\d+)?\b/g, /\]\(https?:\/\/[^\s()]+\)/g, /https?:\/\/\S+/g, /\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/g];
 /** A whole number that is a year, which a read may give of its own knowledge: one a paper or its prior work could
  * carry, up to next year's. 2048 is a number like any other. */
 const FIRST_YEAR = 1950;
