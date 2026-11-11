@@ -176,7 +176,9 @@ const APPENDIX_LINE = /^(?:(?:[Aa]ppendi(?:x|ces)|APPENDI(?:X|CES))(?:\s+[A-Z])?
 /** A lettered heading, as an appendix's sections are numbered: "A Additional samples", "C.1 BBH". */
 const LETTERED = /^[A-Z](?:\.\d{1,2})*\.?\s+[A-Z]/;
 const LETTERED_LINE = /^[A-Z](?:\.\d{1,2})*\.?\s+[A-Z][^.,;()]{1,80}$/;
-const INTRODUCTION = /^(?:(?:1|I)\.?\s+)?introduction\.?$/i;
+const INTRODUCTION = /^(?:(?:1|I)\.?\s+)?introduction$/i;
+/** The same on a Markdown heading, which may end in a full stop. */
+const INTRODUCTION_HEADING = /^(?:(?:1|I)\.?\s+)?introduction\.?$/i;
 
 interface PdfParts {
   headings: Bare[];
@@ -197,18 +199,23 @@ function pdfParts(body: string): PdfParts {
   // below every Markdown heading, so the next one of any level ends it
   const level = Math.max(1, ...marked.map((h) => h.level));
   const lines: Bare[] = [...body.matchAll(/^[ \t]*(?!#)(\S.*)$/gm)].map((m) => ({ level, title: unmarked(m[1]!), start: m.index }));
-  // the last Introduction at the shallowest level: a contents list's entries come before it, and an appendix's own
-  // Introduction, under an appendix's Markdown heading at its level or above (named, or lettered after a
-  // References), is none. Plain lines have no levels to tell a contents list from an appendix by.
-  const cited = marked.filter((h) => REFERENCES.test(h.title)).map((h) => h.start);
-  const appendices = marked.filter((h) => APPENDIX_TITLE.test(h.title) || (cited.some((r) => r < h.start) && LETTERED.test(h.title)));
-  const intros = [...marked, ...lines].filter((h) => INTRODUCTION.test(h.title) && !appendices.some((a) => a.start < h.start && a.level <= h.level));
+  // the paper's Introduction among its Markdown headings, before which a contents list in headings sits: the last at
+  // the shallowest level, leaving out one an appendix's start comes before (named, or lettered after a References): a
+  // heading at its level or above, or a plain line at any. With none left, the rules are those before contents lists
+  // were known, so leaving one out too many costs nothing. Plain lines keep those rules throughout.
+  const cited = [...marked, ...lines].filter((h) => REFERENCES.test(h.title)).map((h) => h.start);
+  const afterCited = (h: Bare) => cited.some((r) => r < h.start);
+  const appendices = [
+    ...marked.filter((h) => APPENDIX_TITLE.test(h.title) || (afterCited(h) && LETTERED.test(h.title))),
+    ...lines.filter((h) => APPENDIX_LINE.test(h.title) || (afterCited(h) && LETTERED_LINE.test(h.title))).map((h) => ({ ...h, level: 0 })),
+  ];
+  const intros = marked.filter((h) => INTRODUCTION_HEADING.test(h.title) && !appendices.some((a) => a.start < h.start && a.level <= h.level));
   const top = Math.min(...intros.map((h) => h.level));
-  const introduction = Math.max(0, ...intros.filter((h) => h.level === top).map((h) => h.start));
-  // a contents list in Markdown headings sits before the Introduction too
-  const sections = marked.filter((h) => h.start >= introduction);
-  const references = sections.find((h) => REFERENCES.test(h.title)) ?? lines.filter((h) => (!marked.length || h.start >= introduction) && REFERENCES.test(h.title)).at(-1);
+  const opening = Math.max(0, ...intros.filter((h) => h.level === top).map((h) => h.start));
+  const sections = marked.filter((h) => h.start >= opening);
+  const references = sections.find((h) => REFERENCES.test(h.title)) ?? lines.filter((h) => h.start >= opening && REFERENCES.test(h.title)).at(-1);
   const after = (h: Bare) => references !== undefined && h.start > references.start;
+  const introduction = Math.max(0, ...[...marked, ...lines].filter((h) => INTRODUCTION.test(h.title)).map((h) => h.start));
   const appendix =
     sections.find((h) => APPENDIX_TITLE.test(h.title) || (after(h) && LETTERED.test(h.title))) ??
     lines.find((h) => h.start > introduction && (APPENDIX_LINE.test(h.title) || (after(h) && LETTERED_LINE.test(h.title))));

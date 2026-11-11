@@ -107,9 +107,17 @@ test("a PDF's text is cut at the bold headings its Markdown form has: References
   assert.deepEqual(splitPaper(bare, "pdf").cuts.map((c) => [c.part, c.start]), [["references", bare.indexOf("## **References**")], ["appendix", bare.indexOf("## **Appendix A**")]]);
   const lettered = bare.replace("## **Appendix A** ", "## **A Additional Samples** ");
   assert.deepEqual(splitPaper(lettered, "pdf").cuts.map((c) => [c.part, c.start]), [["references", lettered.indexOf("## **References**")], ["appendix", lettered.indexOf("## **A Additional Samples**")]]);
-  // a plain text's appendix Introduction still loses the appendix cut, as before P5, but not the References one
+  // plain text keeps the rules it had before: an appendix's Introduction line loses the appendix cut but not the
+  // References one, a stray Markdown heading changes neither, and "Introduction." is no Introduction line
   const lines = "Probes\n1 Introduction\nWe probe the trace.\nReferences\nA. Author. A paper. 2024.\nAppendix A\nIntroduction\nMore.\n";
   assert.deepEqual(splitPaper(lines, "pdf").cuts.map((c) => c.part), ["references"]);
+  assert.deepEqual(splitPaper(lines.replace("References\n", "# Failed\n37\nReferences\n"), "pdf").cuts.map((c) => c.part), ["references"]);
+  // a Markdown Introduction after a plain appendix line is the appendix's, and the References heading still cuts
+  const mixed = "# **Paper** \n\n## **1 Introduction** \n\nMain text.\n\n## **References** \n\nAuthor. A paper. 2024.\n\nAppendix A\n\n## **Introduction** \n\nSupplement.\n";
+  assert.deepEqual(splitPaper(mixed, "pdf").cuts.map((c) => c.part)[0], "references");
+  assert.equal(splitPaper(mixed, "pdf").cuts[0]!.start, mixed.indexOf("## **References**"));
+  const ahead = "Probes\n1 Introduction\nWe probe the trace.\nAppendix A\nIntroduction.\nMore.\nReferences\nA. Author. A paper. 2024.\n";
+  assert.deepEqual(splitPaper(ahead, "pdf").cuts.map((c) => [c.part, c.start]), [["appendix", ahead.indexOf("Appendix A")]]);
 });
 
 test("a PDF's plain text is cut at its References line, and at the appendix's: lettered after it, or named anywhere", () => {
