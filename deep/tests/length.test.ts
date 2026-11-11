@@ -31,3 +31,16 @@ test("a PDF's text is measured from its start, whatever it takes for a heading",
   assert.ok(m.main > 1000 && m.main < 1100, `the text before References: ${m.main}`);
   assert.ok(m.share > 0.25 && m.share < 0.35, `${m.share}`);
 });
+
+test("a LaTeX note with no sections is measured from its start, not from its bibliography", () => {
+  const body = String.raw`\documentclass{article}
+\begin{document}
+${"x".repeat(1000)}
+\begin{thebibliography}{9}
+\bibitem{a} ${"y".repeat(500)}
+\end{thebibliography}
+\end{document}
+`;
+  const m = measure({ sections: [{ title: "Method", blocks: [{ type: "p", text: "z".repeat(300) }] }] }, { body, body_source: "latex" });
+  assert.ok(m.main > 1000 && m.main < 1100, `the text before the bibliography: ${m.main}`);
+});
