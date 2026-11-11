@@ -9,7 +9,7 @@ import type { ImageContent, Model, Models, TextContent, ThinkingLevel } from "@e
 import { Type, type Static } from "typebox";
 import type { Shot } from "./imaging.ts";
 import { blindPrompt } from "./prompt.ts";
-import type { Read } from "./read.ts";
+import { BlockSchema, SectionSchema, type Read } from "./read.ts";
 import { ask, type Asked } from "./review.ts";
 
 const FollowSchema = Type.Object(
@@ -34,12 +34,25 @@ export type Follow = Static<typeof FollowSchema>;
 
 const TOOL = { name: "follow", description: "Give what you understood: the retelling, the followability score, then the places you lost the thread.", parameters: FollowSchema };
 
-// what a reader does not read: ids, layout and links; a block's type is shown as its label
-const UNREAD = new Set(["id", "type", "kind", "x", "y", "w", "h", "width", "height", "lanes", "label_at", "style", "colour", "state", "anchor", "url", "code_url"]);
+// what a reader does not see: layout, links, and a section's takeaway, which only the read's contents outside the web
+// app show; a block's type is shown as its label
+const UNREAD = new Set(["type", "kind", "x", "y", "w", "h", "width", "height", "label_at", "style", "colour", "anchor", "url", "code_url", "takeaway"]);
+
+/** Each block's and section's fields in the schema's order, which is the order the web app shows them in, whatever
+ * order the writer's JSON has them in. */
+const ORDER = new Map<string, string[]>([
+  ...(BlockSchema.anyOf as { properties: Record<string, { const?: string }> }[]).map((s) => [`block:${s.properties.type!.const}`, Object.keys(s.properties)] as const),
+  ...(SectionSchema.anyOf as { properties: Record<string, { const?: string }> }[]).map((s) => [`section:${s.properties.kind!.const}`, Object.keys(s.properties)] as const),
+]);
+const ordered = (o: Record<string, unknown>, order: string[] = []): [string, unknown][] => {
+  const at = (k: string) => (order.includes(k) ? order.indexOf(k) : order.length);
+  return Object.entries(o).sort(([a], [b]) => at(a) - at(b));
+};
 
 /** The read as a reader meets it: its sections in order, each under its title and id, each block under its type
  * and place ("method.3"), a WHY box as its question with its folded answer, a figure as its caption beside its
- * image. `figures` names the figure blocks' images in the order the read shows them. */
+ * image, the collection's papers under Related work. `figures` names the figure blocks' images in the order the
+ * read shows them. */
 export function readerText(read: Read): { text: string; figures: string[] } {
   const lines: string[] = [];
   const figures: string[] = [];
@@ -57,8 +70,8 @@ export function readerText(read: Read): { text: string; figures: string[] } {
   };
   for (const section of read.sections) {
     lines.push("", `== ${section.title} == (${section.id})`);
-    for (const [key, value] of Object.entries(section)) {
-      if (key === "id" || key === "kind" || key === "title") continue;
+    for (const [key, value] of ordered(section, ORDER.get(`section:${section.kind}`))) {
+      if (key === "id" || key === "title") continue;
       if (key !== "blocks" || !Array.isArray(value)) {
         walk(value, "", key);
         continue;
@@ -72,10 +85,11 @@ export function readerText(read: Read): { text: string; figures: string[] } {
           lines.push(`[figure ${figures.length}, its image below] (${at}) ${block.number ?? ""}`.trimEnd(), `  caption: ${block.caption}`);
         } else {
           lines.push(`[${block.type}] (${at})`);
-          walk(block, "  ");
+          for (const [k, v] of ordered(block, ORDER.get(`block:${String(block.type)}`))) walk(v, "  ", k);
         }
       });
     }
+    if (section.kind === "related" && read.among_collection.length) walk(read.among_collection, "", "among the collection");
   }
   return { text: lines.join("\n").trimStart(), figures };
 }

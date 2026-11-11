@@ -80,7 +80,7 @@ test("the findings reach the writer most important first, with what is left", ()
     checks: { ...JUDGED.checks, why_boxes: false },
     findings: [
       { about: "depth" as const, where: "method", text: "The probe's training is one sentence; the paper gives the data split." },
-      { about: "why_boxes" as const, where: "method.1", text: "The reason for layer 12 is in prose." },
+      { about: "why_boxes" as const, where: "method.1", text: "Why layer 12 matters to the result is only in the folded answer." },
     ],
   };
   const message = findingsMessage(review, 1);

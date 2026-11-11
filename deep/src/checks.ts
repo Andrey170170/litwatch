@@ -101,7 +101,11 @@ function* blockUnits(b: DraftBlock, at: string): Generator<Unit> {
   const prose = { inline: true, numbers: true };
   switch (b.type) {
     case "p":
+      yield { path: `${at}/text`, text: b.text, ...prose };
+      break;
     case "why":
+      // the question is plain text, in view while the box is folded: its numbers and cites are checked as prose's
+      if (b.question !== undefined) yield { path: `${at}/question`, text: b.question, numbers: true };
       yield { path: `${at}/text`, text: b.text, ...prose };
       break;
     case "h3":
