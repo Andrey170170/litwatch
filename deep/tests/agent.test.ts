@@ -219,9 +219,11 @@ test("the length check is code's: the read's measured share of the main text, to
   const sent: Sent[] = [];
   faux.setResponses([cell(`console.log(JSON.stringify(await check(${JSON.stringify(draft())})))`), seeing(submits(draft()), sent), seeing(reviews(PASSING), sent)]);
   const outcome = await run(m);
-  const told = /Length: the read's text is \d+ characters, \d+% of the paper's main text \(\d+\); the aim is about 33%, and past 60% the length check fails\./;
-  assert.match(textOf(sent[0]!.messages.at(-1)!), told, "check() gives the writer the measure");
-  assert.match(textOf(sent[1]!.messages[1]!), told, "and the reviewer");
+  const told = /Length: the read's text is \d+ characters, \d+% of the paper's main text \(\d+\); the aim is about 33%/;
+  const writer = textOf(sent[0]!.messages.at(-1)!);
+  assert.match(writer, told, "check() gives the writer the measure");
+  assert.ok(!writer.includes("60%") && !textOf(sent[0]!.messages[0]!).includes("60%"), "but not the limit, which a writer writes up to");
+  assert.match(textOf(sent[1]!.messages[1]!), new RegExp(`${told.source}, and past 60% the length check fails\\.`), "the reviewer is told both");
   assert.deepEqual(outcome.reviews?.map((r) => [r.passed, r.checks.length]), [[true, true]]);
 
   // the same read against a paper whose main text is shorter than it: the reviewer's word does not pass it

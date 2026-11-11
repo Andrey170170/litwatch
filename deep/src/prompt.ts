@@ -6,7 +6,7 @@
  */
 
 import { MAX_BODY_CHARS_IN_CONTEXT, outline, splitPaper, type Heading } from "./paper.ts";
-import { lengthLine, LENGTH_MAX, pct, type Length } from "./length.ts";
+import { lengthLine, type Length } from "./length.ts";
 import { DraftSchema, type Read } from "./read.ts";
 import type { Review } from "./review.ts";
 
@@ -137,8 +137,7 @@ close to the paper's own detail, without the general background and introduction
 reasons for doing things the way it did. For most papers it replaces reading the paper. It is organised so any part can be \
 found at a glance, and it is more sceptical than the authors: where the paper claims more than it shows, the read says so \
 and points at where. Its length scales with the paper, roughly a third of the main text; the method and the results are \
-never cut to save length. check() and submit() give the read's measured share of the main text; past ${pct(LENGTH_MAX)} the \
-review fails it. Length comes from detail, never from repetition: state each caveat once, at the finding it qualifies or \
+never cut to save length. check() and submit() give the read's measured share of the main text. Length comes from detail, never from repetition: state each caveat once, at the finding it qualifies or \
 in Limitations, and let Claims and the lenses point to it rather than restate it.
 
 The shape of a read, in this order:
@@ -357,7 +356,7 @@ export function reviewerMessage(paper: PaperInput, text: string, left: string[],
     "The Deep read, as JSON:",
     "",
     JSON.stringify(read),
-    ...(length ? ["", lengthLine(length)] : []),
+    ...(length ? ["", lengthLine(length, true)] : []),
     ...(left.length ? ["", "What the read says of the parts of the paper left out above cannot be checked here: do not count it for or against the read."] : []),
     ...(unverified.length ? ["", `Not confirmed by code, which could not tell whether the paper has these places the read cites: ${unverified.join("; ")}. Check each against the paper.`] : []),
     ...(stood.length ? ["", `Refused by code, and stood by the writer as the paper's: ${stood.join("; ")}. Check each against the paper; one it does not support is a faithfulness finding.`] : []),

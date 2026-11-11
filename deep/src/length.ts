@@ -42,7 +42,9 @@ export function measure(read: unknown, paper: Pick<PaperInput, "body" | "body_so
 /** A share as a percentage. */
 export const pct = (x: number): string => `${Math.round(x * 100)}%`;
 
-/** The measure as the writer and the reviewer are told it. */
-export function lengthLine(m: Length): string {
-  return `Length: the read's text is ${m.read} characters, ${pct(m.share)} of the paper's main text (${m.main}); the aim is about ${pct(LENGTH_AIM)}, and past ${pct(LENGTH_MAX)} the length check fails.`;
+/** The measure as the writer and the reviewer are told it. Only the reviewer is told where the check fails: a writer
+ * told the limit wrote up to it, three of five reads at 58% against 32–46% without it. */
+export function lengthLine(m: Length, limit = false): string {
+  const line = `Length: the read's text is ${m.read} characters, ${pct(m.share)} of the paper's main text (${m.main}); the aim is about ${pct(LENGTH_AIM)}`;
+  return limit ? `${line}, and past ${pct(LENGTH_MAX)} the length check fails.` : `${line}.`;
 }
