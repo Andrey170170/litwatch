@@ -136,7 +136,8 @@
 /* diagrams */
 .dread .dr-dg { margin: 0 0 14px; border: 1px solid var(--line); background: var(--surface); }
 .dread .dr-dg .svw { overflow-x: auto; }
-.dread .dr-dg svg { display: block; width: 100%; height: auto; font-family: var(--font-ui); }
+/* drawn no larger than it was laid out: a narrow diagram stretched to the column scales its boxes and text with it */
+.dread .dr-dg svg { display: block; width: 100%; max-width: var(--dw); margin-inline: auto; height: auto; font-family: var(--font-ui); }
 /* only a phone scrolls a diagram sideways: drawn at its own size there, so its boxes keep the size they were laid out at */
 @media (max-width: 55.99rem) { .dread .dr-dg svg { min-width: var(--dw); } }
 .dread .dr-dg :is(.nd, .eg) { cursor: pointer; outline-offset: 2px; }
