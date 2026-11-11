@@ -59,7 +59,7 @@ function ordered(value: Record<string, unknown>, schema: Node | undefined): [str
     .map(([k, v]) => [k, v, props[k]]);
 }
 
-/** Coordinates (a diagram edge's waypoints), which say nothing to a reader. */
+/** Coordinates, as a diagram edge's waypoints are (`points`, which At a glance also names its prose points). */
 const coordinates = (v: unknown): boolean => Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "number" || coordinates(x));
 
 /** The read as a reader meets it: its sections in order, each under its title and id, each block under its type
@@ -70,7 +70,7 @@ export function readerText(read: Read): { text: string; figures: string[] } {
   const lines: string[] = [];
   const figures: string[] = [];
   const walk = (value: unknown, schema: Node | undefined, indent: string, key?: string): void => {
-    if ((key !== undefined && UNREAD.has(key)) || coordinates(value)) return;
+    if ((key !== undefined && UNREAD.has(key)) || (key === "points" && coordinates(value))) return;
     const name = key !== undefined && FOLDED.has(key) ? `${key}, shown on a click` : key;
     const label = name === undefined ? "" : `${name}: `;
     const inner = label ? `${indent}  ` : indent;
