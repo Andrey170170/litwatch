@@ -80,4 +80,9 @@ RL, 199k characters with a 136k appendix. All five have LaTeX text; V6 read a PD
 
 First look, at run 1's reads: the length is right, the reads the reviewer failed on length included.
 
-The full read, of run 3's reads: pending.
+The full read, of run 3's reads (2026-11-11): right for a reader who has read the paper and wants its details in one
+place, hard to follow for one who hasn't. Facts come one after another in the paper's order, with no story first:
+2611.12675's Setup opens on its list of eleven models and a WHY box on one model's layer depth before it says what the
+experiment does. The reviewer scored clarity 4 and 5 on these reads; it reads with the paper beside it, so it cannot
+see what a reader without the paper is missing. Length and diagrams pass. Readability is P6 of the plan, and automatic
+reads switch on with it, not with this run.

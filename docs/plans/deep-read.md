@@ -8,13 +8,15 @@ Where this plan and the spec differ, the spec wins and this plan is corrected. T
 
 The Deep read gives a paper's method and results at close to the paper's own detail. It has a claims ledger, the paper's figures, rebuilt tables and diagrams, and sections laid out as rungs of the paper page. One run of the `deep` agent writes it. In that run the agent sees its draft through a render tool, `submit` runs code checks, and a reviewer on the same model sends the read back for at most two revisions.
 
-The work comes in five stages, each its own PR (a hard change in `git-workflow`'s terms):
+The work comes in six stages, each its own PR (a hard change in `git-workflow`'s terms):
 
 1. **P1, the lens fix:** a small PR that ships first and alone. It stops today's leak of the CoT extensions into unrelated papers.
 2. **P2, the format and the web app,** built against fixture reads.
 3. **P3, litwatch's consumers:** storage, figures, Notion, Zotero, MCP and trace.
 4. **P4, the agent.**
-5. **P5, a check on five real reads.** The owner's read is the gate. Deploying P4 and P5 together switches automatic reads.
+5. **P5, a check on five real reads.** The owner's read is the gate.
+6. **P6, readable without the paper,** added on 2026-11-11 after the owner's read of P5. Deploying P3 to P6 together switches
+   automatic reads.
 
 The order means nothing produces a read before everything that consumes one is ready for it.
 
@@ -113,7 +115,8 @@ Each stage is its own PR, started after the previous one merges.
 | P2 | **Format and web app.** The TypeBox schema, its JSON Schema and generated types, and the fixture reads. The `DeepRead` components: sections as rungs; every block kind; the claims ledger; tables with cell notes and column highlight; diagrams with tips and highlight; figures with zoom; KaTeX. Also the rail contents, the phone strip of section chips, the widths, the format switch beside `DeepCard`, and the `render.html` entry (D1). | V2. Both fixture reads walked in the real app at both widths and in both themes. Old cards unchanged. |
 | P3 | **litwatch's consumers.** The format tag. The `deep_figures` table, how the worker stores figures, and the figure endpoint. The `deep_attempts.reviews` migration and the trace output. The `review` note kind. The Notion short form and failed-review line. The Zotero guards. MCP `get_paper` and `read_deep`. The PDF on the read token. The fake deep returning a read. `integrations.md` and `verification.md` updated. | V3, V4, and the stack smoke test green. |
 | P4 | **The deep agent.** The R1 spike first. Then: the new schema in `submit`; the code checks (numbers, figure and table cites, verdict and CARD-note locations, KaTeX); the prompt (writer's standards, lenses, three faults, the rubric for the reviewer); the D4 first message (main text without the appendix and bibliography); the session functions (`render`, `figure`, `pdfPage`, `crop`); Chromium and poppler in the image; the reviewer loop; the budget; the reviews returned to litwatch with the outcome. | V5, V6. |
-| P5 | **Check on real papers, then switch.** Five reads and the `evals/` report (D3), with the budget tuned from the measurements. The owner's read is the merge gate. Deploying P4 and P5 together switches automatic reads. | V7. |
+| P5 | **Check on real papers.** Five reads and the `evals/` report (D3), with the budget tuned from the measurements. The owner's read is the merge gate. | V7. |
+| P6 | **Readable without the paper, then switch.** The owner's read of P5 found the reads right for someone who has read the paper and hard to follow for someone who hasn't: facts in the paper's order, with no story first. Shaped before it is built: the writer is told its reader, and each section opens with what is done and why before its details; a blind reader, a review pass that sees the read and never the paper, reports where it lost the thread; WHY boxes used sparingly, where the text leaves a reason out, perhaps folded. Checked one paper at a time: one read, the owner reads it, adjust, and the next paper once it passes; the other three once two have. Deploying P3 to P6 together switches automatic reads. | V8. |
 
 ## Verification
 
@@ -127,7 +130,8 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | V4. Migrations keep existing data intact. | The `reviews` and `deep_figures` migrations on a sandbox copied from production, with counts of cards, attempts and notes before and after. |
 | V5. The run's loop does what the spec says. | `npm test` with a fake model. The code checks reject a number missing from the paper, a missing figure cite, a missing verdict location and broken TeX. A plot value with its figure cite passes. Also covered: the reviewer's pass rule (every score ≥ 4 and every check passing); the first write plus at most two revisions; a still-failing read kept with a `review` note; `render`, `figure` and `crop` returning images; the reviewer receiving the plot figures cited. The first message leaves out the appendix and the bibliography, with references before the appendix and with no appendix at all. |
 | V6. The image builds, and a real run works end to end. | The stack smoke test. One real read by the newly built deep image (not a host Node process), run as a dev container on its own port and pointed at a dev `serve`, so its Chromium and poppler are the ones exercised. Its trace shows a draft rendered, a figure converted from the e-print and one cropped from the PDF, the review rounds and the stored read. A paper whose read version is older than its latest gets that version's figures. |
-| V7. The reads are good enough to switch on. | Five reads, the `evals/` report, and the owner's read, listed as pending in the P5 PR until done. |
+| V7. The reads are good enough to switch on. | Five reads, the `evals/` report, and the owner's read, listed as pending in the P5 PR until done. Passed on length and diagrams, failed on readability, which P6 takes. |
+| V8. A read can be followed by someone who has not read the paper. | The owner's read, one paper at a time, then all five, in an `evals/` report. |
 
 ## Scope
 

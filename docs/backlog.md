@@ -15,8 +15,9 @@ it are merged. A note leaves `docs/notes/` once every item it holds is merged.
 the paper's figures, rebuilt tables and diagrams, sections as rungs of the paper page; written by the `deep` agent
 with a `render` tool, checks in `submit` and a reviewer. Also: written only for the topics the paper is graded in,
 which ends the CoT extensions on unrelated papers; Notion's short form; Zotero drops the card. Shaped 2026-11-09 in
-[`specs/deep-read.md`](specs/deep-read.md), planned in [`plans/deep-read.md`](plans/deep-read.md) (P1–P5; P1 merged
-in #143). Afterwards: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the prose rules
+[`specs/deep-read.md`](specs/deep-read.md), planned in [`plans/deep-read.md`](plans/deep-read.md) (P1–P6; P1 to P5
+merged, P1 deployed). P6 makes a read followable without the paper, and nothing deploys from `main` before it: that
+deploy switches automatic reads. Afterwards: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the prose rules
 shared between `writing.py` and the deep prompt instead of copied.
 
 ## The rework
