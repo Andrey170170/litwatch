@@ -118,7 +118,11 @@ export interface Read {
           | {
               type: "why";
               /**
-               * The paper's reason for a choice, placed at the choice it explains.
+               * The question the box answers, in view while it is folded: "Why mean ablation, not zero?"
+               */
+              question?: string;
+              /**
+               * The paper's reason for a choice a careful reader would question and the text around it leaves out.
                */
               text: string;
             }
@@ -457,7 +461,11 @@ export interface Read {
           | {
               type: "why";
               /**
-               * The paper's reason for a choice, placed at the choice it explains.
+               * The question the box answers, in view while it is folded: "Why mean ablation, not zero?"
+               */
+              question?: string;
+              /**
+               * The paper's reason for a choice a careful reader would question and the text around it leaves out.
                */
               text: string;
             }

@@ -528,8 +528,15 @@ REVIEWS = [
     {
         "round": 1,
         "passed": False,
-        "scores": {"faithfulness": 4, "clarity": 3, "depth": 5, "calibration": 4},
+        "scores": {
+            "followability": 3,
+            "faithfulness": 4,
+            "clarity": 3,
+            "depth": 5,
+            "calibration": 4,
+        },
         "checks": {"anchors": True, "voice": False},
+        "retelling": "A memory module helps; what it is tested on is unclear.",
         "findings": [
             {
                 "about": "clarity",
@@ -783,7 +790,11 @@ async def test_deep_trace_prints_the_review_rounds_and_needs_you_shows_the_revie
 
     shown = await run("trace", P.id)
     assert "Reviews: 1 round" in shown
-    assert "round 1 · failed · faithfulness 4, clarity 3, depth 5, calibration 4" in shown
+    assert (
+        "round 1 · failed · faithfulness 4, clarity 3, depth 5, calibration 4, followability 3"
+        in shown
+    )
+    assert "retold: A memory module helps; what it is tested on is unclear." in shown
     assert "checks failed: voice" in shown
     assert "- [clarity] who/1: The sentence hides who ran the ablation." in shown
     assert "rewrite: The authors ablate the memory module." in shown

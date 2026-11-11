@@ -68,6 +68,7 @@
         },
         {
           "type": "why",
+          "question": "Why arbitrary labels?",
           "text": "Arbitrary labels (`foo`/`bar`, `quil`/`zorp`) force the model to acquire a mapping it cannot have memorised, so whatever carries the answer must be built from the prompt. Natural word labels are added later to see what changes when the label has a meaning of its own."
         },
         {
@@ -84,10 +85,12 @@
         },
         {
           "type": "why",
+          "question": "Why twin prompts?",
           "text": "Twin prompts differ only inside one span (one sentence, one label, the query), so any activation can be moved between them at the same position, and the share of the difference it carries is well defined. Mean-ablation removes what a head writes without pushing the residual to an unseen zero."
         },
         {
           "type": "why",
+          "question": "Why a fresh draw of prompts?",
           "text": "Every head set chosen on one draw of prompts is confirmed on a fresh draw with another seed, and the leading numbers come from the fresh draw. Every set is compared with random heads from the same layers, every direction with a random direction of the same norm."
         }
       ]
@@ -812,6 +815,7 @@
         },
         {
           "type": "why",
+          "question": "Why must the gate work this way?",
           "text": "Why the gate has to work this way (Corollary 1): if the sink's logit beats the matching slots', the reader returns the sink's value. A signal that exists only at the query can change that competition only through the reader's query. A signal at the slots would enter through the keys, which is not what g does."
         },
         {

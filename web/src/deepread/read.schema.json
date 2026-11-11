@@ -232,10 +232,15 @@
                           "type": "string",
                           "const": "why"
                         },
+                        "question": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The question the box answers, in view while it is folded: \"Why mean ablation, not zero?\""
+                        },
                         "text": {
                           "type": "string",
                           "minLength": 1,
-                          "description": "The paper's reason for a choice, placed at the choice it explains."
+                          "description": "The paper's reason for a choice a careful reader would question and the text around it leaves out."
                         }
                       },
                       "additionalProperties": false
@@ -1011,10 +1016,15 @@
                           "type": "string",
                           "const": "why"
                         },
+                        "question": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The question the box answers, in view while it is folded: \"Why mean ablation, not zero?\""
+                        },
                         "text": {
                           "type": "string",
                           "minLength": 1,
-                          "description": "The paper's reason for a choice, placed at the choice it explains."
+                          "description": "The paper's reason for a choice a careful reader would question and the text around it leaves out."
                         }
                       },
                       "additionalProperties": false

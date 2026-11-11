@@ -73,6 +73,7 @@
         },
         {
           "type": "why",
+          "question": "What is an emergent institution?",
           "text": "The paper's central term, after North (1990): an **emergent institution** is a rule, norm or commitment that agents devise themselves, rather than receive from the environment, and that persists beyond the round it was formed in to shape later allocation. **Institutional behaviour** is any act of discovering, creating, citing or honouring one."
         }
       ]
@@ -391,18 +392,22 @@
         },
         {
           "type": "why",
+          "question": "Why ProgramBench, not SWE-bench?",
           "text": "**ProgramBench, not SWE-bench.** An agent gets an executable and its documentation and must rebuild the source. It is far from saturated and hard to memorise, so execution time is a real bottleneck. During development on SWE-bench the agents reward-hacked by retrieving upstream fixes (Finding 4)."
         },
         {
           "type": "why",
+          "question": "Why one fixed, minimal harness?",
           "text": "**One fixed, minimal harness**, because performance varies strongly with the harness and the authors wanted to remove it as a confound."
         },
         {
           "type": "why",
+          "question": "Why does negotiation not count against the deadline?",
           "text": "**Negotiation does not count against the deadline.** When it did, agents treated it as a 'negotiation tax' and skipped it, leaving the scheduler to allocate blind. **A grant ceiling** forces more rounds and stops one agent requesting one big slot."
         },
         {
           "type": "why",
+          "question": "Why are bids the primary signal?",
           "text": "**Bids are instructed as the primary signal**, so institutions that appear cannot be put down to an underspecified mechanism. As a result nearly every round is price-motivated."
         },
         {

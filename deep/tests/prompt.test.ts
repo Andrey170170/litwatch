@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { LENS_QUESTIONS, findingsMessage, reviewerPrompt, schemaJson, systemPrompt, topicKey } from "../src/prompt.ts";
 import { DraftSchema } from "../src/read.ts";
-import { PASSING } from "./support.ts";
+import { JUDGED } from "./support.ts";
 
 const selections = [
   { name: "CoT faithfulness", slug: "cot-faithfulness", subject: "Chain-of-thought faithfulness and monitoring", rubric: "Tier 1: measures or detects unfaithful traces.", grade: "must_read" },
@@ -56,8 +56,8 @@ test("the prose rules are litwatch's own, as src/litwatch/writing.py has them", 
 test("the reviewer's prompt carries the rubric, the pass rule and the topics", () => {
   const p = reviewerPrompt(selections);
   for (const name of ["faithfulness", "clarity", "depth", "calibration", "anchors", "experiments", "why_boxes", "voice", "length"]) assert.ok(p.includes(`- ${name}: `), name);
-  assert.ok(p.includes("A 5 means a lab member never rereads a sentence"), "clarity's anchors");
-  assert.ok(p.includes("A read passes when every score is at least 4 and every check passes."));
+  assert.ok(p.includes("A 5 means a reader never rereads a sentence"), "clarity's anchors");
+  assert.ok(p.includes("A read passes when every score, the blind reader's included, is at least 4 and every check passes."));
   assert.ok(p.includes('- "cot-faithfulness" · CoT faithfulness (graded must read)'));
 });
 
@@ -73,18 +73,18 @@ test("the reviewer's prompt says what code left unchecked: the places it names, 
 
 test("the findings reach the writer most important first, with what is left", () => {
   const review = {
-    ...PASSING,
+    ...JUDGED,
     round: 2,
     passed: false,
-    scores: { ...PASSING.scores, depth: 3 },
-    checks: { ...PASSING.checks, why_boxes: false },
+    scores: { ...JUDGED.scores, depth: 3 },
+    checks: { ...JUDGED.checks, why_boxes: false },
     findings: [
       { about: "depth" as const, where: "method", text: "The probe's training is one sentence; the paper gives the data split." },
       { about: "why_boxes" as const, where: "method.1", text: "The reason for layer 12 is in prose." },
     ],
   };
   const message = findingsMessage(review, 1);
-  assert.ok(message.startsWith("The reviewer did not pass the read (review 2)."));
+  assert.ok(message.startsWith("The read did not pass (review 2)."));
   assert.ok(message.includes("(below: depth 3)") && message.includes("Checks failed: why_boxes."));
   assert.ok(message.indexOf("1. [depth] method: ") < message.indexOf("2. [why_boxes] method.1: "));
   assert.ok(message.includes("this is the last revision"));
