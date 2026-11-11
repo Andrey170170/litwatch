@@ -9,7 +9,7 @@ import type { ImageContent, Model, Models, TextContent, ThinkingLevel } from "@e
 import { Type, type Static } from "typebox";
 import type { Shot } from "./imaging.ts";
 import { blindPrompt } from "./prompt.ts";
-import { BlockSchema, SectionSchema, type Read } from "./read.ts";
+import { BlockSchema, ReadSchema, SectionSchema, type Read } from "./read.ts";
 import { ask, type Asked } from "./review.ts";
 
 const FollowSchema = Type.Object(
@@ -24,7 +24,7 @@ const FollowSchema = Type.Object(
         },
         { additionalProperties: false },
       ),
-      { maxItems: 20, description: "Last, and most important first; only the places that cost the thread." },
+      { description: "Last, and most important first; only the places that cost the thread." },
     ),
   },
   { additionalProperties: false },
@@ -36,44 +36,67 @@ const TOOL = { name: "follow", description: "Give what you understood: the retel
 
 // what a reader does not see: layout, links, and a section's takeaway, which only the read's contents outside the web
 // app show; a block's type is shown as its label
-const UNREAD = new Set(["type", "kind", "x", "y", "w", "h", "width", "height", "label_at", "style", "colour", "anchor", "url", "code_url", "takeaway"]);
+const UNREAD = new Set(["type", "kind", "x", "y", "w", "h", "width", "height", "label_at", "style", "colour", "anchor", "url", "code_url", "takeaway", "heat"]);
+/** What the page folds, opening on a click. */
+const FOLDED = new Set(["evidence"]);
 
-/** Each block's and section's fields in the schema's order, which is the order the web app shows them in, whatever
- * order the writer's JSON has them in. */
-const ORDER = new Map<string, string[]>([
-  ...(BlockSchema.anyOf as { properties: Record<string, { const?: string }> }[]).map((s) => [`block:${s.properties.type!.const}`, Object.keys(s.properties)] as const),
-  ...(SectionSchema.anyOf as { properties: Record<string, { const?: string }> }[]).map((s) => [`section:${s.properties.kind!.const}`, Object.keys(s.properties)] as const),
-]);
-const ordered = (o: Record<string, unknown>, order: string[] = []): [string, unknown][] => {
+type Node = { properties?: Record<string, Node>; anyOf?: Node[]; items?: Node; const?: unknown };
+
+/** The schema of `value` among a union's branches: the one whose `type` or `kind` it has. */
+function branch(schema: Node | undefined, value: Record<string, unknown>): Node | undefined {
+  if (!schema?.anyOf) return schema;
+  return schema.anyOf.find((s) => ["type", "kind"].some((k) => s.properties?.[k]?.const !== undefined && s.properties[k]!.const === value[k])) ?? schema.anyOf.find((s) => s.properties);
+}
+
+/** An object's fields in its schema's order, which is the order the web app shows them in, whatever order the
+ * writer's JSON has them in; fields the schema does not name follow. */
+function ordered(value: Record<string, unknown>, schema: Node | undefined): [string, unknown, Node | undefined][] {
+  const props = schema?.properties ?? {};
+  const order = Object.keys(props);
   const at = (k: string) => (order.includes(k) ? order.indexOf(k) : order.length);
-  return Object.entries(o).sort(([a], [b]) => at(a) - at(b));
-};
+  return Object.entries(value)
+    .sort(([a], [b]) => at(a) - at(b))
+    .map(([k, v]) => [k, v, props[k]]);
+}
+
+/** Coordinates (a diagram edge's waypoints), which say nothing to a reader. */
+const coordinates = (v: unknown): boolean => Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "number" || coordinates(x));
 
 /** The read as a reader meets it: its sections in order, each under its title and id, each block under its type
- * and place ("method.3"), a WHY box as its question with its folded answer, a figure as its caption beside its
- * image, the collection's papers under Related work. `figures` names the figure blocks' images in the order the
- * read shows them. */
+ * and place ("method.3"), every field in the order the page shows it, a WHY box as its question with its folded
+ * answer, a figure as its caption beside its image, the collection's papers under Related work. `figures` names the
+ * figure blocks' images in the order the read shows them. */
 export function readerText(read: Read): { text: string; figures: string[] } {
   const lines: string[] = [];
   const figures: string[] = [];
-  const walk = (value: unknown, indent: string, key?: string): void => {
-    if (key !== undefined && UNREAD.has(key)) return;
-    const label = key === undefined ? "" : `${key}: `;
+  const walk = (value: unknown, schema: Node | undefined, indent: string, key?: string): void => {
+    if ((key !== undefined && UNREAD.has(key)) || coordinates(value)) return;
+    const name = key !== undefined && FOLDED.has(key) ? `${key}, shown on a click` : key;
+    const label = name === undefined ? "" : `${name}: `;
+    const inner = label ? `${indent}  ` : indent;
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") lines.push(`${indent}${label}${value}`);
     else if (Array.isArray(value)) {
-      if (label) lines.push(`${indent}${key}:`);
-      for (const v of value) walk(v, label ? `${indent}  ` : indent);
+      if (label) lines.push(`${indent}${name}:`);
+      for (const v of value) {
+        // each item of a list of objects (facts, nodes, claims) opens with a dash, so one ends where the next begins
+        const start = lines.length;
+        walk(v, schema?.items, inner);
+        if (v && typeof v === "object" && !Array.isArray(v) && lines.length > start) lines[start] = lines[start]!.replace(/^(\s*)/, "$1- ");
+      }
     } else if (value && typeof value === "object") {
-      if (label) lines.push(`${indent}${key}:`);
-      for (const [k, v] of Object.entries(value)) walk(v, label ? `${indent}  ` : indent, k);
+      if (label) lines.push(`${indent}${name}:`);
+      const o = value as Record<string, unknown>;
+      for (const [k, v, s] of ordered(o, branch(schema, o))) walk(v, s, inner, k);
     }
   };
+  const sectionSchema = SectionSchema as unknown as Node;
+  const blockSchema = BlockSchema as unknown as Node;
   for (const section of read.sections) {
     lines.push("", `== ${section.title} == (${section.id})`);
-    for (const [key, value] of ordered(section, ORDER.get(`section:${section.kind}`))) {
+    for (const [key, value, schema] of ordered(section, branch(sectionSchema, section))) {
       if (key === "id" || key === "title") continue;
       if (key !== "blocks" || !Array.isArray(value)) {
-        walk(value, "", key);
+        walk(value, schema, "", key);
         continue;
       }
       value.forEach((block: Record<string, unknown>, n) => {
@@ -85,11 +108,11 @@ export function readerText(read: Read): { text: string; figures: string[] } {
           lines.push(`[figure ${figures.length}, its image below] (${at}) ${block.number ?? ""}`.trimEnd(), `  caption: ${block.caption}`);
         } else {
           lines.push(`[${block.type}] (${at})`);
-          for (const [k, v] of ordered(block, ORDER.get(`block:${String(block.type)}`))) walk(v, "  ", k);
+          for (const [k, v, s] of ordered(block, branch(blockSchema, block))) walk(v, s, "  ", k);
         }
       });
     }
-    if (section.kind === "related" && read.among_collection.length) walk(read.among_collection, "", "among the collection");
+    if (section.kind === "related" && read.among_collection.length) walk(read.among_collection, (ReadSchema as unknown as Node).properties?.among_collection, "", "among the collection");
   }
   return { text: lines.join("\n").trimStart(), figures };
 }
