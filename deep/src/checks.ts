@@ -313,7 +313,7 @@ const LOCATION = /(?:§+\s*|\b(?:Sections?|Secs?\.?|Appendi(?:x|ces)|Apps?\.?|Eq
 // what is no value: places, arXiv ids, links, and commit hashes (9550e8c), whose leading digits read as a number;
 // a number in scientific notation (1.234567e-3, 10000e3) or with a unit letter (100000B) is a value, not a hash,
 // unless it is named one ("commit 1234567", "hash 12345e6")
-const NOT_VALUES = [LOCATION, /\b\d{4}\.\d{4,5}(?:v\d+)?\b/g, /\]\(https?:\/\/[^\s()]+\)/g, /https?:\/\/\S+/g, /(?<![\d.])\b(?!\d+(?:e[-+−]?\d+|[a-f])\b)(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,64}\b/gi, /\b(?:commit|hash|digest)\s+[0-9a-f]{7,64}\b/gi];
+const NOT_VALUES = [LOCATION, /\b\d{4}\.\d{4,5}(?:v\d+)?\b/g, /\]\(https?:\/\/[^\s()]+\)/g, /https?:\/\/\S+/g, /(?<![\d.])\b(?!\d+(?:e[-+−]?\d+|[a-f])\b)(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,64}\b/gi, /\b(?:commit|hash|digest):?\s+`?[0-9a-f]{7,64}\b/gi];
 /** A whole number that is a year, which a read may give of its own knowledge: one a paper or its prior work could
  * carry, up to next year's. 2048 is a number like any other. */
 const FIRST_YEAR = 1950;

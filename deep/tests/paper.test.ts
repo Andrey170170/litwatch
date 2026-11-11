@@ -102,6 +102,14 @@ test("a PDF's text is cut at the bold headings its Markdown form has: References
   // an appendix's own Introduction, a level below the paper's, moves neither cut
   const nested = MARKDOWN.replace("## **1 Method** ", "## **1 Introduction** ") + "\n### **Introduction.** \n\nThe appendix opens.\n";
   assert.deepEqual(splitPaper(nested, "pdf").cuts.map((c) => [c.part, c.start]), [["references", nested.indexOf("## **References**")], ["appendix", nested.indexOf("## **A Additional Samples**")]]);
+  // and in a paper with no Introduction of its own, the appendix's is none
+  const bare = "## **Method** \n\nWe probe.\n\n## **References** \n\n- Turpin et al.\n\n## **Appendix A** \n\n### **Introduction** \n\nMore.\n";
+  assert.deepEqual(splitPaper(bare, "pdf").cuts.map((c) => [c.part, c.start]), [["references", bare.indexOf("## **References**")], ["appendix", bare.indexOf("## **Appendix A**")]]);
+  const lettered = bare.replace("## **Appendix A** ", "## **A Additional Samples** ");
+  assert.deepEqual(splitPaper(lettered, "pdf").cuts.map((c) => [c.part, c.start]), [["references", lettered.indexOf("## **References**")], ["appendix", lettered.indexOf("## **A Additional Samples**")]]);
+  // a plain text's appendix Introduction still loses the appendix cut, as before P5, but not the References one
+  const lines = "Probes\n1 Introduction\nWe probe the trace.\nReferences\nA. Author. A paper. 2024.\nAppendix A\nIntroduction\nMore.\n";
+  assert.deepEqual(splitPaper(lines, "pdf").cuts.map((c) => c.part), ["references"]);
 });
 
 test("a PDF's plain text is cut at its References line, and at the appendix's: lettered after it, or named anywhere", () => {

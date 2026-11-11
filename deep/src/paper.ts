@@ -197,14 +197,17 @@ function pdfParts(body: string): PdfParts {
   // below every Markdown heading, so the next one of any level ends it
   const level = Math.max(1, ...marked.map((h) => h.level));
   const lines: Bare[] = [...body.matchAll(/^[ \t]*(?!#)(\S.*)$/gm)].map((m) => ({ level, title: unmarked(m[1]!), start: m.index }));
-  // the last Introduction at the shallowest level: a contents list's entries come before it, an appendix's own
-  // Introduction is a level below it
-  const intros = [...marked, ...lines].filter((h) => INTRODUCTION.test(h.title));
+  // the last Introduction at the shallowest level: a contents list's entries come before it, and an appendix's own
+  // Introduction, under an appendix's Markdown heading at its level or above (named, or lettered after a
+  // References), is none. Plain lines have no levels to tell a contents list from an appendix by.
+  const cited = marked.filter((h) => REFERENCES.test(h.title)).map((h) => h.start);
+  const appendices = marked.filter((h) => APPENDIX_TITLE.test(h.title) || (cited.some((r) => r < h.start) && LETTERED.test(h.title)));
+  const intros = [...marked, ...lines].filter((h) => INTRODUCTION.test(h.title) && !appendices.some((a) => a.start < h.start && a.level <= h.level));
   const top = Math.min(...intros.map((h) => h.level));
   const introduction = Math.max(0, ...intros.filter((h) => h.level === top).map((h) => h.start));
   // a contents list in Markdown headings sits before the Introduction too
   const sections = marked.filter((h) => h.start >= introduction);
-  const references = sections.find((h) => REFERENCES.test(h.title)) ?? lines.filter((h) => h.start >= introduction && REFERENCES.test(h.title)).at(-1);
+  const references = sections.find((h) => REFERENCES.test(h.title)) ?? lines.filter((h) => (!marked.length || h.start >= introduction) && REFERENCES.test(h.title)).at(-1);
   const after = (h: Bare) => references !== undefined && h.start > references.start;
   const appendix =
     sections.find((h) => APPENDIX_TITLE.test(h.title) || (after(h) && LETTERED.test(h.title))) ??
