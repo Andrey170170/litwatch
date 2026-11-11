@@ -29,7 +29,10 @@ shows, the read says so and points at where.
 For most papers the read replaces reading the paper. The owner opens the paper itself only in the few cases that
 need every detail exactly, so the read accepts some LLM looseness of wording in exchange for detail and coverage. Its
 length scales with the paper, roughly a third of the main text, and the method and results are never cut to save
-length. R1's two reads (about 15 and 12 minutes) are the target.
+length; it comes from detail, never from a caveat restated. Code measures it as the read's text against the paper's main
+text (without the appendix or bibliography; a LaTeX source from its first heading), and a read past 60% fails its length check: the
+first five real reads, at 32–46%, were the right length to the owner (`evals/2026-11-10-deep-reads.md`). R1's two
+reads (about 15 and 12 minutes) are the target.
 
 ## The shape of a read
 
@@ -157,8 +160,8 @@ today, with these additions:
 
 and pass/fail checks on the structure the writer's prompt already asks for: the anchors in their places; findings as
 experiments; the paper's reasons in WHY boxes; every CARD note and verdict citing a place; an objective voice (no "for
-you", no hype, as everywhere in litwatch's prose); a length in proportion to the paper. A read passes when every score
-is 4 or above and every check passes.
+you", no hype, as everywhere in litwatch's prose); a length in proportion to the paper, which code sets from its
+measure rather than the reviewer's estimate. A read passes when every score is 4 or above and every check passes.
 
 **The writer's standards** (its prompt): everything above under "What a Deep read is" and "The shape of a read";
 specific methods, numbers and model names; no restating of the Brief beyond At a glance; every statement about the

@@ -16,6 +16,7 @@ import { Figures, type Made } from "./figures.ts";
 import { BudgetError, buildHosts, NetworkError, pacer, RefusedError, type FetchRecord, type HostConfig, type StoreHit } from "./hosts.ts";
 import { RenderUnavailable, type Imaging, type RenderTarget, type RenderWidth, type Shot } from "./imaging.ts";
 import { layout } from "./layout.ts";
+import { lengthLine, measure } from "./length.ts";
 import { headings } from "./paper.ts";
 import { PaperIndex } from "./places.ts";
 import { findingsMessage, systemPrompt, topicKey, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
@@ -282,7 +283,7 @@ export async function processPaper(
     },
     check: async ([draft, standBy]) => {
       const result = await examine(draft, standBy);
-      return "errors" in result ? { ok: false, errors: result.errors } : { ok: true };
+      return "errors" in result ? { ok: false, errors: result.errors } : { ok: true, length: lengthLine(measure(result.read, paper)) };
     },
     submit: async ([draft, standBy]) => {
       const result = await examine(draft, standBy);
@@ -292,7 +293,7 @@ export async function processPaper(
       }
       candidate = result;
       record({ t: now(), type: "submit", ok: true, ...(result.stood ? { stood: result.stood } : {}) });
-      return { ok: true };
+      return { ok: true, length: lengthLine(measure(result.read, paper)) };
     },
   };
   for (const [name, fn] of Object.entries(hosts)) if (name !== "submit") hosts[name] = traced(name, fn);
@@ -409,6 +410,7 @@ export async function processPaper(
           }),
           unverified: next.unverified,
           stood: next.stood ?? [],
+          length: measure(next.read, paper),
         },
         { effort: opts.effort, signal: session.signal, onPayload: detailedSummaries },
       );

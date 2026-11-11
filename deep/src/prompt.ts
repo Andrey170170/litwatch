@@ -6,6 +6,7 @@
  */
 
 import { MAX_BODY_CHARS_IN_CONTEXT, outline, splitPaper, type Heading } from "./paper.ts";
+import { lengthLine, type Length } from "./length.ts";
 import { DraftSchema, type Read } from "./read.ts";
 import type { Review } from "./review.ts";
 
@@ -106,7 +107,8 @@ other; Limitations, Related work and Reproducibility last, in that order; each h
 - experiments: the findings are given as experiments (question, did, found, means, not shown), not as loose prose.
 - why_boxes: the paper's reasons for its choices stand in WHY boxes at the choices they explain.
 - voice: objective throughout: nothing addressed to a reader, no audience named, no advice to read, no hype.
-- length: in proportion to the paper, roughly a third of its main text, with the method and the results not cut short.`;
+- length: code measures it and sets this check from the share given with the read; give true. A read made long by \
+repetition is a clarity finding; one whose method or results are cut short is a depth finding.`;
 
 /** The topics the read is written for, each with the key its lens names it by. */
 function renderSelections(context: SelectionContext[]): string {
@@ -135,7 +137,8 @@ close to the paper's own detail, without the general background and introduction
 reasons for doing things the way it did. For most papers it replaces reading the paper. It is organised so any part can be \
 found at a glance, and it is more sceptical than the authors: where the paper claims more than it shows, the read says so \
 and points at where. Its length scales with the paper, roughly a third of the main text; the method and the results are \
-never cut to save length.
+never cut to save length. check() and submit() give the read's measured share of the main text. Length comes from detail, never from repetition: state each caveat once, at the finding it qualifies or \
+in Limitations, and let Claims and the lenses point to it rather than restate it.
 
 The shape of a read, in this order:
 - At a glance (kind glance), first: the key claim, three or four points that carry the paper's argument, and the facts: kind \
@@ -231,7 +234,8 @@ its 12 rows").
 spells its own way. Where you have checked that a refused place or number is the paper's, stand by it (submit(read, \
 ["Table 2", "0.00005"])) rather than reword a correct read; the reviewer is told and checks it. Standing by an item you \
 have not checked is a faithfulness finding waiting to happen.
-- Equations: every eq block and every $inline formula$ parses in KaTeX.
+- Equations: every eq block and every $inline formula$ parses in KaTeX. Write TeX in String.raw\`…\`: in a plain string \
+\\f, \\b and \\t are escape characters, so "\\frac" loses its backslash.
 - Diagrams: leave a diagram's coordinates out and it is laid out for you; render it to see the result, and place the nodes \
 yourself (x, y, w, h on every node, at least 40 tall) only where the layout does not serve.
 
@@ -340,7 +344,7 @@ export function reviewerText(paper: PaperInput, room: number): { text: string; l
 }
 
 /** What the reviewer is given to read, before the plot figures: `text` and `left` are `reviewerText`'s. */
-export function reviewerMessage(paper: PaperInput, text: string, left: string[], read: Read, unverified: string[], stood: string[] = []): string {
+export function reviewerMessage(paper: PaperInput, text: string, left: string[], read: Read, unverified: string[], stood: string[] = [], length?: Length): string {
   return [
     `arXiv ${paper.id}: ${paper.title}`,
     `Text source: ${paper.body_source ?? "unknown"}`,
@@ -352,6 +356,7 @@ export function reviewerMessage(paper: PaperInput, text: string, left: string[],
     "The Deep read, as JSON:",
     "",
     JSON.stringify(read),
+    ...(length ? ["", lengthLine(length, true)] : []),
     ...(left.length ? ["", "What the read says of the parts of the paper left out above cannot be checked here: do not count it for or against the read."] : []),
     ...(unverified.length ? ["", `Not confirmed by code, which could not tell whether the paper has these places the read cites: ${unverified.join("; ")}. Check each against the paper.`] : []),
     ...(stood.length ? ["", `Refused by code, and stood by the writer as the paper's: ${stood.join("; ")}. Check each against the paper; one it does not support is a faithfulness finding.`] : []),

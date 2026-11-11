@@ -105,7 +105,10 @@ Then the reviewer: one call, no session, with the paper's whole text, the read, 
 values, and the places code could not look up. The text is cut only where the model's context (its `contextWindow`)
 has no room for it: the bibliography goes first, then the text's end; the reviewer is told what was left out, and
 the read carries a `tool` note saying so. It answers through a `review` tool with four scores (faithfulness, clarity, depth, calibration, 1 to 5),
-five checks (`anchors`, `experiments`, `why_boxes`, `voice`, `length`) and its findings. A read passes when every
+five checks (`anchors`, `experiments`, `why_boxes`, `voice`, `length`) and its findings. `length` is code's, not the
+reviewer's: the read's text past 60% of the paper's main text fails it (`src/length.ts`). The writer, in `check()` and
+`submit()`, is told the measure and the aim of a third, and the reviewer the limit as well; a writer told the limit
+wrote up to it. A read passes when every
 score is at least 4 and every check passed. Otherwise the findings go into the writer's own conversation and it
 revises: the first write plus at most two revisions. A read that still fails is kept, with a `review` process note
 saying what it failed on; a review that could not run leaves the read with a `tool` note saying it was not
@@ -169,9 +172,9 @@ node src/main.ts serve
 | `DEEP_PORT` | `8081` | Port to listen on |
 | `DEEP_AUTH_FILE` | `/var/lib/litwatch-deep/auth.json` | Where `login` keeps the model session |
 | `DEEP_MODEL`, `DEEP_EFFORT` | `gpt-6.1-sol`, `high` | The model and reasoning effort, the writer's and the reviewer's |
-| `DEEP_MAX_CELLS` | `150` | REPL cells per paper, revisions included |
+| `DEEP_MAX_CELLS` | `100` | REPL cells per paper, revisions included |
 | `DEEP_CELL_TIMEOUT_S` | `90` | One cell's time limit |
-| `DEEP_WALL_CLOCK_MIN` | `120` | One paper's time limit, its review and revisions included; keep it below litwatch's `[integrations.deep] timeout_minutes` (135), past which litwatch ends a running job as stuck and may start a duplicate |
+| `DEEP_WALL_CLOCK_MIN` | `60` | One paper's time limit, its review and revisions included; keep it below litwatch's `[integrations.deep] timeout_minutes` (75), past which litwatch ends a running job as stuck and may start a duplicate |
 | `DEEP_MAX_OUTPUT_CHARS` | `8000` | Output kept per cell |
 | `DEEP_MAX_FETCH_CHARS` | `200000` | Text kept per `fetch` |
 | `DEEP_MAX_FETCH_MB` | `2` | MiB read per `fetch`, fractions allowed; the rest of the body is never read |

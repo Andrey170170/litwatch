@@ -15,8 +15,9 @@ it are merged. A note leaves `docs/notes/` once every item it holds is merged.
 the paper's figures, rebuilt tables and diagrams, sections as rungs of the paper page; written by the `deep` agent
 with a `render` tool, checks in `submit` and a reviewer. Also: written only for the topics the paper is graded in,
 which ends the CoT extensions on unrelated papers; Notion's short form; Zotero drops the card. Shaped 2026-11-09 in
-[`specs/deep-read.md`](specs/deep-read.md), planned in [`plans/deep-read.md`](plans/deep-read.md) (P1–P5; P1 merged
-in #143). Afterwards: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the prose rules
+[`specs/deep-read.md`](specs/deep-read.md), planned in [`plans/deep-read.md`](plans/deep-read.md) (P1–P6; P1 to P5
+merged, P1 deployed). P6 makes a read followable without the paper, and nothing deploys from `main` before it: that
+deploy switches automatic reads. Afterwards: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the prose rules
 shared between `writing.py` and the deep prompt instead of copied.
 
 ## The rework
@@ -149,6 +150,12 @@ Built between milestones, on whatever structure exists then.
   the owner's go-ahead.
 - **A Calibrate session whose drawn topic left Focus:** answering it is a 422 now. *Needs a decision* on what an
   answer there means.
+- **The Deep read's writer corrects a PDF's parts.** A PDF's bibliography and appendix are found from its headings
+  (`pdfParts`), which odd naming or layout defeats: a contents list whose entries sit at the paper's own heading level
+  still starts the cuts, losing the main text from the first message (P5, #164). A missed cut costs only tokens and
+  makes the length check lax, since the rest stays readable in the session. Idea (2026-11-10): the writer may move a
+  part's border when the parsing is wrong, and the length check stays measured on code's cuts, or on the reviewer's,
+  so the writer does not set its own bar. Wait for a PDF-only read whose parts came out wrong. *Needs shaping.*
 - **A0's small fixes left three follow-ups:**
   - `mcp_types`, `starlette` and `pymupdf` are imported but not declared; they arrive through other packages;
   - two more tests in `tests/test_batches.py` share the race #154 fixed (the batched night, the digest batch count):

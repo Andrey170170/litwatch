@@ -8,6 +8,7 @@
 import type { AssistantMessage, ImageContent, Message, Model, Models, TextContent, ThinkingLevel } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import type { Shot } from "./imaging.ts";
+import { LENGTH_MAX, type Length } from "./length.ts";
 import { reviewerMessage, reviewerPrompt, reviewerText, type PaperInput, type SelectionContext } from "./prompt.ts";
 import type { Read } from "./read.ts";
 import { enumOf, schemaErrors } from "./schema.ts";
@@ -106,6 +107,8 @@ export interface ReviewInput {
   unverified: string[];
   /** The places and numbers code refused that the writer stood by. */
   stood: string[];
+  /** The read's length against the paper's, which sets the length check. */
+  length?: Length;
 }
 
 export interface ReviewOutcome {
@@ -129,7 +132,7 @@ export async function review(
   opts: { effort: ThinkingLevel; signal?: AbortSignal; onPayload?: (payload: unknown) => unknown },
 ): Promise<ReviewOutcome> {
   const { text, left } = reviewerText(input.paper, paperRoom(model.contextWindow, JSON.stringify(input.read).length, input.plots.length));
-  const content: (TextContent | ImageContent)[] = [{ type: "text", text: reviewerMessage(input.paper, text, left, input.read, input.unverified, input.stood) }];
+  const content: (TextContent | ImageContent)[] = [{ type: "text", text: reviewerMessage(input.paper, text, left, input.read, input.unverified, input.stood, input.length) }];
   for (const { name, number, shot } of input.plots) {
     // the number is the writer's word for which figure this is, not something code confirmed
     const what = `The writer's figure "${name}"${number ? `, made as the paper's ${number}` : ""}, which the read gives values read off:`;
@@ -152,7 +155,12 @@ export async function review(
     if (answer.stopReason === "error" || answer.stopReason === "aborted") return { error: answer.errorMessage ?? answer.stopReason, calls, left };
     const call = answer.content.find((c) => c.type === "toolCall" && c.name === TOOL.name);
     const errors = call?.type === "toolCall" ? schemaErrors(VerdictSchema, call.arguments) : ["no call of the review tool"];
-    if (call?.type === "toolCall" && errors.length === 0) return { verdict: call.arguments as Verdict, calls, left };
+    if (call?.type === "toolCall" && errors.length === 0) {
+      const verdict = call.arguments as Verdict;
+      // the length check is code's, from the measure, not the reviewer's estimate
+      if (input.length) verdict.checks.length = input.length.share <= LENGTH_MAX;
+      return { verdict, calls, left };
+    }
     if (attempt >= REPAIRS) return { error: `the reviewer gave no valid verdict: ${errors.slice(0, 5).join("; ")}`, calls, left };
     messages.push(answer);
     if (call?.type === "toolCall")

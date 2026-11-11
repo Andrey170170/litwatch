@@ -51,9 +51,9 @@ const config = {
   run: {
     model: env("DEEP_MODEL", "gpt-6.1-sol"),
     effort: env("DEEP_EFFORT", "high") as RunOptions["effort"],
-    maxCells: whole("DEEP_MAX_CELLS", 150),
+    maxCells: whole("DEEP_MAX_CELLS", 100),
     cellTimeoutMs: whole("DEEP_CELL_TIMEOUT_S", 90, 1000, MAX_TIMER_MS),
-    wallClockMs: whole("DEEP_WALL_CLOCK_MIN", 120, 60_000, MAX_TIMER_MS),
+    wallClockMs: whole("DEEP_WALL_CLOCK_MIN", 60, 60_000, MAX_TIMER_MS),
     maxOutputChars: whole("DEEP_MAX_OUTPUT_CHARS", 8000),
   } satisfies RunOptions,
 };

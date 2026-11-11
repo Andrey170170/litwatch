@@ -53,7 +53,10 @@ The learning rate is 0.003 and training runs for 40 epochs.
 \end{document}
 `;
 
-export const PAPER = { id: "2610.00001", title: "Probes read the trace", abstract: "A.", authors: ["A. Author"], body: BODY, body_source: "latex", body_version: 2 };
+/** BODY with a long Discussion, so the main text is a real paper's size against a read: a read's length check is
+ * its share of the main text. */
+const DISCUSSION = `\\section{Discussion}\n${"The probe's accuracy holds across the tested layers. ".repeat(60)}\n`;
+export const PAPER = { id: "2610.00001", title: "Probes read the trace", abstract: "A.", authors: ["A. Author"], body: BODY.replace("\\begin{thebibliography}", `${DISCUSSION}\\begin{thebibliography}`), body_source: "latex", body_version: 2 };
 
 /** A draft that passes every check against `BODY`, with no figure and no lens. */
 export function draft(): Draft {

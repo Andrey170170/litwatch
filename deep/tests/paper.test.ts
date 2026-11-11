@@ -87,6 +87,37 @@ test("a PDF's text is cut at the bold headings its Markdown form has: References
   const kept = splitPaper(methods, "pdf");
   assert.deepEqual(kept.cuts.map((c) => c.part), ["references"]);
   assert.ok(kept.main.includes("## **Methods**") && !kept.main.includes("Turpin"));
+  // a contents list in headings ahead of the Introduction names the parts, and starts neither
+  const listed = "# **Probes** \n\n## **Contents** \n\n### **1 Introduction** \n\n### **References** \n\n### **Appendix A** \n\n" + MARKDOWN.replace("## **1 Method** ", "## **1 Introduction** ");
+  const contents = splitPaper(listed, "pdf");
+  assert.deepEqual(contents.cuts.map((c) => [c.part, c.start]), [["references", listed.lastIndexOf("## **References**")], ["appendix", listed.indexOf("## **A Additional Samples**")]]);
+  assert.ok(contents.main.includes("We probe, see Appendix A"), "the main text stays in the message");
+  // so does a plain contents line naming References, in a paper whose bibliography has no heading
+  const plain = "Probes\nContents\n1 Introduction\nReferences\n\n## **1 Introduction** \n\nWe probe the trace.\n\n## **2 Results** \n\nIt works.\n";
+  assert.deepEqual(splitPaper(plain, "pdf").cuts, []);
+  // an Introduction heading may end in a full stop
+  const stopped = "## **Contents** \n\n### **1 Introduction** \n\n### **References** \n\n### **Appendix A** \n\n" + MARKDOWN.replace("## **1 Method** ", "## **1. Introduction.** ");
+  assert.deepEqual(splitPaper(stopped, "pdf").cuts.map((c) => c.part), ["references", "appendix"]);
+  assert.ok(splitPaper(stopped, "pdf").main.includes("We probe, see Appendix A"));
+  // an appendix's own Introduction, a level below the paper's, moves neither cut
+  const nested = MARKDOWN.replace("## **1 Method** ", "## **1 Introduction** ") + "\n### **Introduction.** \n\nThe appendix opens.\n";
+  assert.deepEqual(splitPaper(nested, "pdf").cuts.map((c) => [c.part, c.start]), [["references", nested.indexOf("## **References**")], ["appendix", nested.indexOf("## **A Additional Samples**")]]);
+  // and in a paper with no Introduction of its own, the appendix's is none
+  const bare = "## **Method** \n\nWe probe.\n\n## **References** \n\n- Turpin et al.\n\n## **Appendix A** \n\n### **Introduction** \n\nMore.\n";
+  assert.deepEqual(splitPaper(bare, "pdf").cuts.map((c) => [c.part, c.start]), [["references", bare.indexOf("## **References**")], ["appendix", bare.indexOf("## **Appendix A**")]]);
+  const lettered = bare.replace("## **Appendix A** ", "## **A Additional Samples** ");
+  assert.deepEqual(splitPaper(lettered, "pdf").cuts.map((c) => [c.part, c.start]), [["references", lettered.indexOf("## **References**")], ["appendix", lettered.indexOf("## **A Additional Samples**")]]);
+  // plain text keeps the rules it had before: an appendix's Introduction line loses the appendix cut but not the
+  // References one, a stray Markdown heading changes neither, and "Introduction." is no Introduction line
+  const lines = "Probes\n1 Introduction\nWe probe the trace.\nReferences\nA. Author. A paper. 2024.\nAppendix A\nIntroduction\nMore.\n";
+  assert.deepEqual(splitPaper(lines, "pdf").cuts.map((c) => c.part), ["references"]);
+  assert.deepEqual(splitPaper(lines.replace("References\n", "# Failed\n37\nReferences\n"), "pdf").cuts.map((c) => c.part), ["references"]);
+  // a Markdown Introduction after a plain appendix line is the appendix's, and the References heading still cuts
+  const mixed = "# **Paper** \n\n## **1 Introduction** \n\nMain text.\n\n## **References** \n\nAuthor. A paper. 2024.\n\nAppendix A\n\n## **Introduction** \n\nSupplement.\n";
+  assert.deepEqual(splitPaper(mixed, "pdf").cuts.map((c) => c.part)[0], "references");
+  assert.equal(splitPaper(mixed, "pdf").cuts[0]!.start, mixed.indexOf("## **References**"));
+  const ahead = "Probes\n1 Introduction\nWe probe the trace.\nAppendix A\nIntroduction.\nMore.\nReferences\nA. Author. A paper. 2024.\n";
+  assert.deepEqual(splitPaper(ahead, "pdf").cuts.map((c) => [c.part, c.start]), [["appendix", ahead.indexOf("Appendix A")]]);
 });
 
 test("a PDF's plain text is cut at its References line, and at the appendix's: lettered after it, or named anywhere", () => {

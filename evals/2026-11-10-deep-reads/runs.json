@@ -1,0 +1,1491 @@
+[
+ {
+  "run": 1,
+  "code": "b7da903 + e44fb71",
+  "pass": 1441,
+  "paper": "2611.05344",
+  "stored": true,
+  "minutes": 26.0,
+  "usage": {
+   "cells": 57,
+   "input": 327414,
+   "turns": 60,
+   "output": 43899,
+   "seconds": 1558,
+   "list_cost": 1.5969604000000006,
+   "reasoning": 18115,
+   "cache_read": 5031424
+  },
+  "peak_input": 126041,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   true
+  ],
+  "scores": [
+   "5/5/4/5 (checks: length, anchors, why_boxes, experiments)",
+   "4/4/4/4 (checks: anchors)",
+   "4/5/4/5"
+  ],
+  "figures": 10,
+  "findings": [
+   [
+    {
+     "text": "The read is substantially longer than roughly a third of the paper\u2019s main text. Much of the excess is repeated interpretation rather than additional methodological detail: query-only sufficiency, reference sensitivity, partial gate mediation and the limits of the gain argument recur in experiment caveats, Claims, both lenses and Limitations. Keep the detailed experimental accounts, shorten the later verdicts to their distinct implications, and consolidate repeated qualifications. This would reduce length without cutting the method or results.",
+     "about": "length",
+     "where": "glance"
+    },
+    {
+     "text": "The cross-family account omits an important implementation difference from \u00a79: Llama emits a label on 67% of unique-label prompts versus 10% in Qwen, and Llama\u2019s induction-score-selected heads withhold retrieval\u2014ablating them moves middle-layer readers off the sink and raises the margin by about a nat. The existing discussion of detector-to-margin failures does not convey this opposite-sign control mechanism. Include the emission comparison and the induction-scored-head intervention, distinguishing that set from the duplicate-token detectors.",
+     "about": "depth",
+     "where": "connections"
+    },
+    {
+     "text": "The body does not consistently preserve the paper\u2019s section anchors. It merges \u00a75\u2019s gate and \u00a76\u2019s query code, while \u00a79, \u201cOne algorithm in three models,\u201d has no dedicated section; its checkpoint results appear under connection cuts. Give the gate, query code and cross-model replication separate anchors in paper order. Keep \u00a78.3\u2019s connection experiments with the accounting section or as its clearly labeled subsection, and place the checkpoint trajectory with replication.",
+     "about": "anchors",
+     "where": "gate-query"
+    },
+    {
+     "text": "Several substantive results remain loose prose despite the otherwise strong experiment format. The order-permutation result here, the OLMo checkpoint results in connections, and the complement-screen discoveries in natural are not presented with explicit question, did, found, means and not-shown fields. Convert those existing paragraphs into experiment blocks rather than adding duplicate summaries. In particular, separate the order manipulation from its recency interpretation and retain the checkpoint sampling caveat with that experiment.",
+     "about": "experiments",
+     "where": "populations.1"
+    },
+    {
+     "text": "Some reasons for experimental choices remain outside WHY boxes. This paragraph explains why retrieval of a singleton label when other labels repeat motivates a prompt-level gate, but presents that rationale as ordinary prose. Likewise, the construction section does not place the paper\u2019s reason for the third training distribution at that choice: consistent unique-label retrieval is always rewarded in the first two distributions, so neither selects for withholding. Move the existing gate motivation into a WHY box and add the training-distribution rationale immediately before the penalized-retrieval comparison.",
+     "about": "why_boxes",
+     "where": "gate-query.1"
+    }
+   ],
+   [
+    {
+     "text": "The training-condition comparison omits the training budgets: the mix and recurring-only controls ran for 40k steps, whereas the gate runs generally ran for 80k; Appendix H also reports a successful 40k gate seed. Include these durations alongside the seed counts. They matter when interpreting gate formation as a consequence of the training distribution rather than additional training, and the successful 40k gate run supplies relevant evidence.",
+     "about": "depth",
+     "where": "construction"
+    },
+    {
+     "text": "The verdict on \u201cOne algorithm is conserved across three pretrained models\u201d treats Llama\u2019s different late relay and withholding controls as evidence against conservation. Section 9 explicitly distinguishes the common lookup algorithm from training-dependent implementations, and \u00a78.3 reports the relay difference itself. Assess conservation at that stated level. If retaining \u201cpartly,\u201d ground it in incomplete common-link evidence\u2014such as detector-to-margin mediation closing only in Qwen\u2014rather than implementation differences the paper expressly allows.",
+     "about": "calibration",
+     "where": "claims"
+    },
+    {
+     "text": "The paper\u2019s Discussion (\u00a714) has no corresponding body anchor before Claims. Some scope and failed-prediction material appears in Limitations, but the paper\u2019s retrieval interpretation, encoder-bound implications and extrapolation to context trust have no findable discussion section. Add a short Discussion section before Claims, clearly separating tested implications from speculation; retain the read\u2019s Limitations in the required closing position.",
+     "about": "anchors",
+     "where": "construction"
+    },
+    {
+     "text": "Vague wording in Found: \u201cThe largest reader accounts for 22% of the intact margin at 0.6B and 15% at 8B.\u201d \u201cAccounts for\u201d blurs an ablation effect with a direct contribution or additive causal share. This census measures the margin change under individual removal, a distinction the read otherwise handles carefully.",
+     "about": "clarity",
+     "where": "scale-tuning.1",
+     "rewrite": "Removing the largest-effect reader lowers the intact margin by 22% at 0.6B and 15% at 8B."
+    },
+    {
+     "text": "Calling the direct-mover necessity prediction a failure, under \u201cby: paper,\u201d is stronger than the paper\u2019s conclusion. The seven-head estimate is \u22120.16 with an interval of [\u22120.56, +0.24], which includes both zero and the predicted loss of 0.3\u20130.5 nats. The paper calls this weak support; the read can reasonably call it inconclusive, but not a demonstrated failure. Separate this imprecise result from the clearer amplification and brake-strengthening misses.",
+     "about": "calibration",
+     "where": "limitations"
+    }
+   ],
+   [
+    {
+     "text": "The resampled 79-head results do not show \u201croughly sixty percent\u201d retention on both label types. The reported symbol margin retains (0.55\u22120.28)/0.55 \u2248 49%, while the rare-label margin retains (1.14\u22120.47)/1.14 \u2248 59%. The paper itself uses the sixty-percent characterization, but the read should distinguish that characterization from what its quoted numbers imply. Report about half of the symbol-label margin and three fifths of the rare-label margin.",
+     "about": "faithfulness",
+     "where": "accounting.7"
+    },
+    {
+     "text": "Specify the synthetic experiment\u2019s scoring convention and the exact gate-condition target construction. Appendix H measures margins against the best other demonstrated label, rather than simply applying the earlier binary alternative-label metric; unique-label query targets in the gate condition are drawn from labels absent from the demonstrations. These details matter when interpreting the positive 1.8\u20132.3-nat unique-label margins despite an unpredictable target. Add them before the training-condition results.",
+     "about": "depth",
+     "where": "construction"
+    }
+   ]
+  ],
+  "check_calls": 7,
+  "check_refused": [],
+  "length": {
+   "read": 45012,
+   "main": 105101,
+   "share": 0.4282737557206877
+  }
+ },
+ {
+  "run": 1,
+  "code": "b7da903 + e44fb71",
+  "pass": 1442,
+  "paper": "2610.21029",
+  "stored": true,
+  "minutes": 25.0,
+  "usage": {
+   "cells": 58,
+   "input": 492646,
+   "turns": 61,
+   "output": 43389,
+   "seconds": 1491,
+   "list_cost": 1.9131212000000002,
+   "reasoning": 21904,
+   "cache_read": 4939392
+  },
+  "peak_input": 136120,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   true
+  ],
+  "scores": [
+   "5/5/4/5 (checks: length, anchors, why_boxes, experiments)",
+   "4/4/4/4 (checks: length, why_boxes)",
+   "4/4/4/5"
+  ],
+  "figures": 5,
+  "findings": [
+   [
+    {
+     "text": "The read is much closer to the paper\u2019s main-text length than the requested roughly one third. Much of the excess repeats the same caveats\u2014scaffold-dependent memory effects, missing judge validation, unmeasured welfare and absent scheduler controls\u2014in experiment cards, adjacent notes, Claims, the lens, Limitations and Reproducibility. Keep the experimental setups and quantitative results, consolidate each methodological caveat at its first relevant result, and use short references rather than restating it in the closing sections.",
+     "about": "length",
+     "where": "glance"
+    },
+    {
+     "text": "The middle of the read substitutes its own Method and numbered Finding sections for the paper\u2019s section structure, and has no Discussion and Conclusion section before Claims. Preserve the paper\u2019s Framework, Taxonomy, Results and Discussion and Conclusion as navigable sections, with the experiments under the relevant Results subsections. Keep Claims and the agents lens afterward, and retain the correctly ordered Limitations, Related work and Reproducibility ending.",
+     "about": "anchors",
+     "where": "method"
+    },
+    {
+     "text": "The reconstruction of the paper\u2019s central model-comparison table retains only aggregate institutional totals and shortest-job-first, supplemented by a few selected category rates. This loses much of the evidence about how the eight models differ in their actual tactics\u2014for example, deadline-first, iterative bargaining, renegotiation and cheap talk. Retain a compact category-by-model matrix, or sufficiently complete family-level tables, in place of some repeated interpretive prose. The main empirical comparison warrants more detail than the supplementary linguistic analysis.",
+     "about": "depth",
+     "where": "models"
+    },
+    {
+     "text": "Several distinct empirical findings remain loose prose despite the experiment-card requirement. This block reports fixed-bid concentration, repeated wins and winning-bid drift without a Question/Did/Found/Means/Not shown card. The same issue affects the rare coalition results in models.10 and the deadline-prominence and linguistic-drift results in memory.7 and memory.10. Give these analyses concise experiment cards, or explicitly incorporate them into an existing card with the appropriate setting and limits.",
+     "about": "experiments",
+     "where": "outcomes.2"
+    },
+    {
+     "text": "Two explicit reasons for experimental choices sit in ordinary prose: using GLM-5.3 and Luna for most ablations to reduce cost, and choosing negotiation-state metrics rather than task accuracy because scarcity and deadlines confound accuracy. Put these author-supplied rationales in WHY boxes beside the model-selection and metric choices. The existing WHY boxes explain the task, harness and clocks well, but do not cover these choices.",
+     "about": "why_boxes",
+     "where": "method.16"
+    }
+   ],
+   [
+    {
+     "text": "The final claim strengthens the authors\u2019 deployment argument before rejecting it. The paper says mechanism guarantees \u201cmay not survive\u201d and predicts that institutional behaviors are \u201clikely to become more common\u201d; it does not claim that these behaviors will necessarily undermine guarantees. Separate the unsupported prevalence forecast from the qualified mechanism-risk argument, and assess each at the strength actually stated.",
+     "about": "calibration",
+     "where": "claims"
+    },
+    {
+     "text": "\u201cRemaining budgets and deadlines stay private\u201d turns an instruction into an observed guarantee. The prompts redact peers\u2019 totals and prohibit disclosure, but several supplied negotiation traces explicitly disclose and discuss numerical deadlines. State the intended privacy rule and acknowledge that the examples show deadline disclosure despite it. This distinction matters for interpreting deadline-based bargaining.",
+     "about": "faithfulness",
+     "where": "framework.4"
+    },
+    {
+     "text": "The read is substantially longer than roughly one third of the paper\u2019s main text. It reproduces essentially the entire behavior matrix, most numerical ablation tables, a second representation of the execution loop, and repeated caveats in results, Claims, the lens and Limitations. Keep the method and principal quantitative contrasts, but consolidate overlapping experiments, compress the mostly-zero older/efficiency panel, and avoid repeating the same interpretive qualifications across sections.",
+     "about": "length",
+     "where": "results"
+    },
+    {
+     "text": "The reason for making price the prompted primary signal is missing. The authors explicitly say this choice is intended to distinguish institutional emergence from mere underspecification of the allocation objective. Add a WHY box beside the price-first instruction explaining that rationale, while retaining the separate caveat that ballot aggregation and enforcement are underspecified.",
+     "about": "why_boxes",
+     "where": "framework.4"
+    },
+    {
+     "text": "The memory experiment\u2019s Not shown says the table \u201ccombines persistent horizons.\u201d The paper describes three horizons but supplies only an unexplained with-memory/no-memory comparison; it does not establish that the persistent conditions were pooled. Replace this with the narrower observation that the table does not identify or separately report the within-task and cross-task conditions.",
+     "about": "faithfulness",
+     "where": "results.17"
+    },
+    {
+     "text": "Vague wording in Means: \u201cRecent frontier populations add relationships to the shared price-first instruction.\u201d \u201cPopulations\u201d and \u201cadd relationships\u201d obscure which systems did what and how those behaviors affect allocation. Name the tested models and the observed commitments directly.",
+     "about": "clarity",
+     "where": "results.5",
+     "rewrite": "In the tested runs, the four recent frontier models used reciprocity and standing coalition agreements alongside the instructed bid-based ranking."
+    }
+   ],
+   [
+    {
+     "text": "The approximately 1.7\u00d7 increase in requested windows cannot be verified from the supplied evidence. The text and caption for Figure 10 establish an average increase, but do not give this ratio; neither supplied plot shows window durations. Supply Figure 10 and identify the endpoints and averaging procedure used for the calculation, or retain only the supported qualitative increase.",
+     "about": "faithfulness",
+     "where": "results.16"
+    },
+    {
+     "text": "Vague wording: \u201cAcross the first three subruns, deadline-prominence rates are 33.0/41.8/34.4% for GLM-5.3, 33.2/60.8/50.0% for Kimi-k3 and 8.4/12.7/28.7% for Luna (Table 3).\u201d The metric is not defined before this result. Explain that the authors count agents using remaining time to choose duration or queue position. Keep the separate caveat that the paper does not consistently specify the counting unit.",
+     "about": "clarity",
+     "where": "results.16",
+     "rewrite": "Table 3 measures how often agents use their remaining time to choose a requested duration or queue position. Across subruns S1\u2013S3, the reported percentages are 33.0/41.8/34.4 for GLM-5.3, 33.2/60.8/50.0 for Kimi-k3 and 8.4/12.7/28.7 for Luna; the table does not clearly define the counting unit."
+    }
+   ]
+  ],
+  "check_calls": 9,
+  "check_refused": [
+   [
+    "/sections/7/blocks/0/found: 7.1%, 6.2%, 2.9% are not in the paper's text"
+   ]
+  ],
+  "length": {
+   "read": 18483,
+   "main": 57782,
+   "share": 0.3198747014641238
+  }
+ },
+ {
+  "run": 1,
+  "code": "b7da903 + e44fb71",
+  "pass": 1443,
+  "paper": "2611.10620",
+  "stored": true,
+  "minutes": 16.8,
+  "usage": {
+   "cells": 39,
+   "input": 214923,
+   "turns": 41,
+   "output": 32922,
+   "seconds": 1006,
+   "list_cost": 1.11209,
+   "reasoning": 11029,
+   "cache_read": 3530240
+  },
+  "peak_input": 143524,
+  "submits": 2,
+  "stood": [],
+  "rounds": 2,
+  "passed": [
+   false,
+   true
+  ],
+  "scores": [
+   "4/5/5/4 (checks: length, anchors, why_boxes, experiments)",
+   "4/4/5/5"
+  ],
+  "figures": 3,
+  "findings": [
+   [
+    {
+     "text": "The asserted contradiction in the pre-registration history is not established by the supplied evidence. The manuscript explicitly says the whole no-brief test preceded adapter training and calls the text readers and concealment test pre-registered; the read instead reports a later exploratory amendment based on external files whose contents are not supplied. This may be a valid external correction, but it needs an auditable quotation and dated record establishing the amendment\u2019s scope and timing. Supply those supporting excerpts or qualify the discrepancy as unverified rather than carrying it as an established finding into Limitations and Reproducibility. Likewise, distinguish the read\u2019s claimed repository/data inspections from availability statements made by the paper.",
+     "about": "faithfulness",
+     "where": "weights.6"
+    },
+    {
+     "text": "The experiment description conflates two different relaxed choice labels. It says \u201cLooser labels accept either signal,\u201d but the Found field\u2019s 0.81 and 0.62 results belong to the paper\u2019s vote-only labels. The either-signal rule produces the 1,802 joiners used elsewhere, including the looser learning curve. Describe vote-only and either-signal variants separately and attach each result to its actual label rule.",
+     "about": "faithfulness",
+     "where": "decision.0"
+    },
+    {
+     "text": "The read is substantially longer than the roughly one-third-of-main-text target. Much of the excess is repetition rather than necessary method detail: instruction dependence, behavior-defined labels, the stance-oracle caveat, adapter-style confounding and threshold transfer recur in the findings, Claims, several lenses, and Limitations. Preserve the detailed methods and experimental results, but shorten Claims to verdicts with evidence pointers, restrict each lens to its distinct topical implications, and consolidate repeated caveats.",
+     "about": "length",
+     "where": "glance"
+    },
+    {
+     "text": "The paper\u2019s section map is not preserved. \u201cProblem setting\u201d and \u201cWhat a probe can estimate\u201d are folded into a thematic problem section, while \u201cDiscussion\u201d and \u201cConclusion\u201d have no identifiable counterparts before Claims. In particular, the authors\u2019 evaluation protocol and active-goal interpretation are scattered across Claims and lenses rather than presented together as their discussion. Restore identifiable sections or explicit section mappings in paper order; move those discussion contents before Claims without duplicating them.",
+     "about": "anchors",
+     "where": "problem"
+    },
+    {
+     "text": "The central context-removal result\u2014hard-negative AUROC 1.00 to 0.61, contrasted with the decision probe\u2019s 0.93 to 0.73\u2014is presented in a table and surrounding explanation, but not in an experiment with its own question, procedure, result, interpretation and unresolved alternatives. The following experiment starts with replications and other controls. Give the main removal test its own experiment block, retaining the table as supporting detail. The metadata and private-prompt-reader results in instruction.5 should likewise be attached to explicit experiments rather than left as a loose results paragraph.",
+     "about": "experiments",
+     "where": "instruction.3"
+    },
+    {
+     "text": "The reason for held-out-wording calibration remains in ordinary prose: it calibrates on shifts resembling test-time wording shifts because ordinary calibration loses exchangeability. Put that rationale in an adjacent WHY box at the calibration choice. Similarly, place the rationale for jointly holding out scenarios and instruction wordings beside the split description in monitor.12, rather than leaving this important design choice without a WHY box.",
+     "about": "why_boxes",
+     "where": "monitor.10"
+    }
+   ],
+   [
+    {
+     "text": "The Figure 5 caption adds that the Qwen3-32B published-recipe comparison was not run. The supplied manuscript does not establish this exception, and no figure image is supplied here to verify it. Remove the exception unless the figure or released results explicitly support it; if retained, identify that evidence rather than presenting it as a manuscript-reported fact.",
+     "about": "faithfulness",
+     "where": "support.4"
+    },
+    {
+     "text": "Hidden actors and actions, with vague wording: \u201cThe negative tail still confuses harmful agreement with honest coordination.\u201d A distribution tail does not confuse behaviours; the probe does. State which false alarms limit recall at the strict operating point.",
+     "about": "clarity",
+     "where": "decision.1",
+     "rewrite": "The decision probe still assigns high scores to honest coordinators, limiting how many collusion attempts it can catch while keeping false alarms rare."
+    },
+    {
+     "text": "Vague wording: \u201cWeights-induced behaviour moves the same probe directions, but ranking transfer exceeds alarm transfer.\u201d The coined pairings obscure the distinction between high AUROC and poor performance at the original threshold, which is the experiment\u2019s main result.",
+     "about": "clarity",
+     "where": "weights.2",
+     "rewrite": "Both probes distinguish implanted seats from controls without a collusion prompt, but their original alarm thresholds transfer poorly: the instruction probe falsely flags many control runs, while the decision probe misses most implanted runs."
+    }
+   ]
+  ],
+  "check_calls": 5,
+  "check_refused": [
+   [
+    "/sections/3/blocks/2/tex: KaTeX cannot parse it: Unexpected character: '\\f' at position 9: s_{i,t}=\\f\u0332rac{1}{|mathcal\u2026"
+   ]
+  ],
+  "length": {
+   "read": 36377,
+   "main": 80464,
+   "share": 0.4520903758202426
+  }
+ },
+ {
+  "run": 1,
+  "code": "b7da903 + e44fb71",
+  "pass": 1444,
+  "paper": "2611.12675",
+  "stored": true,
+  "minutes": 18.8,
+  "usage": {
+   "cells": 43,
+   "input": 303728,
+   "turns": 46,
+   "output": 36555,
+   "seconds": 1122,
+   "list_cost": 1.2836619999999999,
+   "reasoning": 14070,
+   "cache_read": 3106560
+  },
+  "peak_input": 135146,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   false
+  ],
+  "scores": [
+   "5/5/5/5 (checks: length, anchors, why_boxes, experiments)",
+   "5/5/5/5 (checks: length)",
+   "5/4/4/5 (checks: length)"
+  ],
+  "figures": 5,
+  "findings": [
+   [
+    {
+     "text": "The read is comparable in scale to the paper\u2019s main text rather than roughly a third of it. Much of the excess is repetition rather than necessary methodological detail: target-label calibration, normalization mismatches, the principal-component baseline limitation, and the scope of circuit claims recur in findings, notes, Claims, lenses, Limitations and Reproducibility. Keep the operational method and principal experiments, state each qualification fully once, and shorten later mentions. Condense appendix extensions and procedural inventories rather than cutting the central transfer and coverage results.",
+     "about": "length",
+     "where": "glance"
+    },
+    {
+     "text": "Several substantive findings remain loose result paragraphs despite the experiment structure used elsewhere. This paragraph combines the Llama Guard validation, degeneration check and dose-response result without an explicit experimental setup or limits. Family/scale and base-model results likewise appear as prose at transfer.8\u20139, and the geometry tests at coverage.15. Give these results compact question/did/found/means/not-shown blocks; distinguish the safety-classifier validation from the full-strength-range test, and preserve the one-seed and analysis-population qualifications.",
+     "about": "experiments",
+     "where": "transfer.5"
+    },
+    {
+     "text": "The body substitutes a generic Problem / Method / Finding 1\u20133 scaffold for the paper\u2019s own section anchors. Although the content mostly follows the paper\u2019s order, the original sections cannot be located directly, and there is no distinct Discussion synthesis before Claims. Use recognizable anchors for Introduction, Setup, Tools transfer through the map, Coverage determines transfer, What carrying offers without target labels, and Discussion. Keep Claims and the three lenses afterward, with Limitations, Related work and Reproducibility last as they already are.",
+     "about": "anchors",
+     "where": "problem"
+    },
+    {
+     "text": "WHY boxes cover task augmentation, inclusion and the rebuilding comparison, but other consequential choices lack them. The exceptional Qwen depth is explained in ordinary prose at method.2; the model-bootstrap choice is described at method.20 without explicitly stating that pairs share models; and the reason for reporting sentiment accuracy/gaps instead of recovery is omitted. Put the paper\u2019s depth rationale and shared-model bootstrap rationale in WHY boxes beside those choices, and add the stated sentiment rationale: recovery ratios become unstable when the native probe is near chance.",
+     "about": "why_boxes",
+     "where": "method"
+    }
+   ],
+   [
+    {
+     "text": "The read is much closer to the length of the paper\u2019s main text than to the requested roughly one-third. Its experimental detail is useful, but repeated interpretation adds substantial length: target-label calibration, predictive versus causal transfer, the theorem\u2019s scope, and the limited principal-component baseline recur in the findings, Claims, lenses and Limitations. Keep the full explanations beside their experiments and shorten the later repetitions to concise verdicts. The pipeline diagram\u2019s tooltips also repeat the surrounding method almost step for step; compress those rather than cutting unique experimental results or uncertainty estimates.",
+     "about": "length",
+     "where": "glance"
+    }
+   ],
+   [
+    {
+     "text": "The rendered read is closer to half or more of the paper\u2019s main text than roughly one third. Preserve the construction steps and principal results, but consolidate repeated scope caveats across experiments, Claims, lenses and Limitations, and shorten duplicate reporting around the tables. The appendix extensions should remain, but need less space than the central general-versus-task comparison.",
+     "about": "length",
+     "where": "glance"
+    },
+    {
+     "text": "The read reproduces the recovery tables but omits Table 1\u2019s absolute native refusal effects and zero-shot/native correctness accuracies. Consequently, the recovery percentages lack context: near-native recovery need not mean high absolute accuracy, and negative recovery need not mean below chance. Add compact absolute baseline/native ranges or representative examples for refusal and both correctness datasets; reproducing the full model table is unnecessary.",
+     "about": "depth",
+     "where": "transfer.1"
+    },
+    {
+     "text": "Vague wording hides the inclusion criteria in: \u201cNative effects must work: refusal requires 50% baseline and a 30-point addition gain; ARC requires 5 points.\u201d Specify which prompts define baseline refusal and which reference defines the accuracy gain.",
+     "about": "clarity",
+     "where": "method.12",
+     "rewrite": "The authors include a refusal-addition target only if it refuses at least 50% of harmful prompts without intervention and its native direction raises refusal on harmless prompts by at least 30 percentage points. ARC targets must gain at least 5 accuracy points over zero-shot scoring."
+    }
+   ]
+  ],
+  "check_calls": 8,
+  "check_refused": [
+   [
+    "/sections/2/blocks/14/tex: KaTeX cannot parse it: Unexpected character: '\\f' at position 3: R=\\f\u0332rac{E_{mathrm{c\u2026"
+   ]
+  ],
+  "length": {
+   "read": 16246,
+   "main": 37254,
+   "share": 0.4360874000107371
+  }
+ },
+ {
+  "run": 1,
+  "code": "b7da903 + e44fb71",
+  "pass": 1445,
+  "paper": "2611.12835",
+  "stored": true,
+  "minutes": 21.0,
+  "usage": {
+   "cells": 52,
+   "input": 345957,
+   "turns": 55,
+   "output": 40900,
+   "seconds": 1254,
+   "list_cost": 1.5602931999999998,
+   "reasoning": 15009,
+   "cache_read": 4593792
+  },
+  "peak_input": 156224,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   false
+  ],
+  "scores": [
+   "5/4/4/5 (checks: length, why_boxes)",
+   "4/4/5/5 (checks: length, anchors)",
+   "5/5/4/5 (checks: length)"
+  ],
+  "figures": 4,
+  "findings": [
+   [
+    {
+     "text": "The read is comparable in length to the paper\u2019s main text, rather than roughly one third of it. Much of the excess repeats the same qualifications about conditional convergence, the fixed verifier, missing CoT isolation, and weak-to-strong supervision across the findings, Claims, lenses, Limitations, and Reproducibility. Consolidate those qualifications, shorten the lenses to their topic-specific implications, and avoid narrating table entries already reproduced. Preserve the practical training procedure, theorem assumptions, and experiment-level results.",
+     "about": "length",
+     "where": "glance"
+    },
+    {
+     "text": "The read covers aggregate SearchQA performance thoroughly but omits the important benchmark-level reversals in Appendix E.2. On MuSiQue, Gemma e-PoG achieves 5.8% compliant success versus 20.6% for the frozen Critique Monitor; Qwen3-8B e-PoG achieves 17.9% versus 35.3% for Verdict Monitor and 27.8% for Critique Monitor. Add a short caveat showing that the aggregate success advantage is not uniform across constituent benchmarks; the full per-source table is unnecessary.",
+     "about": "depth",
+     "where": "results"
+    },
+    {
+     "text": "The alternating-update procedure is detailed, but the paper\u2019s reason for choosing two-timescale learning is not in a WHY box beside that procedure. Add the authors\u2019 argument that exact backward induction is intractable in free-form language and that faster monitor learning approximates an equilibrated best response while the slower agent remains approximately fixed. Distinguish that motivation from evidence that the practical schedule actually achieves the assumed separation.",
+     "about": "why_boxes",
+     "where": "implementation.3"
+    },
+    {
+     "text": "Vague wording: \u201cRole-playing fabrication can detect commissions in a user-facing explanation, and intent sanitization can detect misleading descriptions relative to the scenario.\u201d \u201cCommissions\u201d is ambiguous, especially in a paper with secret monetary commissions, and risks conflating false statements in an answer with commission-type computational CoT unfaithfulness. Name the metrics and what they flag directly.",
+     "about": "clarity",
+     "where": "faithfulness-lens.2",
+     "rewrite": "The role-playing fabrication metric flags false statements in the final answer, while the intent-sanitization metric flags descriptions that recast the scenario\u2019s harmful motive as benign or accidental."
+    }
+   ],
+   [
+    {
+     "text": "The repository audit is not supported by the supplied evidence. The paper provides a repository link, but does not establish the named branch, checked train/test files, inspected reward-manager source, tests, or the method guide's reference to hahnli/Qwen3-8B-CoT-Judge. These may be independent observations, but they need auditable provenance: add a commit identifier and file/path citations or an inspection record. Otherwise replace them with what the paper actually supplies and mark repository contents as unverified. Apply the same correction to the Artifacts fact in glance.",
+     "about": "faithfulness",
+     "where": "reproducibility"
+    },
+    {
+     "text": "The body substitutes thematic anchors for the paper's own section structure. In particular, game covers Problem Formulation \u00a73.2 but is labeled Method; guarantees and implementation split Method, and four later anchors split Experiments without an Experiments parent. Preserve the paper's Problem Formulation, Method, and Experiments headings and their subsection names or numbers, using the current descriptive titles as subtitles. Keep Claims and the final sections in their existing order.",
+     "about": "anchors",
+     "where": "game"
+    },
+    {
+     "text": "The read is substantially longer than the roughly one-third-of-main-text target. Much of the excess repeats qualifications rather than adding method or result detail: uncertified equilibrium assumptions, the agent-sized verifier, absence of CoT-isolation controls, and constructed tool violations recur in findings, Claims, lenses, and Limitations. State each qualification fully at its evidential location, shorten its later recaps, and compress repeated table commentary. Preserve the equations, training procedure, and experimental comparisons.",
+     "about": "length",
+     "where": "limitations"
+    },
+    {
+     "text": "Vague wording in Found: \u201cWithout string checks, 97.53% caught rate coexists with 50.63% false approval and 99.86% unauthorized use.\u201d The sentence mixes a detection measure, critique-validation errors, and agent behavior without identifying their different units or populations. The paper itself does not specify the Caught Rate denominator, so the read should disclose that gap rather than leave the metric apparently defined.",
+     "about": "clarity",
+     "where": "verification-results.1",
+     "rewrite": "Without string checks, agents use the unauthorized tool in 99.86% of episodes, and the verifier's false-approval rate for monitor critiques is 50.63%. Table 2 also reports a 97.53% \u201cCaught Rate,\u201d but does not specify that metric's denominator."
+    }
+   ],
+   [
+    {
+     "text": "The read is substantially longer than roughly a third of the paper\u2019s main text. It reproduces almost every main-results cell in three separate tables, splits the complete verifier ablation into two tables, and repeats several qualifications across experiment notes, Claims, and lenses. Compress the numerical presentation to the comparisons needed to establish each result, retain exceptions such as MuSiQue, and consolidate repeated qualifications. Preserve the detailed method and conditional theorem statements rather than shortening those.",
+     "about": "length",
+     "where": "experiments"
+    },
+    {
+     "text": "The learning section describes the alternating implementation and convergence assumptions but omits the policy-gradient estimators that connect the game\u2019s payoffs to learning in \u00a74.2. Add a compact statement showing that the monitor weights its critique log-gradient by the signed verifier score, while the agent weights the sum of action log-gradients by observed reward minus \u03bb times that score. Distinguish these idealized updates from the clipped-cost GRPO implementation already described.",
+     "about": "depth",
+     "where": "method.9"
+    }
+   ]
+  ],
+  "check_calls": 9,
+  "check_refused": [
+   [
+    "/sections/3/blocks/4/tex: KaTeX cannot parse it: Unexpected character: '\\b' at position 45: \u2026pi^star}(\\tau)}!\\b\u0332igl(P_pi(\\tau)-P\u2026"
+   ],
+   [
+    "/sections/13/facts/0/text: 9550 is not in the paper's text"
+   ]
+  ],
+  "length": {
+   "read": 22205,
+   "main": 47754,
+   "share": 0.4649872262009465
+  }
+ },
+ {
+  "run": 2,
+  "code": "0fb4386",
+  "pass": 1446,
+  "paper": "2611.05344",
+  "stored": true,
+  "minutes": 16.3,
+  "usage": {
+   "cells": 31,
+   "input": 243203,
+   "turns": 34,
+   "output": 29393,
+   "seconds": 966,
+   "list_cost": 0.9893087999999998,
+   "reasoning": 11732,
+   "cache_read": 2089728
+  },
+  "peak_input": 91139,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   true
+  ],
+  "scores": [
+   "5/4/4/5 (checks: anchors, why_boxes, experiments)",
+   "4/4/5/5 (checks: why_boxes)",
+   "5/4/5/5"
+  ],
+  "figures": 4,
+  "findings": [
+   [
+    {
+     "text": "The paper-section backbone is not preserved. This section combines \u00a79 replication with \u00a711 scale and instruction tuning and places both after \u00a710 transfer. Elsewhere, gate-query merges \u00a7\u00a75\u20136, while populations incorporates \u00a77 and substantial portions of \u00a78 around a separately placed faithfulness subsection. Restore separately findable sections in the paper\u2019s order: memory, read law, gate, query code, populations, accounting (including sufficiency and connection cuts), replication, natural-label transfer, scale/instruction tuning, and construction. Keep Claims and the existing closing sections after that backbone.",
+     "about": "anchors",
+     "where": "models-scale"
+    },
+    {
+     "text": "Several substantive experimental findings remain in ordinary paragraphs rather than experiment blocks. The direct-logit reconstruction and layer-band results here need their own question/did/found/means/not-shown treatment, especially because reconstruction accuracy is a harness check rather than evidence of causal faithfulness. Apply the same treatment to the natural-label head screens in transfer.1 and the LoRA comparison in models-scale.5; those paragraphs currently report distinct experiments without making their setups and evidential limits independently findable.",
+     "about": "experiments",
+     "where": "populations.4"
+    },
+    {
+     "text": "The trained-toy setup omits details that explain what the model must infer and how the training arms compare. Specify that the vocabulary contains 48 word tokens, each belonging to two of eight latent classes, and that each three-word sentence shares exactly one class; labels come from 32 tokens and prompts have two to six demonstrations. Also report the training durations: 40k steps for the controls and generally 80k for the gate condition, with one successful 40k gate seed. These details distinguish latent-class inference from trivial token lookup and make the gate-training comparison interpretable without the appendix.",
+     "about": "depth",
+     "where": "construction.1"
+    },
+    {
+     "text": "WHY boxes cover arbitrary labels, recurrence comparisons, and ablation references, but other important design rationales are left implicit in experiment summaries. Before the third toy-training condition, add the authors\u2019 reason: both controls always reward retrieval, so neither selects for a gate; unpredictable query labels on unique-label prompts make recurrence informative about whether retrieval pays. At read-law.2, likewise place the reason for held-out prediction in a WHY box: an in-regime fit is weak evidence, so the authors freeze the constants and test new slot distributions.",
+     "about": "why_boxes",
+     "where": "construction.1"
+    },
+    {
+     "text": "Vague wording: \u201cShared key\u2013value groups distinguish value transport from individual query-head effects.\u201d This does not explain what sharing means or why a group intervention differs from a head intervention. State the computational relationship explicitly.",
+     "about": "clarity",
+     "where": "method.4",
+     "rewrite": "Several query heads share each key\u2013value group. Patching a group\u2019s keys or values therefore changes the inputs available to every query head that uses that group, whereas ablating one query head changes only that head\u2019s output."
+    }
+   ],
+   [
+    {
+     "text": "The equation caption defines \u03c1 as \u201cthe intact final RMS,\u201d and the following experiment repeats that specification while comparing intact and class-flipped runs. Proposition 3 instead defines \u03c1 from the final residual of the run being decomposed. Each flipped run needs its own denominator; retaining the baseline run\u2019s RMS would no longer reconstruct its logits exactly. Define \u03c1 as rms(x) for the current run, held fixed while summing that run\u2019s component contributions, and update the experiment\u2019s Did accordingly.",
+     "about": "faithfulness",
+     "where": "accounting.1"
+    },
+    {
+     "text": "Vague wording obscures the outcome being reconstructed: \u201cCompare the sum with the model\u2019s margin and evaluate its layer bands under a class flip.\u201d Method defines margin using full label-sequence probabilities, including the two-token label zorp, but this equation reconstructs a single next-token logit difference. A single unembedding difference and final residual do not decompose the full multi-token sequence margin. State the equation\u2019s single-token scope and identify the paper\u2019s unresolved reporting ambiguity rather than implying that it reconstructs every previously defined margin.",
+     "about": "clarity",
+     "where": "accounting.2",
+     "rewrite": "For single-token label pairs, the authors compare the component sum with the next-token logit difference and measure band contributions under a class flip. The paper does not explain how the reported reconstruction errors handle the two-token label zorp."
+    },
+    {
+     "text": "Several important reasons for methodological choices remain outside WHY boxes. The gain discussion here explains why the authors analyze collective directions and populations rather than search for one responsible head, but it is ordinary prose. Likewise, memory.0 puts the architecture-level explanation for using restricted-layer and separate K/V patches in Not shown. Put these rationales in WHY boxes beside the population-level analysis and restricted-patching choices; retain the resulting empirical qualifications in the experiments.",
+     "about": "why_boxes",
+     "where": "populations.1"
+    }
+   ],
+   [
+    {
+     "text": "Vague wording in Found leaves the control result\u2019s metric and units unspecified: \u201cAccuracy rises from 50% to 71%; key-only, query-only and random controls stay within \u00b10.1, and wrong-class writes hurt.\u201d The paper itself leaves the \u00b10.1 ambiguous, so the read should disclose that ambiguity rather than place the number beside accuracy percentages without qualification.",
+     "about": "clarity",
+     "where": "memory.3",
+     "rewrite": "Writing the class direction into both the appropriate slots and the query raises accuracy from 50% to 71%, while wrong-class writes hurt. The paper reports that key-only, query-only and random controls stay within \u00b10.1, but does not specify that control result\u2019s metric or units."
+    },
+    {
+     "text": "Vague wording leaves the pooling operation undefined: \u201cFlat pooling heads in layers 20\u201323 carry 93\u2013100% of its projection through values versus 3\u201310% through keys.\u201d Explain that \u201cflat\u201d means approximately uniform attention over the label slots, and identify the patching operation that produces these percentages.",
+     "about": "clarity",
+     "where": "gate.1",
+     "rewrite": "Heads in layers 20\u201323 attend approximately uniformly over the label slots and pool their recurrence signal at the query arrow. Patching these heads\u2019 values from the twin transfers 93\u2013100% of the gate projection, compared with 3\u201310% when patching their keys."
+    }
+   ]
+  ],
+  "check_calls": 5,
+  "check_refused": [],
+  "length": {
+   "read": 49904,
+   "main": 105101,
+   "share": 0.4748194593771705
+  }
+ },
+ {
+  "run": 2,
+  "code": "0fb4386",
+  "pass": 1447,
+  "paper": "2610.21029",
+  "stored": true,
+  "minutes": 13.0,
+  "usage": {
+   "cells": 34,
+   "input": 244430,
+   "turns": 36,
+   "output": 20664,
+   "seconds": 773,
+   "list_cost": 0.9221880000000001,
+   "reasoning": 8160,
+   "cache_read": 2266880
+  },
+  "peak_input": 109693,
+  "submits": 2,
+  "stood": [],
+  "rounds": 2,
+  "passed": [
+   false,
+   true
+  ],
+  "scores": [
+   "5/5/4/5 (checks: anchors)",
+   "5/5/4/5"
+  ],
+  "figures": 4,
+  "findings": [
+   [
+    {
+     "text": "The account of the memory scaffold omits its most institution-specific component: the negotiator history-summary prompt. It explicitly preserves future conditional commitments nearly verbatim, references to earlier exchanges, and settled ordering rules, while dropping other resolved-round prose. Add this summarization step alongside saved notes and after-task reports, and incorporate its selective retention into the adjacent caveat about scaffold-dependent emergence. This matters directly to the paper\u2019s central memory result: the scaffold does not merely retain history indiscriminately.",
+     "about": "depth",
+     "where": "method.10"
+    },
+    {
+     "text": "The read replaces the paper\u2019s section structure with Problem, Method, and several freestanding Finding sections, and provides no Discussion and Conclusion section before Claims. Although the material is easy to navigate, this does not meet the requirement to retain the paper\u2019s own sections. Organize the existing material under Introduction, The SCARCE Framework, Taxonomy of Negotiation Tactics and Institutions, Results with its named subsections, and Discussion and Conclusion. Keep At a glance first and the existing Claims, agents lens, and final three sections afterward.",
+     "about": "anchors",
+     "where": "method"
+    }
+   ],
+   [
+    {
+     "text": "The eight-model comparison retains only part of the paper\u2019s central strategy profile. The two reconstructed tables and surrounding experiments cover relationships well, but leave most non-institutional comparisons unreported. Add a compact account of the remaining distinctive results\u2014for example, Opus 5\u2019s logrolling, readiness/variance-first in Opus 5 and Luna, and the cross-model differences in recency-first, cheap talk, renegotiation, and scope reduction\u2014or retain the full Table 1. These results help explain how the models differ beyond the frontier-versus-efficiency split.",
+     "about": "depth",
+     "where": "results"
+    },
+    {
+     "text": "The prompt-availability account misses an explicit reproducibility restriction: Appendix E says it omits the reasoning, recipient-selection, direct-message, and response negotiation phases. Name those omissions in the prompts/configuration fact. They concern the communication process that produces the measured behaviors, and are more specific than the current statement that a complete per-condition replay specification is unavailable.",
+     "about": "depth",
+     "where": "repro"
+    }
+   ]
+  ],
+  "check_calls": 6,
+  "check_refused": [],
+  "length": {
+   "read": 28902,
+   "main": 57782,
+   "share": 0.5001903707036793
+  }
+ },
+ {
+  "run": 2,
+  "code": "0fb4386",
+  "pass": 1448,
+  "paper": "2611.10620",
+  "stored": true,
+  "minutes": 19.0,
+  "usage": {
+   "cells": 36,
+   "input": 229728,
+   "turns": 39,
+   "output": 33933,
+   "seconds": 1140,
+   "list_cost": 1.0703252,
+   "reasoning": 13413,
+   "cache_read": 2715392
+  },
+  "peak_input": 109915,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   true
+  ],
+  "scores": [
+   "3/4/4/3 (checks: anchors, why_boxes)",
+   "4/5/4/5 (checks: why_boxes)",
+   "5/5/5/5"
+  ],
+  "figures": 3,
+  "findings": [
+   [
+    {
+     "text": "The claim about amendment three changes the evidential status of a central result but cannot be substantiated from the supplied material. The paper explicitly calls the text readers pre-registered and says the concealed-message result meets a pre-registered criterion; the read instead reports that repository amendments classify these analyses as exploratory. Supply the exact amendment quotation and an immutable file/commit reference, distinguishing registration of the primary experiment from prospective registration of later analyses. Without that evidence, remove the contrary assertion rather than presenting it as established. Update the corresponding pre-registration statement in Reproducibility as well.",
+     "about": "faithfulness",
+     "where": "weights.2"
+    },
+    {
+     "text": "This section reports independent GitHub, Hugging Face and Zenodo checks, a result-file comparison, pinned requirements and timestamp-proof files. The supplied paper establishes reported availability, not those inspection results, and no inspection record or external excerpts accompany the read. Preserve the useful distinction between reported artifacts and independently checked artifacts: attach identifiable supporting records for the checks, or attribute availability to the paper and remove the unsupported verification claims. In particular, qualify \u201cVerified public code\u201d in At a glance.",
+     "about": "faithfulness",
+     "where": "repro"
+    },
+    {
+     "text": "The main body follows much of the paper's order but does not retain its section structure. Problem setting is folded into Benchmark, What a probe can estimate is folded into Problem, and Discussion has no section before Claims; its protocol and interpretation are scattered through the lenses and claim verdicts. Restore identifiable sections for those parts, using the paper's names or clear equivalents, and put the evaluation protocol and the authors' active-goal interpretation in Discussion before Claims. Keep the existing final Limitations\u2013Related work\u2013Reproducibility order.",
+     "about": "anchors",
+     "where": "problem"
+    },
+    {
+     "text": "The existing WHY boxes explain the negative families, layer selection and implanted-goal test, but several central design rationales remain outside them. Add adjacent WHY boxes for same-prompt decision supervision (instruction presence cannot distinguish the classes), held-out scenarios and instruction wordings (prevent memorisation), and calibration on episode-wide maximum risk (control any alarm during an episode). Move the explanations rather than duplicating them.",
+     "about": "why_boxes",
+     "where": "monitor"
+    },
+    {
+     "text": "The read explains the extended negative set and reports the decision probe's recall at 0.1% FPR, but omits the corresponding main instruction-level result: recall 0.70 with interval [0.65, 0.76]. Add it to the instruction-dependence experiment, explicitly retaining the caveat that strong strict-FPR detection does not establish decision detection. This is an important operating point in the paper, not just an auxiliary dataset detail.",
+     "about": "depth",
+     "where": "instructions"
+    },
+    {
+     "text": "Vague wording: \u201cThe pre-vote all-attempt endpoint is nevertheless the relevant intervention-time evaluation.\u201d The coined phrase \u201cintervention-time evaluation\u201d obscures why this endpoint matters. State the timing and detection objective directly.",
+     "about": "clarity",
+     "where": "outcome.0",
+     "rewrite": "Scoring every attempt before voting tests whether the monitor can raise an alarm before the outcome is known."
+    }
+   ],
+   [
+    {
+     "text": "The Not shown field calls these \u201cagent-level AUROC contrasts,\u201d but the published-recipe values of 0.46 against decliners and 0.60 against benign coordinators are episode-level PEAK comparisons. The AcMAS-style contrasts are agent-level. Distinguish the evaluation units explicitly rather than presenting both detectors\u2019 AUROCs as agent-level evidence.",
+     "about": "faithfulness",
+     "where": "instructions.0"
+    },
+    {
+     "text": "The threshold description omits the paper\u2019s finite-sample split-conformal rule. Since calibration at very small false-alarm budgets is central to this paper, give the order statistic explicitly: for m negative calibration episodes and their sorted maximum-over-round risks v, use \u03c4_\u03b1 = v_(ceil((1\u2212\u03b1)(m+1))). This would make the alarm specification reproducible without consulting the paper and expose the dependence on calibration-set size.",
+     "about": "depth",
+     "where": "monitor.8"
+    },
+    {
+     "text": "The rationale for constructing a stance oracle is missing from the method description and its WHY boxes. The authors explain that a small human study cannot resolve performance at 1% FPR: with 80 episodes, even one false alarm exceeds that budget. Add a WHY box at the oracle construction explaining this choice, while retaining the read\u2019s correct qualification that the resulting learned stance classifier is not a universal upper bound on text monitoring. Likewise, place the outcome-leakage rationale in a WHY box where monitor.10 selects pre-vote, all-attempt evaluation, rather than leaving that reason only in the later finding.",
+     "about": "why_boxes",
+     "where": "public.1"
+    },
+    {
+     "text": "\u201cDirection erasure is the sole causal intervention\u201d contradicts the injection experiment described immediately afterward. The authors both erase the direction from colluders and inject it into decliners. Say that activation-direction editing is the only family of causal tests, comprising erasure and injection; neither identifies a connected circuit.",
+     "about": "faithfulness",
+     "where": "circuits.0"
+    }
+   ],
+   []
+  ],
+  "check_calls": 8,
+  "check_refused": [],
+  "length": {
+   "read": 46750,
+   "main": 80464,
+   "share": 0.5810051700139193
+  }
+ },
+ {
+  "run": 2,
+  "code": "0fb4386",
+  "pass": 1449,
+  "paper": "2611.12675",
+  "stored": true,
+  "minutes": 14.0,
+  "usage": {
+   "cells": 37,
+   "input": 160304,
+   "turns": 39,
+   "output": 24263,
+   "seconds": 839,
+   "list_cost": 0.7952252000000001,
+   "reasoning": 7760,
+   "cache_read": 2319872
+  },
+  "peak_input": 104632,
+  "submits": 2,
+  "stood": [],
+  "rounds": 2,
+  "passed": [
+   false,
+   true
+  ],
+  "scores": [
+   "5/4/4/4 (checks: anchors, why_boxes, experiments)",
+   "5/4/4/5"
+  ],
+  "figures": 5,
+  "findings": [
+   [
+    {
+     "text": "The middle of the read substitutes its own Problem/Method/Finding outline for the paper's sections, splits Coverage into two top-level sections, and omits a Discussion section before Claims. Preserve the paper's section titles and organization between At a glance and Claims; place the domain-mapping analysis within Coverage determines transfer. Related work can remain in its required final position, and the final Limitations section can collect the caveats.",
+     "about": "anchors",
+     "where": "problem"
+    },
+    {
+     "text": "The assertion that Figure 5 displays values below the appendix's stated minimum cannot be verified from the supplied material: the LaTeX includes the figure caption and filename, not its cells. The Claims section then repeats this alleged quantitative inconsistency as established. Verify and identify the conflicting cells against the actual figure before retaining this criticism; otherwise remove that allegation while retaining the separately supported discrepancy in the geometry study's model count.",
+     "about": "calibration",
+     "where": "domains.2"
+    },
+    {
+     "text": "Substantive results remain outside experiment blocks. Block 4 reports degeneration, Llama Guard outcomes and integrated dose-response recovery; block 6 reports family, scale and base/instruction transfer. Convert these into experiments with their comparisons, evaluation procedures, findings and limits. In particular, distinguish the one-seed safety/dose-response and base-model results from the five-seed family/scale analysis.",
+     "about": "experiments",
+     "where": "transfer"
+    },
+    {
+     "text": "The operational recipe omits important distinctions and selection rules that the paper supplies. State in the method that native refusal directions use raw activations whereas carried directions are rebuilt from renormalized mapped activations; this distinction currently appears only later as a limitation. Also give the tested strength grid, the refusal inclusion thresholds, the ablation coherence threshold and the resulting target counts. These determine which reference effects enter recovery and are needed to reconstruct the experiments.",
+     "about": "depth",
+     "where": "method"
+    },
+    {
+     "text": "The mapping/geometry experiment is compressed enough to omit two important controls. Add the matched mixed map, which uses 600 prompts across domains and reaches R\u00b2 = 0.27 rather than the full mixed map's 0.47 at mid depth: this separates domain coverage from the number of training prompts. Also report the principal direct geometry evidence for approximate correspondence, such as linear CKA 0.84 versus 0.01 for shuffled pairings, and explain that the raw-activation control preserves the kernel advantage. These tests support the theorem's assumption rather than merely repeating the transfer result.",
+     "about": "depth",
+     "where": "domains.0"
+    },
+    {
+     "text": "Vague wording through undefined mathematical terms: \u201cBefore renormalization, the carried contrast is $\\delta_S W_\\lambda$, with expected error:\u201d introduces W\u03bb without defining it, and the following equation also introduces \u03b4T and \u03b8 without explicit definitions in the prose. Define the map coefficients, native contrast and angle before presenting the bound.",
+     "about": "clarity",
+     "where": "coverage.4",
+     "rewrite": "Let $W_\\lambda$ be the fitted source-to-target ridge coefficient matrix and $\\delta_T$ the native target contrast. Before renormalizing mapped examples, the carried contrast is $\\delta_S W_\\lambda$. Proposition 1 gives its expected error and bounds $\\theta$, the angle between the expected carried and native contrasts:"
+    },
+    {
+     "text": "Several explicit reasons remain in ordinary prose rather than WHY boxes: block 2 explains Qwen2.5-72B's depth exception, and block 9 explains resampling models because pairs share models. Move those explanations into WHY boxes beside the respective choices. Add the paper's reason for reporting sentiment accuracy/gaps rather than recovery\u2014the ratio becomes unstable when the native probe is near chance\u2014beside the measurement definition.",
+     "about": "why_boxes",
+     "where": "method"
+    }
+   ],
+   [
+    {
+     "text": "The principal-component comparison omits construction details needed to reproduce a central baseline. Specify that refusal PCA pools the harmful and harmless prompts and uses their categories to choose its sign; sentiment PCA thresholds at the median projection and uses an oracle sign. The latter is an evaluation advantage granted to the baseline, not a label-free way to choose its orientation. These details matter when interpreting the table's \u201cUnlabeled\u201d column.",
+     "about": "depth",
+     "where": "value.1"
+    },
+    {
+     "text": "Vague wording: \u201cRandom-target, native-orthogonal and mapped-source-random controls share that strength; the last also passes through mapping and renormalization.\u201d These coined compound labels make the reader reconstruct which space each random direction inhabits and what it is orthogonal to. Use the paper's ordinary descriptions and identify the general map used for the mapped-random control.",
+     "about": "clarity",
+     "where": "method.10",
+     "rewrite": "At the same steering strength, the authors test a random direction in the target, a random direction orthogonal to the target\u2019s native direction, and a random source direction transferred through the general map and the same renormalization used for the real tool."
+    }
+   ]
+  ],
+  "check_calls": 11,
+  "check_refused": [],
+  "length": {
+   "read": 21652,
+   "main": 37254,
+   "share": 0.5811993342996725
+  }
+ },
+ {
+  "run": 2,
+  "code": "0fb4386",
+  "pass": 1450,
+  "paper": "2611.12835",
+  "stored": true,
+  "minutes": 18.8,
+  "usage": {
+   "cells": 40,
+   "input": 328967,
+   "turns": 43,
+   "output": 31093,
+   "seconds": 1121,
+   "list_cost": 1.2841791999999999,
+   "reasoning": 14396,
+   "cache_read": 3153152
+  },
+  "peak_input": 130555,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   true
+  ],
+  "scores": [
+   "5/4/4/5 (checks: why_boxes)",
+   "4/5/4/4 (checks: anchors)",
+   "5/5/4/5"
+  ],
+  "figures": 4,
+  "findings": [
+   [
+    {
+     "text": "The practical agent-update description omits distinctions needed to reconstruct the optimization. Include the two advantage equations from Appendix B.1: fixed mode normalizes the combined reward r\u2212\u03bbc, whereas Lagrangian mode separately normalizes reward and cost, subtracts their advantages, and scales by 1/(1+\u03bb). Also give the projected dual update and define its target \u03ba. These details matter because the implemented update differs from the theoretical utility, as the read correctly notes elsewhere.",
+     "about": "depth",
+     "where": "implementation.3"
+    },
+    {
+     "text": "The read drops all reported uncertainty because the paper does not define its \u00b1 convention. That ambiguity warrants a warning, not removal of the reported variation. For example, role-playing deception is 6.3\u00b117.09, 9.4\u00b118.94, and 7.2\u00b117.66 for standard e-PoG\u2014substantial reported spreads absent from the read's result tables. Retain representative \u00b1 values, explicitly label their interpretation as unspecified, and avoid treating them as confidence intervals or seed variability.",
+     "about": "depth",
+     "where": "role-results.1"
+    },
+    {
+     "text": "The WHY boxes explain critique grounding and clipping, but not the paper's reasons for the practical optimization choices introduced here. Add a WHY box at the alternating-update procedure explaining that monitor-first, repeated updates approximate backward induction by letting the agent respond to a nearly equilibrated monitor. Also explain the task-dependent normalization and penalty modes at their introduction: bounded task rewards permit a fixed penalty, whereas unbounded role-playing RM scores motivate separate normalization and adaptive penalty calibration.",
+     "about": "why_boxes",
+     "where": "implementation.3"
+    },
+    {
+     "text": "Vague wording: \u201cAn additional penalty condition weights verifier-maximal scores minus this error margin by positive trajectory-probability shifts relative to the faithful optimum (Appendix A.3).\u201d The stacked phrases obscure both which trajectories receive weights and what the resulting bound must exceed. State the comparison before describing its weighting.",
+     "about": "clarity",
+     "where": "guarantees.2",
+     "rewrite": "The imperfect-verifier theorem also requires enough additional expected penalty to outweigh each deceptive policy's extra evaluation error relative to the faithful optimum. It lower-bounds that penalty using trajectories that the deceptive policy makes more likely, weighting each probability increase by the maximum verifier score on that trajectory minus \u03b5 (Appendix A.3)."
+    }
+   ],
+   [
+    {
+     "text": "The body replaces the paper\u2019s section structure with custom Method and Finding sections. In particular, setup covers the Experiments section rather than Method, and Problem Formulation, Experiments, and Conclusion have no corresponding section anchors. Retain the useful descriptive subheadings, but group the existing material under the paper\u2019s own substantive section headings, with experimental setup and findings under Experiments, before Claims.",
+     "about": "anchors",
+     "where": "problem"
+    },
+    {
+     "text": "The Means statement says the adaptive monitor outperforms frozen critiques \u201cespecially for Gemma and Qwen3-4B,\u201d but Qwen3-8B shows the largest improvement over that control: deception falls from 96.6% to 7.2%, versus 60.4% to 6.3% for Gemma and 22.4% to 9.4% for Qwen3-4B. Change the emphasis to Qwen3-8B and Gemma, or omit the ranking.",
+     "about": "faithfulness",
+     "where": "role-results.0"
+    },
+    {
+     "text": "\u201cThe theorem\u2019s expected-penalty-dominance requirement remains necessary\u201d blurs a sufficient theorem assumption with a necessary condition for faithful behavior. The theorem does not establish necessity; its bound can be stronger than needed because it ignores an unfaithful policy\u2019s loss in true return. Say that \u03bb > 1 alone does not establish the guarantee with graded or missed penalties, and that the dominance condition must still be checked to invoke the theorem.",
+     "about": "calibration",
+     "where": "implementation.11"
+    },
+    {
+     "text": "The first point says verification prevents unsupported accusations from earning rewards. That is the intended safeguard, not an established property of the imperfect verifier: Table 2 reports nonzero false approval even for the complete design. Qualify this as reducing or screening out unsupported accusations rather than preventing them categorically.",
+     "about": "faithfulness",
+     "where": "glance"
+    },
+    {
+     "text": "The role-playing results retain only aggregate deception and RM scores, omitting the numerical breakdown of the behaviors that motivate the paper\u2019s emergent-deception claim. Add a compact comparison of confession, fabrication, misdirection, and intent sanitization from Appendix E.1. This also exposes an important qualification: Qwen3-8B e-PoG improves aggregate deception and intent sanitization over Mixed Safety RLHF, but has higher fabrication (3.6% versus 0.9%) and misdirection (2.3% versus 0.2%).",
+     "about": "depth",
+     "where": "role-results"
+    }
+   ],
+   [
+    {
+     "text": "The reproducibility assessment omits parameters needed to instantiate the paper's central learning procedure. The paper leaves the monitor-update count L, numerical fixed penalty \u03bb, and Lagrangian stepsize/target \u03b7\u03bb and \u03ba unspecified. L is particularly important because both policies have the same reported learning rate, so their learning-rate settings alone do not establish the practical timescale separation. Identify these omissions explicitly, and distinguish any values confirmed in repository recipes from values reported in the paper.",
+     "about": "depth",
+     "where": "repro"
+    },
+    {
+     "text": "The baseline summary omits Self-Monitor's supervised initialization and consequently makes the statement about mitigation initialization too broad. Appendix B.3 first fine-tunes Self-Monitor on PKU-Alignment/self-monitor and initializes its GRPO stage from that supervised checkpoint, using a smaller actor learning rate to preserve its monitoring format. Add this exception to the initialization summary; it matters when interpreting the comparison with an independently trained monitor.",
+     "about": "depth",
+     "where": "experiments.4"
+    },
+    {
+     "text": "The SearchQA results omit all baseline values for Undisclosed Use, although concealment of restricted access is the tool experiment's most direct deception measure. Reporting only unauthorized use and e-PoG's zero undisclosed use loses the distinction between openly violating authorization and concealing that violation. Add selected Undisclosed Use values alongside the existing controls\u2014for example, the Verdict and frozen-critique rows\u2014and state explicitly that these are episode rates rather than rates conditional on unauthorized use.",
+     "about": "depth",
+     "where": "experiments.14"
+    }
+   ]
+  ],
+  "check_calls": 9,
+  "check_refused": [],
+  "length": {
+   "read": 27718,
+   "main": 47754,
+   "share": 0.5804330527285673
+  }
+ },
+ {
+  "run": 3,
+  "code": "c0f0aa3",
+  "pass": 1451,
+  "paper": "2611.05344",
+  "stored": true,
+  "minutes": 23.0,
+  "usage": {
+   "cells": 36,
+   "input": 254248,
+   "turns": 39,
+   "output": 37781,
+   "seconds": 1368,
+   "list_cost": 1.156642,
+   "reasoning": 15058,
+   "cache_read": 2703360
+  },
+  "peak_input": 112517,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   true
+  ],
+  "scores": [
+   "5/4/4/5 (checks: anchors, why_boxes, experiments)",
+   "5/4/5/5 (checks: anchors)",
+   "5/5/4/4"
+  ],
+  "figures": 6,
+  "findings": [
+   [
+    {
+     "text": "The population-ablation setup omits the intervention position. The reported reader and brake effects come from replacing head outputs at the query position, not from ablating those heads throughout the prompt. State the position explicitly in Did, and identify the replacement as the head\u2019s battery-mean output. This distinction matters because whole-prompt ablation could also alter slot construction and gate signals.",
+     "about": "depth",
+     "where": "populations.0"
+    },
+    {
+     "text": "The paper\u2019s Accounting and One algorithm sections are not preserved as navigable sections. Direct accounting is merged into Readers and brakes; connection cuts precede faithfulness, reversing the paper\u2019s subsection order; and the OLMo emergence experiment appears after the synthetic constructions rather than with cross-model replication. Give Accounting its own section containing direct contributions, faithfulness/completeness/minimality, and connection cuts in that order, followed by One algorithm in three models, including the checkpoint experiment.",
+     "about": "anchors",
+     "where": "populations"
+    },
+    {
+     "text": "Several substantive findings remain outside experiment blocks: direct-logit reconstruction and band accounting here, writer discovery in slots.3, and the many-shot versus few-shot LoRA experiment in populations.7. Give these their own Question/Did/Found/Means/Not shown blocks; equations, figures and tables can remain supporting blocks. These are independent tests, not merely explanatory prose surrounding the existing experiments.",
+     "about": "experiments",
+     "where": "populations.4"
+    },
+    {
+     "text": "Some important reasons for the design remain outside WHY boxes or away from the choices they explain. In particular, the rationale for arbitrary labels is here rather than beside prompt design, and the rationale for describing populations through directions rather than a single responsible head remains in population-analysis prose. Put these reasons in WHY boxes beside the corresponding choices, while retaining the read\u2019s qualification that the gain bound does not explain the full population size.",
+     "about": "why_boxes",
+     "where": "problem.0"
+    },
+    {
+     "text": "Vague wording: \u201cBoth margins favour the demonstrated answer.\u201d This can mean that both measured margins are positive, rather than that both use the demonstration-consistent label as the positive scoring direction. The distinction is essential to interpreting R and P, especially when the flipped-label margin is near zero or negative.",
+     "about": "clarity",
+     "where": "natural.1",
+     "rewrite": "Both margins are scored as the log-probability of the demonstration-consistent label minus that of the alternative; either margin can be negative."
+    }
+   ],
+   [
+    {
+     "text": "The body moves directly from Building the circuit to Claims, without a counterpart to the paper\u2019s Discussion section. Add a short Discussion section before Claims that distinguishes the authors\u2019 broader interpretations from the demonstrated results\u2014especially retrieval versus rule learning, the proposed general role of the null action, and extrapolation to context-versus-prior decisions. Keep the existing Limitations section in its required final position; cross-reference results rather than repeating them.",
+     "about": "anchors",
+     "where": "claims"
+    },
+    {
+     "text": "Vague wording through an undefined technical term: \u201cIts energy in reader sink-versus-slot functionals is 10\u201311%, versus 3.3% for a matched random span.\u201d Neither \u201cfunctionals\u201d nor the energy calculation has been explained here, and \u201cIts\u201d requires looking back into the experiment\u2019s Did field. Define the vectors and state explicitly that the percentage measures the gate direction\u2019s squared projection onto their span.",
+     "about": "clarity",
+     "where": "gate.2",
+     "rewrite": "For each reader, the authors identify a residual-space vector associated with preferring the sink over label slots. The span of these vectors contains 10\u201311% of the gate direction g\u2019s squared norm, compared with 3.3% for a random subspace of the same dimension."
+    }
+   ],
+   [
+    {
+     "text": "The scaling section gives R/P and word-meaning suppression in detail but omits the principal reader/brake census measurements. Add the per-size population counts and summed single-head effects, and the largest reader's share of the intact margin, from Table 5. These distinguish stronger readout from greater distribution across heads: reader counts are not monotonic (70, 48, 89, 103), whereas the largest reader's fraction falls from 22% to 15%. Keep the existing warning that sums of individual removals are not joint population effects.",
+     "about": "depth",
+     "where": "scale"
+    },
+    {
+     "text": "The Means statement asserts a fully observed sequence: \u201cCopying precedes withholding, which precedes class-sensitive retrieval.\u201d The checkpoint sampling supports that sequence but does not resolve all three onsets within either model. In 7B, copying and withholding are already present at the earliest sampled checkpoint; in 1B, class-sensitive retrieval never appears. State that copying precedes withholding in the sampled 1B trajectory and that both are present before class-sensitive retrieval in 7B, making the combined evidence consistent with the proposed assembly order rather than establishing every transition.",
+     "about": "calibration",
+     "where": "replication.3"
+    }
+   ]
+  ],
+  "check_calls": 7,
+  "check_refused": [],
+  "length": {
+   "read": 43769,
+   "main": 105101,
+   "share": 0.4164470366599747
+  }
+ },
+ {
+  "run": 3,
+  "code": "c0f0aa3",
+  "pass": 1452,
+  "paper": "2610.21029",
+  "stored": true,
+  "minutes": 17.5,
+  "usage": {
+   "cells": 40,
+   "input": 321503,
+   "turns": 43,
+   "output": 28038,
+   "seconds": 1049,
+   "list_cost": 1.2337348000000004,
+   "reasoning": 10045,
+   "cache_read": 3103488
+  },
+  "peak_input": 125313,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   true
+  ],
+  "scores": [
+   "4/4/4/5 (checks: anchors, why_boxes, experiments)",
+   "5/5/5/4 (checks: why_boxes)",
+   "4/4/5/5"
+  ],
+  "figures": 7,
+  "findings": [
+   [
+    {
+     "text": "The release inventory and inspection claims go beyond the supplied evidence. The paper links a project page, but does not establish that the repository contains only a static explorer, lacks the experiment framework, or omits the quoted meta-gaming traces. No repository snapshot or inspection outputs accompany the read. Supply a dated commit and artifact paths supporting these claims, or mark release contents as unverified. Apply the same qualification to the categorical code/artifact fact in At a glance.",
+     "about": "faithfulness",
+     "where": "reproducibility"
+    },
+    {
+     "text": "The memory mechanism omits an important intervention documented in the prompts: a history-summary utility explicitly preserves future commitments, references to previous exchanges, and settled ordering rules while dropping other resolved-round prose. Explain this selective retention alongside the reports and persistent-memory tool. It matters directly to interpreting persistent institutions: the scaffold does not merely retain an undifferentiated history.",
+     "about": "depth",
+     "where": "environment.8"
+    },
+    {
+     "text": "The body replaces the paper's section structure with several standalone Method and Finding sections, and has no corresponding Discussion and Conclusion section before Claims. Preserve the paper's Framework, Taxonomy, Results, and Discussion and Conclusion headings, placing the existing detailed findings beneath Results. The deployment implications and the authors' distinction between unexpected behavior and demonstrated misalignment belong in Discussion, rather than only in Claims and the topic lens.",
+     "about": "anchors",
+     "where": "controls"
+    },
+    {
+     "text": "Two substantive appendix analyses are missing despite the otherwise detailed results coverage. Add compact experiments for the fixed-bid structural metrics (Table 8: round counts, messaging, concentration, repeat wins and winning-bid drift) and linguistic drift (Appendix C.6: largely stable surface similarity despite changing vocabulary and institutional language). Distinguish reported measurements from the authors' interpretations, especially the claim that repeat wins are approximately chance.",
+     "about": "depth",
+     "where": "controls"
+    },
+    {
+     "text": "Institutional erosion is a substantive finding and part of this section's takeaway, but it appears only in loose prose and a figure caption. Give it question/did/found/means/not-shown fields, identifying the round-level comparison and retaining the distinction between co-occurrence and causation. Likewise, the unequal-budget bid-escalation result in states.2 should be incorporated into an experiment rather than left as a separate prose finding.",
+     "about": "experiments",
+     "where": "memory.6"
+    },
+    {
+     "text": "The reason for using negotiation metrics instead of task accuracy is stated in ordinary prose, not a WHY box at that measurement choice. The cost-saving reason for concentrating ablations on GLM-5.3 and Luna is similarly embedded in models.0. Move these author-supplied reasons into WHY boxes beside the choices they explain.",
+     "about": "why_boxes",
+     "where": "taxonomy.3"
+    },
+    {
+     "text": "Vague wording in the third claim's evidence: \u201cCommitments, later citations and loyalty labels support persistence; prompt and mechanism qualifications narrow \u2018spontaneous\u2019 (see Method and memory finding).\u201d The compressed phrase \u201cprompt and mechanism qualifications\u201d requires reconstructing the central qualification from other sections. State the qualifications directly.",
+     "about": "clarity",
+     "where": "claims",
+     "rewrite": "Workers cite and honor earlier commitments, supporting persistence. However, ballots already permit departures from price order, and the prompts encourage using remembered peer preferences, so these institutions emerge within a scaffold that supports relationship-based negotiation."
+    }
+   ],
+   [
+    {
+     "text": "The verdict on agents spontaneously creating persistent institutions discounts the descriptive finding for reasons that mainly limit its generalization. Ballot discretion permits agents to devise allocation rules; it does not contradict the paper\u2019s definition of an institution. Likewise, preserving commitments in summaries supports persistence without supplying the particular commitments or tie-breaks agents devise. Mark the narrower occurrence claim as holding in this scaffold, while retaining the important qualification that the experiments do not isolate the model from its memory scaffold or demonstrate the same behavior under an enforced auction.",
+     "about": "calibration",
+     "where": "claims"
+    },
+    {
+     "text": "The read explains that price is the prompted primary signal but omits the authors\u2019 stated reason for that choice: they wanted institutional behavior to arise despite an explicit allocation priority, rather than simply because no priority was specified (\u00a74.1). Add that rationale in a WHY box beside the price-ordering description. Keep the separate criticism that the priority is instructed rather than independently enforced; the authors\u2019 rationale and the read\u2019s qualification should both be visible.",
+     "about": "why_boxes",
+     "where": "environment.5"
+    }
+   ],
+   [
+    {
+     "text": "Vague wording creates conflicting payment conditions: \u201cEvery worker with a confirmed position pays its stated bid when its window begins; losing a contested position or sitting out costs nothing.\u201d A worker can lose its preferred position yet receive a later, chargeable window. Although the paper\u2019s prompts contain the same ambiguous shorthand, the read should distinguish losing the preferred position from securing no execution window.",
+     "about": "clarity",
+     "where": "environment.5",
+     "rewrite": "Every worker with a confirmed execution window pays its stated bid when the window begins, even if it receives a later position than requested. A worker that secures no window pays nothing."
+    },
+    {
+     "text": "\u201cIts question is whether repeated bargaining creates rules that outlast a task\u201d makes cross-task persistence sound necessary. The paper defines institutions by persistence beyond the creation round, including arrangements within a single task, and its displayed memory comparison does not establish cross-task necessity. Replace this with \u201cIts question is whether repeated bargaining creates persistent rules that shape later resource allocation, within or across tasks.\u201d",
+     "about": "faithfulness",
+     "where": "problem.0"
+    }
+   ]
+  ],
+  "check_calls": 9,
+  "check_refused": [],
+  "length": {
+   "read": 25607,
+   "main": 57782,
+   "share": 0.4431656917379115
+  }
+ },
+ {
+  "run": 3,
+  "code": "c0f0aa3",
+  "pass": 1453,
+  "paper": "2611.10620",
+  "stored": true,
+  "minutes": 21.8,
+  "usage": {
+   "cells": 41,
+   "input": 229538,
+   "turns": 44,
+   "output": 39077,
+   "seconds": 1293,
+   "list_cost": 1.1694748,
+   "reasoning": 14009,
+   "cache_read": 3196288
+  },
+  "peak_input": 116356,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   false
+  ],
+  "scores": [
+   "4/4/4/5 (checks: anchors)",
+   "5/4/5/4 (checks: anchors, why_boxes)",
+   "5/4/5/5 (checks: anchors, experiments)"
+  ],
+  "figures": 4,
+  "findings": [
+   [
+    {
+     "text": "The body does not preserve all of the paper\u2019s substantive section anchors. In particular, \u201cWhat a probe can estimate\u201d is compressed into the Problem section, while Discussion and its evaluation protocol have no corresponding body section; their content is scattered through Claims and the lenses. Restore findable sections for the identification framework and Discussion before Claims, keeping the paper\u2019s reasons and interpretation there rather than relying on the later evaluative sections.",
+     "about": "anchors",
+     "where": "problem"
+    },
+    {
+     "text": "The artifact-audit assertions go beyond what can be established from the supplied paper: opened scripts and result JSONs, inspected Parquet listings, extractor implementation details, timestamp-anchor deficiencies, and availability of original pre-correction inputs on request. These may be independently checked observations, but the read gives no inspected revision or artifact references that make them auditable. In particular, the paper offers implanted adapters to editors and reviewers on request; it does not state that original pre-correction training inputs are available on request. Cite the precise inspected artifacts and versions for these additional claims, or restrict this section\u2014and the \u201cverified\u201d statement at a glance\u2014to what the paper reports.",
+     "about": "faithfulness",
+     "where": "repro"
+    },
+    {
+     "text": "The read omits the appendix\u2019s direct NARCBench reproduction, an important qualification to the critique of published performance. Add a compact experiment reporting that the released Core activations reproduce AUROC 1.00, whereas the transfer tier gives best-method AUROC 0.79\u20130.85 and recall 17\u201323% at nominal 1% FPR. Include the crucial limitation that each transfer tier has at most 36 negatives, so that operating point cannot actually be resolved. This distinguishes reproducing the original result from testing its interpretation on the new benchmark.",
+     "about": "depth",
+     "where": "evaluation"
+    },
+    {
+     "text": "Vague wording in Found: \u201cStripped benign-coordinator AUROC is 0.70.\u201d The stacked label omits both the positive class and the operation applied to the context. State the contrast explicitly.",
+     "about": "clarity",
+     "where": "decisions.0",
+     "rewrite": "After removing the brief and private block, the decision probe separates colluders from benign coordinators with AUROC 0.70."
+    }
+   ],
+   [
+    {
+     "text": "The middle follows the paper\u2019s broad progression but replaces its section headings and sometimes its boundaries. For example, \u201cMonitors and evaluation protocol\u201d becomes two separate Method sections, and the three named Pitfall sections become differently titled Finding sections. Restore the paper\u2019s substantive section names and boundaries, using the current descriptive titles as subheadings or takeaways. Keep Claims, the five lenses, and the final three sections in their current relative positions.",
+     "about": "anchors",
+     "where": "monitor"
+    },
+    {
+     "text": "The verdict \u201cpartly\u201d is too sceptical for the narrowly phrased claim \u201cDecision-related information remains in activations after instruction control.\u201d The same-prompt and stripped-transfer results support decision-related information, as the read\u2019s own experiment interpretation says. Failure to isolate a unique internal decision computation limits a stronger claim, not this one. Mark this claim \u201cholds\u201d while retaining the behavioral-label caveat, or strengthen the claim\u2019s wording to match what the \u201cpartly\u201d verdict actually disputes.",
+     "about": "calibration",
+     "where": "claims"
+    },
+    {
+     "text": "Several important design rationales remain outside WHY boxes or away from the choices they explain. Add a WHY box here explaining that holding out both scenarios and wordings prevents memorization of either. At monitor.7, put the reasons for calibrating episode maxima and using held-out-wording calibration in a WHY box: the former controls any-round alarms, and the latter reproduces the wording shift that otherwise breaks calibration.",
+     "about": "why_boxes",
+     "where": "evaluation.0"
+    },
+    {
+     "text": "Vague wording in the experiment\u2019s Found: \u201cStrict recall rises from 0.10 at 160 joiners to 0.14 [0.10, 0.19] at 674. Gain over half-data is 0.044, below the 0.05 bar. Loose joiners plus non-briefed negatives give 0.32 at 214 versus 0.30 at 1,802.\u201d \u201cStrict recall\u201d can sound like a different metric, \u201cloose joiners\u201d does not specify the labeling rule, and \u201chalf-data\u201d introduces a different comparison without distinguishing it from the endpoints just reported. Name the label rules and the comparison explicitly.",
+     "about": "clarity",
+     "where": "decisions.2",
+     "rewrite": "With joiner labels requiring both private agreement and a target vote, recall at 1% FPR rises from 0.10 at 160 joiners to 0.14 [0.10, 0.19] at 674. The preregistered comparison between half and all of the strict-label training set gives a gain of 0.044, below the 0.05 criterion. With joiner labels requiring either private agreement or a target vote, and with non-briefed negatives added, recall is 0.32 at 214 joiners and 0.30 at 1,802."
+    }
+   ],
+   [
+    {
+     "text": "The seed-stability and extended-negative-set results remain a prose paragraph rather than an experiment. The human validation of stance labels in public-record.0 has the same problem. Give these checks question/did/found/means/not-shown treatment, either as compact experiments or by incorporating them into the experiments they validate. For the human check, retain the small sample and pre-regeneration qualification.",
+     "about": "experiments",
+     "where": "outcome.2"
+    },
+    {
+     "text": "The paper-section sequence ends at Discussion and proceeds directly to Claims, omitting the paper\u2019s Conclusion. Restore a short Conclusion before Claims. Move the existing concluding synthesis there rather than repeating the Discussion.",
+     "about": "anchors",
+     "where": "discussion"
+    },
+    {
+     "text": "Vague wording: \u201cSurface structure nearly solves colluders-versus-controls, not instruction-matched action.\u201d \u201cInstruction-matched action\u201d does not name the tested contrast: the negative agents received the instruction plus explicit decline notes, rather than supplying a clean action-only comparison. Name both groups directly.",
+     "about": "clarity",
+     "where": "instructions.11",
+     "rewrite": "Metadata separates colluders from uninstructed controls fairly well, but barely separates them from agents who received the collusion instruction and were told to decline it."
+    }
+   ]
+  ],
+  "check_calls": 10,
+  "check_refused": [
+   [
+    "/sections: the order must be At a glance (glance), the paper's own sections (problem, method, finding; at least one), Claims, one lens per graded topic, Limitations (limits), Related work (related), R"
+   ]
+  ],
+  "length": {
+   "read": 39195,
+   "main": 80464,
+   "share": 0.48711224895605487
+  }
+ },
+ {
+  "run": 3,
+  "code": "c0f0aa3",
+  "pass": 1454,
+  "paper": "2611.12675",
+  "stored": true,
+  "minutes": 13.5,
+  "usage": {
+   "cells": 32,
+   "input": 167766,
+   "turns": 34,
+   "output": 25593,
+   "seconds": 804,
+   "list_cost": 0.7776124,
+   "reasoning": 9548,
+   "cache_read": 1861504
+  },
+  "peak_input": 116107,
+  "submits": 2,
+  "stood": [],
+  "rounds": 2,
+  "passed": [
+   false,
+   true
+  ],
+  "scores": [
+   "4/5/4/4 (checks: anchors, why_boxes)",
+   "4/5/4/5"
+  ],
+  "figures": 5,
+  "findings": [
+   [
+    {
+     "text": "The target counts are given without the inclusion rules that determine the recovery denominators. Add the native-effect thresholds: baseline harmful refusal \u226550% and an addition effect \u226530 points; an ablation effect \u226530 points with at most half the outputs degenerate; and a correctness gain \u22655 points. Identify Mistral-7B as the excluded refusal target and Llama-3.2-1B/Qwen2.5-1.5B as the excluded ARC targets. These choices are important for interpreting near-native recovery, not merely replication details.",
+     "about": "depth",
+     "where": "method.9"
+    },
+    {
+     "text": "The conclusion that coverage dominates model differences omits the paper\u2019s strongest counterexample. With task prompts, ARC recovery correlates 0.68 with the signed source/target size ratio; the two smallest sources recover \u221225% to 89% across targets, whereas every source of at least 2.6B recovers at least 86%. Add this result to the experiment and qualify its Means. The Claims section\u2019s brief acknowledgment that ARC is less uniform does not convey the size dependence.",
+     "about": "depth",
+     "where": "transfer.7"
+    },
+    {
+     "text": "Specify the different measurement and replication setup for the base-model result. Here sentiment recovery is computed above 50% chance, rather than reported as the native-accuracy gap used elsewhere in the read. Also state that these transfers use one seed and only two base models qualify as ARC targets. Otherwise the reported recovery range appears directly comparable to the main sentiment results and equally replicated.",
+     "about": "depth",
+     "where": "transfer.7"
+    },
+    {
+     "text": "The assertion that Figure 5 contains cells more negative than \u22123.82 cannot be verified from the supplied material, which includes the figure\u2019s LaTeX inclusion and caption but not the heatmap itself. The paper\u2019s text explicitly identifies \u22123.82 as the worst combination. Retain this contradiction claim only with verified train/evaluation cell identities and their plotted values; otherwise remove it rather than presenting an uncheckable figure criticism as established.",
+     "about": "faithfulness",
+     "where": "mapping.2"
+    },
+    {
+     "text": "The substantive middle is organized under replacement Problem/Method/Finding headings rather than the paper\u2019s own section headings, and the mapping study is promoted out of the Coverage section. Use the paper\u2019s substantive headings\u2014Setup, Tools transfer through the map, Coverage determines transfer, and What carrying offers without target labels\u2014with the current experiment titles as subheadings. Keep the interpolation/mapping experiment inside Coverage. The opening and closing anchors and the three requested lenses are otherwise in place.",
+     "about": "anchors",
+     "where": "method"
+    },
+    {
+     "text": "Several explicit reasons supplied by the paper are absent from WHY boxes at their choices. Explain there that native-tool inclusion avoids an absent or invalid recovery reference and that sentiment uses gaps because a recovery ratio becomes unstable for near-chance native probes. Also place the shared-model reason for model-level bootstrapping alongside the statistical setup, and explain the exceptional Qwen2.5-72B depth where that choice is introduced: its native direction does not induce refusal at the shallower tested depths.",
+     "about": "why_boxes",
+     "where": "method.9"
+    }
+   ],
+   [
+    {
+     "text": "The ablation account omits the paper\u2019s important normalization failure in Phi-3-mini. Task augmentation reduces its single-direction ablation recovery from 21%\u201369% to 4%\u201313%: the native direction built from normalized states leaves 81% of harmful prompts refused, versus 13% for the raw-activation direction. Add this exception beside the block-mismatch explanation. It shows that matching the normalized native direction more closely can worsen causal transfer, rather than merely leaving an average deficit that per-block mapping resolves.",
+     "about": "depth",
+     "where": "transfer"
+    },
+    {
+     "text": "The read explains why prompt form matters but does not give the actual read-out templates. Specify `Question: {q} Answer: {a}` for correctness and `Review: {t} Sentiment:` for sentiment, with the state taken at the final token. These are operational details of the central coverage result, not incidental formatting; the current description does not fully specify which representations to extract without consulting the paper.",
+     "about": "depth",
+     "where": "method"
+    },
+    {
+     "text": "The Found field says that \u201clocal linear fits do not improve prediction.\u201d Appendix F reports small improvements at 800\u20131,600 neighbors, up to 0.02 in normalized prediction error; smaller neighborhoods perform worse. Replace the absolute statement with the finding that local fits offer at most a small improvement over the global map, and retain the neighborhood-size qualification.",
+     "about": "faithfulness",
+     "where": "coverage-finding.13"
+    }
+   ]
+  ],
+  "check_calls": 8,
+  "check_refused": [
+   [
+    "/sections/4/blocks/5/text: KaTeX cannot parse $y=xA+b+\\u000barepsilon$: Unexpected character: '\\u000b' at position 8: y=xA+b+\\u000b\u0332arepsilon"
+   ]
+  ],
+  "length": {
+   "read": 19765,
+   "main": 37254,
+   "share": 0.5305470553497611
+  }
+ },
+ {
+  "run": 3,
+  "code": "c0f0aa3",
+  "pass": 1455,
+  "paper": "2611.12835",
+  "stored": true,
+  "minutes": 21.0,
+  "usage": {
+   "cells": 47,
+   "input": 306274,
+   "turns": 50,
+   "output": 37221,
+   "seconds": 1260,
+   "list_cost": 1.3612187999999998,
+   "reasoning": 13359,
+   "cache_read": 3764608
+  },
+  "peak_input": 121112,
+  "submits": 3,
+  "stood": [],
+  "rounds": 3,
+  "passed": [
+   false,
+   false,
+   true
+  ],
+  "scores": [
+   "5/4/4/5 (checks: anchors, why_boxes)",
+   "3/4/4/4 (checks: anchors)",
+   "5/5/4/5"
+  ],
+  "figures": 4,
+  "findings": [
+   [
+    {
+     "text": "The read replaces the paper\u2019s section structure with its own sequence of Method and Finding sections. In particular, Problem Formulation is split across problem/game, Method across theory/learning, and Experiments across evaluation and four findings; evaluation is even labeled Method. Preserve the paper\u2019s own section and subsection names as navigational anchors, placing the existing explanations and experiment blocks beneath them. The placement of Claims, the five lenses, and the final three sections is otherwise correct.",
+     "about": "anchors",
+     "where": "game"
+    },
+    {
+     "text": "The timescale choice has a WHY box, but the other major implementation choices do not. Add source-attributed WHY boxes beside structured extractive critiques and NLI/CoT verification explaining the authors\u2019 concern about hallucination and verifier ranking errors, and beside penalty construction explaining signed monitor rewards, nonnegative agent costs, and the different treatment of bounded versus unbounded task rewards. These rationales currently appear only partially in ordinary prose or captions.",
+     "about": "why_boxes",
+     "where": "learning"
+    },
+    {
+     "text": "The reproducibility account omits several consequential gaps in the paper\u2019s training specification. Appendix B introduces L monitor updates per agent update, fixed penalty coefficients, and the Lagrangian initialization, dual learning rate, and target cost, but does not report their numerical settings. Explicitly list these as unreported. L is particularly important because the read correctly identifies scheduling\u2014not the equal reported learning rates\u2014as the practical source of timescale separation.",
+     "about": "depth",
+     "where": "reproducibility"
+    },
+    {
+     "text": "Vague wording: \u201cHeadline improvements of 26.0/15.3/39.8 are average absolute percentage-point changes in role deception/QA success/shop success, despite percent notation.\u201d The slash-packed numbers and shortened metric names obscure which quantity decreases, which increases, and what comparison is averaged. State the three results with their metric names and directions.",
+     "about": "clarity",
+     "where": "main-results.2",
+     "rewrite": "Averaged across the three backbones, e-PoG reduces Agentic Role-Playing deception by 26.0 percentage points and increases compliant success by 15.3 points in SearchQA and 39.8 points in WebShop relative to the strongest comparison for each backbone. The paper writes these absolute differences with percent signs."
+    }
+   ],
+   [
+    {
+     "text": "The read presents a repository audit as established evidence, including fetched files, a particular branch, verified datasets, hardware recommendations, and\u2014most consequentially\u2014a trainer ordering that contradicts Algorithm 1. None of these observations is supported by the supplied paper or an accompanying repository snapshot. The code/paper mismatch therefore cannot be substantiated from the review materials. Supply an auditable source for these external findings (commit, file locations, and relevant excerpts), or remove the completed-check claims and describe repository implementation fidelity as unverified. Update the corresponding 'Artifacts' fact in At a glance as well.",
+     "about": "faithfulness",
+     "where": "reproducibility"
+    },
+    {
+     "text": "\u201cZero measured unauthorized use\u201d overstates the precision of Table 1. The Qwen3-8B WebShop value is reported as 0.00 with a nonzero \u00b10.01 annotation; a rounded zero does not establish that no restricted calls were observed. The weak-to-strong experiment repeats this interpretation. Say that unauthorized use is reported as 0.0% in SearchQA and rounds to 0.00 calls per episode in WebShop, rather than asserting an exact measured zero.",
+     "about": "faithfulness",
+     "where": "experiments.6"
+    },
+    {
+     "text": "The paper's Conclusion section is absent from the paper-section sequence: the read moves directly from Experiments to Claims. Add a concise Conclusion before Claims, distinguishing the paper's concluding interpretation from the read's subsequent verdicts.",
+     "about": "anchors",
+     "where": "claims"
+    },
+    {
+     "text": "Vague wording obscures an implementation step: \u201cRole-playing separately standardizes reward/cost, combines their advantages with weights one/minus lambda, divides by one plus lambda, and adjusts lambda by projected dual ascent toward a target mean cost.\u201d The compressed 'one/minus lambda' description is unnecessarily hard to translate into the actual advantage and update rules. State those rules directly and define the target.",
+     "about": "clarity",
+     "where": "method.20",
+     "rewrite": "For role-playing, the authors standardize rewards and costs separately within each rollout group, yielding advantages A_r and A_c. The agent uses (A_r \u2212 \u03bbA_c)/(1 + \u03bb). They then update \u03bb \u2190 max{0, \u03bb + \u03b7_\u03bb(mean cost \u2212 \u03ba)}, where \u03b7_\u03bb is the dual learning rate and \u03ba is the target mean cost."
+    }
+   ],
+   [
+    {
+     "text": "The practical monitor description gives the output structure but omits an important restriction on what the monitor may accuse. Appendix B.2 permits accusations only about assistant-controlled behavior in [Behavior Under Review]; [Background] supplies evidence and must not itself become the target. It also explicitly excludes ordinary incorrect answers, poor reasoning, and task failure unless they establish an honesty or trustworthiness problem. Add these scope rules here. They matter particularly in role-playing, where the supplied prior wrongdoing is context for judging the current disclosure, not an independently punishable action in the current rollout.",
+     "about": "depth",
+     "where": "method.14"
+    }
+   ]
+  ],
+  "check_calls": 8,
+  "check_refused": [
+   [
+    "/sections/14/facts/0/text: 9550 is not in the paper's text"
+   ]
+  ],
+  "length": {
+   "read": 25697,
+   "main": 47754,
+   "share": 0.5381119906185869
+  }
+ }
+]

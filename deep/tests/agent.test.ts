@@ -35,8 +35,8 @@ const FAILING: Verdict = {
 const revised = (n: number) => changed((d) => (blocks(d, "method")[1]!.text = `A linear probe, because it adds little of its own (revision ${n}).`));
 const why = (read: { sections: unknown[] } | null) => blocks(read as Draft, "method")[1]!.text;
 const stopping = [fauxAssistantMessage("Done."), fauxAssistantMessage("Done."), fauxAssistantMessage("Done.")];
-/** `BODY` with `chars` more characters of appendix before its last sentence. */
-const long = (chars: number) => BODY.replace("The learning rate is 0.003", `${"The probe is linear. ".repeat(Math.ceil(chars / 21))}\nThe learning rate is 0.003`);
+/** `PAPER`'s text with `chars` more characters of appendix before its last sentence. */
+const long = (chars: number) => PAPER.body.replace("The learning rate is 0.003", `${"The probe is linear. ".repeat(Math.ceil(chars / 21))}\nThe learning rate is 0.003`);
 
 // ── the run's failures ──────────────────────────────────────────────────────────────────────────────
 
@@ -209,9 +209,28 @@ test("a read that passes its review is returned with the round, and the reviewer
   assert.equal(sent[0]!.messages.length, 2);
   assert.ok(textOf(system!).startsWith("You review a Deep read"));
   assert.deepEqual(system!.toolsAdded?.map((t) => t.name), ["review"]);
-  assert.ok(textOf(user!).includes("The paper's text, whole:") && textOf(user!).includes(BODY), "the paper's whole text, the appendix included");
+  assert.ok(textOf(user!).includes("The paper's text, whole:") && textOf(user!).includes(PAPER.body), "the paper's whole text, the appendix included");
   assert.ok(textOf(user!).includes(JSON.stringify(draft())), "the read as JSON");
   assert.ok(!textOf(user!).includes("Not confirmed by code"), "every place the read cites was found");
+});
+
+test("the length check is code's: the read's measured share of the main text, told to the writer and the reviewer", async () => {
+  const { models: m, faux } = models();
+  const sent: Sent[] = [];
+  faux.setResponses([cell(`console.log(JSON.stringify(await check(${JSON.stringify(draft())})))`), seeing(submits(draft()), sent), seeing(reviews(PASSING), sent)]);
+  const outcome = await run(m);
+  const told = /Length: the read's text is \d+ characters, \d+% of the paper's main text \(\d+\); the aim is about 33%/;
+  const writer = textOf(sent[0]!.messages.at(-1)!);
+  assert.match(writer, told, "check() gives the writer the measure");
+  assert.ok(!writer.includes("60%") && !textOf(sent[0]!.messages[0]!).includes("60%"), "but not the limit, which a writer writes up to");
+  assert.match(textOf(sent[1]!.messages[1]!), new RegExp(`${told.source}, and past 60% the length check fails\\.`), "the reviewer is told both");
+  assert.deepEqual(outcome.reviews?.map((r) => [r.passed, r.checks.length]), [[true, true]]);
+
+  // the same read against a paper whose main text is shorter than it: the reviewer's word does not pass it
+  const short = models();
+  short.faux.setResponses([submits(draft()), reviews(PASSING), ...stopping]);
+  const long = await run(short.models, { paper: { ...PAPER, body: BODY } });
+  assert.deepEqual(long.reviews?.map((r) => [r.passed, r.checks.length]), [[false, false]]);
 });
 
 test("the reviewer is told by name the places code could not look up", async () => {
