@@ -149,6 +149,12 @@ Built between milestones, on whatever structure exists then.
   the owner's go-ahead.
 - **A Calibrate session whose drawn topic left Focus:** answering it is a 422 now. *Needs a decision* on what an
   answer there means.
+- **The Deep read's writer corrects a PDF's parts.** A PDF's bibliography and appendix are found from its headings
+  (`pdfParts`), which odd naming or layout defeats: a contents list whose entries sit at the paper's own heading level
+  still starts the cuts, losing the main text from the first message (P5, #164). A missed cut costs only tokens and
+  makes the length check lax, since the rest stays readable in the session. Idea (2026-11-10): the writer may move a
+  part's border when the parsing is wrong, and the length check stays measured on code's cuts, or on the reviewer's,
+  so the writer does not set its own bar. Wait for a PDF-only read whose parts came out wrong. *Needs shaping.*
 - **A0's small fixes left three follow-ups:**
   - `mcp_types`, `starlette` and `pymupdf` are imported but not declared; they arrive through other packages;
   - two more tests in `tests/test_batches.py` share the race #154 fixed (the batched night, the digest batch count):
