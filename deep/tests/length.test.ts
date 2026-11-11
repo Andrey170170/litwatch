@@ -25,8 +25,8 @@ ${"z".repeat(500)}
   assert.equal(m.share, m.read / m.main);
 });
 
-test("a PDF's plain text, whose only headings found are the cut ones, is measured from its start", () => {
-  const body = ["Probes read the trace", "1 Introduction", "x".repeat(1000), "References", "A. Author. A paper. 2024.", "A Additional Samples", "y".repeat(500), ""].join("\n");
+test("a PDF's text is measured from its start, whatever it takes for a heading", () => {
+  const body = ["Probes read the trace", "1 Introduction", "x".repeat(900), "| Probe | # Failed |", "# Failed", "x".repeat(100), "References", "A. Author. A paper. 2024.", "A Additional Samples", "y".repeat(500), ""].join("\n");
   const m = measure({ sections: [{ title: "Method", blocks: [{ type: "p", text: "z".repeat(300) }] }] }, { body, body_source: "pdf" });
   assert.ok(m.main > 1000 && m.main < 1100, `the text before References: ${m.main}`);
   assert.ok(m.share > 0.25 && m.share < 0.35, `${m.share}`);

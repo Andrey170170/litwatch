@@ -30,7 +30,7 @@ For most papers the read replaces reading the paper. The owner opens the paper i
 need every detail exactly, so the read accepts some LLM looseness of wording in exchange for detail and coverage. Its
 length scales with the paper, roughly a third of the main text, and the method and results are never cut to save
 length; it comes from detail, never from a caveat restated. Code measures it as the read's text against the paper's main
-text (from its first heading, without the appendix or bibliography), and a read past 60% fails its length check: the
+text (without the appendix or bibliography; a LaTeX source from its first heading), and a read past 60% fails its length check: the
 first five real reads, at 32–46%, were the right length to the owner (`evals/2026-11-10-deep-reads.md`). R1's two
 reads (about 15 and 12 minutes) are the target.
 

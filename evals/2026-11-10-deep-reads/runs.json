@@ -16,7 +16,7 @@
    "reasoning": 18115,
    "cache_read": 5031424
   },
-  "peak_input": 41756,
+  "peak_input": 126041,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -125,7 +125,7 @@
    "reasoning": 21904,
    "cache_read": 4939392
   },
-  "peak_input": 59869,
+  "peak_input": 136120,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -244,7 +244,7 @@
    "reasoning": 11029,
    "cache_read": 3530240
   },
-  "peak_input": 40005,
+  "peak_input": 143524,
   "submits": 2,
   "stood": [],
   "rounds": 2,
@@ -339,7 +339,7 @@
    "reasoning": 14070,
    "cache_read": 3106560
   },
-  "peak_input": 78176,
+  "peak_input": 135146,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -432,7 +432,7 @@
    "reasoning": 15009,
    "cache_read": 4593792
   },
-  "peak_input": 33560,
+  "peak_input": 156224,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -539,7 +539,7 @@
    "reasoning": 11732,
    "cache_read": 2089728
   },
-  "peak_input": 40254,
+  "peak_input": 91139,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -641,7 +641,7 @@
    "reasoning": 8160,
    "cache_read": 2266880
   },
-  "peak_input": 32541,
+  "peak_input": 109693,
   "submits": 2,
   "stood": [],
   "rounds": 2,
@@ -705,7 +705,7 @@
    "reasoning": 13413,
    "cache_read": 2715392
   },
-  "peak_input": 40104,
+  "peak_input": 109915,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -803,7 +803,7 @@
    "reasoning": 7760,
    "cache_read": 2319872
   },
-  "peak_input": 22606,
+  "peak_input": 104632,
   "submits": 2,
   "stood": [],
   "rounds": 2,
@@ -894,7 +894,7 @@
    "reasoning": 14396,
    "cache_read": 3153152
   },
-  "peak_input": 33659,
+  "peak_input": 130555,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -1003,7 +1003,7 @@
    "reasoning": 15058,
    "cache_read": 2703360
   },
-  "peak_input": 40245,
+  "peak_input": 112517,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -1098,7 +1098,7 @@
    "reasoning": 10045,
    "cache_read": 3103488
   },
-  "peak_input": 32532,
+  "peak_input": 125313,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -1203,7 +1203,7 @@
    "reasoning": 14009,
    "cache_read": 3196288
   },
-  "peak_input": 40095,
+  "peak_input": 116356,
   "submits": 3,
   "stood": [],
   "rounds": 3,
@@ -1313,7 +1313,7 @@
    "reasoning": 9548,
    "cache_read": 1861504
   },
-  "peak_input": 22597,
+  "peak_input": 116107,
   "submits": 2,
   "stood": [],
   "rounds": 2,
@@ -1406,7 +1406,7 @@
    "reasoning": 13359,
    "cache_read": 3764608
   },
-  "peak_input": 33650,
+  "peak_input": 121112,
   "submits": 3,
   "stood": [],
   "rounds": 3,
