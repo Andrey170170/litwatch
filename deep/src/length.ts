@@ -29,9 +29,11 @@ export interface Length {
 }
 
 export function measure(read: unknown, paper: Pick<PaperInput, "body" | "body_source">): Length {
-  const { main } = splitPaper(paper.body, paper.body_source);
-  // what comes before the first heading is a LaTeX source's preamble and the title, which no read retells
-  const start = headings(paper.body, paper.body_source)[0]?.start ?? 0;
+  const { main, cuts } = splitPaper(paper.body, paper.body_source);
+  // what comes before the first heading is a LaTeX source's preamble and the title, which no read retells; a heading
+  // found only where the cuts begin (a PDF's plain text, whose References line may be its first) leaves the start
+  const first = headings(paper.body, paper.body_source)[0]?.start;
+  const start = first !== undefined && first < (cuts[0]?.start ?? Infinity) ? first : 0;
   const length = Math.max(1, main.length - start);
   const text = chars(read);
   return { read: text, main: length, share: text / length };

@@ -173,7 +173,7 @@ node src/main.ts serve
 | `DEEP_MODEL`, `DEEP_EFFORT` | `gpt-6.1-sol`, `high` | The model and reasoning effort, the writer's and the reviewer's |
 | `DEEP_MAX_CELLS` | `100` | REPL cells per paper, revisions included |
 | `DEEP_CELL_TIMEOUT_S` | `90` | One cell's time limit |
-| `DEEP_WALL_CLOCK_MIN` | `60` | One paper's time limit, its review and revisions included; keep it below litwatch's `[integrations.deep] timeout_minutes` (135), past which litwatch ends a running job as stuck and may start a duplicate |
+| `DEEP_WALL_CLOCK_MIN` | `60` | One paper's time limit, its review and revisions included; keep it below litwatch's `[integrations.deep] timeout_minutes` (75), past which litwatch ends a running job as stuck and may start a duplicate |
 | `DEEP_MAX_OUTPUT_CHARS` | `8000` | Output kept per cell |
 | `DEEP_MAX_FETCH_CHARS` | `200000` | Text kept per `fetch` |
 | `DEEP_MAX_FETCH_MB` | `2` | MiB read per `fetch`, fractions allowed; the rest of the body is never read |
