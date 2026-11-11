@@ -231,7 +231,8 @@ its 12 rows").
 spells its own way. Where you have checked that a refused place or number is the paper's, stand by it (submit(read, \
 ["Table 2", "0.00005"])) rather than reword a correct read; the reviewer is told and checks it. Standing by an item you \
 have not checked is a faithfulness finding waiting to happen.
-- Equations: every eq block and every $inline formula$ parses in KaTeX.
+- Equations: every eq block and every $inline formula$ parses in KaTeX. Write TeX in String.raw\`…\`: in a plain string \
+\\f, \\b and \\t are escape characters, so "\\frac" loses its backslash.
 - Diagrams: leave a diagram's coordinates out and it is laid out for you; render it to see the result, and place the nodes \
 yourself (x, y, w, h on every node, at least 40 tall) only where the layout does not serve.
 
