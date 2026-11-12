@@ -133,7 +133,7 @@ test("a finished job carries the read, its figures and its reviews, and the text
   const read = { format: "read", sections: [], among_collection: [] } as unknown as NonNullable<Outcome["result"]>;
   const figures: Outcome["figures"] = [{ name: "fig-1", mime: "image/webp", data: "UklGRg==" }];
   const reviews: Outcome["reviews"] = [
-    { round: 1, passed: true, scores: { faithfulness: 5, clarity: 4, depth: 4, calibration: 5 }, checks: { anchors: true, experiments: true, why_boxes: true, voice: true, length: true }, findings: [] },
+    { round: 1, passed: true, scores: { faithfulness: 5, clarity: 4, depth: 4, calibration: 5, followability: 4 }, checks: { anchors: true, experiments: true, why_boxes: true, voice: true, length: true }, findings: [], retelling: "A probe beats chance." },
   ];
   const versions: unknown[] = [];
   const jobs = new JobQueue(async ({ paper }) => {

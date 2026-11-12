@@ -52,8 +52,14 @@ function build(draft: boolean) {
     { type: Type.Literal("list"), items: Type.Array(text("One item."), { minItems: 1 }) },
     { additionalProperties: false },
   );
+  // a WHY box is folded, its question in view; a stored read from before P6 may have none, and shows open
+  const question = plain('The question the box answers, in view while it is folded: "Why mean ablation, not zero?"');
   const Why = Type.Object(
-    { type: Type.Literal("why"), text: text("The paper's reason for a choice, placed at the choice it explains.") },
+    {
+      type: Type.Literal("why"),
+      question: draft ? question : Type.Optional(question),
+      text: text("The paper's reason for a choice a careful reader would question and the text around it leaves out."),
+    },
     { additionalProperties: false },
   );
   const CardNote = Type.Object(
@@ -351,7 +357,7 @@ function build(draft: boolean) {
       sections: Type.Array(SectionSchema, {
         minItems: 1,
         description:
-          "The read, in order: At a glance; the paper's own sections; Claims; one lens per graded topic; Limitations; " +
+          "The read, in order: At a glance; the body (problem, method and finding sections, in the order a newcomer understands the argument); Claims; one lens per graded topic; Limitations; " +
           "Related work; Reproducibility.",
       }),
       among_collection: AMONG_COLLECTION,

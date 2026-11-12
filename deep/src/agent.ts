@@ -22,6 +22,7 @@ import { PaperIndex } from "./places.ts";
 import { findingsMessage, systemPrompt, topicKey, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
 import { draftErrors, readErrors, type Draft, type Read } from "./read.ts";
 import { Repl, type HostDetail, type HostFn } from "./repl.ts";
+import { follow } from "./blind.ts";
 import { failings, passes, review, type Review } from "./review.ts";
 import { isWebUrl } from "./schema.ts";
 
@@ -396,7 +397,10 @@ export async function processPaper(
       const next = take();
       if (!next) break;
       accepted = next;
-      const judged = await review(
+      const judging = { effort: opts.effort, signal: session.signal, onPayload: detailedSummaries };
+      // the two judges read the same draft at once, and their findings go to the writer together
+      const [judged, blind] = await Promise.all([
+        review(
         models,
         model,
         {
@@ -412,11 +416,14 @@ export async function processPaper(
           stood: next.stood ?? [],
           length: measure(next.read, paper),
         },
-        { effort: opts.effort, signal: session.signal, onPayload: detailedSummaries },
-      );
-      const usage = judged.calls.map(spent).reduce<TurnUsage>((sum, u) => ({ input: sum.input + u.input, output: sum.output + u.output, reasoning: sum.reasoning + u.reasoning, cache_read: sum.cache_read + u.cache_read, list_cost: sum.list_cost + u.list_cost }), { input: 0, output: 0, reasoning: 0, cache_read: 0, list_cost: 0 });
-      if (!judged.verdict) {
-        const why = failure ?? judged.error ?? "it gave no verdict";
+        judging,
+        ),
+        follow(models, model, { read: next.read, shots: new Map([...next.figures].map(([name, made]) => [name, made.view])) }, judging),
+      ]);
+      const usage = [...judged.calls, ...blind.calls].map(spent).reduce<TurnUsage>((sum, u) => ({ input: sum.input + u.input, output: sum.output + u.output, reasoning: sum.reasoning + u.reasoning, cache_read: sum.cache_read + u.cache_read, list_cost: sum.list_cost + u.list_cost }), { input: 0, output: 0, reasoning: 0, cache_read: 0, list_cost: 0 });
+      if (!judged.verdict || !blind.verdict) {
+        const blindError = blind.error ?? "it gave no verdict";
+        const why = failure ?? (judged.verdict ? (blindError.startsWith("the blind reader") ? blindError : `the blind reader: ${blindError}`) : (judged.error ?? "it gave no verdict"));
         record({ t: now(), type: "review", round, error: why, usage });
         // The read kept is unreviewed, and says so. A verdict on the draft before it is no verdict on this one:
         // the earlier rounds stay in `reviews` as what happened, and nothing of them is said of this read.
@@ -426,8 +433,15 @@ export async function processPaper(
         break;
       }
       unread = judged.left;
-      const passed = passes(judged.verdict);
-      const entry: Review = { round, passed, ...judged.verdict };
+      const { followability, retelling, findings } = blind.verdict;
+      const judgement = {
+        ...judged.verdict,
+        scores: { ...judged.verdict.scores, followability },
+        findings: [...judged.verdict.findings, ...findings.map((f) => ({ about: "followability" as const, ...f }))],
+        retelling,
+      };
+      const passed = passes(judgement);
+      const entry: Review = { round, passed, ...judgement };
       reviews.push(entry);
       record({ t: now(), type: "review", round, passed, usage });
       if (passed) break;

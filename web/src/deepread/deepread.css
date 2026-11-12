@@ -65,7 +65,16 @@
 .dread .dr-ul { margin: 0 0 11px; padding-left: 18px; list-style: disc; font-size: 14px; line-height: 1.55; }
 .dread .dr-ul li { margin-bottom: 4px; }
 .dread .dr-why { margin: 0 0 12px; padding: 7px 10px 7px 12px; border-left: 2px solid var(--cy); background: color-mix(in srgb, var(--cy) 6%, transparent); font-size: 13.5px; line-height: 1.55; }
-.dread .dr-why::before { content: "WHY  "; font: 700 10.5px var(--font-name); letter-spacing: 0.2em; color: var(--cy); white-space: pre; }
+.dread .dr-why::before, .dread details.dr-why > summary::before { content: "WHY  "; font: 700 10.5px var(--font-name); letter-spacing: 0.2em; color: var(--cy); white-space: pre; }
+/* a folded WHY box: its question in view, its answer on a click */
+.dread details.dr-why::before { content: none; }
+/* the question line is the control, 40 px tall, so the box keeps no padding of its own above or below it */
+.dread details.dr-why { padding-block: 0; }
+.dread details.dr-why > summary { cursor: pointer; list-style: none; font-weight: 600; padding-block: 9px; min-height: 40px; box-sizing: border-box; }
+.dread details.dr-why[open] { padding-bottom: 8px; }
+.dread details.dr-why > summary::-webkit-details-marker { display: none; }
+.dread details.dr-why > summary::after { content: " ▸"; color: var(--cy); }
+.dread details.dr-why[open] > summary::after { content: " ▾"; }
 .dread .dr-note { margin: 0 0 12px; padding: 7px 10px 7px 12px; border-left: 2px solid var(--warn); background: color-mix(in srgb, var(--warn) 7%, transparent); font-size: 13.5px; line-height: 1.55; }
 .dread .dr-note::before { content: "CARD  "; font: 700 10.5px var(--font-name); letter-spacing: 0.2em; color: var(--warn); white-space: pre; }
 .dread .dr-cap { font-size: 12.5px; color: var(--fg2); margin: -8px 0 14px; line-height: 1.5; }

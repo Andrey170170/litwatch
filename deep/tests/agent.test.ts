@@ -12,7 +12,7 @@ import { RenderUnavailable, type Imaging } from "../src/imaging.ts";
 import type { PaperInput } from "../src/prompt.ts";
 import type { Draft } from "../src/read.ts";
 import { passes, type Verdict } from "../src/review.ts";
-import { BODY, blocks, cell, changed, draft, fakeImaging, HOSTS, imagesOf, models, OPEN, OPTS, PAPER, PASSING, png, reviews, seeing, submits, textOf, WEBP, withSite, type Sent } from "./support.ts";
+import { BODY, blocks, cell, changed, draft, fakeImaging, HOSTS, imagesOf, models, OPEN, OPTS, PAPER, PASSING, png, reviews, follows, JUDGED, READABLE, seeing, submits, textOf, WEBP, withSite, type Sent } from "./support.ts";
 
 const NONE: CardSpec = { extensions: [], selections: [] };
 interface Run {
@@ -31,6 +31,8 @@ const FAILING: Verdict = {
   scores: { ...PASSING.scores, clarity: 3 },
   findings: [{ about: "clarity", where: "method.0", text: 'Hidden actor: "a probe is trained" does not say who trains it.', rewrite: "The authors train a probe." }],
 };
+/** A reviewer's verdict as the round keeps it, with the blind reader's following the read. */
+const judged = (v: Verdict) => ({ ...v, scores: { ...v.scores, followability: READABLE.followability }, retelling: READABLE.retelling });
 /** The draft as the writer's n-th revision leaves it. */
 const revised = (n: number) => changed((d) => (blocks(d, "method")[1]!.text = `A linear probe, because it adds little of its own (revision ${n}).`));
 const why = (read: { sections: unknown[] } | null) => blocks(read as Draft, "method")[1]!.text;
@@ -168,7 +170,7 @@ test("submit rejects a draft with what is wrong, check says the same without sub
     cell(`const a = await check(${JSON.stringify(wrong)}); const b = await submit(${JSON.stringify(wrong)}); console.log(JSON.stringify([a, b]))`),
     seeing(cell(`console.log(JSON.stringify(await check(${JSON.stringify(drawn)})))`), sent),
     submits(drawn),
-    reviews(PASSING),
+    reviews(PASSING), follows(),
   ]);
   const outcome = await run(m);
   const answers = textOf(sent[0]!.messages.at(-1)!);
@@ -186,23 +188,24 @@ test("submit rejects a draft with what is wrong, check says the same without sub
 // ── the review ──────────────────────────────────────────────────────────────────────────────────────
 
 test("the pass rule: every score at 4 or above and every check passed", () => {
-  assert.equal(passes(PASSING), true);
-  assert.equal(passes({ ...PASSING, scores: { faithfulness: 4, clarity: 4, depth: 4, calibration: 4 } }), true);
-  for (const name of ["faithfulness", "clarity", "depth", "calibration"] as const) assert.equal(passes({ ...PASSING, scores: { ...PASSING.scores, [name]: 3 } }), false, name);
+  assert.equal(passes(JUDGED), true);
+  assert.equal(passes({ ...JUDGED, scores: { faithfulness: 4, clarity: 4, depth: 4, calibration: 4, followability: 4 } }), true);
+  for (const name of ["faithfulness", "clarity", "depth", "calibration", "followability"] as const) assert.equal(passes({ ...JUDGED, scores: { ...JUDGED.scores, [name]: 3 } }), false, name);
   for (const name of ["anchors", "experiments", "why_boxes", "voice", "length"] as const)
-    assert.equal(passes({ ...PASSING, scores: { faithfulness: 5, clarity: 5, depth: 5, calibration: 5 }, checks: { ...PASSING.checks, [name]: false } }), false, name);
+    assert.equal(passes({ ...JUDGED, scores: { faithfulness: 5, clarity: 5, depth: 5, calibration: 5, followability: 5 }, checks: { ...JUDGED.checks, [name]: false } }), false, name);
 });
 
-test("a read that passes its review is returned with the round, and the reviewer's call counts", async () => {
+test("a read that passes its review is returned with the round, and both judges' calls count", async () => {
   const { models: m, faux } = models();
   const sent: Sent[] = [];
-  faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent)]);
+  const blind: Sent[] = [];
+  faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent), seeing(follows(), blind)]);
   const outcome = await run(m);
   assert.equal(outcome.error, undefined);
   assert.deepEqual(outcome.result, draft(), "the read as the writer gave it: no note where nothing held the run back");
-  assert.deepEqual(outcome.reviews, [{ round: 1, passed: true, ...PASSING }]);
+  assert.deepEqual(outcome.reviews, [{ round: 1, passed: true, ...JUDGED }]);
   assert.deepEqual(outcome.figures, []);
-  assert.equal(outcome.stats.turns, 2, "the writer's turn and the reviewer's");
+  assert.equal(outcome.stats.turns, 3, "the writer's turn, the reviewer's and the blind reader's");
   assert.deepEqual(outcome.trace.map((e) => e.type), ["assistant", "submit", "cell", "review"]);
   // the reviewer: its own prompt, one tool, the whole paper and the read, no session
   const [system, user] = sent[0]!.messages;
@@ -212,12 +215,32 @@ test("a read that passes its review is returned with the round, and the reviewer
   assert.ok(textOf(user!).includes("The paper's text, whole:") && textOf(user!).includes(PAPER.body), "the paper's whole text, the appendix included");
   assert.ok(textOf(user!).includes(JSON.stringify(draft())), "the read as JSON");
   assert.ok(!textOf(user!).includes("Not confirmed by code"), "every place the read cites was found");
+  // the blind reader: its own prompt and tool, the read as it is laid out, and never the paper
+  const [blindSystem, blindUser] = blind[0]!.messages;
+  assert.ok(textOf(blindSystem!).startsWith("You are the reader of a Deep read"));
+  assert.deepEqual(blindSystem!.toolsAdded?.map((t) => t.name), ["follow"]);
+  const laidOut = textOf(blindUser!);
+  assert.ok(laidOut.includes("== Method == (method)") && laidOut.includes("[WHY box, folded] (method.1) Why a linear probe?"), laidOut);
+  assert.ok(!laidOut.includes("Earlier work left open") && !laidOut.includes("0.003"), "no text of the paper's");
+});
+
+test("a read the blind reader cannot follow fails its round, though the reviewer passed it, and its findings reach the writer", async () => {
+  const { models: m, faux } = models();
+  const writer: Sent[] = [];
+  const lost = { retelling: "A probe is trained; what it is for is unclear.", followability: 3, findings: [{ where: "method.0", text: "Layer 12 and 1,200 traces come before what the probe is for." }] };
+  faux.setResponses([submits(draft()), reviews(PASSING), follows(lost), seeing(submits(revised(1)), writer), reviews(PASSING), follows()]);
+  const outcome = await run(m);
+  assert.deepEqual(outcome.reviews?.map((r) => [r.round, r.passed, r.scores.followability]), [[1, false, 3], [2, true, 4]]);
+  assert.equal(outcome.reviews?.[0]?.retelling, lost.retelling, "the retelling is kept with the round");
+  const findings = textOf(writer[0]!.messages.at(-1)!);
+  assert.ok(findings.includes("(below: followability 3)") && findings.includes("retold its argument from the read as: A probe is trained; what it is for is unclear."), findings);
+  assert.ok(findings.includes("1. [followability] method.0: Layer 12 and 1,200 traces come before what the probe is for."), findings);
 });
 
 test("the length check is code's: the read's measured share of the main text, told to the writer and the reviewer", async () => {
   const { models: m, faux } = models();
   const sent: Sent[] = [];
-  faux.setResponses([cell(`console.log(JSON.stringify(await check(${JSON.stringify(draft())})))`), seeing(submits(draft()), sent), seeing(reviews(PASSING), sent)]);
+  faux.setResponses([cell(`console.log(JSON.stringify(await check(${JSON.stringify(draft())})))`), seeing(submits(draft()), sent), seeing(reviews(PASSING), sent), follows()]);
   const outcome = await run(m);
   const told = /Length: the read's text is \d+ characters, \d+% of the paper's main text \(\d+\); the aim is about 33%/;
   const writer = textOf(sent[0]!.messages.at(-1)!);
@@ -228,7 +251,7 @@ test("the length check is code's: the read's measured share of the main text, to
 
   // the same read against a paper whose main text is shorter than it: the reviewer's word does not pass it
   const short = models();
-  short.faux.setResponses([submits(draft()), reviews(PASSING), ...stopping]);
+  short.faux.setResponses([submits(draft()), reviews(PASSING), follows(), ...stopping]);
   const long = await run(short.models, { paper: { ...PAPER, body: BODY } });
   assert.deepEqual(long.reviews?.map((r) => [r.passed, r.checks.length]), [[false, false]]);
 });
@@ -237,7 +260,7 @@ test("the reviewer is told by name the places code could not look up", async () 
   const { models: m, faux } = models();
   const sent: Sent[] = [];
   const read = changed((d) => ((d.sections[3] as unknown as { claims: { where: string }[] }).claims[0]!.where = "Eq. 9999 and Algorithm 9999, p. 9999"));
-  faux.setResponses([submits(read), seeing(reviews(PASSING), sent)]);
+  faux.setResponses([submits(read), seeing(reviews(PASSING), sent), follows()]);
   const outcome = await run(m);
   assert.deepEqual(outcome.trace.filter((e) => e.type === "submit").map((s) => s.ok), [true], "no place the source rules out: the read is taken");
   assert.ok(
@@ -256,7 +279,7 @@ test("a refused place or number the writer stands by goes to the reviewer by nam
   faux.setResponses([
     cell(`console.log(JSON.stringify(await submit(${JSON.stringify(read)}, ["83.4%"])))`),
     seeing(cell(`console.log(JSON.stringify(await submit(${JSON.stringify(read)}, ["table  9", "83.4%", "Section 1"])))`), sent),
-    seeing(reviews(PASSING), sent),
+    seeing(reviews(PASSING), sent), follows(),
   ]);
   const outcome = await run(m);
   assert.match(textOf(sent[0]!.messages.at(-1)!), /^\{"ok":false,"errors":\["\/sections\/3\/claims\/0\/where: cites Table 9, but the paper's source has 1 table"\]\}/, "only what is not stood by is refused");
@@ -271,7 +294,7 @@ test("the reviewer reads the whole paper where the model's context has room, pas
   // 400,000 tokens of context: room for a text of 250,000 characters, whose appendix ends it
   const { models: m, faux } = models(400_000);
   const sent: Sent[] = [];
-  faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent)]);
+  faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent), follows()]);
   const body = long(250_000);
   const outcome = await run(m, { paper: { ...PAPER, body } });
   assert.ok(textOf(sent[0]!.messages[1]!).includes(body), "all of it, the appendix's last sentence included");
@@ -282,7 +305,7 @@ test("a paper past the model's context reaches the reviewer cut, with what was l
   // 64,000 tokens of context leave the paper the least it is given: 10,000 characters
   const { models: m, faux } = models(64_000);
   const sent: Sent[] = [];
-  faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent)]);
+  faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent), follows()]);
   const body = long(40_000);
   const outcome = await run(m, { paper: { ...PAPER, body } });
   const message = textOf(sent[0]!.messages[1]!);
@@ -303,7 +326,7 @@ test("a paper past the model's context reaches the reviewer cut, with what was l
 test("a failed review sends its findings into the writer's own conversation, and the revision is reviewed again", async () => {
   const { models: m, faux } = models();
   const writer: Sent[] = [];
-  faux.setResponses([submits(draft()), reviews(FAILING), seeing(submits(revised(1)), writer), reviews(PASSING)]);
+  faux.setResponses([submits(draft()), reviews(FAILING), follows(), seeing(submits(revised(1)), writer), reviews(PASSING), follows()]);
   const outcome = await run(m);
   assert.deepEqual(outcome.reviews?.map((r) => [r.round, r.passed]), [[1, false], [2, true]]);
   assert.equal(why(outcome.result), why(revised(1)), "the revision is the read");
@@ -314,7 +337,7 @@ test("a failed review sends its findings into the writer's own conversation, and
   assert.ok(textOf(messages[0]!).startsWith("You write the Deep read"));
   assert.ok(textOf(messages[1]!).startsWith("arXiv 2610.00001: Probes read the trace"));
   const findings = textOf(messages[4]!);
-  assert.ok(findings.startsWith("The reviewer did not pass the read (review 1). Scores: faithfulness 5, clarity 3, depth 4, calibration 5; a pass needs every score at 4 or above (below: clarity 3)."), findings);
+  assert.ok(findings.startsWith("The read did not pass (review 1). Scores: faithfulness 5, clarity 3, depth 4, calibration 5, followability 4; a pass needs every score at 4 or above (below: clarity 3)."), findings);
   assert.ok(findings.includes('1. [clarity] method.0: Hidden actor: "a probe is trained" does not say who trains it.\n   Rewrite: The authors train a probe.'));
   assert.ok(findings.includes("2 revisions are left"));
   assert.ok(outcome.trace.some((e) => e.type === "system" && e.text === findings), "the trace keeps what the writer was told");
@@ -326,16 +349,16 @@ test("a read is written once and revised at most twice; one still failing is kep
   const voice: Verdict = { ...PASSING, scores: { faithfulness: 5, clarity: 5, depth: 5, calibration: 5 }, checks: { ...PASSING.checks, voice: false }, findings: [] };
   faux.setResponses([
     submits(draft()),
-    reviews(FAILING),
+    reviews(FAILING), follows(),
     submits(revised(1)),
-    reviews(FAILING),
+    reviews(FAILING), follows(),
     seeing(submits(revised(2)), last),
-    reviews(voice), // every score at 5, one check failed: no pass
+    reviews(voice), follows(), // every score at 5, one check failed: no pass
     submits(revised(3)), // a third revision is never asked for
-    reviews(PASSING),
+    reviews(PASSING), follows(),
   ]);
   const outcome = await run(m);
-  assert.equal(faux.getPendingResponseCount(), 2, "neither the writer nor the reviewer was called again");
+  assert.equal(faux.getPendingResponseCount(), 3, "neither the writer nor a judge was called again");
   assert.deepEqual(outcome.reviews?.map((r) => [r.round, r.passed]), [[1, false], [2, false], [3, false]]);
   assert.ok(textOf(last[0]!.messages.at(-1)!).includes("this is the last revision"));
   assert.equal(outcome.error, undefined, "the read is kept");
@@ -346,7 +369,7 @@ test("a read is written once and revised at most twice; one still failing is kep
 
 test("a revision the writer does not make leaves the reviewed read, with a note saying so", async () => {
   const { models: m, faux } = models();
-  faux.setResponses([submits(draft()), reviews(FAILING), ...stopping]);
+  faux.setResponses([submits(draft()), reviews(FAILING), follows(), ...stopping]);
   const outcome = await run(m);
   assert.equal(outcome.error, undefined);
   assert.equal(why(outcome.result), why(draft()));
@@ -359,19 +382,19 @@ test("a revision the writer does not make leaves the reviewed read, with a note 
 test("a revision whose review cannot run is kept as unreviewed, not as failing the review of the draft before it", async () => {
   const { models: m, faux } = models();
   // round 1 fails on clarity; the writer revises; the review of the revision meets a usage limit
-  faux.setResponses([submits(draft()), reviews(FAILING), submits(revised(1)), fauxAssistantMessage("", { stopReason: "error", errorMessage: "usage limit reached" })]);
+  faux.setResponses([submits(draft()), reviews(FAILING), follows(), submits(revised(1)), fauxAssistantMessage("", { stopReason: "error", errorMessage: "usage limit reached" })]);
   const outcome = await run(m);
   assert.equal(outcome.error, undefined);
   assert.equal(why(outcome.result), why(revised(1)), "the revision is the read kept");
   assert.deepEqual(outcome.result?.process_notes, [
     { kind: "tool", source: "service", note: "The read was not reviewed: the review could not run (usage limit reached). It is a revision: the reviews on record are of the drafts before it." },
   ]);
-  assert.deepEqual(outcome.reviews, [{ round: 1, passed: false, ...FAILING }], "the round that was completed stays as history");
+  assert.deepEqual(outcome.reviews, [{ round: 1, passed: false, ...judged(FAILING) }], "the round that was completed stays as history");
   assert.deepEqual(outcome.trace.filter((e) => e.type === "review").map((e) => [e.round, e.passed, e.error]), [[1, false, undefined], [2, undefined, "usage limit reached"]]);
 
   // what round 1's reviewer was not given of a long paper is no note on a revision no reviewer read
   const small = models(64_000);
-  small.faux.setResponses([submits(draft()), reviews(FAILING), submits(revised(1)), fauxAssistantMessage("", { stopReason: "error", errorMessage: "usage limit reached" })]);
+  small.faux.setResponses([submits(draft()), reviews(FAILING), follows(), submits(revised(1)), fauxAssistantMessage("", { stopReason: "error", errorMessage: "usage limit reached" })]);
   const cut = await run(small.models, { paper: { ...PAPER, body: long(40_000) } });
   assert.deepEqual(cut.result?.process_notes?.map((n) => n.note.slice(0, 28)), ["The read was not reviewed: t"]);
 });
@@ -404,7 +427,7 @@ test("a review that cannot run keeps the read, unreviewed; a verdict that does n
     return complete(...args);
   }) as Models["completeSimple"];
   const cut = await run(half.models);
-  assert.equal(asked, 2);
+  assert.equal(asked, 3, "the reviewer's first call, the blind reader's and the reviewer's retry");
   assert.equal(cut.stats.turns, 2, "the writer's turn and the reviewer's first call");
   const judged = cut.trace.find((e) => e.type === "review")!;
   assert.ok(judged.usage.output > 0 && judged.usage.input > 0, "the usage of the call that was answered is kept");
@@ -413,17 +436,24 @@ test("a review that cannot run keeps the read, unreviewed; a verdict that does n
 
   const repaired = models();
   const sent: Sent[] = [];
-  repaired.faux.setResponses([submits(draft()), reviews({ ...PASSING, scores: { ...PASSING.scores, clarity: 6 } }), seeing(reviews(PASSING), sent)]);
+  repaired.faux.setResponses([submits(draft()), reviews({ ...PASSING, scores: { ...PASSING.scores, clarity: 6 } }), follows(), seeing(reviews(PASSING), sent)]);
   const outcome = await run(repaired.models);
-  assert.deepEqual(outcome.reviews, [{ round: 1, passed: true, ...PASSING }]);
+  assert.deepEqual(outcome.reviews, [{ round: 1, passed: true, ...JUDGED }]);
   assert.match(textOf(sent[0]!.messages.at(-1)!), /The verdict does not fit the tool's schema:\n\/scores\/clarity: /);
-  assert.equal(outcome.stats.turns, 3, "both of the reviewer's calls count");
+  assert.equal(outcome.stats.turns, 4, "both of the reviewer's calls count, and the blind reader's");
 
   const never = models();
-  never.faux.setResponses([submits(draft()), fauxAssistantMessage("It reads well."), fauxAssistantMessage("It reads well.")]);
+  never.faux.setResponses([submits(draft()), fauxAssistantMessage("It reads well."), follows(), fauxAssistantMessage("It reads well.")]);
   const none = await run(never.models);
   assert.equal(none.reviews, null);
   assert.match(none.result!.process_notes![0]!.note, /^The read was not reviewed: the review could not run \(the reviewer gave no valid verdict: no call of the review tool\)\.$/);
+
+  // the blind reader giving no verdict leaves the round without one, as the reviewer's would
+  const blind = models();
+  blind.faux.setResponses([submits(draft()), reviews(PASSING), fauxAssistantMessage("Easy to follow."), fauxAssistantMessage("Easy to follow.")]);
+  const unfollowed = await run(blind.models);
+  assert.equal(unfollowed.reviews, null);
+  assert.deepEqual(unfollowed.result?.process_notes?.map((n) => n.note), ["The read was not reviewed: the review could not run (the blind reader gave no valid verdict: no call of the follow tool)."]);
 });
 
 // ── images ──────────────────────────────────────────────────────────────────────────────────────────
@@ -468,7 +498,7 @@ test("the reviewer is shown the figures the read cites for values read off a plo
     const sent: Sent[] = [];
     faux.setResponses([
       cell(`await figure("figs/probe.png", "probe"); await figure("a/setup.png", "setup"); await submit(${JSON.stringify(showing("probe"))})`),
-      seeing(reviews(PASSING), sent),
+      seeing(reviews(PASSING), sent), follows(),
     ]);
     const outcome = await run(m, { hosts: local(url) });
     assert.equal(outcome.error, undefined);
@@ -487,7 +517,7 @@ test("a plot value is refused until the session has its figure's image, which th
     faux.setResponses([
       submits(showing()),
       cell(`await figure("figs/probe.png", "probe", "Figure 1"); await submit(${JSON.stringify(showing())})`),
-      seeing(reviews(PASSING), sent),
+      seeing(reviews(PASSING), sent), follows(),
     ]);
     const outcome = await run(m, { hosts: local(url) });
     const submitted = outcome.trace.filter((e) => e.type === "submit");
@@ -511,7 +541,7 @@ test("a revision that fails its submit leaves the accepted read its figures as t
     const second: Sent[] = [];
     faux.setResponses([
       cell(`await figure("figs/probe.png", "probe"); await submit(${JSON.stringify(showing("probe"))})`),
-      reviews(FAILING),
+      reviews(FAILING), follows(),
       // the revision makes another picture under the same name, and its submit is refused
       cell(`await figure("a/setup.png", "probe"); await submit(${JSON.stringify(refused)})`),
       ...stopping,
@@ -525,9 +555,9 @@ test("a revision that fails its submit leaves the accepted read its figures as t
     const again = models();
     again.faux.setResponses([
       cell(`await figure("figs/probe.png", "probe"); await submit(${JSON.stringify(showing("probe"))})`),
-      reviews(FAILING),
+      reviews(FAILING), follows(),
       cell(`await figure("a/setup.png", "probe"); await submit(${JSON.stringify(showing("probe"))})`),
-      seeing(reviews(PASSING), second),
+      seeing(reviews(PASSING), second), follows(),
     ]);
     const replaced = await run(again.models, { hosts: local(url), imaging });
     assert.deepEqual(imagesOf(second[0]!.messages[1]!), [view(png(4, 4).length)]);
@@ -538,7 +568,7 @@ test("a revision that fails its submit leaves the accepted read its figures as t
     const first: Sent[] = [];
     after.faux.setResponses([
       cell(`await figure("figs/probe.png", "probe"); await submit(${JSON.stringify(showing("probe"))}); await figure("a/setup.png", "probe")`),
-      seeing(reviews(PASSING), first),
+      seeing(reviews(PASSING), first), follows(),
     ]);
     const late = await run(after.models, { hosts: local(url), imaging });
     assert.deepEqual(imagesOf(first[0]!.messages[1]!), [view(png(8, 8).length)], "the reviewer sees the picture the read was accepted with");
@@ -555,7 +585,7 @@ test("figures made at once in one cell each reach the reviewer under their own n
     const read = changed((d) => (blocks(d, "method")[0]!.text = "Accuracy peaks near 0.84 at layer 9 (Fig. 1). Loss falls to about 0.31 (Fig. 2)."));
     faux.setResponses([
       cell(`await Promise.all([figure("figs/probe.png", "probe", "Figure 1"), figure("a/setup.png", "setup", "Figure 2")]); await submit(${JSON.stringify(read)})`),
-      seeing(reviews(PASSING), sent),
+      seeing(reviews(PASSING), sent), follows(),
     ]);
     const outcome = await run(m, { paper: { ...PAPER, body }, hosts: local(url) });
     assert.equal(outcome.error, undefined);
@@ -575,7 +605,7 @@ test("figures from the latest e-print, and a render that could not be made, are 
     faux.setResponses([
       cell(`await figures(); try { await render(${JSON.stringify(draft())}) } catch (e) { console.log(e.message) }`),
       submits(draft()),
-      reviews(PASSING),
+      reviews(PASSING), follows(),
     ]);
     const outcome = await run(m, { paper: { ...PAPER, body_version: null }, hosts: local(url), imaging });
     assert.deepEqual(asked, ["/e-print/2610.00001"], "no version to ask for");
@@ -590,7 +620,7 @@ test("a draft that cannot be drawn is refused by render with what to fix, and is
   const { models: m, faux } = models();
   const { imaging, calls } = fakeImaging();
   const broken = changed((d) => (blocks(d, "result")[1]!.rows as { cells: unknown[] }[])[0]!.cells.push("extra"));
-  faux.setResponses([cell(`await render(${JSON.stringify(broken)})`), cell('await render({}, "Method!")'), submits(draft()), reviews(PASSING)]);
+  faux.setResponses([cell(`await render(${JSON.stringify(broken)})`), cell('await render({}, "Method!")'), submits(draft()), reviews(PASSING), follows()]);
   const outcome = await run(m, { imaging });
   const cells = outcome.trace.filter((e) => e.type === "cell");
   assert.match(cells[0]!.error ?? "", /the draft cannot be drawn until these are fixed:\n\/sections\/2\/blocks\/1\/rows\/0\/cells: 3 cells for 2 columns/);
@@ -641,7 +671,7 @@ test("the service's notes follow the model's, one per kind with a count, the eve
     cell(fetches("http://10.0.0.1/", "http://lan.example/a", "http://gone.example/x")),
     // After the submit: one more refused, two past the budget of four, then a cell timeout.
     cell(`await submit(${JSON.stringify({ ...draft(), process_notes: [MODEL_NOTE] })});\n${fetches("http://10.0.0.2/", "https://example.org/", "https://example.org/b")}\nwhile (true) {}`),
-    reviews(PASSING),
+    reviews(PASSING), follows(),
   ]);
   const outcome = await withDns(() => run(m, { hosts: { maxFetches: 4 }, opts: { cellTimeoutMs: 300 } }));
   assert.equal(outcome.error, undefined);
@@ -661,7 +691,7 @@ test("the model can neither forge a service note or a review note nor drop one, 
   faux.setResponses([
     cell(`${fetches("http://10.0.0.1/")}\nawait submit(${JSON.stringify({ ...draft(), process_notes: [forged, passed] })})`),
     submits({ ...draft(), process_notes: [] }),
-    reviews(PASSING),
+    reviews(PASSING), follows(),
   ]);
   const outcome = await run(m);
   const rejected = outcome.trace.filter((e) => e.type === "submit");

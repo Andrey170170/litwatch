@@ -13,7 +13,8 @@ import { PROVIDER } from "../src/auth.ts";
 import { makeGuard, type HostConfig } from "../src/hosts.ts";
 import type { Box, Imaging, RenderTarget, RenderWidth } from "../src/imaging.ts";
 import type { Draft, Read } from "../src/read.ts";
-import type { Verdict } from "../src/review.ts";
+import type { Follow } from "../src/blind.ts";
+import type { Judgement, Verdict } from "../src/review.ts";
 
 export const OPTS: RunOptions = { model: "faux-1", effort: "low", maxCells: 12, cellTimeoutMs: 5000, wallClockMs: 60_000, maxOutputChars: 4000 };
 /** Hosts for a test that reaches nothing: litwatch and arXiv are names that do not resolve. */
@@ -81,7 +82,7 @@ export function draft(): Draft {
         takeaway: "A linear probe on layer 12, trained on 1,200 labelled traces.",
         blocks: [
           { type: "p", text: "The authors train a linear probe on layer 12 of Qwen3-8B over 1,200 labelled traces." },
-          { type: "why", text: "A linear probe, because it reads what is linearly present and adds little of its own." },
+          { type: "why", question: "Why a linear probe?", text: "A linear probe, because it reads what is linearly present and adds little of its own." },
         ],
       },
       {
@@ -265,6 +266,11 @@ export const PASSING: Verdict = {
 };
 /** The reviewer giving a verdict. */
 export const reviews = (verdict: unknown) => fauxAssistantMessage(fauxToolCall("review", verdict as Parameters<typeof fauxToolCall>[1]), { stopReason: "toolUse" });
+/** The blind reader following the read. */
+export const READABLE: Follow = { retelling: "A probe on layer 12 tells unfaithful traces from faithful ones, at 71.3% against 50% for chance.", followability: 4, findings: [] };
+export const follows = (verdict: unknown = READABLE) => fauxAssistantMessage(fauxToolCall("follow", verdict as Parameters<typeof fauxToolCall>[1]), { stopReason: "toolUse" });
+/** A round's verdict when the reviewer passes the read and the blind reader follows it. */
+export const JUDGED: Judgement = { ...PASSING, scores: { ...PASSING.scores, followability: READABLE.followability }, retelling: READABLE.retelling };
 
 /** One message of the conversation a model call was sent: the system prompt with its tools first, then the turns. */
 export interface SentMessage {
