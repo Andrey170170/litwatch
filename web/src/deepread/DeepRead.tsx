@@ -1,7 +1,7 @@
 /**
  * A Deep read on the paper page (docs/specs/deep-read.md; sketch R2, variant C): under a "Deep read" rung, each
  * section is a rung of the ladder, its name in the side column with its colour square, its body beside it, all laid
- * out in full. Only a claim's evidence and the process notes are folded.
+ * out in full. Only a claim's evidence, a WHY box's answer and the process notes are folded.
  *
  * Every section rung has the id `dr-<section id>` and `data-section`; every block sits in an element with
  * `data-block="<section id>.<its index in the section>"`. The render page's screenshots target those.

@@ -72,8 +72,7 @@
           "text": "Reconstructions after the fact cannot say when such arrangements form or what sustains them. Prior work on LLM negotiation uses bargaining benchmarks, Diplomacy and Werewolf, and simulated markets, where the interaction is itself the task and the game sets the payoffs; multi-agent coding has been studied as cooperation toward one goal. The gap: agents with **independent** objectives that repeatedly negotiate over a scarce resource while doing other work, and carry what they learn forward."
         },
         {
-          "type": "why",
-          "question": "What is an emergent institution?",
+          "type": "p",
           "text": "The paper's central term, after North (1990): an **emergent institution** is a rule, norm or commitment that agents devise themselves, rather than receive from the environment, and that persists beyond the round it was formed in to shape later allocation. **Institutional behaviour** is any act of discovering, creating, citing or honouring one."
         }
       ]
