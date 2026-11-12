@@ -216,11 +216,11 @@ const BODY = new Set(["problem", "method", "finding"]);
 function structureErrors(read: Draft, topics: readonly string[]): string[] {
   const errors: string[] = [];
   const kinds = read.sections.map((s) => s.kind);
-  // one letter per section: g, then the paper's own sections (b), c, lenses (l), then m r p
+  // one letter per section: g, then the body: problem, method and finding sections (b), c, lenses (l), then m r p
   const letters = kinds.map((k) => (BODY.has(k) ? "b" : k === "limits" ? "m" : k === "repro" ? "p" : k[0])).join("");
   if (!/^gb+cl*mrp$/.test(letters))
     errors.push(
-      `/sections: the order must be At a glance (glance), the paper's own sections (problem, method, finding; at least one), ` +
+      `/sections: the order must be At a glance (glance), the body's sections (problem, method, finding; at least one), ` +
         `Claims, one lens per graded topic, Limitations (limits), Related work (related), Reproducibility (repro); got ${kinds.join(", ")}`,
     );
   const ids = new Set<string>();

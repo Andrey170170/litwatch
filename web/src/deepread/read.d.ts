@@ -14,7 +14,7 @@ export interface Read {
    */
   format: "read";
   /**
-   * The read, in order: At a glance; the paper's own sections; Claims; one lens per graded topic; Limitations; Related work; Reproducibility.
+   * The read, in order: At a glance; the body (problem, method and finding sections, in the order a newcomer understands the argument); Claims; one lens per graded topic; Limitations; Related work; Reproducibility.
    *
    * @minItems 1
    */

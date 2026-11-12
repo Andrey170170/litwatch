@@ -126,6 +126,8 @@ export function readerText(read: Read): { text: string; parts: (string | { figur
     }
     if (section.kind === "related" && read.among_collection.length) walk(read.among_collection, (ReadSchema as unknown as Node).properties?.among_collection, "", "among the collection");
   }
+  // the process notes close the read, folded
+  if (read.process_notes?.length) walk(read.process_notes, (ReadSchema as unknown as Node).properties?.process_notes, "", "process notes, shown on a click");
   const parts: (string | { figure: string })[] = [];
   let from = 0;
   cuts.forEach((cut, i) => {

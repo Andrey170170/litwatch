@@ -38,6 +38,7 @@ test("the blind reader gets the read as the page shows it, whatever order the JS
   assert.match(text, /where, shown on a click: §3/);
   assert.match(text, /value: 71\.3\n\s+note, shown on a click: Best of three seeds/);
   assert.ok(!text.slice(at("edges:")).includes("points:") && !text.includes("4.5"), "no waypoints");
+  assert.ok(!text.includes("process notes"), "a read with no notes has none");
   assert.ok(at("among the collection:") > at("== Related work"), "the collection's papers under Related work, as the page shows them");
   assert.ok(text.includes("[WHY box, folded] (method.1) Why a linear probe?\n  answer, shown on a click: A linear probe"), text);
 });
@@ -50,4 +51,10 @@ test("each figure's image goes where the read shows it, after its caption", () =
   assert.ok(at > 0, JSON.stringify(parts));
   assert.match(parts[at - 1] as string, /\[figure 1, its image here\] \(method\.\d+\) Figure 1\n  caption: Probe accuracy by layer\.$/);
   assert.match(parts[at + 1] as string, /^\n?== Finding/, "the sections after the figure follow its image");
+});
+
+test("the process notes close the reader's text, marked as shown on a click", () => {
+  const r = { ...read(), process_notes: [{ kind: "tool", source: "model", note: "The repository's history was not checked." }] } as unknown as Read;
+  const { text } = readerText(r);
+  assert.match(text, /process notes, shown on a click:\n[\s\S]*note: The repository's history was not checked\.$/);
 });

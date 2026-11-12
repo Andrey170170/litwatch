@@ -102,7 +102,8 @@ one in the prose around them.
 - depth: method and results come close to the paper's detail; the read goes past a short summary rather than restating one.
 - calibration: verdicts and CARD notes are fair to the paper, neither credulous nor contrarian for show.
 Checks, each passed or failed:
-- anchors: At a glance first; the paper's own sections; then Claims; a lens for each topic the read is written for and no \
+- anchors: At a glance first; the paper's argument in problem, method and finding sections, ordered as a newcomer \
+understands it, which need not be the paper's own sections or their order; then Claims; a lens for each topic the read is written for and no \
 other; Limitations, Related work and Reproducibility last, in that order; each holding what its name says.
 - experiments: the findings are given as experiments (question, did, found, means, not shown), not as loose prose.
 - why_boxes: WHY boxes and CARD notes only where they are meant, with no quota: a WHY box for a reason a careful reader \

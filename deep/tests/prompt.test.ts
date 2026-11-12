@@ -57,6 +57,8 @@ test("the reviewer's prompt carries the rubric, the pass rule and the topics", (
   const p = reviewerPrompt(selections);
   for (const name of ["faithfulness", "clarity", "depth", "calibration", "anchors", "experiments", "why_boxes", "voice", "length"]) assert.ok(p.includes(`- ${name}: `), name);
   assert.ok(p.includes("A 5 means a reader never rereads a sentence"), "clarity's anchors");
+  // the body's sections follow the argument for a newcomer, not the paper's own: the anchors check must not ask for them
+  assert.ok(p.includes("which need not be the paper's own sections or their order") && !/the paper's own sections;/.test(p));
   assert.ok(p.includes("A read passes when every score, the blind reader's included, is at least 4 and every check passes."));
   assert.ok(p.includes('- "cot-faithfulness" · CoT faithfulness (graded must read)'));
 });

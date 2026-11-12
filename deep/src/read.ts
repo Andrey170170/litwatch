@@ -357,7 +357,7 @@ function build(draft: boolean) {
       sections: Type.Array(SectionSchema, {
         minItems: 1,
         description:
-          "The read, in order: At a glance; the paper's own sections; Claims; one lens per graded topic; Limitations; " +
+          "The read, in order: At a glance; the body (problem, method and finding sections, in the order a newcomer understands the argument); Claims; one lens per graded topic; Limitations; " +
           "Related work; Reproducibility.",
       }),
       among_collection: AMONG_COLLECTION,
