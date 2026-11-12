@@ -72,11 +72,14 @@ const coordinates = (v: unknown): boolean => Array.isArray(v) && v.length > 0 &&
 
 /** The read as a reader meets it: its sections in order, each under its title and id, each block under its type
  * and place ("method.3"), every field in the order the page shows it, a WHY box as its question with its folded
- * answer, a figure as its caption beside its image, the collection's papers under Related work. `figures` names the
+ * answer, a figure as its caption with its image there, the collection's papers under Related work. `parts` is the
+ * text cut at each figure, with the figure's name where its image goes; `figures` names the
  * figure blocks' images in the order the read shows them. */
-export function readerText(read: Read): { text: string; figures: string[] } {
+export function readerText(read: Read): { text: string; parts: (string | { figure: string })[]; figures: string[] } {
   const lines: string[] = [];
   const figures: string[] = [];
+  // where the text is cut for each figure's image: the line after its caption
+  const cuts: number[] = [];
   const walk = (value: unknown, schema: Node | undefined, indent: string, key?: string, parent?: Record<string, unknown>): void => {
     if ((key !== undefined && UNREAD.has(key)) || (key === "points" && coordinates(value))) return;
     const name = key !== undefined && hidden(key, parent) ? `${key}, shown on a click` : key;
@@ -113,7 +116,8 @@ export function readerText(read: Read): { text: string; figures: string[] } {
           lines.push(`[WHY box, folded] (${at}) ${block.question ?? "Why?"}`, `  answer, shown on a click: ${block.text}`);
         } else if (block.type === "fig") {
           figures.push(String(block.name));
-          lines.push(`[figure ${figures.length}, its image below] (${at}) ${block.number ?? ""}`.trimEnd(), `  caption: ${block.caption}`);
+          lines.push(`[figure ${figures.length}, its image here] (${at}) ${block.number ?? ""}`.trimEnd(), `  caption: ${block.caption}`);
+          cuts.push(lines.length);
         } else {
           lines.push(`[${block.type}] (${at})`);
           for (const [k, v, s] of ordered(block, branch(blockSchema, block))) walk(v, s, "  ", k);
@@ -122,7 +126,14 @@ export function readerText(read: Read): { text: string; figures: string[] } {
     }
     if (section.kind === "related" && read.among_collection.length) walk(read.among_collection, (ReadSchema as unknown as Node).properties?.among_collection, "", "among the collection");
   }
-  return { text: lines.join("\n").trimStart(), figures };
+  const parts: (string | { figure: string })[] = [];
+  let from = 0;
+  cuts.forEach((cut, i) => {
+    parts.push(lines.slice(from, cut).join("\n").trimStart(), { figure: figures[i]! });
+    from = cut;
+  });
+  parts.push(lines.slice(from).join("\n"));
+  return { text: lines.join("\n").trimStart(), parts: parts.filter((p) => typeof p !== "string" || p.trim()), figures };
 }
 
 export interface BlindInput {
@@ -138,11 +149,12 @@ export async function follow(
   input: BlindInput,
   opts: { effort: ThinkingLevel; signal?: AbortSignal; onPayload?: (payload: unknown) => unknown },
 ): Promise<Asked<Follow>> {
-  const { text, figures } = readerText(input.read);
-  const content: (TextContent | ImageContent)[] = [{ type: "text", text: `The Deep read, as it is laid out:\n\n${text}` }];
-  figures.forEach((name, i) => {
-    const shot = input.shots.get(name);
-    if (shot) content.push({ type: "text", text: `Figure ${i + 1} of the read:` }, { type: "image", data: shot.data, mimeType: shot.mimeType });
-  });
+  // each figure's image where the read shows it, after its caption, so the reader meets them in the page's order
+  const content: (TextContent | ImageContent)[] = [{ type: "text", text: "The Deep read, as it is laid out:" }];
+  for (const part of readerText(input.read).parts) {
+    const shot = typeof part === "string" ? undefined : input.shots.get(part.figure);
+    if (typeof part === "string") content.push({ type: "text", text: part });
+    else if (shot) content.push({ type: "image", data: shot.data, mimeType: shot.mimeType });
+  }
   return ask<Follow>(models, model, { who: "the blind reader", systemPrompt: blindPrompt(), tool: TOOL, content }, opts);
 }

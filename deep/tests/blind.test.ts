@@ -41,3 +41,13 @@ test("the blind reader gets the read as the page shows it, whatever order the JS
   assert.ok(at("among the collection:") > at("== Related work"), "the collection's papers under Related work, as the page shows them");
   assert.ok(text.includes("[WHY box, folded] (method.1) Why a linear probe?\n  answer, shown on a click: A linear probe"), text);
 });
+
+test("each figure's image goes where the read shows it, after its caption", () => {
+  const r = read();
+  blocks(r, "method").push({ type: "fig", name: "probe", number: "Figure 1", caption: "Probe accuracy by layer." });
+  const { parts } = readerText(r);
+  const at = parts.findIndex((p) => typeof p !== "string" && p.figure === "probe");
+  assert.ok(at > 0, JSON.stringify(parts));
+  assert.match(parts[at - 1] as string, /\[figure 1, its image here\] \(method\.\d+\) Figure 1\n  caption: Probe accuracy by layer\.$/);
+  assert.match(parts[at + 1] as string, /^\n?== Finding/, "the sections after the figure follow its image");
+});
