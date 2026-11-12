@@ -37,8 +37,9 @@ const TOOL = { name: "follow", description: "Give what you understood: the retel
 // what a reader does not see: layout, links, and a section's takeaway, which only the read's contents outside the web
 // app show; a block's type is shown as its label
 const UNREAD = new Set(["type", "kind", "x", "y", "w", "h", "width", "height", "label_at", "style", "colour", "anchor", "url", "code_url", "takeaway", "heat"]);
-/** What the page folds, opening on a click. */
-const FOLDED = new Set(["evidence"]);
+/** What the page shows only on a click or a hover: a claim's evidence, a diagram's node and edge tips, a table
+ * cell's note (a cell with a note is `{value, note}`; other notes, the collection's, are in view). */
+const hidden = (key: string, parent: Record<string, unknown> | undefined): boolean => key === "evidence" || key === "tip" || (key === "note" && parent !== undefined && "value" in parent);
 
 type Node = { properties?: Record<string, Node>; anyOf?: Node[]; items?: Node; const?: unknown };
 
@@ -69,9 +70,9 @@ const coordinates = (v: unknown): boolean => Array.isArray(v) && v.length > 0 &&
 export function readerText(read: Read): { text: string; figures: string[] } {
   const lines: string[] = [];
   const figures: string[] = [];
-  const walk = (value: unknown, schema: Node | undefined, indent: string, key?: string): void => {
+  const walk = (value: unknown, schema: Node | undefined, indent: string, key?: string, parent?: Record<string, unknown>): void => {
     if ((key !== undefined && UNREAD.has(key)) || (key === "points" && coordinates(value))) return;
-    const name = key !== undefined && FOLDED.has(key) ? `${key}, shown on a click` : key;
+    const name = key !== undefined && hidden(key, parent) ? `${key}, shown on a click` : key;
     const label = name === undefined ? "" : `${name}: `;
     const inner = label ? `${indent}  ` : indent;
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") lines.push(`${indent}${label}${value}`);
@@ -86,7 +87,7 @@ export function readerText(read: Read): { text: string; figures: string[] } {
     } else if (value && typeof value === "object") {
       if (label) lines.push(`${indent}${name}:`);
       const o = value as Record<string, unknown>;
-      for (const [k, v, s] of ordered(o, branch(schema, o))) walk(v, s, inner, k);
+      for (const [k, v, s] of ordered(o, branch(schema, o))) walk(v, s, inner, k, o);
     }
   };
   const sectionSchema = SectionSchema as unknown as Node;

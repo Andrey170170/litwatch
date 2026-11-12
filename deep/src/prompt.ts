@@ -355,15 +355,16 @@ export function blindPrompt(): string {
   return `You are the reader of a Deep read, an account litwatch, a literature watch run by an NLP research lab, wrote of a \
 paper so that it can stand in for reading the paper. ${ITS_READER} You are not given the paper, only the read, laid out \
 as it is shown: its sections in order, each block under its type and its place ("method.3"), and the figures it shows. A \
-WHY box is folded on the page: its question is in view and its answer opens on a click.
+WHY box is folded on the page: its question is in view and its answer opens on a click. What else the page shows only on \
+a click or a hover is marked "shown on a click".
 
 Read it from start to finish, once, as that reader. Then give your verdict through the follow tool, once:
 - retelling: the paper's argument as you understood it from the read, in a few sentences: the question, the idea, how it \
 is tested, what it found. Where you could not tell one of these, say so.
 - findings: every place you lost the thread, at its place in the read: a term or a name used before it is explained; a \
 detail given before you knew why it mattered; a section whose point you could not tell, or that you could not place in the \
-argument; a finding whose meaning or weight you could not tell; a reason the story needs that you found only inside a \
-folded WHY answer. Say what was missing or came too early. Most important first; only the places that cost you the thread, \
+argument; a finding whose meaning or weight you could not tell; a reason or a definition the story needs that you found \
+only where the page hides it until a click (a folded WHY answer, a claim's evidence, a diagram's tip, a table cell's note). Say what was missing or came too early. Most important first; only the places that cost you the thread, \
 not matters of style.
 - followability, from 1 to 5: a 5 means you never lost the thread and can retell the argument; a 4 allows isolated \
 stumbles, none hiding what a section is for or what a finding shows; a 3 or below means you lost the thread in a section \
@@ -417,7 +418,7 @@ export function reviewerMessage(paper: PaperInput, text: string, left: string[],
 export function findingsMessage(review: Review, revisionsLeft: number): string {
   const low = Object.entries(review.scores).filter(([, score]) => score < 4).map(([name, score]) => `${name} ${score}`);
   const failed = Object.entries(review.checks).filter(([, ok]) => !ok).map(([name]) => name);
-  const findings = review.findings.map((f, i) => `${i + 1}. [${f.about}] ${f.where}: ${f.text}${"rewrite" in f && f.rewrite ? `\n   Rewrite: ${f.rewrite}` : ""}`);
+  const findings = review.findings.map((f, i) => `${i + 1}. [${f.about}] ${f.where}: ${f.text}${f.rewrite ? `\n   Rewrite: ${f.rewrite}` : ""}`);
   return [
     `The read did not pass (review ${review.round}). Scores: ${Object.entries(review.scores).map(([n, s]) => `${n} ${s}`).join(", ")}; a pass needs every score at 4 or above${low.length ? ` (below: ${low.join(", ")})` : ""}.`,
     failed.length ? `Checks failed: ${failed.join(", ")}.` : "Every check passed.",
