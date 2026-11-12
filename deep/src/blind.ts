@@ -37,9 +37,14 @@ const TOOL = { name: "follow", description: "Give what you understood: the retel
 // what a reader does not see: layout, links, and a section's takeaway, which only the read's contents outside the web
 // app show; a block's type is shown as its label
 const UNREAD = new Set(["type", "kind", "x", "y", "w", "h", "width", "height", "label_at", "style", "colour", "anchor", "url", "code_url", "takeaway", "heat"]);
-/** What the page shows only on a click or a hover: a claim's evidence, a diagram's node and edge tips, a table
- * cell's note (a cell with a note is `{value, note}`; other notes, the collection's, are in view). */
-const hidden = (key: string, parent: Record<string, unknown> | undefined): boolean => key === "evidence" || key === "tip" || (key === "note" && parent !== undefined && "value" in parent);
+/** What the page shows only on a click or a hover: a claim's evidence and where it rests; a diagram node's or
+ * edge's tip, with its place in the paper and an edge's title; a table cell's note (a cell with a note is
+ * `{value, note}`; the collection's notes and a CARD note's place are in view). */
+function hidden(key: string, parent: Record<string, unknown> | undefined): boolean {
+  if (!parent) return false;
+  const explained = "tip" in parent || "evidence" in parent;
+  return key === "evidence" || key === "tip" || (key === "where" && explained) || (key === "title" && "from" in parent) || (key === "note" && "value" in parent);
+}
 
 type Node = { properties?: Record<string, Node>; anyOf?: Node[]; items?: Node; const?: unknown };
 

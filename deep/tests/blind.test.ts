@@ -21,7 +21,7 @@ test("the blind reader gets the read as the page shows it, whatever order the JS
   blocks(r, "method").push({
     type: "diagram",
     nodes: [{ id: "probe", label: "Probe", tip: "Reads layer 12.", x: 4.5, y: 10, w: 80, h: 40 }, { id: "out", label: "Verdict", x: 4.5, y: 90, w: 80, h: 40 }],
-    edges: [{ from: "probe", to: "out", points: [[4.5, 50], [4.5, 90]] }],
+    edges: [{ from: "probe", to: "out", title: "The probe's verdict", tip: "A score per trace.", where: "§3", points: [[4.5, 50], [4.5, 90]] }],
     width: 100,
     height: 140,
   });
@@ -34,6 +34,8 @@ test("the blind reader gets the read as the page shows it, whatever order the JS
   assert.match(text, /cells:\n\s+12\n\s+80\.2/);
   // what the page shows only on a click is marked so: a diagram's tips, a table cell's note
   assert.match(text, /tip, shown on a click: Reads layer 12/);
+  assert.match(text, /title, shown on a click: The probe's verdict/);
+  assert.match(text, /where, shown on a click: §3/);
   assert.match(text, /value: 71\.3\n\s+note, shown on a click: Best of three seeds/);
   assert.ok(!text.slice(at("edges:")).includes("points:") && !text.includes("4.5"), "no waypoints");
   assert.ok(at("among the collection:") > at("== Related work"), "the collection's papers under Related work, as the page shows them");
