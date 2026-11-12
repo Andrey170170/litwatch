@@ -43,10 +43,12 @@ const hidden = (key: string, parent: Record<string, unknown> | undefined): boole
 
 type Node = { properties?: Record<string, Node>; anyOf?: Node[]; items?: Node; const?: unknown };
 
-/** The schema of `value` among a union's branches: the one whose `type` or `kind` it has. */
+/** The schema of `value` among a union's branches: the one whose `type` or `kind` it has, or, for an untagged union
+ * (a table's row or group, a cell with a note), the one that has every field it has. */
 function branch(schema: Node | undefined, value: Record<string, unknown>): Node | undefined {
   if (!schema?.anyOf) return schema;
-  return schema.anyOf.find((s) => ["type", "kind"].some((k) => s.properties?.[k]?.const !== undefined && s.properties[k]!.const === value[k])) ?? schema.anyOf.find((s) => s.properties);
+  const tagged = schema.anyOf.find((s) => ["type", "kind"].some((k) => s.properties?.[k]?.const !== undefined && s.properties[k]!.const === value[k]));
+  return tagged ?? schema.anyOf.find((s) => s.properties && Object.keys(value).every((k) => k in s.properties!));
 }
 
 /** An object's fields in its schema's order, which is the order the web app shows them in, whatever order the

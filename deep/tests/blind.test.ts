@@ -16,7 +16,7 @@ test("the blind reader gets the read as the page shows it, whatever order the JS
   claims[0] = Object.fromEntries(Object.entries(claims[0]!).reverse());
   (r as unknown as { among_collection: unknown[] }).among_collection = [{ id: "2609.00002", relation: "extends", note: "Probes on another model." }];
   const rows = (blocks(r, "result").find((b) => b.type === "table") as { rows: { cells: unknown[] }[] }).rows;
-  rows[0]!.cells[1] = { value: 71.3, note: "Best of three seeds." };
+  rows[0]!.cells[1] = { note: "Best of three seeds.", value: 71.3 };
   rows.push({ cells: [12, 80.2] });
   blocks(r, "method").push({
     type: "diagram",
