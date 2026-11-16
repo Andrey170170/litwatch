@@ -540,6 +540,16 @@ describe("a paper's page", () => {
     expect(screen.queryByRole("button", { name: "Deep read" })).toBeNull();
   });
 
+  it("still shows a stored Deep card while no card can be asked for, without Write again", async () => {
+    viewport(true);
+    const card = { card: { key_claim: "A meta-verifier catches 71% of unfaithful chains.", summary: "SIFT trains a probe." }, model: "m", written_at: "2026-10-15T21:10:00Z", revision: 1, arxiv_version: 1, source: "latex", among: [] };
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, card, card_requestable: false } });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByText("SIFT trains a probe.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Write again" })).toBeNull();
+  });
+
   it("says why a card is coming and where it stands while its pass is open", async () => {
     viewport(true);
     const pass = { id: 73, reason: "pick", state: "running", queued_at: "2026-10-15T21:00:00Z", failed_runs: 0, error: null };

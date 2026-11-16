@@ -219,6 +219,7 @@ async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_que
     [
         ('[integrations.deep]\nurl = "http://deep:8081"\n', True),
         ('[integrations.reader]\nuse = "deep"\nurl = "http://deep:8081"\n', True),
+        ('[integrations.reader]\nuse = "litwatch.integrations.deep"\nurl = "http://d"\n', True),
         ('[integrations.deep]\nenabled = false\nurl = "http://deep:8081"\n', False),
         ('[integrations.deep]\nuse = "webhook"\nurl = "http://hook"\n', False),
         ("[integrations.archive]\n", False),
