@@ -21,7 +21,7 @@ editorial and hard to scan.
 | **The page is the acknowledgement.** | An action shows its result where it was taken (a lit star, a lit thumb with its reason, a label). A toast appears only for results the page cannot show. |
 | **Offered, never asked.** | Feedback is always at hand and never requested; Calibrate, behind the gear, is the one place that asks. No queues, no "mark as read". |
 | **Kitchen behind a door.** | Overview, Needs you, the topic editor, runs, integrations and configuration are Settings pages; on the front are only the run status and a paper's own open states. |
-| **Self-contained.** | With no integration connected every page works; only the buttons that need one (Deep read without a provider) are missing. |
+| **Self-contained.** | With no integration connected every page works; only what needs one is missing (without a Deep provider, Deep read and a paper's empty Deep rung; stored cards and reads still show). |
 | **Phone first, desktop whole.** | The phone keeps its controls at the bottom within reach of the thumb and moves by swipes; the desktop uses its width for a sidebar, a rail and full tables. |
 
 ## Shell
@@ -174,8 +174,8 @@ italics. It offers no Deep read. Where a row of it shows (a digest that listed i
    any ("Process notes · 2", folded until opened, each with its kind as a tag: access, tool, budget, input), Prior work (rows that open the paper
    when it has an arXiv id), Among the collection (rows with their rarity stripe and a tag: agrees, extends,
    contradicts, supersedes). It ends with what it was written from and when, and "Write again". Without a card: one
-   line saying when cards are automatic and "Deep read" to ask for one; while one is queued or being written, a
-   status line with a pulsing dot.
+   line saying when cards are automatic and "Deep read" to ask for one, only while a Deep provider is loaded (no
+   rung at all without one); while one is queued or being written, a status line with a pulsing dot.
 
    A card in the Deep read's format (`"format": "read"`, [deep-read.md](../deep-read.md)) shows as the **Deep read**
    instead, and a card without the tag as above. The rung reads "Deep read", and each section of the read is a rung

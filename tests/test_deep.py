@@ -214,16 +214,43 @@ async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_que
     assert await deep_rows(db) == [] and queued["reason"] == "focus"
 
 
-def test_the_cli_turns_automatic_deep_cards_on_only_with_the_deep_integration(tmp_path):
+@pytest.mark.parametrize(
+    ("toml", "on"),
+    [
+        ('[integrations.deep]\nurl = "http://deep:8081"\n', True),
+        ('[integrations.reader]\nuse = "deep"\nurl = "http://deep:8081"\n', True),
+        ('[integrations.deep]\nenabled = false\nurl = "http://deep:8081"\n', False),
+        ('[integrations.deep]\nuse = "webhook"\nurl = "http://hook"\n', False),
+        ("[integrations.archive]\n", False),
+    ],
+)
+def test_the_cli_turns_automatic_deep_cards_on_only_with_the_deep_integration(
+    tmp_path, monkeypatch, toml, on
+):
     from litwatch import cli
 
-    off, on = tmp_path / "off.toml", tmp_path / "on.toml"
-    off.write_text("[integrations.archive]\n")
-    on.write_text('[integrations.deep]\nurl = "http://deep:8081"\n')
-    cli._load_config(on)
-    assert word.automatic_deep
-    cli._load_config(off)
-    assert not word.automatic_deep
+    path = tmp_path / "litwatch.toml"
+    path.write_text(toml)
+    monkeypatch.setattr(word, "automatic_deep", not on)
+    cli._load_config(path)
+    assert word.automatic_deep is on
+
+
+@pytest.mark.parametrize("command", [["taxonomy", "import"], ["library", "sync"]])
+def test_the_cli_commands_that_settle_load_the_configuration_first(tmp_path, monkeypatch, command):
+    from typer.testing import CliRunner
+
+    from litwatch import cli
+
+    path = tmp_path / "litwatch.toml"
+    path.write_text('[integrations.deep]\nurl = "http://deep:8081"\n')
+    seen = []
+    monkeypatch.setattr(word, "automatic_deep", False)
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: seen.append(word.automatic_deep) or {})
+    monkeypatch.setattr(cli, "_taxonomy_file", lambda p: None)  # `_run`, stubbed, never uses it
+    # what the command prints after `_run` is not the point: only what settling saw
+    CliRunner().invoke(cli.app, [*command, "--config", str(path)])
+    assert seen == [True]
 
 
 async def test_the_owners_request_takes_over_an_automatic_pass_and_no_unsave_cancels_it(db):

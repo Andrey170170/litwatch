@@ -21,7 +21,7 @@ from litwatch import logs, seeds, store
 from litwatch.archive import ArchiveError
 from litwatch.core import Paper, Taxonomy
 from litwatch.feedback import word
-from litwatch.integrations import IntegrationError
+from litwatch.integrations import IntegrationError, enabled_using
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
@@ -68,9 +68,10 @@ Until = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The last da
 
 def _load_config(path: Path | None) -> configuration.Config:
     """The configuration (`config.load`), which also sets whether settling queues automatic Deep
-    cards: only while the `deep` integration is configured (`word.automatic_deep`)."""
+    cards: only while an enabled integration loads `deep` (`word.automatic_deep`). Every
+    command that settles papers loads it first."""
     cfg = configuration.load(path)
-    word.automatic_deep = "deep" in cfg.integrations
+    word.automatic_deep = enabled_using(cfg, "deep") is not None
     return cfg
 
 
@@ -319,9 +320,11 @@ def _taxonomy_file(path: Path | None) -> Taxonomy:
 @taxonomy_app.command("import")
 def taxonomy_import(
     path: Annotated[Path | None, typer.Argument(help="A taxonomy YAML; default the seed.")] = None,
+    config: ConfigPath = None,
 ) -> None:
     """Make the file the taxonomy. A changed class or topic gets a new revision and applies
     forward; a class left out is retired, a topic left out unfollowed."""
+    _load_config(config)  # its papers are settled, automatic Deep cards as configured
     tree = _taxonomy_file(path)
     saved = _run(lambda conn: word.save_taxonomy(conn, tree))
     console.print(f"{len(tree.classes)} classes, {len(tree.topics)} topics")
@@ -802,9 +805,10 @@ def eval_ladders_report(
 
 
 @library_app.command("sync")
-def library_sync() -> None:
+def library_sync(config: ConfigPath = None) -> None:
     """Settle every paper with a verdict, a Weight or the owner's word: effective grades,
     rarity, the library, and their events. For a database written around the settle."""
+    _load_config(config)  # automatic Deep cards as configured
     console.print_json(data=_run(word.sync))
 
 
