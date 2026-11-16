@@ -45,12 +45,14 @@ def _module(use: str) -> Any:
 
 def enabled_using(config: Config, use: str) -> dict[str, Any] | None:
     """The options of the enabled section that loads the module `use`, whatever the section
-    is called (`[integrations.library] use = "zotero"`); None when there is none. Several
-    are refused: which one another integration means would be a guess."""
+    is called (`[integrations.library] use = "zotero"`) and whether it names a built-in module
+    short or by its path (`use = "litwatch.integrations.zotero"`); None when there is none.
+    Several are refused: which one another integration means would be a guess."""
+    names = {use, f"litwatch.integrations.{use}"} if use in BUILT_IN else {use}
     found = [
         options
         for name, options in config.integrations.items()
-        if options.get("use", name) == use and options.get("enabled", True)
+        if options.get("use", name) in names and options.get("enabled", True)
     ]
     if len(found) > 1:
         raise IntegrationError(f"more than one enabled integration uses {use!r}")

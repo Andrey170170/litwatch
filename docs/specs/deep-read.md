@@ -132,7 +132,9 @@ line. The layout is open: every section is laid out in full, nothing folded but 
 ## Which papers get one
 
 Unchanged: automatic for a Focus paper at an effective grade of must read and for an Area pick, and any paper the owner
-asks for. What changes is only which topics it is written for (Lenses, above).
+asks for. What changes is only which topics it is written for (Lenses, above). All of it only while the `deep`
+integration is configured: without it settling queues no automatic read and drops one not started, and the paper
+page has no Deep rung for a paper without a read (2026-11-15).
 
 ## How a read is made
 

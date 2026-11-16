@@ -7,7 +7,8 @@ them, and emits `grade.changed`, `paper.saved` and `paper.unsaved` in the same t
 Whoever settles names the `Cause`, which `grade.changed` carries. It
 also queues the paper's full-text passes when it qualifies for them (its Brief or Weight
 re-check, its Deep card), so the owner's word can queue one too, and drops one not started that
-it no longer qualifies for.
+it no longer qualifies for. Automatic Deep cards are queued only while `automatic_deep` is on,
+which the CLI sets from the configuration: on when the `deep` integration is configured.
 
 A change to a paper goes through `change`, which opens the transaction, takes the locks in
 their order, runs the action's checks and writes, and settles each paper once before commit;
@@ -68,6 +69,11 @@ from litwatch.store import word as word_store
 
 log = logging.getLogger(__name__)
 SYNC_PROGRESS = 2000  # `sync` logs its progress every this many papers
+
+# Whether settling queues automatic Deep cards: the process's, set by the CLI from its
+# configuration (`[integrations.deep]` present) when it loads it. Off, settling wants none, so it
+# drops an automatic one not started; the owner's request is left alone either way.
+automatic_deep = False
 
 
 @dataclass
@@ -303,7 +309,7 @@ async def _deep_pass(
     """Queue the paper's automatic Deep card when an active Focus topic grades it must read, or
     a published digest of an active Area topic picked it, it is not unsaved and it has no card;
     relabel one not started that it wants for the other reason now, and drop one it no longer
-    wants (an Unsave, a paused topic). The owner's request is left alone."""
+    wants (an Unsave, a paused topic, `automatic_deep` off). The owner's request is left alone."""
     found = await fulltext_store.deep_facts(conn, paper_id)
     if found is None or found.dropped:
         return
@@ -317,7 +323,7 @@ async def _deep_pass(
         for t in active
     )
     picked = any(t.depth == Depth.AREA and t.slug in found.picked_by for t in active)
-    want = deep_wanted(focus_must_read, picked, unsaved, found.has_card)
+    want = deep_wanted(focus_must_read, picked, unsaved, found.has_card) if automatic_deep else None
     if deep_to_drop(want, open_pass):
         await fulltext_store.drop(conn, open_pass.id, claimed=ours)
     elif want is not None and deep_to_relabel(want, open_pass):

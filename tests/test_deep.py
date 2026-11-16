@@ -198,6 +198,63 @@ async def test_a_saved_focus_must_read_gets_one_deep_pass_and_unsave_or_a_pause_
     assert await deep_rows(db) == []
 
 
+async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_queued_is_dropped(
+    db, monkeypatch
+):
+    await grade(db, Fit.CENTRAL)
+    (queued,) = await deep_rows(db)
+    request = await deep_passes.request(db, Q.id)
+    monkeypatch.setattr(word, "automatic_deep", False)
+    await word.settle(db, P.id, cause=Cause.VERDICT)
+    await word.settle(db, Q.id, cause=Cause.VERDICT)
+    assert await deep_rows(db) == []  # the automatic one, not started, is dropped
+    assert [r["id"] for r in await deep_rows(db, Q.id)] == [request]  # the owner's stays
+    await word.toggle(db, P.id, Hand.UNSAVE)
+    await word.toggle(db, P.id, Hand.SAVE)
+    assert await deep_rows(db) == [] and queued["reason"] == "focus"
+
+
+@pytest.mark.parametrize(
+    ("toml", "on"),
+    [
+        ('[integrations.deep]\nurl = "http://deep:8081"\n', True),
+        ('[integrations.reader]\nuse = "deep"\nurl = "http://deep:8081"\n', True),
+        ('[integrations.reader]\nuse = "litwatch.integrations.deep"\nurl = "http://d"\n', True),
+        ('[integrations.deep]\nenabled = false\nurl = "http://deep:8081"\n', False),
+        ('[integrations.deep]\nuse = "webhook"\nurl = "http://hook"\n', False),
+        ("[integrations.archive]\n", False),
+    ],
+)
+def test_the_cli_turns_automatic_deep_cards_on_only_with_the_deep_integration(
+    tmp_path, monkeypatch, toml, on
+):
+    from litwatch import cli
+
+    path = tmp_path / "litwatch.toml"
+    path.write_text(toml)
+    monkeypatch.setattr(word, "automatic_deep", not on)
+    cli._load_config(path)
+    assert word.automatic_deep is on
+
+
+@pytest.mark.parametrize("command", [["taxonomy", "import"], ["library", "sync"]])
+def test_the_cli_commands_that_settle_load_the_configuration_first(tmp_path, monkeypatch, command):
+    from typer.testing import CliRunner
+
+    from litwatch import cli
+
+    path = tmp_path / "litwatch.toml"
+    path.write_text('[integrations.deep]\nurl = "http://deep:8081"\n')
+    seen = []
+    monkeypatch.chdir(tmp_path)  # no checkout `.env` loaded
+    monkeypatch.setattr(word, "automatic_deep", False)
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: seen.append(word.automatic_deep) or {})
+    monkeypatch.setattr(cli, "_taxonomy_file", lambda p: None)  # `_run`, stubbed, never uses it
+    # what the command prints after `_run` is not the point: only what settling saw
+    CliRunner().invoke(cli.app, [*command, "--config", str(path)])
+    assert seen == [True]
+
+
 async def test_the_owners_request_takes_over_an_automatic_pass_and_no_unsave_cancels_it(db):
     await grade(db, Fit.CENTRAL)
     (automatic,) = await deep_rows(db)

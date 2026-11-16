@@ -196,8 +196,9 @@ export function Ladder({ paper, asked, deepRead, onGistAway }: Props) {
           <p className="prose">{paper.abstract}</p>
         </Rung>
       )}
-      {/* the format switch: a card written as a Deep read is drawn as one, any other as the Deep card it is */}
-      {read ? <PaperRead paper={paper} read={read} asked={asked} /> : (paper.in_collection || paper.card || paper.card_pass || asked) && <DeepCard paper={paper} asked={asked} deepRead={deepRead} />}
+      {/* the format switch: a card written as a Deep read is drawn as one, any other as the Deep card it is; a
+          paper without one has the rung only while one can be asked for, so not while the deep integration is off */}
+      {read ? <PaperRead paper={paper} read={read} asked={asked} /> : (paper.card || paper.card_pass || asked || (paper.in_collection && paper.card_requestable)) && <DeepCard paper={paper} asked={asked} deepRead={deepRead} />}
       {desktop && <ThePaper paper={paper} />}
     </div>
   );

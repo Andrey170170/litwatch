@@ -132,9 +132,8 @@ Built between milestones, on whatever structure exists then.
 - **Deep reads back on**, once models write well enough without the agent's heavy tooling. The Deep read
   ([`specs/deep-read.md`](specs/deep-read.md)) is built (P1 to P6) and off since 2026-11-15: the owner's read of P6
   found it still not well written. Needs shaping first: what to try (a newer model, a lighter setup) and how to
-  judge it before switching on. To switch on: build the deep image from litwatch's commit, enable the `deep` service
-  and `[integrations.deep]`, and drop or keep the automatic passes settling queued while it was off (it keeps queuing
-  them; nothing works them). Then: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the
+  judge it before switching on. To switch on: build the deep image from litwatch's commit, then enable the `deep`
+  service and `[integrations.deep]`; settling queues automatic reads only while that is configured. Then: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the
   prose rules shared between `writing.py` and the deep prompt instead of copied.
 
 - **Frontend polish and speed** (review, project 2): elements jumping when a topic tab or paper loads the first
