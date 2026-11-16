@@ -11,20 +11,13 @@ it are merged. A note leaves `docs/notes/` once every item it holds is merged.
 
 ## Now
 
-**The Deep read**, replacing the Deep card: method and results at close to the paper's detail, a claims ledger,
-the paper's figures, rebuilt tables and diagrams, sections as rungs of the paper page; written by the `deep` agent
-with a `render` tool, checks in `submit` and a reviewer. Also: written only for the topics the paper is graded in,
-which ends the CoT extensions on unrelated papers; Notion's short form; Zotero drops the card. Shaped 2026-11-09 in
-[`specs/deep-read.md`](specs/deep-read.md), planned in [`plans/deep-read.md`](plans/deep-read.md) (P1–P6; P1 to P5
-merged, P1 deployed). P6 makes a read followable without the paper, and nothing deploys from `main` before it: that
-deploy switches automatic reads. Afterwards: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the prose rules
-shared between `writing.py` and the deep prompt instead of copied.
+The rework's A1, below.
 
 ## The rework
 
 The backend brought to the roles and gates of [`specs/architecture.md`](specs/architecture.md), one milestone at a
 time. A0, the role checks and the baseline, was merged on 2026-11-10
-([`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md)); A1 starts once the Deep read has landed. Each
+([`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md)); A1 is next. Each
 milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
 
 ### A1. Database gate
@@ -135,6 +128,14 @@ Its own project on top of A6: the labelled query set and goals first, then work 
 ## Outside the rework
 
 Built between milestones, on whatever structure exists then.
+
+- **Deep reads back on**, once models write well enough without the agent's heavy tooling. The Deep read
+  ([`specs/deep-read.md`](specs/deep-read.md)) is built (P1 to P6) and off since 2026-11-15: the owner's read of P6
+  found it still not well written. Needs shaping first: what to try (a newer model, a lighter setup) and how to
+  judge it before switching on. To switch on: build the deep image from litwatch's commit, enable the `deep` service
+  and `[integrations.deep]`, and drop or keep the automatic passes settling queued while it was off (it keeps queuing
+  them; nothing works them). Then: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the
+  prose rules shared between `writing.py` and the deep prompt instead of copied.
 
 - **Frontend polish and speed** (review, project 2): elements jumping when a topic tab or paper loads the first
   time; windowed rendering with scroll restoration and paper order kept; lean shelf pages; mutations with their own

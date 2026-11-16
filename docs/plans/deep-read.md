@@ -15,8 +15,8 @@ The work comes in six stages, each its own PR (a hard change in `git-workflow`'s
 3. **P3, litwatch's consumers:** storage, figures, Notion, Zotero, MCP and trace.
 4. **P4, the agent.**
 5. **P5, a check on five real reads.** The owner's read is the gate.
-6. **P6, readable without the paper,** added on 2026-11-11 after the owner's read of P5. Deploying P3 to P6 together switches
-   automatic reads.
+6. **P6, readable without the paper,** added on 2026-11-11 after the owner's read of P5. Deploying P3 to P6 together was to
+   switch automatic reads on; V8 did not pass, so they deploy with the `deep` integration off (2026-11-15).
 
 The order means nothing produces a read before everything that consumes one is ready for it.
 
@@ -133,7 +133,7 @@ By [`docs/agents/verification.md`](../agents/verification.md).
 | V5. The run's loop does what the spec says. | `npm test` with a fake model. The code checks reject a number missing from the paper, a missing figure cite, a missing verdict location and broken TeX. A plot value with its figure cite passes. Also covered: the reviewer's pass rule (every score ≥ 4 and every check passing); the first write plus at most two revisions; a still-failing read kept with a `review` note; `render`, `figure` and `crop` returning images; the reviewer receiving the plot figures cited. The first message leaves out the appendix and the bibliography, with references before the appendix and with no appendix at all. |
 | V6. The image builds, and a real run works end to end. | The stack smoke test. One real read by the newly built deep image (not a host Node process), run as a dev container on its own port and pointed at a dev `serve`, so its Chromium and poppler are the ones exercised. Its trace shows a draft rendered, a figure converted from the e-print and one cropped from the PDF, the review rounds and the stored read. A paper whose read version is older than its latest gets that version's figures. |
 | V7. The reads are good enough to switch on. | Five reads, the `evals/` report, and the owner's read, listed as pending in the P5 PR until done. Passed on length and diagrams, failed on readability, which P6 takes. |
-| V8. A read can be followed by someone who has not read the paper. | The owner's read, one paper at a time, then all five, in an `evals/` report with each read's followability score, retelling and length. `npm test`: the blind reader gets the read without the paper, its findings reach the writer in the same round as the reviewer's, a followability below 4 fails the read, and two revisions stay the limit. Vitest: a WHY box folded, opening on a click. |
+| V8. A read can be followed by someone who has not read the paper. | The owner's read, one paper at a time, then all five, in an `evals/` report with each read's followability score, retelling and length. `npm test`: the blind reader gets the read without the paper, its findings reach the writer in the same round as the reviewer's, a followability below 4 fails the read, and two revisions stay the limit. Vitest: a WHY box folded, opening on a click. Not passed (2026-11-15): the owner read 2611.12675, written by P6 (two rounds, followability 4 then 5, 60% of the main text), and found it still not well written, with no sign that more prompting would fix it. P6 merged for its web app and tooling, with Deep reads off. |
 
 ## Scope
 
