@@ -245,6 +245,7 @@ def test_the_cli_commands_that_settle_load_the_configuration_first(tmp_path, mon
     path = tmp_path / "litwatch.toml"
     path.write_text('[integrations.deep]\nurl = "http://deep:8081"\n')
     seen = []
+    monkeypatch.chdir(tmp_path)  # no checkout `.env` loaded
     monkeypatch.setattr(word, "automatic_deep", False)
     monkeypatch.setattr(cli, "_run", lambda *a, **k: seen.append(word.automatic_deep) or {})
     monkeypatch.setattr(cli, "_taxonomy_file", lambda p: None)  # `_run`, stubbed, never uses it
