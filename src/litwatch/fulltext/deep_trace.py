@@ -130,8 +130,9 @@ def event_lines(trace: list[dict[str, Any]]) -> Iterator[str]:
             yield f"{at}  {kind}: {cut(str(e), TEXT_CHARS)}"
 
 
-# A review's scores, in the rubric's order (docs/specs/deep-read.md); any other follows by name.
-SCORES = ("faithfulness", "clarity", "depth", "calibration")
+# A review's scores, in the rubric's order (docs/specs/deep-read.md), the blind reader's
+# followability last; any other follows by name.
+SCORES = ("faithfulness", "clarity", "depth", "calibration", "followability")
 
 
 def _scores(scores: Any) -> str:
@@ -143,8 +144,9 @@ def _scores(scores: Any) -> str:
 
 
 def review_lines(reviews: list[Any]) -> Iterator[str]:
-    """The attempt's review rounds in order: each one's verdict, scores and failed checks, then
-    its findings, most important first as the reviewer gave them. A round is printed by the
+    """The attempt's review rounds in order: each one's verdict, scores and failed checks, the
+    blind reader's retelling of the paper's argument, then the findings, most important first
+    as the judges gave them. A round is printed by the
     fields it has (docs/integrations.md gives the shape), and whole when it is not an object."""
     for n, review in enumerate(reviews, 1):
         if not isinstance(review, dict):
@@ -159,6 +161,7 @@ def review_lines(reviews: list[Any]) -> Iterator[str]:
                 yield f"{INDENT}checks failed: {', '.join(failed)}"
         elif checks is not None:
             yield f"{INDENT}checks: {cut(str(checks), TEXT_CHARS)}"
+        yield from _block("retold", str(review.get("retelling") or ""), TEXT_CHARS)
         for finding in review.get("findings") or []:
             if not isinstance(finding, dict):
                 yield f"{INDENT}- {cut(str(finding), TEXT_CHARS)}"

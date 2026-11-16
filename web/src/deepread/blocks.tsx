@@ -60,7 +60,13 @@ export function BlockView({ block }: { block: Block }) {
         </ul>
       );
     case "why":
-      return (
+      // folded, its question in view; a read from before P6 has no question and shows the box open
+      return block.question ? (
+        <details className="dr-why">
+          <summary>{block.question}</summary>
+          <Inline text={block.text} />
+        </details>
+      ) : (
         <div className="dr-why">
           <Inline text={block.text} />
         </div>

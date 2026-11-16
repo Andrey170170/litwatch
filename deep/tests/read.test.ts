@@ -59,7 +59,7 @@ test("a read is rejected for what the page cannot draw or the spec forbids", () 
   assert.notDeepEqual(changed((r) => ((r as Loose).extra = 1)), []);
 });
 
-test("what submit takes differs from what is stored only in the coordinates and the notes", () => {
+test("what submit takes differs from what is stored only in the coordinates, a WHY box's question and the notes", () => {
   const read = fixture("read-scarce");
   type Loose = Record<string, unknown>;
   const diagram = (r: Read) => r.sections.flatMap((s) => ("blocks" in s ? s.blocks : [])).find((b) => b.type === "diagram") as unknown as { nodes: Loose[]; edges: Loose[] } & Loose;
@@ -72,6 +72,12 @@ test("what submit takes differs from what is stored only in the coordinates and 
   delete diagram(bare as Read).height;
   assert.deepEqual(draftErrors(bare), []);
   assert.ok(readErrors(bare).some((e) => /\/nodes\/0\/x: is required$/.test(e)), readErrors(bare).join("\n"));
+  // a WHY box asks its question in a draft; a stored read from before P6 has none
+  const open = structuredClone(model);
+  const why = open.sections.flatMap((s) => ("blocks" in s ? s.blocks : [])).find((b) => b.type === "why") as Loose;
+  delete why.question;
+  assert.deepEqual(readErrors(open), []);
+  assert.ok(draftErrors(open).some((e) => /\/question: is required$/.test(e)), draftErrors(open).join("\n"));
   // the service's notes are the stored read's only
   const review = { kind: "review", source: "service", note: "The read did not pass its review: scores below 4: clarity 3." };
   assert.deepEqual(readErrors({ ...model, process_notes: [review] }), []);

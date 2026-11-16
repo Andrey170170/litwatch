@@ -1,8 +1,9 @@
 # Deep read
 
-Status (2026-11-11): **built through P5, not deployed**; the build plan is [`plans/deep-read.md`](../plans/deep-read.md).
-Amended on 2026-11-11 so a read can be followed without the paper (its reader, story before detail, the blind
-reader); P6 builds that, and automatic reads switch on with it. This replaces the Deep card (`deep` integration, [v1
+Status (2026-11-15): **built, and off.** P1 to P6 of [`plans/deep-read.md`](../plans/deep-read.md) are merged; the
+owner's read of P6 found the reads still not well written, so production runs without the `deep` integration and
+writes none. Amended on 2026-11-11 so a read can be followed without the paper (its reader, story before detail, the
+blind reader), which P6 builds. This replaces the Deep card (`deep` integration, [v1
 integrations.md](v1/integrations.md), "Changed: deep"; [DESIGN.md](v1/DESIGN.md), "The ladder", rung 3) with the Deep
 read. The visual reference is [`deep-read/sketches/`](deep-read/sketches/index.html): R1 is the read on its own, R2
 puts it in the paper page. Where this spec and the sketches differ, this spec decides.

@@ -351,7 +351,13 @@ describe("a paper's Deep read", () => {
     };
     expect(block("problem", "p")).toHaveTextContent("Show a base model a dozen lines like The soup was cold -> bar");
     expect(block("problem", "p").querySelector("code")).toHaveTextContent("The soup was cold -> bar");
-    expect(block("problem", "why").querySelector(".dr-why")).toHaveTextContent(/^Arbitrary labels/);
+    // a WHY box is folded: its question in view, its answer opening on a click
+    const why = block("problem", "why").querySelector("details.dr-why") as HTMLDetailsElement;
+    expect(why.querySelector("summary")).toHaveTextContent("Why arbitrary labels?");
+    expect(why.open).toBe(false);
+    await userEvent.click(within(why).getByText("Why arbitrary labels?"));
+    expect(why.open).toBe(true);
+    expect(why).toHaveTextContent(/Arbitrary labels/);
     expect(within(block("problem", "h3")).getByRole("heading", { name: "Setup" })).toBeInTheDocument();
     expect(within(block("problem", "list")).getAllByRole("listitem")).toHaveLength(3);
     expect(block("read", "eq").querySelector(".katex-display")).not.toBeNull();

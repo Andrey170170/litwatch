@@ -14,7 +14,7 @@ export interface Read {
    */
   format: "read";
   /**
-   * The read, in order: At a glance; the paper's own sections; Claims; one lens per graded topic; Limitations; Related work; Reproducibility.
+   * The read, in order: At a glance; the body (problem, method and finding sections, in the order a newcomer understands the argument); Claims; one lens per graded topic; Limitations; Related work; Reproducibility.
    *
    * @minItems 1
    */
@@ -118,7 +118,11 @@ export interface Read {
           | {
               type: "why";
               /**
-               * The paper's reason for a choice, placed at the choice it explains.
+               * The question the box answers, in view while it is folded: "Why mean ablation, not zero?"
+               */
+              question?: string;
+              /**
+               * The paper's reason for a choice a careful reader would question and the text around it leaves out.
                */
               text: string;
             }
@@ -457,7 +461,11 @@ export interface Read {
           | {
               type: "why";
               /**
-               * The paper's reason for a choice, placed at the choice it explains.
+               * The question the box answers, in view while it is folded: "Why mean ablation, not zero?"
+               */
+              question?: string;
+              /**
+               * The paper's reason for a choice a careful reader would question and the text around it leaves out.
                */
               text: string;
             }

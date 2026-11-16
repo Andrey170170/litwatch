@@ -1,7 +1,7 @@
 /**
  * The prompts of a Deep read's run (docs/specs/deep-read.md, "How a read is made"): the writer's (what a read is,
  * the session's functions, the schema, the standards), its first message (the outline and the main text), the
- * reviewer's rubric, and the message that carries a review's findings back to the writer. No procedure: the writer
+ * reviewer's rubric, the blind reader's, and the message that carries a round's findings back to the writer. No procedure: the writer
  * works in phases of its own choosing.
  */
 
@@ -95,20 +95,30 @@ restates or sets up the next one is cut.`;
 
 const RUBRIC = `Scores from 1 to 5:
 - faithfulness: numbers, claims and setups match the paper; nothing misread or invented.
-- clarity: a lab member could follow the method without the paper; terms defined before use; none of the three prose faults. \
-A 5 means a lab member never rereads a sentence; a 4 allows isolated faults, none hiding a method step or a result; a 3 or \
+- clarity: none of the three prose faults; terms defined before use. Whether the read can be followed as a whole is a \
+separate reader's score, not this one. A 5 means a reader never rereads a sentence; a 4 allows isolated faults, none hiding a method step or a result; a 3 or \
 below means faults recur across sections or hide one. A fault in an experiment's Found or Means or in the claims ranks above \
 one in the prose around them.
 - depth: method and results come close to the paper's detail; the read goes past a short summary rather than restating one.
 - calibration: verdicts and CARD notes are fair to the paper, neither credulous nor contrarian for show.
 Checks, each passed or failed:
-- anchors: At a glance first; the paper's own sections; then Claims; a lens for each topic the read is written for and no \
+- anchors: At a glance first; the paper's argument in problem, method and finding sections, ordered as a newcomer \
+understands it, which need not be the paper's own sections or their order; then Claims; a lens for each topic the read is written for and no \
 other; Limitations, Related work and Reproducibility last, in that order; each holding what its name says.
 - experiments: the findings are given as experiments (question, did, found, means, not shown), not as loose prose.
-- why_boxes: the paper's reasons for its choices stand in WHY boxes at the choices they explain.
+- why_boxes: WHY boxes and CARD notes only where they are meant, with no quota: a WHY box for a reason a careful reader \
+would question and the text leaves out, never for one the story needs (that belongs in the text); a CARD note for a remark \
+that bears on a claim's verdict or on how far a result can be trusted. A box or note elsewhere, or a reason a reader needs \
+only inside a box, fails it.
 - voice: objective throughout: nothing addressed to a reader, no audience named, no advice to read, no hype.
 - length: code measures it and sets this check from the share given with the read; give true. A read made long by \
 repetition is a clarity finding; one whose method or results are cut short is a depth finding.`;
+
+// Who a read is for and how it is told (docs/specs/deep-read.md, "What a Deep read is"), the same for the writer,
+// the reviewer and the blind reader.
+const ITS_READER = `Its reader knows the field broadly (language models, interpretability, the usual methods) and has not read \
+the paper. The read leaves out general background, and introduces what this paper needs: its question, its idea, its own \
+terms, and any specialised concept it goes deep into.`;
 
 /** The topics the read is written for, each with the key its lens names it by. */
 function renderSelections(context: SelectionContext[]): string {
@@ -133,19 +143,29 @@ topics, each with a subject and a rubric for what it must read; litwatch graded 
 lab member asked for the read. The read is the document described by the schema below, delivered through submit().
 
 What a Deep read is. It is the further reading after a one-line gist and a short brief: the paper's method and results at \
-close to the paper's own detail, without the general background and introduction a researcher skips, but with the paper's \
-reasons for doing things the way it did. For most papers it replaces reading the paper. It is organised so any part can be \
+close to the paper's own detail, with the paper's reasons for doing things the way it did. For most papers it replaces \
+reading the paper. ${ITS_READER}
+
+A read is a story before it is a reference. Reads written as true facts one after another, in the paper's order, were \
+right for someone who had read the paper and hard to follow for someone who had not. So the read follows the paper's \
+argument in the order a newcomer understands it, which need not be the order of the paper's sections, and every section \
+says what it is about before its details. A reader who knows the paper skims to the details, which are all still there. It is organised so any part can be \
 found at a glance, and it is more sceptical than the authors: where the paper claims more than it shows, the read says so \
 and points at where. Its length scales with the paper, roughly a third of the main text; the method and the results are \
 never cut to save length. check() and submit() give the read's measured share of the main text. Length comes from detail, never from repetition: state each caveat once, at the finding it qualifies or \
 in Limitations, and let Claims and the lenses point to it rather than restate it.
 
 The shape of a read, in this order:
-- At a glance (kind glance), first: the key claim, three or four points that carry the paper's argument, and the facts: kind \
-of paper, models, task or data, methods, code and artifacts, and a fact named "Read" with the reading time.
-- The paper's own story, as the paper needs it: a short problem and motivation section (what earlier work left open), the \
-method (setup, environment, taxonomy, whatever the paper builds), and the findings, one section each. Do not restate the \
-brief here: go into what the paper did.
+- At a glance (kind glance), first: the key claim, then the paper's arc in three or four points (the question, the idea, \
+how it is tested, what it found), and the facts: kind of paper, models, task or data, methods, code and artifacts, and a \
+fact named "Read" with the reading time.
+- The paper's argument, in the order a newcomer understands it: a short problem and motivation section (what earlier work \
+left open), the method (setup, environment, taxonomy, whatever the paper builds), and the findings, one section each. Do \
+not restate the brief here: go into what the paper did. Each section opens with a few sentences on what it covers and \
+where it sits in the arc; its details follow in the order that story needs them. Settings and exceptions (a list of \
+models, a setting changed for one model, which runs were left out) go in a table or at the section's end, not at its \
+start. A method section says what is done and why before how: "train a probe to tell faithful traces from unfaithful \
+ones, then test whether it holds on tasks it never saw" comes before the layer, the learning rate and the trace counts.
 - Claims: one entry per main claim of the paper, every claim, each with a verdict (holds, partly, not shown, overclaimed), \
 the evidence, and where in the paper it rests.
 - One lens section per topic below: what the paper means for that topic's question, worded objectively.
@@ -153,10 +173,14 @@ the evidence, and where in the paper it rests.
 in among_collection), Reproducibility (what you checked, not assumed: the repository and what it actually holds, data, \
 models, compute, statistics), last and in that order.
 Blocks: a finding is given as an experiment (xp: the question, what was done, what was found with its numbers, what it \
-means, what it leaves open including the controls that hold). The paper's reason for a choice goes in a WHY box (why) at \
-the choice it explains: why this benchmark, why this ablation. Your own sceptical remark, where the paper's text does not \
-say it, is a CARD note (note) that points at a place in the paper: a table that does not support the abstract, a test the \
-paper does not report, an inconsistency. Rebuild the tables that matter as tables, cut to the rows that matter and said so \
+means, what it leaves open including the controls that hold). A reason the story needs to make sense is said in the \
+text, where it is needed. A WHY box (why) is for a reason a careful reader would question and the text around it leaves \
+out (why this benchmark, why mean ablation rather than zero ablation); boxes are few, so the reader stops for each \
+one. A box is shown folded, its question in view and its answer opening on a click, so the story never depends on what \
+is inside one. Your own sceptical remark, where the paper's text does not say it, is a CARD note (note) that points at a \
+place in the paper: a table that does not support the abstract, a test the paper does not report, an inconsistency. Keep \
+notes for remarks that bear on a claim's verdict or on how far a result can be trusted; they stay open and highlighted, \
+so the eye goes to them. Rebuild the tables that matter as tables, cut to the rows that matter and said so \
 in the caption. Show the paper's own figures where the read discusses them. Draw a diagram for the method, a pipeline or a \
 circuit when a picture explains it better than prose: nodes and edges, each with a tip saying what it does and the numbers \
 behind it.
@@ -254,9 +278,11 @@ Prose. ${VOICE}
 ${READER}
 ${FAULTS}
 
-After a submit passes the checks, a reviewer on the same model reads the read against the paper and scores it; a read \
-passes when every score is at least 4 and every check passes. If it does not pass, the reviewer's findings come back to \
-you, most important first, and you revise and submit again: at most two revisions. Triage the findings: fix the real \
+After a submit passes the checks, two judges on the same model read it: a reviewer reads it against the paper and scores \
+it, and a blind reader, who is the reader described above and never sees the paper, retells the paper's argument from the \
+read, says where it lost the thread and scores followability. A read passes when every score, followability included, is \
+at least 4 and every check passes. If it does not pass, both judges' findings come back to you together, most important \
+first, and you revise and submit again: at most two revisions. Triage the findings: fix the real \
 problems, leave the nitpicks, and do not grow the read to answer every small point.
 
 Budget: ${maxCells} cells for the whole run, revisions included. The run ends when a submitted read passes its review.`;
@@ -292,9 +318,10 @@ export function reviewerPrompt(context: SelectionContext[]): string {
 the paper's text, the read as JSON, and the paper's figures the read cites for values read off a plot. Judge the read against \
 the paper and give your verdict through the review tool, once.
 
-What a Deep read is: the paper's method and results at close to the paper's own detail, without the general background, but \
-with the paper's reasons for its choices; organised so any part can be found at a glance; more sceptical than the authors, \
-saying where the paper claims more than it shows. For most papers it replaces reading the paper.
+What a Deep read is: the paper's method and results at close to the paper's own detail, with the paper's reasons for its \
+choices; organised so any part can be found at a glance; more sceptical than the authors, saying where the paper claims \
+more than it shows. For most papers it replaces reading the paper. ${ITS_READER} A separate blind reader, without the \
+paper, judges whether the read can be followed; you judge it against the paper.
 
 ${renderSelections(context)}
 
@@ -320,7 +347,32 @@ shown, whether a figure made as one of the paper's is that figure, whether a cla
 Findings point at a place in the read (where: a section's id, or "<section id>.<n>" for its n-th block counted from 0) and \
 say what is wrong and what would fix it. A clarity finding names its fault, quotes the sentence and gives a rewrite. Give \
 the findings last, most important first, and only those worth acting on: a writer flooded with nitpicks loses the real \
-fixes among them. A read passes when every score is at least 4 and every check passes.`;
+fixes among them. A read passes when every score, the blind reader's included, is at least 4 and every check passes.`;
+}
+
+// ── the blind reader ────────────────────────────────────────────────────────────────────────────────
+
+export function blindPrompt(): string {
+  return `You are the reader of a Deep read, an account litwatch, a literature watch run by an NLP research lab, wrote of a \
+paper so that it can stand in for reading the paper. ${ITS_READER} You are not given the paper, only the read, laid out \
+as it is shown: its sections in order, each block under its type and its place ("method.3"), and the figures it shows. A \
+WHY box is folded on the page: its question is in view and its answer opens on a click. What else the page shows only on \
+a click or a hover is marked "shown on a click".
+
+Read it from start to finish, once, as that reader. Then give your verdict through the follow tool, once:
+- retelling: the paper's argument as you understood it from the read, in a few sentences: the question, the idea, how it \
+is tested, what it found. Where you could not tell one of these, say so.
+- findings: every place you lost the thread, at its place in the read: a term or a name used before it is explained; a \
+detail given before you knew why it mattered; a section whose point you could not tell, or that you could not place in the \
+argument; a finding whose meaning or weight you could not tell; a reason or a definition the story needs that you found \
+only where the page hides it until a click (a folded WHY answer, a claim's evidence, a diagram's tip, a table cell's note). Say what was missing or came too early. Most important first; only the places that cost you the thread, \
+not matters of style.
+- followability, from 1 to 5: a 5 means you never lost the thread and can retell the argument; a 4 allows isolated \
+stumbles, none hiding what a section is for or what a finding shows; a 3 or below means you lost the thread in a section \
+or could not tell what the paper found.
+
+Do not judge whether the read is faithful to the paper: you cannot see the paper, and another judge checks that. Judge \
+only whether a reader can follow it.`;
 }
 
 /** The paper's text as the reviewer gets it: whole, appendix and bibliography included, where `room` characters
@@ -369,10 +421,12 @@ export function findingsMessage(review: Review, revisionsLeft: number): string {
   const failed = Object.entries(review.checks).filter(([, ok]) => !ok).map(([name]) => name);
   const findings = review.findings.map((f, i) => `${i + 1}. [${f.about}] ${f.where}: ${f.text}${f.rewrite ? `\n   Rewrite: ${f.rewrite}` : ""}`);
   return [
-    `The reviewer did not pass the read (review ${review.round}). Scores: ${Object.entries(review.scores).map(([n, s]) => `${n} ${s}`).join(", ")}; a pass needs every score at 4 or above${low.length ? ` (below: ${low.join(", ")})` : ""}.`,
+    `The read did not pass (review ${review.round}). Scores: ${Object.entries(review.scores).map(([n, s]) => `${n} ${s}`).join(", ")}; a pass needs every score at 4 or above${low.length ? ` (below: ${low.join(", ")})` : ""}.`,
     failed.length ? `Checks failed: ${failed.join(", ")}.` : "Every check passed.",
     "",
-    findings.length ? "Findings, most important first:" : "The reviewer gave no findings.",
+    `The blind reader, without the paper, retold its argument from the read as: ${review.retelling}`,
+    "",
+    findings.length ? "Findings, the reviewer's then the blind reader's (followability), each most important first:" : "The judges gave no findings.",
     ...findings,
     "",
     `Revise the read and submit it again; ${revisionsLeft === 1 ? "this is the last revision" : `${revisionsLeft} revisions are left`}. Fix the real problems, leave the nitpicks, and do not grow the read to answer every small point.`,

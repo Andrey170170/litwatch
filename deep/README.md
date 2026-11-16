@@ -1,8 +1,8 @@
 # litwatch-deep
 
 The deep service: an agent with one JavaScript REPL tool reads a paper and writes its Deep read
-([`docs/specs/deep-read.md`](../docs/specs/deep-read.md)), a reviewer on the same model scores the read, and the
-writer revises it at most twice. litwatch's `deep` integration submits papers to it (`POST /process`) and polls for
+([`docs/specs/deep-read.md`](../docs/specs/deep-read.md)), a reviewer and a blind reader on the same model score
+the read, and the writer revises it at most twice. litwatch's `deep` integration submits papers to it (`POST /process`) and polls for
 the result (`GET /jobs/<id>`); what a finished job carries is in [`docs/integrations.md`](../docs/integrations.md).
 The service writes reads only. A Deep card from before the read stays as litwatch stored it.
 
@@ -108,9 +108,15 @@ the read carries a `tool` note saying so. It answers through a `review` tool wit
 five checks (`anchors`, `experiments`, `why_boxes`, `voice`, `length`) and its findings. `length` is code's, not the
 reviewer's: the read's text past 60% of the paper's main text fails it (`src/length.ts`). The writer, in `check()` and
 `submit()`, is told the measure and the aim of a third, and the reviewer the limit as well; a writer told the limit
-wrote up to it. A read passes when every
-score is at least 4 and every check passed. Otherwise the findings go into the writer's own conversation and it
-revises: the first write plus at most two revisions. A read that still fails is kept, with a `review` process note
+wrote up to it.
+
+Beside the reviewer, in the same round, the blind reader (`src/blind.ts`): one call, no session, given the read as a
+reader meets it (its text in reading order, a WHY box as its question and its folded answer, the figures it shows)
+and never the paper. It answers through a `follow` tool with its retelling of the paper's argument, the places it
+lost the thread and a followability score, which join the round's verdict; a blind reader that gives no verdict
+leaves the round without one, as the reviewer's would. A read passes when every score, followability included, is
+at least 4 and every check passed. Otherwise both judges' findings go into the writer's own conversation together
+and it revises: the first write plus at most two revisions. A read that still fails is kept, with a `review` process note
 saying what it failed on; a review that could not run leaves the read with a `tool` note saying it was not
 reviewed. That holds for a revision too: the verdict on the draft before it is not carried over to it, and stays
 in `reviews` as what happened. The job returns each round in `reviews`, and the figures the read shows in `figures`. Both the review

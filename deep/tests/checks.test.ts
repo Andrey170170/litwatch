@@ -46,6 +46,9 @@ test("a number the paper's text lacks is rejected, in whatever form the paper do
   assert.ok(has(cell, "/sections/2/blocks/1/rows/0/cells/1: 72.9"), cell.join("\n"));
   const found = errors(changed((d) => (blocks(d, "result")[0]!.found = "The probe reaches 71.3% and the random direction 48%.")));
   assert.ok(has(found, "/sections/2/blocks/0/found: 48%"), found.join("\n"));
+  // a WHY box's question is in view while it is folded, and its numbers are checked like the answer's
+  const asked = errors(changed((d) => (blocks(d, "method")[1]!.question = "Why train on 87,654 traces?")));
+  assert.ok(has(asked, "/sections/1/blocks/1/question: 87,654"), asked.join("\n"));
 });
 
 test("the paper's numbers pass in the forms a read gives them", () => {
