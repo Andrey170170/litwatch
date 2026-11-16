@@ -81,6 +81,8 @@ the pass is about to start, `deep` checks its reason still holds: for a Focus mu
 must read; for a pick, the digest that picked it is published. Either way the paper must not be unsaved: an Unsave
 cancels automatic card passes that have not started. A card the owner asked for is never cancelled by an Unsave, and a
 card already made is kept.
+Automatic cards are queued only while `deep` is configured; without it, settling cancels the automatic passes that
+have not started, as an Unsave does ([deep-read.md](../deep-read.md), "Which papers get one").
 
 ## The Notion export
 

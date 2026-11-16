@@ -198,6 +198,34 @@ async def test_a_saved_focus_must_read_gets_one_deep_pass_and_unsave_or_a_pause_
     assert await deep_rows(db) == []
 
 
+async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_queued_is_dropped(
+    db, monkeypatch
+):
+    await grade(db, Fit.CENTRAL)
+    (queued,) = await deep_rows(db)
+    request = await deep_passes.request(db, Q.id)
+    monkeypatch.setattr(word, "automatic_deep", False)
+    await word.settle(db, P.id, cause=Cause.VERDICT)
+    await word.settle(db, Q.id, cause=Cause.VERDICT)
+    assert await deep_rows(db) == []  # the automatic one, not started, is dropped
+    assert [r["id"] for r in await deep_rows(db, Q.id)] == [request]  # the owner's stays
+    await word.toggle(db, P.id, Hand.UNSAVE)
+    await word.toggle(db, P.id, Hand.SAVE)
+    assert await deep_rows(db) == [] and queued["reason"] == "focus"
+
+
+def test_the_cli_turns_automatic_deep_cards_on_only_with_the_deep_integration(tmp_path):
+    from litwatch import cli
+
+    off, on = tmp_path / "off.toml", tmp_path / "on.toml"
+    off.write_text("[integrations.archive]\n")
+    on.write_text('[integrations.deep]\nurl = "http://deep:8081"\n')
+    cli._load_config(on)
+    assert word.automatic_deep
+    cli._load_config(off)
+    assert not word.automatic_deep
+
+
 async def test_the_owners_request_takes_over_an_automatic_pass_and_no_unsave_cancels_it(db):
     await grade(db, Fit.CENTRAL)
     (automatic,) = await deep_rows(db)

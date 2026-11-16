@@ -530,6 +530,16 @@ describe("a paper's page", () => {
     expect(rung.querySelector('a[href^="javascript"]')).toBeNull();
   });
 
+  it("has no Deep card rung for a paper without one while no card can be asked for", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, card_requestable: false } });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.queryByText("Deep card")).toBeNull();
+    expect(screen.queryByText(/cards are automatic/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Deep read" })).toBeNull();
+  });
+
   it("says why a card is coming and where it stands while its pass is open", async () => {
     viewport(true);
     const pass = { id: 73, reason: "pick", state: "running", queued_at: "2026-10-15T21:00:00Z", failed_runs: 0, error: null };

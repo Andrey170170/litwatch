@@ -66,6 +66,14 @@ Since = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The first d
 Until = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The last day.")]
 
 
+def _load_config(path: Path | None) -> configuration.Config:
+    """The configuration (`config.load`), which also sets whether settling queues automatic Deep
+    cards: only while the `deep` integration is configured (`word.automatic_deep`)."""
+    cfg = configuration.load(path)
+    word.automatic_deep = "deep" in cfg.integrations
+    return cfg
+
+
 def _run[T](work: Callable[[psycopg.AsyncConnection], Awaitable[T]], *, migrate: bool = True) -> T:
     """Run `work` on a connection to the configured database, migrated first."""
     logs.setup()
@@ -106,7 +114,7 @@ def intake(
     """Fetch new and revised papers for the configured categories from arXiv."""
     if ctx.invoked_subcommand is not None:
         return
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     if catalog_from is not None:
         if days is not None:
             raise typer.BadParameter("--days and --catalog-from do not go together")
@@ -157,7 +165,7 @@ def intake_archive(
     archive ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration)."""
     if (since is None) == (days is None) or (days is not None and days < 1):
         raise typer.BadParameter("give --since or a positive --days")
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     last = until.date() if until else datetime.now(UTC).date()
     first = since.date() if since else last - timedelta(days=days - 1)
     if first > last:
@@ -200,7 +208,7 @@ def nightly(
 ) -> None:
     """The nightly run as the scheduler runs it: intake, classification, analysis, grading,
     the full-text passes and the digests."""
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     run_id = _run(
         lambda conn: nightly_job.run(
             conn, cfg, fetch=fetch, days=days, limit=limit, with_digests=digests
@@ -221,7 +229,7 @@ def digests_write(since: Since, until: Until, config: ConfigPath = None) -> None
     (the restart, a missed night). Published digests stay as they are."""
     from litwatch.jobs import digests as digests_job  # noqa: PLC0415
 
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     run_id = _run(lambda conn: digests_job.window(conn, cfg, since.date(), until.date()))
     run = _run(lambda conn: runs.get(conn, run_id))
     console.print(f"run {run_id}: cost ${run['cost']}")
@@ -249,7 +257,7 @@ def deep_trace(
     from litwatch.fulltext import deep_trace as text  # noqa: PLC0415
     from litwatch.store import integrations as cards  # noqa: PLC0415
 
-    zone = configuration.load(config).schedule.zone
+    zone = _load_config(config).schedule.zone
 
     async def work(conn: psycopg.AsyncConnection) -> tuple[Any, ...]:
         found = await cards.attempts(conn, paper)
@@ -291,7 +299,7 @@ def deep_notes(
     from litwatch.fulltext import deep_trace as text  # noqa: PLC0415
     from litwatch.store import integrations as cards  # noqa: PLC0415
 
-    zone = configuration.load(config).schedule.zone
+    zone = _load_config(config).schedule.zone
     start = since.replace(tzinfo=zone) if since is not None else None
     found = _run(lambda conn: cards.process_notes(conn, start), migrate=False)
     print(text.notes_text(found, zone), end="")
@@ -458,7 +466,7 @@ def eval_replay(
     Shows what it would cost and asks first; a run cut short goes on with --resume."""
     from litwatch.quality import replay  # noqa: PLC0415
 
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     sample = _counts(negatives or [], "--negatives")
     if unknown := (set(cohort or []) | set(sample)) - set(replay.COHORTS):
         raise typer.BadParameter(f"no cohort {', '.join(sorted(unknown))}")
@@ -595,7 +603,7 @@ def eval_briefs(
     from litwatch.llm.gateway import build  # noqa: PLC0415
     from litwatch.quality import briefs  # noqa: PLC0415
 
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     archive = archive_for(cfg)
     if archive is None:
         raise SystemExit("no archive: configure one, or set $LITWATCH_ARCHIVE_URL")
@@ -687,7 +695,7 @@ def eval_ladders(
     from litwatch.llm.gateway import build  # noqa: PLC0415
     from litwatch.quality import ladders  # noqa: PLC0415
 
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     found = ladders.ladders(candidates)
     if which is not None and which not in ladders.SETS:
         raise typer.BadParameter(f"--set is one of {', '.join(ladders.SETS)}")
@@ -771,7 +779,7 @@ def eval_ladders_report(
     from litwatch.quality import ladders  # noqa: PLC0415
 
     found, chosen = ladders.ladders(candidates), ladders.cases(cases)
-    archive = archive_for(configuration.load(config))
+    archive = archive_for(_load_config(config))
 
     async def work(conn: psycopg.AsyncConnection) -> tuple[dict[str, Any], dict[str, str]]:
         ids = sorted({c.paper for c in chosen if c.paper and c.set == "refusals"})
@@ -846,7 +854,7 @@ def serve(
         raise SystemExit("LITWATCH_API_TOKEN (or LITWATCH_API_TOKEN_FILE) is not set")
     from litwatch import integrations  # noqa: PLC0415
 
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     try:
         loaded = integrations.load(cfg)
     except integrations.IntegrationError as exc:
@@ -934,7 +942,7 @@ def fulltext_queue(
     from litwatch.integrations import deep as deep_integration  # noqa: PLC0415
     from litwatch.integrations import enabled_using  # noqa: PLC0415
 
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     archive = fulltext.archive_for(cfg)
     if archive is None:
         raise SystemExit("no archive configured")
@@ -991,7 +999,7 @@ def ping(
     class Sum(BaseModel):
         total: int
 
-    cfg = configuration.load(config)
+    cfg = _load_config(config)
     request = llm.Request(
         system="You answer arithmetic questions with the structured output only.",
         user="What is 17 + 25?",

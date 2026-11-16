@@ -17,6 +17,15 @@ import pytest
 from litwatch import store
 from litwatch.core import Depth, Paper, Taxonomy, TaxonomyClass, Topic
 from litwatch.events import dispatch
+from litwatch.feedback import word
+
+
+@pytest.fixture(autouse=True)
+def automatic_deep(monkeypatch):
+    """Settling queues automatic Deep cards, as with the `deep` integration configured; a test of
+    it off turns it off."""
+    monkeypatch.setattr(word, "automatic_deep", True)
+
 
 # A small tree with one topic at each depth: Focus under its Area, a Field beside them.
 FAITH = Topic(
