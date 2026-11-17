@@ -79,7 +79,8 @@ callers open `change`.
 **Settling gets cheap through its reads.** The rule itself stays a per-paper Policy in Python: the owner's word, the
 effective grade, rarity, the passes a paper wants. What changes is how its inputs arrive:
 
-- one taxonomy snapshot per unit;
+- one taxonomy snapshot per unit, read when settling starts, so a unit that edits the taxonomy settles against
+  the taxonomy as its edit left it;
 - the papers' labels, reactions, weights and current verdicts (not their full history), read in one query each for
   all the papers in the unit;
 - each paper settled once per unit, however many changed topics reach it.
