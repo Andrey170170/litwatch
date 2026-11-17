@@ -117,8 +117,8 @@ and they are not database work.
 - the nesting check runs, raising in tests and logging in production;
 - settling batches its reads and settles each paper once per unit, measured before and after on the 6,777-paper
   Field;
-- the folded items are merged, and the violation lists in A1's area are empty: the SQL outside `store`, `store`'s
-  imports, and advisory locks outside the gate.
+- the folded items are merged, and the violation lists in A1's area are empty: the SQL outside `store` (the gate's
+  own lock and transaction SQL aside), `store`'s imports, and advisory locks outside the gate.
 
 ## Not in A1
 

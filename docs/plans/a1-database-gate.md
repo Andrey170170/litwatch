@@ -47,7 +47,9 @@ Each stage runs in production before the next starts.
   cluster's oldest snapshot.
 - **A bridge while code moves.** `DatabaseGate.over(conn)` is a gate whose units all run on one given connection,
   with no pool, so code not yet migrated can call a migrated Service. It refuses a connection already inside a
-  transaction, so nesting stays strict. It goes in P6, unless tests still need it as a helper.
+  transaction, so nesting stays strict. It goes in P6, unless tests still need it as a helper. It cannot serve a
+  caller that already holds a transaction around a settle (`request_card`, `jobs.process`, intake's page write, the
+  taxonomy save, a job's end): those callers move to units in P2, with `change`.
 - **Settling takes its inputs explicitly:** `settle_many(unit, ids, cause, rules)`.
   - It reads the taxonomy once, when settling starts, so a unit that edits the taxonomy settles against its edit.
   - It reads labels, reactions, weights and current verdicts (not their history) in one query each for the whole
@@ -59,6 +61,8 @@ Each stage runs in production before the next starts.
   in one go keeps the earlier PRs' diffs readable.
 - **Two new search checks** start from today's list, which may only shrink: no advisory-lock SQL outside the gate,
   and no `AsyncConnection` outside the gate and `store`. Both lists are empty when A1 is done.
+  `tests/test_sql_home.py` exempts `gates/database.py` as it exempts `store/`, in P1: the gate's own SQL (locks,
+  transaction settings) is resource management, and application queries stay in `store`.
 - **`ty` runs on `src` and `tests`** in CI, beside ruff, from P6 (D2). Its baseline is committed at the repository's
   root. When a fix clears a baselined diagnostic, the same PR regenerates the baseline, so it shrinks.
 - **Folded items come after P6,** one PR each and in parallel among themselves, built on the finished gate. The SQL
@@ -116,11 +120,11 @@ never commits.
 | | Stage | Shows before the next starts |
 |---|---|---|
 | **P1** | **The gate.** Pool; typed units; the lock registry and its order; the session locks on their list; the nesting check (a unit inside a unit, and the model gateway's `complete`, `decide` and batch submit); the slow-unit warning; the `over(conn)` bridge; the two new search checks with today's lists. Nothing uses it yet. | The gate's tests pass (V1, V2), and CI is green with the new checks. |
-| **P2** | **Settling and `change`.** `change` becomes a Service over a write unit, with `settle_many` doing batched reads. The steps' `record(unit, …)` move with it. A taxonomy edit settles each paper once. `automatic_deep` becomes an input. Plus the multi-paper `change` tests. | Equivalence on the sandbox (V3), the timing before and after (V4), the change tests (V2). Deployed with P1, then a clean night (V7). |
+| **P2** | **Settling and `change`.** `change` becomes a Service over a write unit, with `settle_many` doing batched reads. The steps' `record(unit, …)` move with it, and so does every write that settles inside a transaction of its own: those transactions become units now, and the rest of their modules move in their later stage. A taxonomy edit settles each paper once. `automatic_deep` becomes an input. Plus the multi-paper `change` tests. | Equivalence on the sandbox (V3), the timing before and after (V4), the change tests (V2). Deployed with P1, then a clean night (V7). |
 | **P3** | **Entries.** The API's `Conn` becomes `db`, with plain reads in read units. The CLI builds one gate per process. MCP and the monitor app move too. | The API tests and the stack smoke test pass, then a clean night (V7). |
-| **P4** | **Loops and bookkeeping.** The scheduler, jobs worker, dispatch, full-text and Deep loops, and publications move. The model run's journal writes in units of its own instead of on a sibling connection. The session locks move into the gate, and retally's becomes a unit's lock. | The advisory-lock list is empty. One sandbox nightly over a small window with the check strict (V6), then a clean night (V7). |
+| **P4** | **Loops and bookkeeping.** The scheduler, jobs worker, dispatch, full-text and Deep loops, and publications move. The model run's journal writes in units of its own instead of on a sibling connection. The session locks move into the gate, and retally's becomes a unit's lock. | The advisory-lock list is empty. One sandbox nightly over a small window with the check strict, as intermediate evidence: intake and digests still run partly outside the gate. Then a clean night (V7). |
 | **P5** | **The remaining Services.** Intake, digests, Calibrate, misses, quality, replay. The SQL outside `store` moves into it, `events.emit` included, which ends `store`'s imports of `events` and `llm`. | `tests/test_sql_home.py`'s list is empty, `store`'s import-linter ignores are gone, then a clean night. |
-| **P6** | **Tightening.** `store.connect` and `sibling` go, the bridge stays only as a test helper, and store parameters are renamed `unit`. The connection list is empty. `ty` runs in CI with its baseline (D2). | Every A1 check list is empty and CI is green, then a clean night. |
+| **P6** | **Tightening.** `store.connect` and `sibling` go, the bridge stays only as a test helper, and store parameters are renamed `unit`. The connection list is empty. `ty` runs in CI with its baseline (D2). | Every A1 check list is empty and CI is green; the sandbox nightly on the whole gate (V6); then a clean night. |
 | **P7** | **Folded items,** one PR each, in parallel: `/summary` with the sidebar's count and today in the schedule's zone; Calibrate reading its pool once; the four read gaps; intake leaving unchanged rows alone; the drops from `notes/still-used.md`. | Each shown by its kind (V8), then deployed together. |
 
 ## Verification
@@ -131,8 +135,8 @@ never commits.
 | **V2** | Locks are taken in the order the gate sets. A lock asked for late raises, except papers under the exclusive taxonomy lock. Two changes on overlapping papers, named in reverse order on two connections, both finish. A later paper's failure rolls the whole change back. | pytest: two concurrent units under a timeout that fails on a deadlock. |
 | **V3** | Settling decides exactly as before. | On a sandbox copied from production, run `litwatch library sync` at the base commit and dump the settled tables (effective grades, rarity, library, queued passes). Do the same at P2's head, diff the two dumps and find them identical. |
 | **V4** | Settling is cheap: the 6,777-paper Field re-settles in far fewer statements and less time. | On the same sandbox, the Field's `settle_topic` is timed and its statements counted (by a counting wrapper on the unit), before and after. The numbers go in the PR and in this plan's evidence. |
-| **V5** | Nothing outside the gate holds a connection or takes an advisory lock, and no SQL is left outside `store`. | In CI: the search checks and `test_sql_home.py`, their lists empty at P6; `lint-imports` with no ignores for `store`; `ty check` against its baseline. The PR shows `ty` flagging a writing Repository given a `ReadUnit`. |
-| **V6** | The pipeline runs end to end on the gate. | After P4, the nightly runs on the sandbox over one small window with `LITWATCH_STRICT_GATES=1`. Its run record is compared with a run of the same window before the change, and no check may raise. Cost at most $5. |
+| **V5** | Nothing outside the gate holds a connection or takes an advisory lock, and no application SQL is left outside `store` (the gate keeps only its own lock and transaction SQL). | In CI: the search checks and `test_sql_home.py`, their lists empty at P6; `lint-imports` with no ignores for `store`; `ty check` against its baseline. The PR shows `ty` flagging a writing Repository given a `ReadUnit`. |
+| **V6** | The pipeline runs end to end on the gate. | At P6, when nothing bypasses the gate any more, the nightly runs on the sandbox over one small window with `LITWATCH_STRICT_GATES=1`. Its run record is compared with a run of the same window before A1, and no check may raise. The same run after P4 is intermediate evidence only. At most $5 a run. |
 | **V7** | Production holds after each deploy. | The next night's run record. The service logs searched for the check's errors, slow-unit warnings and pool timeouts. A read-only look for blocked locks during the run. Each finding is fixed before the next stage. |
 | **V8** | Each folded item does what its backlog entry says. | By its kind in `docs/agents/verification.md`. API tests and the regenerated client for API changes. The sidebar count and today's date walked in the web app on the sandbox at both widths. Intake's untouched rows counted on a re-run of the overlap. |
 
