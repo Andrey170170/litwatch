@@ -33,6 +33,15 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
 - The agent shell exports `ANTHROPIC_BASE_URL` for the agent's own proxy. The Anthropic SDK picks it up and every
   litwatch call fails with 401, hence `env -u`.
 - Dev API: `litwatch serve --port 8766`; the web app's `pnpm dev` (port 5173) proxies `/api` to it.
+- Start a dev `serve` with `LITWATCH_STRICT_GATES=1`, as the tests run:
+
+  ```sh
+  env -u ANTHROPIC_BASE_URL LITWATCH_STRICT_GATES=1 uv run litwatch serve --port 8766
+  ```
+
+  With it, a Database-gate unit opened while another is open on the task, or the model gateway called inside
+  one, raises (`src/litwatch/gates/database.py`). Without it, as in production, the violation is logged as an
+  error starting `gate nesting:` and work carries on.
 - The sandbox: `scripts/refresh-sandbox.sh` rebuilds `sandbox` and replaces the old one only once the new one is
   complete. Its two sources:
   - `--production`: a copy of production's database (one read-only `pg_dump` in `litwatch-db`, a few seconds),
