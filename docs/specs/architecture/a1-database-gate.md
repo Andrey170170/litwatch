@@ -1,9 +1,9 @@
 # A1. Database gate
 
-Status (2026-11-17): **shaped, not planned.** This is milestone A1 of [the architecture](../architecture.md): the
-Database gate, its units and its locks, and settling a paper made cheap. Its plan goes in
-[`../../plans/`](../../plans/). Its input is the measurement in
-[`notes/where-work-waits.md`](../../notes/where-work-waits.md).
+Status (2026-11-17): **planned, not built**; the build plan is
+[`plans/a1-database-gate.md`](../../plans/a1-database-gate.md). This is milestone A1 of
+[the architecture](../architecture.md): the Database gate, its units and its locks, and settling a paper made cheap.
+Its input is the measurement in [`notes/where-work-waits.md`](../../notes/where-work-waits.md).
 
 ## Why
 
@@ -32,7 +32,8 @@ connection or sees `AsyncConnection`.
 - **A write unit** names its locks when it opens (below), does its reads and writes, and commits.
 - **Units are typed.** The gate hands out a `ReadUnit` or a `WriteUnit`. A Repository that only reads takes a
   `ReadUnit`, and a `WriteUnit` is accepted wherever a `ReadUnit` is. A Repository that writes takes only a
-  `WriteUnit`. So the type checker rejects a write inside a read unit, and no rule has to be checked at runtime.
+  `WriteUnit`. So the type checker (`ty`, in CI from A1 on) rejects a write inside a read unit, and Postgres
+  rejects one at runtime too, since a read unit's transaction is read-only.
 - **Units are short.** Fetching, parsing and model calls happen outside them (the architecture's "slow work outside,
   saving inside").
 
@@ -116,8 +117,8 @@ and they are not database work.
 - the nesting check runs, raising in tests and logging in production;
 - settling batches its reads and settles each paper once per unit, measured before and after on the 6,777-paper
   Field;
-- the folded items are merged, and the violation lists in A1's area are empty: the SQL outside `store`, `store`'s
-  imports, and advisory locks outside the gate.
+- the folded items are merged, and the violation lists in A1's area are empty: the SQL outside `store` (the gate's
+  own lock and transaction SQL aside), `store`'s imports, and advisory locks outside the gate.
 
 ## Not in A1
 

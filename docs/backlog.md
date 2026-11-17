@@ -22,8 +22,8 @@ milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
 
 ### A1. Database gate
 
-Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architecture/a1-database-gate.md); blueprint
-and drive next. Input: the measurement of where work waits
+Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architecture/a1-database-gate.md), planned in
+[`plans/a1-database-gate.md`](plans/a1-database-gate.md) (P1–P7); drive next. Input: the measurement of where work waits
 ([`notes/where-work-waits.md`](notes/where-work-waits.md), 2026-11-09/10).
 
 - **Settling a paper made cheap** (review, project 1): one taxonomy snapshot per transaction, current verdicts only,
