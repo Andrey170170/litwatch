@@ -359,7 +359,6 @@ class DatabaseGate:
                 check=AsyncConnectionPool.check_connection,
                 name="litwatch",
             )
-        # The backends holding each session lock for this gate, by lock name.
 
     @classmethod
     def over(cls, conn: Connection) -> DatabaseGate:
