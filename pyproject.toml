@@ -19,7 +19,7 @@ dependencies = [
     "httpx>=0.27",
     "httpx2>=2.13.1",
     "openai>=1.50",
-    "psycopg[binary]>=3.2",
+    "psycopg[binary,pool]>=3.2",
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "typer>=0.12",
@@ -59,8 +59,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 # The role rules (docs/specs/architecture.md, "Roles"), by package: `core` is Records and
-# Policies, `store` Repositories, `llm` the Model gate, `api` and `cli` Entries, and every other
-# package a Service. `config`, `logs`, `concurrency` and `writing` are shared modules: they import
+# Policies, `store` Repositories, `gates` the gates (the Database gate so far), `llm` the Model
+# gate, `api` and `cli` Entries, and every other package a Service. `store` may import `gates`
+# for the unit types, and `llm` for the nesting check. `config`, `logs`, `concurrency` and `writing` are shared modules: they import
 # only `core`, and any role but `core` and `store` may import them. `tests/test_roles.py` keeps the lists below in step with the
 # packages, and checks that Services form no cycle. `ignore_imports` lists today's violations: it
 # only shrinks, and an entry that no longer matches an import fails the check.
@@ -74,7 +75,7 @@ source_modules = ["litwatch.core"]
 forbidden_modules = ["litwatch.*"]
 
 [[tool.importlinter.contracts]]
-name = "store imports only core and itself"
+name = "store imports only core, the gates and itself"
 type = "forbidden"
 source_modules = ["litwatch.store"]
 forbidden_modules = [
@@ -104,6 +105,35 @@ ignore_imports = [
     "litwatch.store.calls -> litwatch.llm.types",
     "litwatch.store.digests -> litwatch.events",
     "litwatch.store.papers -> litwatch.events",
+]
+
+[[tool.importlinter.contracts]]
+name = "gates import only core and themselves"
+type = "forbidden"
+source_modules = ["litwatch.gates"]
+forbidden_modules = [
+    "litwatch.analysis",
+    "litwatch.api",
+    "litwatch.archive",
+    "litwatch.classification",
+    "litwatch.cli",
+    "litwatch.concurrency",
+    "litwatch.config",
+    "litwatch.digests",
+    "litwatch.events",
+    "litwatch.feedback",
+    "litwatch.fulltext",
+    "litwatch.grading",
+    "litwatch.intake",
+    "litwatch.integrations",
+    "litwatch.jobs",
+    "litwatch.llm",
+    "litwatch.logs",
+    "litwatch.publications",
+    "litwatch.quality",
+    "litwatch.seeds",
+    "litwatch.store",
+    "litwatch.writing",
 ]
 
 [[tool.importlinter.contracts]]
@@ -145,6 +175,7 @@ forbidden_modules = [
     "litwatch.events",
     "litwatch.feedback",
     "litwatch.fulltext",
+    "litwatch.gates",
     "litwatch.grading",
     "litwatch.intake",
     "litwatch.integrations",

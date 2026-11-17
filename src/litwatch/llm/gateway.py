@@ -15,6 +15,7 @@ from typing import Any, Protocol, cast
 from pydantic import BaseModel, ValidationError
 
 from litwatch.config import Models, RoleConfig, secret
+from litwatch.gates.database import outside_unit
 from litwatch.llm import ceiling
 from litwatch.llm.batches import MAX_REQUESTS, Answered, Batcher, BatchProvider
 from litwatch.llm.decisions import Decision, chat_request, decision_of
@@ -219,6 +220,17 @@ class Gateway:
         """One reply from `role`, a model of the role's list, after retries. Not journalled;
         `ask` is. `send` replaces the chat call (a Decisions endpoint). Under a `ceiling`, each
         attempt first reserves the most it can cost (`llm.ceiling`)."""
+        outside_unit(f"a model call for role {role_name!r}")
+        return await self._complete(role_name, role, request, send)
+
+    async def _complete(
+        self,
+        role_name: str,
+        role: RoleConfig,
+        request: Request,
+        send: Callable[..., Awaitable[Reply]] | None = None,
+    ) -> Reply:
+        """`complete`, for a caller that checked the nesting itself (`ask`)."""
         provider = self._provider(role)
         role, limits = self._limits(role, request)
         for delay in (*self.retry_delays, None):
@@ -316,6 +328,9 @@ class Gateway:
         The reply is recorded before it is validated, so a rejected one still has its charge;
         only validated outputs are reusable. The reply's text is kept only in debug mode.
         """
+        # Before the journal is read: `decide`, a reused answer and a batched call come through
+        # here too, and none of them runs inside a Database-gate unit.
+        outside_unit(f"a model call for role {role_name!r}")
         models = self.models.role(role_name).models
         for model in models:  # a model without credentials can have answered nothing
             if model.provider in self.providers and (answer := await self._reused(model, request)):
@@ -342,6 +357,7 @@ class Gateway:
         `ask` reuses): a refusal remembered from an earlier run holds only while the question
         and the list are unchanged. A model without credentials now has not: asked, it is a
         call with no answer."""
+        outside_unit(f"the model journal read for role {role_name!r}")
         if not self.journal:
             return False
         for model in self.models.role(role_name).models:
@@ -386,7 +402,7 @@ class Gateway:
             if isinstance(reply, ProviderError):  # the account kept the batch from answering
                 raise CallError("account", str(reply))
             if reply is None:
-                reply = await self.complete(role_name, role, request, send)
+                reply = await self._complete(role_name, role, request, send)
             reply.usage.source_call_id = call_id
             if journal:
                 await journal.record(call_id, reply.usage)

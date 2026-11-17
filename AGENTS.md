@@ -33,6 +33,11 @@ production since 2026-10-17, in place of release 0.14.
 - A write that can move a paper is a change (`feedback.word.change`): it takes the locks, taxonomy then papers in
   id order, checks and writes under them, and settles each paper once before commit. Taxonomy edits keep their own
   flow, with the taxonomy lock taken exclusively.
+- The Database gate (`gates/database.py`) owns the pool, the units and every advisory lock. A function that takes
+  `db` opens its own units; one that takes a unit runs inside it and never commits; units do not nest, and no
+  model call runs inside one (tests raise on it, `LITWATCH_STRICT_GATES=1`). Code moves onto the gate stage by
+  stage (`docs/plans/a1-database-gate.md`): until then, no new advisory-lock SQL outside the gate and no new
+  `AsyncConnection` outside `gates/` and `store/` (`tests/test_database_home.py`, lists that only shrink).
 - Which role may import which, and no cycle between Services, is checked (`lint-imports`, `tests/test_roles.py`)
   against the roles in `docs/specs/architecture.md`. Their lists of today's violations only shrink.
 

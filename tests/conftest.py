@@ -18,6 +18,7 @@ from litwatch import store
 from litwatch.core import Depth, Paper, Taxonomy, TaxonomyClass, Topic
 from litwatch.events import dispatch
 from litwatch.feedback import word
+from litwatch.gates.database import STRICT_ENV, DatabaseGate
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +26,13 @@ def automatic_deep(monkeypatch):
     """Settling queues automatic Deep cards, as with the `deep` integration configured; a test of
     it off turns it off."""
     monkeypatch.setattr(word, "automatic_deep", True)
+
+
+@pytest.fixture(autouse=True)
+def strict_gates(monkeypatch):
+    """A unit opened inside a unit, or a gate called inside one, raises (`gates.database`); a
+    test of the lenient way, as production runs, removes the variable."""
+    monkeypatch.setenv(STRICT_ENV, "1")
 
 
 # A small tree with one topic at each depth: Focus under its Area, a Field beside them.
@@ -135,6 +143,13 @@ async def conn():
                 yield c
         finally:
             await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+
+
+@pytest.fixture
+async def db(conn):
+    """The Database gate on `conn`'s schema, with a pool of its own."""
+    async with DatabaseGate(conn.test_dsn, conn.test_schema) as gate:
+        yield gate
 
 
 async def settled(conn, timeout: float = 20.0) -> None:

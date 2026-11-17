@@ -18,6 +18,7 @@ PYPROJECT = Path(__file__).parent.parent / "pyproject.toml"
 NOT_SERVICES = {
     "core": "Records and Policies",
     "store": "Repositories",
+    "gates": "Gates",
     "llm": "the Model gate",
     "api": "Entry",
     "cli": "Entry",
@@ -72,7 +73,10 @@ def _forbidden(source: str) -> set[str]:
 
 def test_contracts_name_every_package():
     assert set(NOT_SERVICES) <= _packages()
-    assert _forbidden("store") == _packages() - {"store", "core"}
+    # `store` may import the gates for the unit types its Repositories run in; `llm`, a gate
+    # itself, for the nesting check.
+    assert _forbidden("store") == _packages() - {"store", "core", "gates"}
+    assert _forbidden("gates") == _packages() - {"gates", "core"}
     assert _forbidden("llm") == _services() | ENTRIES
     for shared in SHARED:
         assert _forbidden(shared) == _packages() - {"core"}
