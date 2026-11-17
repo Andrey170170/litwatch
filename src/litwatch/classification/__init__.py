@@ -10,11 +10,9 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import Any
 
-import psycopg
-
 from litwatch import events
 from litwatch.concurrency import bounded
-from litwatch.core import Cause, Paper
+from litwatch.core import Paper
 from litwatch.core.classification import (
     CHOSEN,
     Classified,
@@ -26,7 +24,7 @@ from litwatch.core.classification import (
     standing,
 )
 from litwatch.core.taxonomy import Taxonomy
-from litwatch.feedback import word
+from litwatch.gates.database import WriteUnit
 from litwatch.llm import CallError, Gateway, Usage
 from litwatch.llm.decisions import Decision
 from litwatch.llm.types import Choice, DecisionRequest, Predicate, Question
@@ -124,14 +122,12 @@ def classify(
     return bounded(papers, lambda p: _one(p, tree, gateway, thresholds), gateway.width(concurrency))
 
 
-async def _announce(
-    conn: psycopg.AsyncConnection, paper: Paper, primary: str, by_owner: bool
-) -> None:
+async def _announce(unit: WriteUnit, paper: Paper, primary: str, by_owner: bool) -> None:
     """`paper.classified`, with the classes the paper is a direct member of now that it is
     recorded, the owner's labels applied."""
-    classes = sorted({m.slug for m in standing(await store.memberships(conn, paper.id))})
+    classes = sorted({m.slug for m in standing(await store.memberships(unit, paper.id))})
     await events.emit(
-        conn,
+        unit,
         events.PAPER_CLASSIFIED,
         paper.id,
         revision=paper.revision,
@@ -141,39 +137,40 @@ async def _announce(
     )
 
 
-async def record(conn: psycopg.AsyncConnection, c: Classification) -> bool:
-    """Store one paper's classification, or record its failure. Returns False when there was
-    nothing to record: the paper's text changed meanwhile, or it was dismissed.
+async def record(unit: WriteUnit, c: Classification) -> bool:
+    """Store one paper's classification, or record its failure, in the unit of a change of the
+    paper (`word.change`). Returns False when there was nothing to record: the paper's text
+    changed meanwhile, or it was dismissed.
 
     The classifier's memberships replace the paper's earlier ones; the owner's class labels
-    stay and outrank them (`core.classification.standing`). The paper is settled: classified,
-    it is in the collection and has a rarity, from its Weight alone until it is graded.
+    stay and outrank them (`core.classification.standing`). The change settles the paper:
+    classified, it is in the collection and has a rarity, from its Weight alone until it is
+    graded.
     """
-    async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
-        if not await papers_store.still_current(conn, c.paper):
-            return False
-        if c.error is not None or c.classified is None or c.model is None:
-            error = c.error or "no answer"
-            await failures.failed(
-                conn,
-                c.paper,
-                "classification",
-                error,
-                counts=c.unusable,
-                refused=[ROLE] if c.refused else [],
-                stops=c.refused,
-            )
-            return True
-        primary = c.classified.primary
-        await store.add(conn, c.paper, c.taxonomy_revision, primary, c.response, c.model)
-        await store.replace(conn, c.paper, c.memberships, c.versions)
-        await failures.succeeded(conn, c.paper.id, "classification")
-        await _announce(conn, c.paper, primary, by_owner=False)
+    if not await papers_store.still_current(unit, c.paper):
+        return False
+    if c.error is not None or c.classified is None or c.model is None:
+        error = c.error or "no answer"
+        await failures.failed(
+            unit,
+            c.paper,
+            "classification",
+            error,
+            counts=c.unusable,
+            refused=[ROLE] if c.refused else [],
+            stops=c.refused,
+        )
+        return True
+    primary = c.classified.primary
+    await store.add(unit, c.paper, c.taxonomy_revision, primary, c.response, c.model)
+    await store.replace(unit, c.paper, c.memberships, c.versions)
+    await failures.succeeded(unit, c.paper.id, "classification")
+    await _announce(unit, c.paper, primary, by_owner=False)
     return True
 
 
 async def by_hand(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     paper: Paper,
     tree: Taxonomy,
     classes: list[str],
@@ -182,7 +179,7 @@ async def by_hand(
     """The owner classifies a paper: its classes, each an owner membership, and its primary
     class (the first named, unless given). The keyword check runs as usual. Raises ValueError
     for a class not in the tree. Returns False when the paper's text changed meanwhile, or it
-    was dismissed. A change of the paper (`word.change`), alone or in the caller's."""
+    was dismissed. In the unit of a change of the paper (`word.change`), which settles it."""
     if not classes:
         raise ValueError("name at least one class")
     if unknown := sorted(set(classes) - {c.slug for c in tree.classes}):
@@ -192,14 +189,13 @@ async def by_hand(
         raise ValueError("the primary class must be one of the classes named")
     versions = {c.slug: c.version for c in tree.classes}
     hits = keyword(tree, paper.title, paper.abstract)
-    async with word.change(conn, paper.id, cause=Cause.OWNER):
-        if not await papers_store.still_current(conn, paper):
-            return False
-        await store.add(conn, paper, tree.classes_version, primary, None, OWNER)
-        for slug in dict.fromkeys(classes):
-            await store.put_owner(conn, paper, slug, True, versions[slug])
-        found = [Membership(slug=f, source=Source.KEYWORD) for f in sorted(hits)]
-        await store.replace(conn, paper, found, versions)
-        await failures.succeeded(conn, paper.id, "classification")
-        await _announce(conn, paper, primary, by_owner=True)
+    if not await papers_store.still_current(unit, paper):
+        return False
+    await store.add(unit, paper, tree.classes_version, primary, None, OWNER)
+    for slug in dict.fromkeys(classes):
+        await store.put_owner(unit, paper, slug, True, versions[slug])
+    found = [Membership(slug=f, source=Source.KEYWORD) for f in sorted(hits)]
+    await store.replace(unit, paper, found, versions)
+    await failures.succeeded(unit, paper.id, "classification")
+    await _announce(unit, paper, primary, by_owner=True)
     return True

@@ -34,7 +34,6 @@ from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import outbox
 from litwatch.store import taxonomy as taxonomy_store
-from litwatch.store import word as word_store
 from tests.fakes import BatchingProvider, ScriptedProvider
 
 LOG = "litwatch.gates.database"
@@ -81,6 +80,12 @@ async def keyed(conn, key: int, arg: str | int) -> tuple[int, int, int]:
 
 async def paper_key(conn, paper_id: str) -> tuple[int, int, int]:
     return await keyed(conn, 7213912, paper_id)
+
+
+async def hold_paper(conn, paper_id: str) -> None:
+    """Take the paper's lock in `conn`'s open transaction, by its key written out: a holder the
+    gate does not know."""
+    await conn.execute("SELECT pg_advisory_xact_lock(7213912, hashtext(%s))", (paper_id,))
 
 
 ADVISORY = (
@@ -310,7 +315,7 @@ async def test_locks_are_taken_taxonomy_then_papers_by_id_then_the_rest(db, conn
     key_a, key_b, key_c = [await paper_key(conn, p) for p in (a, b, c)]
     rerun = await keyed(conn, 7213916, topic)
     async with conn.transaction():
-        await word_store.lock_settles(conn, [b])  # today's settle holds paper b
+        await hold_paper(conn, b)
         held = Held(
             db.write("u", locks=["replay", ("rerun", topic)], papers=[c, b, a], taxonomy="shared"),
         )
@@ -394,7 +399,7 @@ async def test_two_units_on_overlapping_papers_named_in_reverse_order_both_finis
     a, b = papers("a", "b")
     key_a = await paper_key(conn, a)
     async with conn.transaction():
-        await word_store.lock_settles(conn, [a])
+        await hold_paper(conn, a)
         first = Held(db.write("first", taxonomy="shared", papers=[a, b]))
         await waiters(conn, key_a, 1)
         second = Held(db.write("second", taxonomy="shared", papers=[b, a]))

@@ -107,6 +107,18 @@ async def current_weight(conn: psycopg.AsyncConnection, paper_id: str) -> Weight
     return Weight(row["weight"]) if row else None
 
 
+async def current_weights(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> dict[str, Weight]:
+    """`current_weight` of each of the papers that has one, by paper."""
+    rows = await (
+        await conn.execute(
+            f"SELECT p.id, w.weight FROM papers p JOIN LATERAL ({CURRENT_WEIGHT}) w ON true "
+            "WHERE p.id = ANY(%s)",
+            (paper_ids,),
+        )
+    ).fetchall()
+    return {r["id"]: Weight(r["weight"]) for r in rows}
+
+
 async def weight_of(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
     """The current Weight's row, `current_weight`'s, with its reason and source."""
     return await (

@@ -19,7 +19,6 @@ from litwatch.core import (
     Publication,
     Verdict,
 )
-from litwatch.feedback import word
 from litwatch.integrations import webdav as webdav_mod
 from litwatch.integrations.webdav import WebDav, WebDAVWriter
 from litwatch.integrations.zotero import Zotero, ZoteroClient, attachment_filename, is_item_of
@@ -28,6 +27,7 @@ from litwatch.store import integrations as state
 from litwatch.store import outbox, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import FAITH, TREE, deliver, fixture_read, paper, start
 from tests.fakes_http import PDF, FakeArxiv, FakeDAV, FakeZotero, mock
 
@@ -82,11 +82,11 @@ async def grade(conn, g: str) -> None:
             opinions={"judge": Opinion(fit=fit, reason="r", model="anthropic:x")},
         ),
     )
-    await word.settle(conn, P.id, cause=Cause.VERDICT)
+    await settling.settle(conn, P.id, cause=Cause.VERDICT)
 
 
 async def say(conn, value: LabelValue) -> None:
-    await word.label(
+    await settling.label(
         conn, Label(paper_id=P.id, topic=FAITH.slug, value=value, origin=LabelOrigin.READER)
     )
 
@@ -129,14 +129,14 @@ async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_
     assert "litwatch:watch:cot-faithfulness:must_read" not in fake.tags(key)
 
     # Unsaved: out of the collections and tagged dropped, but still there.
-    await word.toggle(conn, P.id, Hand.UNSAVE)
+    await settling.toggle(conn, P.id, Hand.UNSAVE)
     await run(conn, z)
     assert fake.collection_names(key) == set()
     assert fake.tags(key) == {"litwatch:dropped"}
     assert not any(c.startswith("DELETE") for c in fake.calls)
 
     # Saved again: back, and the same item.
-    await word.toggle(conn, P.id, Hand.SAVE)
+    await settling.toggle(conn, P.id, Hand.SAVE)
     await run(conn, z)
     assert [i["key"] for i in fake.tops()] == [key]
     assert fake.collection_names(key) == {"Litwatch", "Tier 2"}
@@ -296,7 +296,7 @@ async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(worl
     await say(conn, LabelValue.CENTRAL)  # back
     await run(conn, z)
     assert inbox()
-    await word.toggle(conn, P.id, Hand.UNSAVE)  # unsaved: out with the other collections
+    await settling.toggle(conn, P.id, Hand.UNSAVE)  # unsaved: out with the other collections
     await run(conn, z)
     assert not inbox() and fake.collection_names(key) == set()
 
@@ -436,12 +436,12 @@ async def test_an_overruled_or_unsaved_must_read_fetches_no_pdf_until_it_is_back
 
     # Must read again, but unsaved by hand: still nothing.
     await say(conn, LabelValue.CENTRAL)
-    await word.toggle(conn, P.id, Hand.UNSAVE)
+    await settling.toggle(conn, P.id, Hand.UNSAVE)
     await run(conn, z, w)
     assert arxiv.calls == []
 
     # Saved again: `paper.saved` does what was skipped.
-    await word.toggle(conn, P.id, Hand.SAVE)
+    await settling.toggle(conn, P.id, Hand.SAVE)
     await run(conn, z, w)
     assert arxiv.calls == [f"/pdf/{P.id}"] and await state.webdav_file(conn, P.id)
 
@@ -526,8 +526,8 @@ async def test_an_item_made_again_gets_its_pdf_again(world, pdfs):
     # The owner deletes the item in Zotero; unsaving and saving makes litwatch a new one.
     for key in [first["key"], *fake.attachments(first["key"]), *fake.notes_keys(first["key"])]:
         del fake.items[key]
-    await word.toggle(conn, P.id, Hand.UNSAVE)
-    await word.toggle(conn, P.id, Hand.SAVE)
+    await settling.toggle(conn, P.id, Hand.UNSAVE)
+    await settling.toggle(conn, P.id, Hand.SAVE)
     await run(conn, z, w)
     (second,) = fake.tops()
     assert second["key"] != first["key"]

@@ -28,6 +28,7 @@ from litwatch.core import (
     grade,
 )
 from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.analyses import CURRENT_WEIGHT
 
@@ -194,24 +195,28 @@ class Answer(BaseModel):
 
 
 async def answer(
-    conn: psycopg.AsyncConnection, session_id: int, position: int, given: Answer
+    db: DatabaseGate, session_id: int, position: int, given: Answer, *, rules: word.Rules
 ) -> None:
     """Store an item's answers as one change of its paper (`word.change`): its labels are
-    written together and settled once, so a Fit moved from one topic to another does not take
-    the paper out of the library and back. LookupError for no such item; ValueError for a
-    missing Fit or one for a topic not at Focus."""
-    item = await (
-        await conn.execute(
-            "SELECT * FROM calibration_items WHERE session_id = %s AND position = %s",
-            (session_id, position),
-        )
-    ).fetchone()
+    written together and settled once, by `rules`, so a Fit moved from one topic to another
+    does not take the paper out of the library and back. LookupError for no such item;
+    ValueError for a missing Fit or one for a topic not at Focus."""
+    async with db.read("calibrate item") as unit:
+        item = await (
+            await unit.execute(
+                "SELECT * FROM calibration_items WHERE session_id = %s AND position = %s",
+                (session_id, position),
+            )
+        ).fetchone()
     if item is None:
         raise LookupError("no such item")
     if item["topic"] not in given.fit and item["answered_at"] is None:
         raise ValueError(f"fit for {item['topic']} is required")
-    async with word.change(conn, item["paper_id"], cause=Cause.OWNER):
-        focus = {t.slug for t in await taxonomy_store.topics(conn) if t.depth == Depth.FOCUS}
+    async with word.change(
+        db, item["paper_id"], cause=Cause.OWNER, rules=rules, name="calibrate answer"
+    ) as done:
+        unit = done.unit
+        focus = {t.slug for t in await taxonomy_store.topics(unit) if t.depth == Depth.FOCUS}
         if unknown := sorted(set(given.fit) - focus):
             raise ValueError(f"not Focus topics: {', '.join(unknown)}")
         # A firm label already saying this Fit is not written again: writing renews its time,
@@ -219,7 +224,7 @@ async def answer(
         firm = {
             r["topic"]: r["value"]
             for r in await _all(
-                conn,
+                unit,
                 "SELECT topic, value FROM labels WHERE paper_id = %s AND NOT provisional",
                 (item["paper_id"],),
             )
@@ -230,7 +235,7 @@ async def answer(
             # The drawn topic's answer is the sample; any other is the owner's own choice.
             drawn = topic == item["topic"] and item["why"] in ("above", "below")
             await word.label(
-                conn,
+                unit,
                 Label(
                     paper_id=item["paper_id"],
                     topic=topic,
@@ -241,7 +246,7 @@ async def answer(
         # An appraisal changed, cleared included, is a new row; the same one sent again is not.
         # The newest is the last given (`at`): an imported one keeps its time, not its id.
         newest = await (
-            await conn.execute(
+            await unit.execute(
                 "SELECT value, note FROM appraisals WHERE paper_id = %s "
                 "ORDER BY at DESC, id DESC LIMIT 1",
                 (item["paper_id"],),
@@ -249,12 +254,12 @@ async def answer(
         ).fetchone()
         said = (given.value, given.note or None)
         if said != ((newest["value"], newest["note"]) if newest else (None, None)):
-            await conn.execute(
+            await unit.execute(
                 "INSERT INTO appraisals (paper_id, value, note) VALUES (%s, %s, %s)",
                 (item["paper_id"], *said),
             )
         answered = given.fit.get(item["topic"])
-        await conn.execute(
+        await unit.execute(
             "UPDATE calibration_items SET answer = coalesce(%s, answer), answered_at = now() "
             "WHERE session_id = %s AND position = %s",
             (answered.value if answered else None, session_id, position),

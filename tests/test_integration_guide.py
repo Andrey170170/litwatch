@@ -12,10 +12,10 @@ from litwatch import integrations
 from litwatch.config import Config
 from litwatch.core import Cause, Fit, Hand, Opinion, Verdict
 from litwatch.events import Integration
-from litwatch.feedback import word
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
+from tests import settling
 from tests.conftest import FAITH, TREE, deliver, paper, start
 
 GUIDE = Path(__file__).parent.parent / "docs" / "integrations.md"
@@ -47,7 +47,7 @@ async def grade(conn, g: str) -> None:
             opinions={"judge": Opinion(fit=fit, reason="r", model="anthropic:x")},
         ),
     )
-    await word.settle(conn, P.id, cause=Cause.VERDICT)
+    await settling.settle(conn, P.id, cause=Cause.VERDICT)
 
 
 async def test_the_guides_example_loads_by_dotted_path_and_works(conn, example):
@@ -83,10 +83,10 @@ async def test_the_guides_example_loads_by_dotted_path_and_works(conn, example):
     ]
 
     # Unsaved by the owner, then saved again: told again, as the guide says.
-    await word.toggle(conn, P.id, Hand.UNSAVE)
+    await settling.toggle(conn, P.id, Hand.UNSAVE)
     await deliver(conn, phone)
     assert len(sent) == 1
-    await word.toggle(conn, P.id, Hand.SAVE)
+    await settling.toggle(conn, P.id, Hand.SAVE)
     await deliver(conn, phone)
     assert len(sent) == 2
     await phone.aclose()

@@ -11,6 +11,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core.deepread import Figure
+from litwatch.store.db import transaction
 
 # -- zotero ----------------------------------------------------------------------------------------
 
@@ -93,7 +94,7 @@ async def put_card(
     labelled with the text it was written from, and with it the paper's `figures`, which
     replace the earlier card's: both or neither. A card written again has its process notes
     unseen: the owner's Acknowledge was for the card it replaces."""
-    async with conn.transaction():
+    async with transaction(conn):
         await conn.execute(
             """
             INSERT INTO deep_cards (paper_id, card, model, stats, written_at, paper_revision,

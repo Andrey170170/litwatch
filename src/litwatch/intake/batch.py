@@ -9,38 +9,37 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import date
 
-import psycopg
-
 from litwatch.core import Cause, Paper
 from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.store import papers as papers_store
 
-# The most papers one transaction stores, and so the most settle locks it holds at once.
+# The most papers one unit stores, and so the most settle locks it holds at once.
 PAGE = 500
 
 
 async def store(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     papers: list[Paper],
     *,
     source: str,
+    rules: word.Rules,
     listed: Mapping[str, date] | None = None,
 ) -> papers_store.Upserted:
-    """Store `papers` (`store.papers.upsert`) a page at a time, each page in a transaction of
-    its own: the page's settle locks first (`word.lock_many`), then the papers, then a settle
-    of each one rewritten, withdrawn or brought back. A rewrite's Weight went with the old
+    """Store `papers` (`store.papers.upsert`) a page at a time, each page in a write unit of
+    its own that holds the page's settle locks: the papers, then a settle of each one
+    rewritten, withdrawn or brought back, by `rules`. A rewrite's Weight went with the old
     text, so its grades fall back to solid until the new text is analysed, and a new arXiv
-    version queues the passes that read the text again. Call it outside a transaction: inside
-    one, the pages are savepoints that commit, and release their locks, only with it. Inside a
-    change of the papers (`word.change`), that change settles the rewrites at its exit."""
+    version queues the passes that read the text again. A paper fetched inside a change of it
+    is stored there with `store.papers.upsert` instead, and that change settles it."""
     total = papers_store.Upserted()
     for start in range(0, len(papers), PAGE):
         page = papers[start : start + PAGE]
-        async with conn.transaction():
-            await word.lock_many(conn, [p.id for p in page])
-            stored = await papers_store.upsert(conn, page, source=source, listed=listed)
+        ids = [p.id for p in page]
+        async with db.write("store papers", taxonomy="shared", papers=ids) as unit:
+            stored = await papers_store.upsert(unit, page, source=source, listed=listed)
             settled = list(dict.fromkeys(stored.rewritten + stored.withdrawn))
-            await word.settle_all(conn, settled, cause=Cause.VERDICT)
+            await word.settle_many(unit, settled, cause=Cause.VERDICT, rules=rules)
         total.inserted += stored.inserted
         total.updated += stored.updated
         total.rewritten += stored.rewritten

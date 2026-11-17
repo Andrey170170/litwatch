@@ -8,7 +8,7 @@ eligible late is in the next one. Published digests are final; one whose writer 
 failed, its papers stay due, and the next run writes it again, one model further down `writer`'s
 list after each failed answer in a row, until a digest of the topic is published (models.md,
 roles). A digest with nothing due is published as nothing new, without a call. Its picks are
-settled as it is published, so an Area pick gets its Deep card (`feedback.word.settle`).
+settled as it is published, so an Area pick gets its Deep card (`feedback.word.settle_many`).
 
 An old paper back with a new arXiv version is listed once more as updated
 (`store.digests.due_updated`), after the digest's papers and apart from them: the writer is not
@@ -28,6 +28,7 @@ from litwatch.core import FAILED_RUNS, Cause, Depth, Rarity, Status, Taxonomy, T
 from litwatch.core.digests import DAILY, PUBLISHED, DigestPeriod, DigestRole, DigestState, marked
 from litwatch.digests import writer
 from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.jobs.context import ModelRun
 from litwatch.llm import CallError, Request
 from litwatch.store import digests as store_
@@ -227,16 +228,20 @@ async def write(
     topic: Topic,
     period: DigestPeriod,
     day: date,
+    *,
+    rules: word.Rules,
 ) -> DigestState | None:
     """Write and store the digest, unless it is published already (None: a re-run of the same
     day rewrites nothing), as one change of its picks (`word.change`): an Area pick's Deep pass
-    is queued with it. Returns the state stored."""
+    is queued with it, as `rules` say. Returns the state stored."""
     if await store_.state_of(conn, topic.slug, period, day) in PUBLISHED:
         return None
     o = await compose(conn, run, tree, topic, period, day)
     picks = {s.due.paper_id for s in o.papers if s.role == DigestRole.PICK}
-    async with word.change(conn, *picks, cause=Cause.VERDICT):  # locked together, in id order
-        if await store_.record(conn, o, run.run_id) is None:
+    async with word.change(  # its picks locked together, in id order
+        DatabaseGate.over(conn), *picks, cause=Cause.VERDICT, rules=rules, name="record digest"
+    ) as done:
+        if await store_.record(done.unit, o, run.run_id) is None:
             return None
     if o.error:
         log.warning("%s digest of %s for %s failed: %s", period, day, topic.slug, o.error)
@@ -250,35 +255,43 @@ def _active(tree: Taxonomy, depths: Sequence[Depth] = tuple(Depth)) -> list[Topi
 
 
 async def write_day(
-    conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, day: date
+    conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, day: date, *, rules: word.Rules
 ) -> bool:
     """The daily digests of `day`, every active Focus and Area topic's in the fixed order, when
     arXiv listed papers on it; a day it listed none has no digests. Returns whether it did."""
     if not await store_.released(conn, day):
         return False
     for topic in _active(tree, DAILY):
-        await write(conn, run, tree, topic, DigestPeriod.DAY, day)
+        await write(conn, run, tree, topic, DigestPeriod.DAY, day, rules=rules)
     return True
 
 
 async def write_week(
-    conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, monday: date
+    conn: psycopg.AsyncConnection,
+    run: ModelRun,
+    tree: Taxonomy,
+    monday: date,
+    *,
+    rules: word.Rules,
 ) -> None:
     """The weekly digests of the week from `monday`, every active topic's in the fixed order."""
     for topic in _active(tree):
-        await write(conn, run, tree, topic, DigestPeriod.WEEK, monday)
+        await write(conn, run, tree, topic, DigestPeriod.WEEK, monday, rules=rules)
 
 
-async def retry_failed(conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy) -> None:
+async def retry_failed(
+    conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, *, rules: word.Rules
+) -> None:
     """Write every failed digest of an active topic again, oldest first, each over the papers
     due for it now, so a later digest does not take its papers first."""
     active = {t.slug: t for t in _active(tree)}
     for row in await store_.failed(conn):
-        await write(conn, run, tree, active[row["topic"]], DigestPeriod(row["period"]), row["day"])
+        period = DigestPeriod(row["period"])
+        await write(conn, run, tree, active[row["topic"]], period, row["day"], rules=rules)
 
 
 async def nightly(
-    conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, today: date
+    conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, today: date, *, rules: word.Rules
 ) -> None:
     """The night's digests: the failed ones again, today's daily digests, and on a Monday the
     weekly digests of the week before. Each topic's are written in that order, the topics
@@ -291,11 +304,13 @@ async def nightly(
         async with await store.sibling(conn) as c:
             for row in failed:
                 if row["topic"] == topic.slug:
-                    await write(c, run, tree, topic, DigestPeriod(row["period"]), row["day"])
+                    period = DigestPeriod(row["period"])
+                    await write(c, run, tree, topic, period, row["day"], rules=rules)
             if released and topic.depth in DAILY:
-                await write(c, run, tree, topic, DigestPeriod.DAY, today)
+                await write(c, run, tree, topic, DigestPeriod.DAY, today, rules=rules)
             if today.weekday() == 0:
-                await write(c, run, tree, topic, DigestPeriod.WEEK, today - timedelta(days=7))
+                monday = today - timedelta(days=7)
+                await write(c, run, tree, topic, DigestPeriod.WEEK, monday, rules=rules)
 
     async with asyncio.TaskGroup() as group:
         for topic in _active(tree):

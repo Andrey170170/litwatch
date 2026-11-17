@@ -14,10 +14,11 @@ from typing import Annotated, Any
 from fastapi import HTTPException, Query, Request
 
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, protected
+from litwatch.api.deps import Conn, Rules, protected
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Cause, Topic
 from litwatch.feedback import misses, word
+from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.intake.search import NoAnswerError
 from litwatch.jobs import replays, reruns
 from litwatch.store import failures, quality
@@ -136,7 +137,9 @@ PROCESS_REFUSED = {
 
 
 @router.post("/process", status_code=202, responses=PROCESS_REFUSED)
-async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob | None:
+async def process(
+    body: s.ProcessIn, request: Request, c: Conn, rules: Rules
+) -> s.ProcessJob | None:
     """Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks
     it, with no transaction open, then store it and queue its Process job in one. Asked again,
     it answers with the job already queued or running, changing nothing (its paper classified
@@ -151,32 +154,35 @@ async def process(body: s.ProcessIn, request: Request, c: Conn) -> s.ProcessJob 
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    async with c.transaction():
-        # A job already under way is only answered, before any change: the owner's settle would
-        # ask a running one again (`settle_process`), and it would run once more for nothing.
-        # Under the paper's locks, so a Process in flight (a double click) has either committed
-        # its job or not started.
-        await word.lock_many(c, [paper_id])
-        found = await jobs_store.process_of(c, paper_id, lock=True)
+    # The owner's change of the paper, in a unit opened here and settled by hand, since a job
+    # already under way is only answered, before any change: the owner's settle would ask a
+    # running one again (`settle_process`), and it would run once more for nothing. Under the
+    # paper's locks, so a Process in flight (a double click) has either committed its job or
+    # not started.
+    db = DatabaseGate.over(c)
+    async with db.write("process paper", taxonomy="shared", papers=[paper_id]) as unit:
+        found = await jobs_store.process_of(unit, paper_id, lock=True)
         if (
             found is not None
             and found["state"] in jobs_store.ACTIVE
-            and not await papers_store.dropped(c, paper_id)
+            and not await papers_store.dropped(unit, paper_id)
         ):
             return s.ProcessJob(id=found["id"], state=found["state"], error=found["error"])
-        async with word.change(c, paper_id, cause=Cause.OWNER):
-            if await taxonomy_store.load(c) is None:  # nothing to sort the paper into
-                raise HTTPException(status_code=409, detail="no taxonomy yet")
-            await misses.keep(c, paper_id, fetched)
-            if await word_store.in_collection(c, paper_id):
-                raise HTTPException(status_code=409, detail="already in the collection")
-            if await papers_store.dropped(c, paper_id):
-                raise HTTPException(status_code=409, detail=DROPPED)
-            if await failures.waits_on_owner(c, [paper_id], FAILED_RUNS):
-                raise HTTPException(status_code=409, detail=WAITS)
-            if not request.app.state.config.schedule.enabled:
-                return None
-            job = await jobs_store.process(c, paper_id)
+        if await taxonomy_store.load(unit) is None:  # nothing to sort the paper into
+            raise HTTPException(status_code=409, detail="no taxonomy yet")
+        await misses.keep(unit, paper_id, fetched)
+        if await word_store.in_collection(unit, paper_id):
+            raise HTTPException(status_code=409, detail="already in the collection")
+        if await papers_store.dropped(unit, paper_id):
+            raise HTTPException(status_code=409, detail=DROPPED)
+        if await failures.waits_on_owner(unit, [paper_id], FAILED_RUNS):
+            raise HTTPException(status_code=409, detail=WAITS)
+        job = None
+        if request.app.state.config.schedule.enabled:
+            job = await jobs_store.process(unit, paper_id)
+        await word.settle_many(unit, [paper_id], cause=Cause.OWNER, rules=rules)
+    if job is None:
+        return None
     request.app.state.jobs_wake.set()
     return s.ProcessJob(id=job["id"], state=job["state"], error=job["error"])
 
@@ -387,7 +393,7 @@ async def run_replay(body: s.ReplayIn, request: Request, c: Conn) -> s.Jobs:
     return await _listing(c)
 
 
-async def _above_spent(c: Conn, job: dict[str, Any], ceiling: float | None) -> None:
+async def _above_spent(c: ReadUnit, job: dict[str, Any], ceiling: float | None) -> None:
     """A stopped re-run goes on only under a ceiling above what it spent."""
     if job["state"] != "stopped":
         return
@@ -412,19 +418,21 @@ async def act(
     sources, to = MOVES[action]
     ceiling = body.ceiling if body else None
     schedule_on = request.app.state.config.schedule.enabled
-    async with c.transaction():
-        job = await jobs_store.get(c, job_id)
-        if job is not None and action == "again" and job["kind"] == "process":
-            await word.lock_many(c, job["scope"]["papers"])
-            if await failures.waits_on_owner(c, job["scope"]["papers"], FAILED_RUNS):
-                raise HTTPException(status_code=409, detail=WAITS)
+    # Read first for the locks its unit names: a job's kind and papers never change.
+    job = await jobs_store.get(c, job_id)
+    again = job is not None and action == "again" and job["kind"] == "process"
+    papers = job["scope"]["papers"] if again else []
+    db = DatabaseGate.over(c)
+    async with db.write(f"job {action}", taxonomy="shared", papers=papers) as unit:
+        if again and await failures.waits_on_owner(unit, papers, FAILED_RUNS):
+            raise HTTPException(status_code=409, detail=WAITS)
         if job is not None and job["kind"] == "replay" and to in ("queued", "tonight"):
             # One replay under way at a time: the replay lock before the row, as Run replay.
-            found = await jobs_store.open_replay(c)
+            found = await jobs_store.open_replay(unit)
             if found is not None and found["id"] != job_id:
                 raise HTTPException(status_code=409, detail="another replay is under way")
         # The job's row after its paper's settle lock, the order a settle takes them in.
-        job = await jobs_store.get(c, job_id, lock=True)
+        job = await jobs_store.get(unit, job_id, lock=True)
         if job is None:
             raise HTTPException(status_code=404, detail="no such job")
         if job["state"] not in sources:
@@ -432,11 +440,11 @@ async def act(
         if job["kind"] != "process" and to in ("queued", "tonight") and not schedule_on:
             raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
         if to in ("queued", "tonight"):
-            await _above_spent(c, job, ceiling)
+            await _above_spent(unit, job, ceiling)
         held = ceiling if job["ceiling"] is not None else None  # a re-run's or a replay's
-        await jobs_store.move(c, job_id, sources, to, held)
+        await jobs_store.move(unit, job_id, sources, to, held)
         if to == "discarded":
-            await fulltext_store.release_job(c, job_id)
+            await fulltext_store.release_job(unit, job_id)
     if to == "queued":
         request.app.state.jobs_wake.set()
     return await _listing(c)

@@ -19,7 +19,6 @@ from litwatch.archive import ArchiveClient
 from litwatch.config import Config, Models, RoleConfig, Schedule
 from litwatch.core import Cause, Depth, Fit, Label, LabelOrigin, LabelValue, Status, Verdict
 from litwatch.core.fulltext import BACKGROUND_PRIORITY, TEXT_REQUEST_PRIORITY
-from litwatch.feedback import word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.jobs import reruns, worker
 from litwatch.llm import CallError, Gateway, Reply, Request, Usage, prices
@@ -31,6 +30,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
+from tests import settling
 from tests.conftest import AGENTS, FAITH, TREE, paper
 from tests.fakes import ScriptedProvider, SdkClient, openrouter_completion
 from tests.fakes_http import FakeArchive, FakeDeep, mock
@@ -172,14 +172,14 @@ async def graded_before(conn, p, topic: str, version: str, fit: str = "related")
         paper_id=p.id, topic=topic, topic_version=version, fit=Fit(fit), reason="r", opinions={}
     )
     await verdicts_store.add(conn, v)
-    await word.settle(conn, p.id, cause=Cause.VERDICT)
+    await settling.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def edited(conn, topic, **change) -> str:
     """Save the topic edited; its new version."""
     tree = await taxonomy_store.load(conn)
     changed = tree.topic(topic.slug).model_copy(update=change)
-    await word.save_taxonomy(conn, tree.following(changed))
+    await settling.save_taxonomy(conn, tree.following(changed))
     return changed.version
 
 
@@ -642,10 +642,17 @@ async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn, m
     # The Deep worker holds the re-run's card while a nightly runs, and makes it after.
     service = FakeDeep(DONE)
     nightly = await runs.start(conn, "nightly", None, None)
-    assert await deep_passes.work(conn, archive(with_text(A)), make(service), config=CONFIG) == {}
+    assert (
+        await deep_passes.work(
+            conn, archive(with_text(A)), make(service), rules=settling.RULES, config=CONFIG
+        )
+        == {}
+    )
     assert service.requests == []
     await runs.finish(conn, nightly)
-    done = await deep_passes.work(conn, archive(with_text(A)), make(service), config=CONFIG)
+    done = await deep_passes.work(
+        conn, archive(with_text(A)), make(service), rules=settling.RULES, config=CONFIG
+    )
     assert done == {"cards_written": 1} and len(service.requests) == 1
     assert (await jobs_store.get(conn, job))["state"] == "running"  # its text pass still waits
 
@@ -658,7 +665,9 @@ async def test_with_the_schedule_off_a_due_nightly_holds_no_reruns_deep_pass(con
     await focus_rerun(conn, models, ceiling=1.0)
     assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)  # its Deep pass queued
     service = FakeDeep(DONE)
-    done = await deep_passes.work(conn, archive(with_text(A)), make(service), config=off)
+    done = await deep_passes.work(
+        conn, archive(with_text(A)), make(service), rules=settling.RULES, config=off
+    )
     assert done == {"cards_written": 1} and len(service.requests) == 1
 
 
@@ -734,7 +743,7 @@ async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_r
     label = Label(
         paper_id=C.id, topic=AGENTS.slug, value=LabelValue.RELATED, origin=LabelOrigin.READER
     )
-    await word.label(conn, label)
+    await settling.label(conn, label)
     for p in (A, C):
         await conn.execute(
             "INSERT INTO memberships (paper_id, class, source, probability, class_version, "

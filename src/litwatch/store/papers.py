@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 from litwatch import events
 from litwatch.core import Paper, rewritten, withdrawn_at
 from litwatch.core.digests import announced, first_listing
+from litwatch.store.db import transaction
 
 # What `row_to_paper` reads; the stored body of every match would be megabytes nobody looks at.
 COLUMNS = """
@@ -103,7 +104,7 @@ async def upsert(
     (`core.withdrawn_at`); a later real version brings it back.
     """
     result = Upserted()
-    async with conn.transaction():
+    async with transaction(conn):
         before = {
             r["id"]: r
             for r in await (
@@ -349,7 +350,7 @@ async def correct(
     """The owner's fix of a title or abstract (a broken character, a garbled abstract). It
     counts as a rewrite: the revision goes up, so the paper is classified and analysed again
     with its failures forgotten, and `paper.revised` says so."""
-    async with conn.transaction():
+    async with transaction(conn):
         cur = await conn.execute(
             "UPDATE papers SET title = coalesce(%s, title), abstract = coalesce(%s, abstract), "
             "corrected_at = now(), revision = revision + 1, "

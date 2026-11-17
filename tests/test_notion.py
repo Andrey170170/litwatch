@@ -30,7 +30,6 @@ from litwatch.core import (
     Verdict,
 )
 from litwatch.events import dispatch
-from litwatch.feedback import word
 from litwatch.integrations.notion import FAILED_REVIEW, Notion, NotionClient, _hash
 from litwatch.jobs.publications import store_record
 from litwatch.store import integrations as integrations_store
@@ -40,6 +39,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
+from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, deliver, fixture_read, paper, settled
 from tests.fakes_http import FakeNotion, mock
 
@@ -135,12 +135,12 @@ async def grade(conn, p, topic: str, g: str) -> None:
             opinions={"judge": opinion},
         ),
     )
-    await word.settle(conn, p.id, cause=Cause.VERDICT)
+    await settling.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def say(conn, p, topic: str, value: LabelValue) -> None:
     label = Label(paper_id=p.id, topic=topic, value=value, origin=LabelOrigin.READER)
-    await word.label(conn, label)
+    await settling.label(conn, label)
 
 
 async def texts(conn, p, gist: str | None = None, brief: str | None = None) -> None:
@@ -478,7 +478,7 @@ async def test_a_delisted_paper_says_why_and_listing_it_again_clears_that(world)
     assert top["callout"]["icon"]["emoji"] == "🗄️"
     assert plain(top["callout"]["rich_text"]) == f"No longer listed.\n{why}"
 
-    await word.unlabel(conn, A.id, FAITH.slug)
+    await settling.unlabel(conn, A.id, FAITH.slug)
     await deliver(conn, n)
     assert fake.value(row, "Grade") == "Worth a look" and fake.value(row, "Why") == ""
     assert [b["callout"]["icon"]["emoji"] for b in fake.body(row["id"])[:1]] == ["💡"]
@@ -498,14 +498,14 @@ async def test_the_why_is_the_newest_change_that_took_it_off(world):
     await say(conn, A, FAITH.slug, LabelValue.NONE)
     await deliver(conn, n)
     assert "Andrei marked it" in fake.value(fake.row(A.id), "Why")
-    await word.unlabel(conn, A.id, FAITH.slug)
+    await settling.unlabel(conn, A.id, FAITH.slug)
     await grade(conn, A, FAITH.slug, "adjacent")
     await deliver(conn, n)
     assert fake.value(fake.row(A.id), "Why") == verdicts.format(await last_day(conn))
 
     # Handed over together: every event finds B already off for the verdict's reason.
     await say(conn, B, FAITH.slug, LabelValue.NONE)
-    await word.unlabel(conn, B.id, FAITH.slug)
+    await settling.unlabel(conn, B.id, FAITH.slug)
     await grade(conn, B, FAITH.slug, "adjacent")
     await deliver(conn, n)
     assert fake.value(fake.row(B.id), "Why") == verdicts.format(await last_day(conn))
@@ -513,7 +513,7 @@ async def test_the_why_is_the_newest_change_that_took_it_off(world):
     # Dismissed after such a sequence, the topic it had left keeps the newest reason.
     await say(conn, C, FAITH.slug, LabelValue.NONE)
     await deliver(conn, n)
-    await word.unlabel(conn, C.id, FAITH.slug)
+    await settling.unlabel(conn, C.id, FAITH.slug)
     await grade(conn, C, FAITH.slug, "adjacent")
     day = await last_day(conn)
     await papers_store.dismiss(conn, C.id)
@@ -688,7 +688,7 @@ async def test_a_write_failing_part_way_and_then_undone_is_put_right(world):
     assert (await outbox.cursor(conn, n.name)).failing is not None
     assert fake.body(row["id"]) == []
 
-    await word.unlabel(conn, A.id, FAITH.slug)  # undone before the retry
+    await settling.unlabel(conn, A.id, FAITH.slug)  # undone before the retry
     await outbox.retry(conn, n.name)
     await deliver(conn, n)
     assert fake.value(row, "Grade") == "Worth a look" and fake.value(row, "Why") == ""

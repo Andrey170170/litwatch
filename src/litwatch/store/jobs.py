@@ -100,6 +100,20 @@ async def processing(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
     return row is not None
 
 
+async def with_process(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> set[str]:
+    """Those of the papers that have a Process job, in whatever state: the only ones
+    `settle_process` and `processing` have anything to find for."""
+    rows = await (
+        await conn.execute(
+            "SELECT DISTINCT scope -> 'papers' ->> 0 AS paper_id FROM jobs "
+            "WHERE kind = 'process' AND scope -> 'papers' IN "
+            "(SELECT jsonb_build_array(id) FROM unnest(%s::text[]) AS id)",
+            (paper_ids,),
+        )
+    ).fetchall()
+    return {r["paper_id"] for r in rows}
+
+
 async def settle_process(
     conn: psycopg.AsyncConnection, paper_id: str, *, owner: bool = False
 ) -> None:

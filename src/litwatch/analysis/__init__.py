@@ -8,14 +8,13 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
-import psycopg
 from pydantic import BaseModel, Field, field_validator
 
 from litwatch import events
 from litwatch.concurrency import bounded
-from litwatch.core import Analysis, Cause, Contribution, Facets, Paper, TaxonomyClass, Weight
+from litwatch.core import Analysis, Contribution, Facets, Paper, TaxonomyClass, Weight
 from litwatch.core.analysis import WEIGHT_DEFINITIONS
-from litwatch.feedback import word
+from litwatch.gates.database import WriteUnit
 from litwatch.llm import CallError, Gateway, Request, Usage
 from litwatch.store import analyses as store
 from litwatch.store import failures
@@ -140,37 +139,37 @@ def analyse(
     return bounded(papers, lambda pa: _one(*pa, gateway), gateway.width(concurrency))
 
 
-async def record(conn: psycopg.AsyncConnection, a: Analysed) -> bool:
+async def record(unit: WriteUnit, a: Analysed) -> bool:
     """Store one paper's analysis, its Weight and its Gist from the abstract, with
-    `gist.written` when that Gist is current, and settle the paper (its grades and rarity
-    follow the Weight); or record its failure. Returns False when there was nothing to record:
-    the paper's text changed meanwhile, or it was dismissed."""
-    async with word.change(conn, a.paper.id, cause=Cause.VERDICT):
-        if not await papers_store.still_current(conn, a.paper):
-            return False
-        if a.analysis is None or a.model is None:
-            error = a.error or "no answer"
-            refused = [ROLE] if a.refused else []
-            await failures.failed(
-                conn,
-                a.paper,
-                "analysis",
-                error,
-                counts=a.unusable,
-                refused=refused,
-                stops=a.refused,
-            )
-            return True
-        gist = await store.add(conn, a.paper, a.primary, a.analysis, a.model)
-        await failures.succeeded(conn, a.paper.id, "analysis")
-        # A Gist the full text already gave this revision stays current.
-        if await store.current_gist_id(conn, a.paper.id) == gist:
-            await events.emit(
-                conn,
-                events.GIST_WRITTEN,
-                a.paper.id,
-                revision=a.paper.revision,
-                source="abstract",
-                gist_id=gist,
-            )
+    `gist.written` when that Gist is current; or record its failure. In the unit of a change of
+    the paper (`word.change`), which settles it: its grades and rarity follow the Weight.
+    Returns False when there was nothing to record: the paper's text changed meanwhile, or it
+    was dismissed."""
+    if not await papers_store.still_current(unit, a.paper):
+        return False
+    if a.analysis is None or a.model is None:
+        error = a.error or "no answer"
+        refused = [ROLE] if a.refused else []
+        await failures.failed(
+            unit,
+            a.paper,
+            "analysis",
+            error,
+            counts=a.unusable,
+            refused=refused,
+            stops=a.refused,
+        )
+        return True
+    gist = await store.add(unit, a.paper, a.primary, a.analysis, a.model)
+    await failures.succeeded(unit, a.paper.id, "analysis")
+    # A Gist the full text already gave this revision stays current.
+    if await store.current_gist_id(unit, a.paper.id) == gist:
+        await events.emit(
+            unit,
+            events.GIST_WRITTEN,
+            a.paper.id,
+            revision=a.paper.revision,
+            source="abstract",
+            gist_id=gist,
+        )
     return True

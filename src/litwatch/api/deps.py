@@ -1,5 +1,6 @@
-"""What every route needs: a connection, and the shared token (or the read token); and the
-month's spend against budget, which the status line and Quality both show."""
+"""What every route needs: a connection, and the shared token (or the read token); what a
+route that changes papers settles them by; and the month's spend against budget, which the
+status line and Quality both show."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from litwatch import store
 from litwatch.config import Budget
 from litwatch.core.budget import Spend, month_start, spend
+from litwatch.feedback import word
 from litwatch.store import calls
 
 COOKIE = "litwatch_token"
@@ -53,6 +55,14 @@ def authorised(request: Request) -> None:
 
 
 Conn = Annotated[psycopg.AsyncConnection, Depends(_conn)]
+
+
+def _rules(request: Request) -> word.Rules:
+    return word.rules(request.app.state.config)
+
+
+# What settling takes from the app's configuration: for a route that changes papers.
+Rules = Annotated[word.Rules, Depends(_rules)]
 
 UNAUTHORISED = {
     401: {"description": "Missing or wrong token"},

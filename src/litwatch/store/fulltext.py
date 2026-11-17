@@ -53,43 +53,56 @@ class Facts:
     dropped: bool  # dismissed or withdrawn (`papers.dropped`)
     last: TextPass | None  # the newest text pass queued for the current revision
     has_text_result: bool  # a text pass of any revision is done
+    stale: bool  # a text pass for an older revision is not done: `drop_stale` may remove it
 
 
-async def facts(conn: psycopg.AsyncConnection, paper_id: str) -> Facts | None:
-    row = await (
+async def facts_of(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> dict[str, Facts]:
+    """The facts of each of the papers litwatch has, by paper."""
+    rows = await (
         await conn.execute(
             f"""
-            SELECT p.revision, p.version, p.dropped,
+            SELECT p.id AS paper_id, p.revision, p.version, p.dropped,
                    f.id, f.kind, f.reason, f.state, f.arxiv_version,
                    NOT {COVERS_UPDATE} AS newer_update,
                    EXISTS (SELECT 1 FROM fulltext_passes d WHERE d.paper_id = p.id
-                           AND d.kind <> 'deep' AND d.state = 'done') AS has_text_result
+                           AND d.kind <> 'deep' AND d.state = 'done') AS has_text_result,
+                   EXISTS (SELECT 1 FROM fulltext_passes s WHERE s.paper_id = p.id
+                           AND s.paper_revision < p.revision AND s.kind <> 'deep'
+                           AND s.state <> 'done') AS stale
             FROM papers p
             LEFT JOIN LATERAL (
                 SELECT id, kind, reason, state, arxiv_version, paper_updated FROM fulltext_passes
                 WHERE paper_id = p.id AND paper_revision = p.revision AND kind <> 'deep'
                 ORDER BY id DESC LIMIT 1
             ) f ON true
-            WHERE p.id = %s
+            WHERE p.id = ANY(%s)
             """,
-            (paper_id,),
+            (paper_ids,),
         )
-    ).fetchone()
-    if row is None:
-        return None
-    last = (
-        TextPass(
-            row["id"],
-            PassKind(row["kind"]),
-            row["reason"],
-            PassState(row["state"]),
-            row["arxiv_version"],
-            row["state"] == PassState.DONE and row["newer_update"],
+    ).fetchall()
+    found: dict[str, Facts] = {}
+    for row in rows:
+        last = (
+            TextPass(
+                row["id"],
+                PassKind(row["kind"]),
+                row["reason"],
+                PassState(row["state"]),
+                row["arxiv_version"],
+                row["state"] == PassState.DONE and row["newer_update"],
+            )
+            if row["id"]
+            else None
         )
-        if row["id"]
-        else None
-    )
-    return Facts(row["revision"], row["version"], row["dropped"], last, row["has_text_result"])
+        found[row["paper_id"]] = Facts(
+            row["revision"],
+            row["version"],
+            row["dropped"],
+            last,
+            row["has_text_result"],
+            row["stale"],
+        )
+    return found
 
 
 @dataclass(frozen=True)
@@ -104,20 +117,40 @@ class DeepFacts:
 
 
 async def deep_facts(conn: psycopg.AsyncConnection, paper_id: str) -> DeepFacts | None:
-    row = await (
+    return (await deep_facts_of(conn, [paper_id])).get(paper_id)
+
+
+async def deep_facts_of(
+    conn: psycopg.AsyncConnection, paper_ids: list[str]
+) -> dict[str, DeepFacts]:
+    """The Deep facts of each of the papers litwatch has, by paper."""
+    rows = await (
         await conn.execute(
-            "SELECT p.revision, p.dropped, f.id, f.reason, f.state, "
+            "SELECT p.id AS paper_id, p.revision, p.dropped, f.id, f.reason, f.state, "
             "EXISTS (SELECT 1 FROM deep_cards c WHERE c.paper_id = p.id AND c.card IS NOT NULL) "
             f"AS has_card, {PICKED_BY} AS picked_by FROM papers p LEFT JOIN fulltext_passes f "
-            "ON f.paper_id = p.id AND f.kind = 'deep' AND f.state <> 'done' WHERE p.id = %s",
-            (paper_id,),
+            "ON f.paper_id = p.id AND f.kind = 'deep' AND f.state <> 'done' "
+            "WHERE p.id = ANY(%s)",
+            (paper_ids,),
         )
-    ).fetchone()
-    if row is None:
-        return None
-    found = DeepPass(row["id"], row["reason"], PassState(row["state"])) if row["id"] else None
-    picked = frozenset(row["picked_by"])
-    return DeepFacts(row["revision"], row["dropped"], found, row["has_card"], picked)
+    ).fetchall()
+    found: dict[str, DeepFacts] = {}
+    for row in rows:
+        open_pass = (
+            DeepPass(row["id"], row["reason"], PassState(row["state"])) if row["id"] else None
+        )
+        # A paper has one open Deep pass: the first row is its only one.
+        found.setdefault(
+            row["paper_id"],
+            DeepFacts(
+                row["revision"],
+                row["dropped"],
+                open_pass,
+                row["has_card"],
+                frozenset(row["picked_by"]),
+            ),
+        )
+    return found
 
 
 async def request_card(conn: psycopg.AsyncConnection, paper_id: str, revision: int) -> int:

@@ -31,6 +31,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
+from tests import settling
 from tests import test_digests as dg
 from tests import test_fulltext as ft
 from tests import test_steps as steps
@@ -1169,12 +1170,14 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
         async with model_run(c, Config(), "nightly", gateway=gateway) as run:
             if together:
                 run.gateway.batch_until(tonight()[1])
-                await digests.nightly(c, run, tree, dg.MON)
+                await digests.nightly(c, run, tree, dg.MON, rules=settling.RULES)
                 await run.gateway.close()
             else:
-                await digests.retry_failed(c, run, tree)
-                await digests.write_day(c, run, tree, dg.MON)
-                await digests.write_week(c, run, tree, dg.MON - timedelta(days=7))
+                await digests.retry_failed(c, run, tree, rules=settling.RULES)
+                await digests.write_day(c, run, tree, dg.MON, rules=settling.RULES)
+                await digests.write_week(
+                    c, run, tree, dg.MON - timedelta(days=7), rules=settling.RULES
+                )
         rows = await (
             await c.execute("SELECT topic, period, day, state, text FROM digests ORDER BY 1, 2, 3")
         ).fetchall()

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from litwatch.gates.database import HELD_ACROSS_CALLS, REGISTRY
 from litwatch.jobs import lock as jobs_lock
-from litwatch.store import calls, db, fulltext, jobs, outbox, publications, taxonomy, word
+from litwatch.store import calls, db, fulltext, jobs, outbox, publications, taxonomy
 
 SRC = Path(__file__).parent.parent / "src" / "litwatch"
 GATE = "gates/database.py"
@@ -24,31 +24,26 @@ LOCKS_BEFORE_THE_RULE = {
     "store/outbox.py": 2,
     "store/publications.py": 1,
     "store/taxonomy.py": 2,
-    "store/word.py": 1,
 }
 
 # Modules outside `gates/` and `store/` that name `AsyncConnection`, before the rule; each is to
 # take `db` or a unit instead.
 CONNECTIONS_BEFORE_THE_RULE = {
-    "analysis/__init__.py",
     "api/deps.py",
     "api/digests.py",
     "api/mcp.py",
     "api/monitor.py",
     "api/reading.py",
-    "classification/__init__.py",
     "cli.py",
     "digests/__init__.py",
     "events/__init__.py",
     "events/dispatch.py",
     "feedback/calibrate.py",
     "feedback/misses.py",
-    "feedback/word.py",
     "fulltext/__init__.py",
     "fulltext/deep.py",
     "grading/__init__.py",
     "intake/archive.py",
-    "intake/batch.py",
     "intake/catalog.py",
     "intake/collect.py",
     "integrations/__init__.py",
@@ -114,10 +109,10 @@ def test_the_registry_has_todays_keys():
         ("deep-worker", 7213915, "session", None),
         ("migration", 7213910, "startup", None),
     ]
-    # The constants of the code not yet moved; each line goes with its constant.
-    assert {lock.name: lock.key for lock in REGISTRY} == {
+    # The constants of the code not yet moved; each line goes with its constant. The paper lock
+    # has none left: only the gate takes it.
+    assert {lock.name: lock.key for lock in REGISTRY if lock.name != "paper"} == {
         "taxonomy": taxonomy.TAXONOMY_LOCK,
-        "paper": word.SETTLE_LOCK,
         "publication": publications.PUBLICATION_LOCK,
         "rerun": jobs.RERUN_LOCK,
         "replay": jobs.REPLAY_LOCK,

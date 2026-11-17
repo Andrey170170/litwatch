@@ -19,13 +19,15 @@ from litwatch.core import Depth, Paper, Taxonomy, TaxonomyClass, Topic
 from litwatch.events import dispatch
 from litwatch.feedback import word
 from litwatch.gates.database import STRICT_ENV, DatabaseGate
+from tests.settling import RULES
 
 
 @pytest.fixture(autouse=True)
 def automatic_deep(monkeypatch):
-    """Settling queues automatic Deep cards, as with the `deep` integration configured; a test of
-    it off turns it off."""
-    monkeypatch.setattr(word, "automatic_deep", True)
+    """Every configuration settles by `RULES`: automatic Deep cards queued, as with the `deep`
+    integration configured. A test of them off passes its own (`settling.OFF`); a test of how
+    the configuration gives them reads `settling.configured`."""
+    monkeypatch.setattr(word, "rules", lambda config: RULES)
 
 
 @pytest.fixture(autouse=True)

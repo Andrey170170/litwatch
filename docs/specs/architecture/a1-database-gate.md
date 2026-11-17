@@ -86,8 +86,8 @@ effective grade, rarity, the passes a paper wants. What changes is how its input
   all the papers in the unit;
 - each paper settled once per unit, however many changed topics reach it.
 
-Inputs the rule depends on, such as whether automatic Deep reads are on (`word.automatic_deep` today), are passed to
-it rather than read from a module global. Moving the rule into set-based SQL is not part of A1. If the measurement
+Inputs the rule depends on, such as whether automatic Deep reads are on, are passed to it as `word.Rules`, which a
+boundary reads from its configuration (`word.rules(config)`), rather than read from a module global. Moving the rule into set-based SQL is not part of A1. If the measurement
 shows batched reads are not enough, the rule can move into SQL then.
 
 ## Folded in

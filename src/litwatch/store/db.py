@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from importlib import resources
 from typing import Any
 
@@ -11,6 +13,8 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
+
+from litwatch.gates.database import ReadUnit
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +40,18 @@ async def connect(
     if schema:
         await conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
     return conn
+
+
+@asynccontextmanager
+async def transaction(conn: psycopg.AsyncConnection | ReadUnit) -> AsyncIterator[None]:
+    """A transaction of its own for a Repository's writes that belong together, on a raw
+    connection; nothing on a unit, which is one transaction already. Transitional, while a
+    Repository is reached both ways: it goes with the raw connections (A1's P6)."""
+    if isinstance(conn, ReadUnit):
+        yield
+        return
+    async with conn.transaction():
+        yield
 
 
 async def sibling(conn: psycopg.AsyncConnection) -> psycopg.AsyncConnection[dict[str, Any]]:

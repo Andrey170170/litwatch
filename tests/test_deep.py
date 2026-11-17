@@ -52,6 +52,7 @@ from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
+from tests import settling
 from tests.conftest import (
     AGENTS,
     BLUE,
@@ -122,7 +123,7 @@ async def grade(conn, fit: Fit, pid: str = P.id) -> None:
             opinions={},
         ),
     )
-    await word.settle(conn, pid, cause=Cause.VERDICT)
+    await settling.settle(conn, pid, cause=Cause.VERDICT)
 
 
 async def deep_rows(conn, pid: str = P.id) -> list[dict]:
@@ -139,7 +140,13 @@ async def attempts(conn) -> list[dict]:
 
 
 async def work(conn, fake: FakeArchive, d: Deep, **kw):
-    return await deep_passes.work(conn, archive(fake), d, **kw)
+    return await deep_passes.work(conn, archive(fake), d, rules=settling.RULES, **kw)
+
+
+async def ask(conn, paper_id: str) -> int | None:
+    """The owner asks for the paper's Deep card (`deep.request`), in a change of the paper."""
+    async with settling.change(conn, paper_id, cause=Cause.OWNER) as change:
+        return await deep_passes.request(change.unit, paper_id)
 
 
 async def unpause(conn) -> None:
@@ -184,33 +191,34 @@ async def test_a_saved_focus_must_read_gets_one_deep_pass_and_unsave_or_a_pause_
     await grade(db, Fit.CENTRAL)  # must read, and so saved
     (row,) = await deep_rows(db)
     assert (row["reason"], row["state"], row["priority"]) == ("focus", "awaiting_text", 1)
-    await word.settle(db, P.id, cause=Cause.VERDICT)
+    await settling.settle(db, P.id, cause=Cause.VERDICT)
     assert len(await deep_rows(db)) == 1  # one open per paper
 
-    await word.toggle(db, P.id, Hand.UNSAVE)
+    await settling.toggle(db, P.id, Hand.UNSAVE)
     assert await deep_rows(db) == []  # not started: cancelled
-    await word.toggle(db, P.id, Hand.SAVE)
+    await settling.toggle(db, P.id, Hand.SAVE)
     assert len(await deep_rows(db)) == 1
 
     tree = await taxonomy_store.load(db)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)
-    await word.save_taxonomy(db, tree.following(faith.model_copy(update={"status": Status.PAUSED})))
+    await settling.save_taxonomy(
+        db, tree.following(faith.model_copy(update={"status": Status.PAUSED}))
+    )
     assert await deep_rows(db) == []
 
 
-async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_queued_is_dropped(
-    db, monkeypatch
-):
+async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_queued_is_dropped(db):
     await grade(db, Fit.CENTRAL)
     (queued,) = await deep_rows(db)
-    request = await deep_passes.request(db, Q.id)
-    monkeypatch.setattr(word, "automatic_deep", False)
-    await word.settle(db, P.id, cause=Cause.VERDICT)
-    await word.settle(db, Q.id, cause=Cause.VERDICT)
+    request = await ask(db, Q.id)
+    off = settling.OFF
+    await settling.settle(db, P.id, cause=Cause.VERDICT, rules=off)
+    await settling.settle(db, Q.id, cause=Cause.VERDICT, rules=off)
     assert await deep_rows(db) == []  # the automatic one, not started, is dropped
     assert [r["id"] for r in await deep_rows(db, Q.id)] == [request]  # the owner's stays
-    await word.toggle(db, P.id, Hand.UNSAVE)
-    await word.toggle(db, P.id, Hand.SAVE)
+    for hand in (Hand.UNSAVE, Hand.SAVE):
+        async with settling.change(db, P.id, cause=Cause.OWNER, rules=off) as change:
+            await word.toggle(change.unit, P.id, hand)
     assert await deep_rows(db) == [] and queued["reason"] == "focus"
 
 
@@ -225,20 +233,18 @@ async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_que
         ("[integrations.archive]\n", False),
     ],
 )
-def test_the_cli_turns_automatic_deep_cards_on_only_with_the_deep_integration(
-    tmp_path, monkeypatch, toml, on
-):
-    from litwatch import cli
+def test_automatic_deep_cards_are_on_only_with_the_deep_integration(tmp_path, toml, on):
+    from litwatch import config
 
     path = tmp_path / "litwatch.toml"
     path.write_text(toml)
-    monkeypatch.setattr(word, "automatic_deep", not on)
-    cli._load_config(path)
-    assert word.automatic_deep is on
+    assert settling.configured(config.load(path)) == word.Rules(automatic_deep=on)
 
 
 @pytest.mark.parametrize("command", [["taxonomy", "import"], ["library", "sync"]])
-def test_the_cli_commands_that_settle_load_the_configuration_first(tmp_path, monkeypatch, command):
+def test_the_cli_commands_that_settle_take_their_rules_from_the_configuration(
+    tmp_path, monkeypatch, command
+):
     from typer.testing import CliRunner
 
     from litwatch import cli
@@ -247,32 +253,31 @@ def test_the_cli_commands_that_settle_load_the_configuration_first(tmp_path, mon
     path.write_text('[integrations.deep]\nurl = "http://deep:8081"\n')
     seen = []
     monkeypatch.chdir(tmp_path)  # no checkout `.env` loaded
-    monkeypatch.setattr(word, "automatic_deep", False)
-    monkeypatch.setattr(cli, "_run", lambda *a, **k: seen.append(word.automatic_deep) or {})
+    monkeypatch.setattr(word, "rules", lambda cfg: seen.append(settling.configured(cfg)))
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: {})  # what it prints is not the point
     monkeypatch.setattr(cli, "_taxonomy_file", lambda p: None)  # `_run`, stubbed, never uses it
-    # what the command prints after `_run` is not the point: only what settling saw
     CliRunner().invoke(cli.app, [*command, "--config", str(path)])
-    assert seen == [True]
+    assert seen == [word.Rules(automatic_deep=True)]
 
 
 async def test_the_owners_request_takes_over_an_automatic_pass_and_no_unsave_cancels_it(db):
     await grade(db, Fit.CENTRAL)
     (automatic,) = await deep_rows(db)
-    assert await deep_passes.request(db, P.id) == automatic["id"]
+    assert await ask(db, P.id) == automatic["id"]
     (row,) = await deep_rows(db)
     assert (row["reason"], row["priority"]) == ("request", 0)
-    await word.toggle(db, P.id, Hand.UNSAVE)
+    await settling.toggle(db, P.id, Hand.UNSAVE)
     assert [r["id"] for r in await deep_rows(db)] == [automatic["id"]]
 
     # A paper graded nowhere gets its pass too, and the request is an event.
-    other = await deep_passes.request(db, Q.id)
+    other = await ask(db, Q.id)
     assert [r["reason"] for r in await deep_rows(db, Q.id)] == ["request"]
     assert await outbox_of(db, events.CARD_REQUESTED) == [
         {"paper": P.id, "pass_id": automatic["id"]},
         {"paper": Q.id, "pass_id": other},
     ]
     await db.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (Q.id,))
-    assert await deep_passes.request(db, Q.id) is None
+    assert await ask(db, Q.id) is None
 
 
 async def test_a_must_read_whose_settle_was_missed_gets_its_pass_on_the_nightly_sweep(db):
@@ -288,7 +293,7 @@ async def test_a_must_read_whose_settle_was_missed_gets_its_pass_on_the_nightly_
         ),
     )  # and no settle
     assert await deep_rows(db) == []
-    await word.settle_all(
+    await settling.settle_all(
         db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK), cause=Cause.VERDICT
     )
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
@@ -310,7 +315,7 @@ async def test_a_missed_settle_is_swept_up_though_the_paper_has_its_brief(db):
             opinions={},
         ),
     )  # and no settle
-    await word.settle_all(
+    await settling.settle_all(
         db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK), cause=Cause.VERDICT
     )
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
@@ -325,11 +330,11 @@ async def test_a_missed_settle_of_an_unsure_label_is_swept_up(db):
     said = Label(
         paper_id=P.id, topic=FAITH.slug, value=LabelValue.RELATED, origin=LabelOrigin.READER
     )
-    await word.label(db, said)  # relevant: the pass is dropped
+    await settling.label(db, said)  # relevant: the pass is dropped
     assert await deep_rows(db) == []
     unsure = said.model_copy(update={"value": LabelValue.UNSURE})
     await feedback_store.set_label(db, unsure)  # the central verdict counts again; no settle
-    await word.settle_all(
+    await settling.settle_all(
         db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK), cause=Cause.VERDICT
     )
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
@@ -362,7 +367,7 @@ async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db):
     ready = await outbox_of(db, events.CARD_READY)
     assert ready == [{"paper": P.id, "model": "deep-model", "pass_id": row["id"]}]
 
-    await word.settle(db, P.id, cause=Cause.VERDICT)  # a card is remade only on request
+    await settling.settle(db, P.id, cause=Cause.VERDICT)  # a card is remade only on request
     assert len(await deep_rows(db)) == 1
 
 
@@ -391,7 +396,7 @@ async def test_a_requested_card_is_written_for_the_topics_that_graded_the_paper(
     graded only outside the CoT topics gets no CoT extension."""
     if graded:
         await graded(db)
-    await deep_passes.request(db, Q.id)
+    await ask(db, Q.id)
     fake = FakeDeep(DONE)
     assert await work(db, with_text(Q), make(fake)) == {"cards_written": 1}
     (sent,) = fake.requests
@@ -431,7 +436,7 @@ async def test_the_owners_request_tries_a_failed_pass_again(db):
         assert await work(db, with_text(P), d) == {"card_failed": 1}
     (failed,) = await deep_rows(db)
     fake.outcome = DONE
-    assert await deep_passes.request(db, P.id) == failed["id"]
+    assert await ask(db, P.id) == failed["id"]
     assert await work(db, with_text(P), d) == {"cards_written": 1}
 
 
@@ -470,10 +475,10 @@ async def test_each_attempt_keeps_its_own_trace_and_a_job_without_one_keeps_none
     fake.outcome["trace"] = trace("failed")
     assert await work(db, with_text(P), d) == {"card_failed": 1}
     fake.outcome = DONE | {"trace": trace("carded")}
-    await deep_passes.request(db, P.id)
+    await ask(db, P.id)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     fake.answer_submits = (422, "no such extension")  # turned down: its job never ran
-    await deep_passes.request(db, P.id)
+    await ask(db, P.id)
     assert await work(db, with_text(P), d) == {"card_failed": 1}
 
     kept = [a["trace"] for a in await attempts(db)]
@@ -646,14 +651,14 @@ async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_repla
         "figures": [sent_figure("pact_vs_bid", RUST)],
         "reviews": [],
     }
-    await deep_passes.request(db, P.id)
+    await ask(db, P.id)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     assert await figures(db) == {"pact_vs_bid": ("image/webp", RUST)}
     assert [a["reviews"] for a in await attempts(db)] == [REVIEWS, []]
 
     # A Deep card, from a service that writes none yet: no format, no figures, no review ran.
     fake.outcome = DONE
-    await deep_passes.request(db, P.id)
+    await ask(db, P.id)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     assert (await cards.card(db, P.id))["card"] == CARD and await figures(db) == {}
     assert (await attempts(db))[-1]["reviews"] is None
@@ -705,7 +710,7 @@ async def test_a_failed_read_keeps_the_figures_of_the_read_before_it(db):
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     fake.outcome = {"error": "no valid read", "failure": "paper", "stats": USAGE}
     fake.outcome["reviews"] = REVIEWS[:1]
-    await deep_passes.request(db, P.id)
+    await ask(db, P.id)
     assert await work(db, with_text(P), d) == {"card_failed": 1}
     assert (await cards.card(db, P.id))["card"] == READ and len(await figures(db)) == len(FIGURES)
     assert (await attempts(db))[-1]["reviews"] == REVIEWS[:1]  # what ran is kept with the failure
@@ -716,7 +721,7 @@ async def test_a_text_of_unknown_version_is_submitted_as_such(db):
     known version either: the submission says so, and the service takes the latest figures."""
     old = paper("2610.00003", title="A paper of no known version", version=None)
     await papers_store.upsert(db, [old])
-    await deep_passes.request(db, old.id)
+    await ask(db, old.id)
     held = FakeArchive()
     held.texts[old.id] = (None, BODY)
     fake = FakeDeep(DONE)
@@ -765,7 +770,7 @@ async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(d
         # named "pdf" is the read's, never the paper's PDF.
         again = [sent_figure(f["name"], RUST) for f in FIGURES] + [sent_figure("pdf")]
         fake.outcome = WROTE_READ | {"figures": again}
-        await deep_passes.request(db, P.id)
+        await ask(db, P.id)
         assert await work(db, with_text(P), d) == {"cards_written": 1}
         stale = await http.get(f"{base}/methodology_by_step", params={"v": written})
         assert stale.status_code == 404
@@ -1015,7 +1020,7 @@ async def test_a_lost_submission_with_no_job_waits_for_text_and_unsave_as_a_firs
     assert attempt["ended_at"] is not None and attempt["usage"] is None
     (row,) = await deep_rows(db)
     assert row["state"] == "awaiting_text"  # listed on Quality after a week, as any pass
-    await word.toggle(db, P.id, Hand.UNSAVE)  # and an Unsave drops it, as any pass
+    await settling.toggle(db, P.id, Hand.UNSAVE)  # and an Unsave drops it, as any pass
     assert await deep_rows(db) == [] and fake.started == 0
 
 
@@ -1095,7 +1100,7 @@ async def test_a_job_left_by_a_dead_worker_is_followed_not_paid_for_twice(db):
     assert row["state"] == "running"
     # Its lease runs out; meanwhile the paper is unsaved, which a started card ignores.
     await db.execute("UPDATE fulltext_passes SET lease_until = now() - interval '1 second'")
-    await word.toggle(db, P.id, Hand.UNSAVE)
+    await settling.toggle(db, P.id, Hand.UNSAVE)
     fake.hold = False
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     assert len(fake.requests) == 1 and len(await attempts(db)) == 1
@@ -1118,7 +1123,7 @@ async def test_a_failed_poll_lets_the_pass_go_and_its_next_claim_follows_the_job
 
 
 async def test_a_submitted_job_is_followed_past_a_dismissal(db):
-    await deep_passes.request(db, Q.id)
+    await ask(db, Q.id)
     fake = FakeDeep(DONE)
     fake.fail_polls = 1
     d = make(fake)
@@ -1138,7 +1143,7 @@ async def test_a_request_that_takes_over_a_claimed_pass_makes_the_attempt_the_ow
 
     async def read_then_request(archive, c):
         found = await reading(archive, c)
-        await deep_passes.request(db, P.id)  # while the worker reads the text
+        await ask(db, P.id)  # while the worker reads the text
         return found
 
     monkeypatch.setattr(deep_passes, "read", read_then_request)
@@ -1160,10 +1165,10 @@ async def test_a_paper_dismissed_or_unsaved_during_the_read_is_never_submitted(d
         await db.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (P.id,))
 
     async def unsave():
-        await word.toggle(db, P.id, Hand.UNSAVE)
+        await settling.toggle(db, P.id, Hand.UNSAVE)
 
     monkeypatch.setattr(deep_passes, "read", read_then)
-    await deep_passes.request(db, P.id)
+    await ask(db, P.id)
     fake = FakeDeep(DONE)
     meanwhile.append(dismiss)
     assert await work(db, with_text(P), make(fake)) == {"fulltext_dismissed": 1}
@@ -1289,13 +1294,13 @@ async def test_a_card_says_the_revision_it_read_and_is_remade_only_on_request(db
     d = make(fake)
     await work(db, with_text(P), d)
     rewrite = P.model_copy(update={"version": 3, "title": "Entirely different words now"})
-    await word.settle_all(
+    await settling.settle_all(
         db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
     )
     assert [r["state"] for r in await deep_rows(db)] == ["done"]  # nothing new by itself
     assert (await cards.card(db, P.id))["revision"] == 1
 
-    await deep_passes.request(db, P.id)
+    await ask(db, P.id)
     assert await work(db, with_text(rewrite), d) == {"cards_written": 1}
     stored = await cards.card(db, P.id)
     assert (stored["revision"], stored["arxiv_version"]) == (2, 3)
@@ -1361,7 +1366,7 @@ async def test_an_area_pick_gets_its_deep_card_when_its_digest_is_published_and_
     (sent,) = fake.requests
     assert [s["name"] for s in sent["selections"]] == ["Interpretability"]
     assert [a["automatic"] for a in await attempts(db)] == [True]
-    await word.settle(db, P.id, cause=Cause.VERDICT)  # a card already made is not made again
+    await settling.settle(db, P.id, cause=Cause.VERDICT)  # a card already made is not made again
     assert [r["state"] for r in await deep_rows(db)] == ["done"]
 
 
@@ -1404,23 +1409,23 @@ async def test_a_pick_pass_is_judged_again_at_claim_and_spends_nothing_unwanted(
 
 async def test_an_unsave_a_pause_or_a_rewrite_drops_a_pick_pass_not_started(db):
     await picked(db)
-    await word.toggle(db, P.id, Hand.UNSAVE)
+    await settling.toggle(db, P.id, Hand.UNSAVE)
     assert await deep_rows(db) == []
     assert P.id not in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)
-    await word.toggle(db, P.id, Hand.SAVE)  # the owner's Save: the pick wants its card again
+    await settling.toggle(db, P.id, Hand.SAVE)  # the owner's Save: the pick wants its card again
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 
     tree = await taxonomy_store.load(db)
     interp = next(t for t in tree.topics if t.slug == INTERP.slug)
     paused = tree.following(interp.model_copy(update={"status": Status.PAUSED}))
-    await word.save_taxonomy(db, paused)
+    await settling.save_taxonomy(db, paused)
     assert await deep_rows(db) == []
-    await word.save_taxonomy(db, paused.following(interp))
+    await settling.save_taxonomy(db, paused.following(interp))
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 
     # A rewrite: the pick judged text that no longer exists.
     rewrite = P.model_copy(update={"version": 3, "title": "Entirely different words now"})
-    await word.settle_all(
+    await settling.settle_all(
         db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
     )
     assert await deep_rows(db) == []
@@ -1439,7 +1444,7 @@ async def test_a_dismissed_pick_is_never_worked(db):
 async def test_a_pick_pass_once_for_a_focus_must_read_says_it_is_for_the_pick(db):
     await picked(db)
     await db.execute("UPDATE fulltext_passes SET reason = 'focus' WHERE kind = 'deep'")
-    await word.settle(db, P.id, cause=Cause.VERDICT)
+    await settling.settle(db, P.id, cause=Cause.VERDICT)
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 
 
@@ -1537,7 +1542,7 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
         "primary_class, model) VALUES (%s, 1, 'x', 'interpretability', 'm')",
         (Q.id,),
     )
-    await word.settle(db, Q.id, cause=Cause.VERDICT)  # in the collection now, with a rarity
+    await settling.settle(db, Q.id, cause=Cause.VERDICT)  # in the collection now, with a rarity
     _, bare = client(db, [])
     async with bare:
         page = (await bare.get(f"/api/papers/{P.id}")).json()
@@ -1586,9 +1591,11 @@ async def test_the_deep_worker_runs_a_requested_card_as_soon_as_it_is_woken(db):
     d = make(fake)
     wake = asyncio.Event()
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
-    worker = asyncio.create_task(deep_passes.run_forever(dsn, archive(with_text(P)), d, wake))
+    worker = asyncio.create_task(
+        deep_passes.run_forever(dsn, archive(with_text(P)), d, wake, rules=settling.RULES)
+    )
     try:
-        await deep_passes.request(db, P.id)
+        await ask(db, P.id)
         wake.set()
         for _ in range(200):
             if (await cards.card(db, P.id) or {}).get("card"):

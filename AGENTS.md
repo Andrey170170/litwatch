@@ -30,9 +30,12 @@ production since 2026-10-17, in place of release 0.14.
 - Evaluation runs are dry runs: they write to the evaluation tables only, never to verdicts or the outbox.
 - A pipeline step writes its event to the outbox in the same transaction as its data. Integrations react to events
   and are off unless configured.
-- A write that can move a paper is a change (`feedback.word.change`): it takes the locks, taxonomy then papers in
-  id order, checks and writes under them, and settles each paper once before commit. Taxonomy edits keep their own
-  flow, with the taxonomy lock taken exclusively.
+- A write that can move a paper is a change (`feedback.word.change`): a write unit that takes the locks, taxonomy
+  then papers in id order, checks and writes under them, and settles each paper once before commit
+  (`settle_many`). What runs inside takes its unit; a change never opens inside another. A request that may only
+  answer opens the same unit itself and calls `settle_many` when it wrote. Taxonomy edits keep their own flow: a
+  unit with the taxonomy lock taken exclusively, which settles each paper the edit reaches once. Settling takes
+  its `Rules` from the configuration (`word.rules(config)`), never from module state.
 - The Database gate (`gates/database.py`) owns the pool, the units and every advisory lock. A function that takes
   `db` opens its own units; one that takes a unit runs inside it and never commits; units do not nest, and no
   model call runs inside one (tests raise on it, `LITWATCH_STRICT_GATES=1`). Code moves onto the gate stage by

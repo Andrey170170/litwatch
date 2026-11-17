@@ -16,6 +16,8 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Status, Taxonomy, TaxonomyClass, Topic
+from litwatch.gates.database import ReadUnit, WriteUnit
+from litwatch.store.db import transaction
 
 # Advisory lock key on the taxonomy: edits hold it exclusively, readers that need one consistent
 # view (`load`, settles) hold it shared.
@@ -40,14 +42,27 @@ class Saved:
 
 async def lock(conn: psycopg.AsyncConnection) -> None:
     """Hold the taxonomy edit lock to the end of the transaction. It waits for settles in
-    flight, which hold the lock shared (`feedback.word.lock_many`). Every write to classes or
-    topics takes it first."""
+    flight, which hold the lock shared (a change's unit, `feedback.word.change`). Every write to
+    classes or topics takes it first. A unit took it from the gate when it opened, or may not
+    edit."""
+    if isinstance(conn, ReadUnit):
+        if getattr(conn, "taxonomy", None) != "exclusive":
+            raise RuntimeError(f"unit {conn.name!r} edits the taxonomy without its lock")
+        return
     await conn.execute("SELECT pg_advisory_xact_lock(%s)", (TAXONOMY_LOCK,))
 
 
 async def lock_shared(conn: psycopg.AsyncConnection) -> None:
     """Hold the taxonomy lock shared to the end of the transaction: no edit commits until
-    then, so every read sees one version of the tree."""
+    then, so every read sees one version of the tree. A write unit took it from the gate when
+    it opened, shared or exclusively, or may not read the tree; a read unit needs none, since
+    it reads one snapshot."""
+    if isinstance(conn, WriteUnit):
+        if conn.taxonomy is None:
+            raise RuntimeError(f"unit {conn.name!r} reads the taxonomy without its lock")
+        return
+    if isinstance(conn, ReadUnit):
+        return
     await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (TAXONOMY_LOCK,))
 
 
@@ -89,7 +104,7 @@ async def topics(conn: psycopg.AsyncConnection, status: Status | None = None) ->
 
 async def load(conn: psycopg.AsyncConnection) -> Taxonomy | None:
     """The current taxonomy, None before one is saved."""
-    async with conn.transaction():
+    async with transaction(conn):
         await lock_shared(conn)
         rows = await (
             await conn.execute("SELECT * FROM classes WHERE retired_at IS NULL ORDER BY position")
@@ -135,7 +150,7 @@ async def _add_version(
 async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
     """Store `tree` as the whole taxonomy: classes in its order, topics in its order."""
     saved = Saved()
-    async with conn.transaction():
+    async with transaction(conn):
         await lock(conn)
         before = {
             r["class"]: (r["depth"], r["status"], r["revision"])
@@ -237,7 +252,7 @@ async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
 async def set_order(conn: psycopg.AsyncConnection, slugs: list[str]) -> None:
     """The owner's order of the topics. `slugs` must name every followed topic exactly once;
     ValueError otherwise. The order is not part of a topic's version."""
-    async with conn.transaction():
+    async with transaction(conn):
         await lock(conn)
         rows = await (await conn.execute("SELECT class FROM topics")).fetchall()
         if sorted(slugs) != sorted(r["class"] for r in rows):

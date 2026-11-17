@@ -10,7 +10,6 @@ import pytest
 from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Hand, Publication
-from litwatch.feedback import word
 from litwatch.jobs import publications as lookups
 from litwatch.jobs.lock import BusyError, job_lock
 from litwatch.publications import SourceError, dblp
@@ -18,6 +17,7 @@ from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
 from litwatch.store import sibling as store_sibling
+from tests import settling
 from tests.conftest import paper
 
 TOKEN = "s3cret"
@@ -157,7 +157,7 @@ class Source:
 async def db(conn):
     await papers_store.upsert(conn, [P, Q])
     for p in (P, Q):
-        await word.toggle(conn, p.id, Hand.SAVE)
+        await settling.toggle(conn, p.id, Hand.SAVE)
     return conn
 
 

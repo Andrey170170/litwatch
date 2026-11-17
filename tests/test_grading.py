@@ -12,9 +12,9 @@ from litwatch import grading, intake, store
 from litwatch.api import create_app
 from litwatch.archive import ArchiveClient, ArchiveError
 from litwatch.archive.client import listed
-from litwatch.core import FAILED_RUNS, Fit, Status
+from litwatch.core import FAILED_RUNS, Cause, Fit, Status
 from litwatch.core.grading import FIT_DEFINITIONS
-from litwatch.feedback import misses, word
+from litwatch.feedback import word
 from litwatch.intake import atom, oai
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly
@@ -25,6 +25,7 @@ from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
+from tests import settling
 from tests.conftest import FAITH, INTERP, TREE
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
@@ -181,7 +182,7 @@ async def test_a_topic_followed_later_grades_nothing_until_a_rerun_but_a_miss_do
     )  # now under a followed topic, as if a class had moved
     await night(conn, models)
     assert await verdicts(conn, A.id) == []
-    await misses.report(conn, A.id, INTERP.slug, Fit.RELATED)
+    await settling.report_miss(conn, A.id, INTERP.slug, Fit.RELATED)
     await night(conn, models)
     assert [v["topic"] for v in await verdicts(conn, A.id)] == [INTERP.slug]
     assert await verdicts_store.candidates(conn, FAILED_RUNS) == []  # the miss is done
@@ -319,7 +320,7 @@ def paused(slug: str = FAITH.slug):
 
 async def test_a_paused_topic_is_not_graded_now_nor_waits_for_the_owner(conn, models):
     await stuck(conn, models)
-    await word.save_taxonomy(conn, paused())
+    await settling.save_taxonomy(conn, paused())
     async with api(conn, models) as client:
         assert (await client.post(NOW, json={"revision": 1})).status_code == 409
         status = (await client.get("/api/summary")).json()["status"]
@@ -334,7 +335,7 @@ async def test_a_failure_on_a_paused_topic_does_not_wait_for_the_owner(conn, mod
     await stuck(conn, models)
     paper = await papers_store.get(conn, B.id)
     assert await failures.waiting(conn, paper, "grading", FAILED_RUNS, FAITH.slug)
-    await word.save_taxonomy(conn, paused())
+    await settling.save_taxonomy(conn, paused())
     assert not await failures.waiting(conn, paper, "grading", FAILED_RUNS, FAITH.slug)
 
 
@@ -353,7 +354,7 @@ async def test_grading_now_checks_the_topic_under_the_taxonomy_lock(conn, models
                 )
             ).fetchone()
             if row["got"]:
-                await word.save_taxonomy(other, paused())
+                await settling.save_taxonomy(other, paused())
             landed.append(row["got"])
         return await lock(c, paper_id)
 
@@ -372,15 +373,16 @@ async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(conn,
     ):
         (graded,) = [g async for g in results]
     assert graded.verdict is not None
-    await word.save_taxonomy(conn, paused())  # paused while the graders were asked
-    assert await grading.record(conn, graded) is False
+    await settling.save_taxonomy(conn, paused())  # paused while the graders were asked
+    async with settling.change(conn, B.id, cause=Cause.VERDICT) as change:
+        assert await grading.record(change.unit, graded) is False
     assert await verdicts(conn, B.id) == []
     assert await rows(conn, "SELECT 1 FROM outbox WHERE type = 'verdict.recorded'") == []
 
 
 async def test_a_miss_whose_grading_stopped_is_no_longer_a_candidate(conn, models):
     await night(conn, models)  # A leads to no topic; its pass is done
-    await misses.report(conn, A.id, INTERP.slug, Fit.RELATED)
+    await settling.report_miss(conn, A.id, INTERP.slug, Fit.RELATED)
     models.fits[("judge", A.title)] = fit("very central")
     for _ in range(FAILED_RUNS):
         await night(conn, models)
@@ -442,10 +444,10 @@ async def test_a_rewrite_settles_with_its_page_when_a_later_page_fails(conn, mod
 
 
 async def test_a_rewrite_whose_settle_fails_is_not_stored(conn, models, monkeypatch):
-    async def failing(conn, paper_id, **kwargs):
+    async def failing(unit, paper_ids, **kwargs):
         raise RuntimeError("settle failed")
 
-    monkeypatch.setattr(word, "settle", failing)
+    monkeypatch.setattr(word, "settle_many", failing)
     fake = FakeArchive()
     fake.listing = [B_REWRITTEN]
     client = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
@@ -464,7 +466,9 @@ async def test_a_rewrite_harvested_from_arxiv_settles_as_it_is_stored(conn, mode
     monkeypatch.setattr(atom, "fetch_category", unavailable)
     monkeypatch.setattr(oai, "fetch_category", lambda *a, **k: oai.OaiBatch([rewrite], now))
     run_id = await runs.start(conn, "intake")
-    result = await intake.collect(conn, ("cs.CL",), now - timedelta(days=3), run_id)
+    result = await intake.collect(
+        conn, ("cs.CL",), now - timedelta(days=3), run_id, rules=settling.RULES
+    )
     assert result.rewritten == [B.id]
     await assert_settled_on_solid(conn)
 

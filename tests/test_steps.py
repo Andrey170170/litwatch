@@ -16,7 +16,7 @@ from litwatch.analysis import Output
 from litwatch.api import create_app
 from litwatch.api import settings as settings_api
 from litwatch.config import Classification, Config, Models, RoleConfig
-from litwatch.core import FAILED_RUNS, Paper
+from litwatch.core import FAILED_RUNS, Cause, Paper
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run, run_record
 from litwatch.llm import Gateway, ProviderError, Reply, Stop, Usage
@@ -25,6 +25,7 @@ from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
+from tests import settling
 from tests.conftest import TREE, paper
 from tests.fakes import ScriptedProvider
 
@@ -377,7 +378,8 @@ async def test_a_result_for_text_that_changed_meanwhile_records_nothing(conn, mo
         (found,) = [c async for c in results]
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
     await papers_store.upsert(conn, [rewritten])
-    assert not await classification.record(conn, found)
+    async with settling.change(conn, A.id, cause=Cause.VERDICT) as change:
+        assert not await classification.record(change.unit, found)
     assert await rows(conn, "SELECT 1 FROM classifications") == []
     assert await rows(conn, "SELECT 1 FROM outbox WHERE type = 'paper.classified'") == []
 
@@ -590,7 +592,7 @@ async def test_a_correction_that_cannot_settle_is_not_kept(client, conn, monkeyp
     async def broken(*_, **__):
         raise RuntimeError("settle failed")
 
-    monkeypatch.setattr(settings_api.word, "settle", broken)
+    monkeypatch.setattr(settings_api.word, "settle_many", broken)
     url = f"/api/settings/classification/{A.id}/correction"
     with pytest.raises(RuntimeError):
         await client.post(url, json=AT_1 | {"title": "Probes, fixed"})

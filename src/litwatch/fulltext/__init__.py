@@ -1,9 +1,9 @@
-"""The full-text queue (docs/specs/v1/pipeline.md, section 6). `feedback.word.settle` queues a
-paper's Brief or Weight re-check; here passes are worked. A pass reads the paper's text from the
+"""The full-text queue (docs/specs/v1/pipeline.md, section 6). A settle (`feedback.word`) queues
+a paper's Brief or Weight re-check; here passes are worked. A pass reads the paper's text from the
 archive, asked for at urgent priority. While the archive is still fetching it, the pass is
 awaiting text and is tried again on the worker's next tick, so it runs once the text is there.
 With the text, the `brief` role writes the Brief, a Gist and the Weight from the full text, which
-`record` stores and settles. Both kinds of pass make that one call.
+`record_in_change` stores and settles. Both kinds of pass make that one call.
 
 Before anything is spent on a claimed pass, its paper is settled (`still_wanted`), so a pass
 the database no longer wants is dropped unread, whatever trigger missed it. A pass is held by
@@ -41,6 +41,7 @@ from litwatch.core import Cause
 from litwatch.core.fulltext import LEASE, PassKind, TextRead
 from litwatch.feedback import word
 from litwatch.fulltext import brief
+from litwatch.gates.database import DatabaseGate, WriteUnit
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
@@ -138,51 +139,60 @@ def _read_of(text: PaperText | None) -> TextRead | None:
     return TextRead(text.version, text.source, text.sha256) if text else None
 
 
-async def record(conn: psycopg.AsyncConnection, a: Attempt) -> bool:
-    """Store one try's outcome. With an answer: the Brief, the Weight and the Gist from the full
-    text, labelled with the revision the pass was queued for, with `brief.written` and, when
-    that revision is still the paper's, `gist.written`. Without: the pass fails or waits for its
-    text, as one for a dropped paper does whatever it got. Then settle the paper: its grades
-    follow the Weight, its next pass may be queued (section 8), and a pass back in the queue
-    that is no longer wanted (a topic paused while it ran) is dropped. A pass a re-run's
-    ceiling stopped goes back unworked. Returns False when the worker no longer held the
-    pass."""
+async def record_in_change(db: DatabaseGate, a: Attempt, rules: word.Rules) -> bool:
+    """Store one try's outcome (`record`) as a change of the paper, which settles it: its
+    grades follow the Weight, its next pass may be queued (section 8), and a pass back in the
+    queue that is no longer wanted (a topic paused while it ran) is dropped. Returns False when
+    the worker no longer held the pass."""
     c = a.claimed
-    async with word.change(conn, c.paper.id, cause=Cause.VERDICT, job=c.job):
-        if not await store_.held(conn, c):
-            return False
-        read = _read_of(a.text)
-        if a.retry_asked:
-            await store_.retry_asked(conn, c)
-        if a.waiting or await papers_store.dropped(conn, c.paper.id):
-            a.waiting = True  # a dropped paper's pass writes nothing; `claim` leaves it alone
-            await store_.awaiting(conn, c, a.error)
-        elif a.stopped:
-            await store_.wait_again(conn, c, a.error or "stopped at the ceiling")
-        elif a.output is None or a.model is None or read is None:
-            error = a.error or "no answer"
-            await store_.failed(
-                conn,
-                c,
-                error,
-                counts=a.counts,
-                text=read,
-                unusable=a.unusable,
-                refused=a.refused,
-            )
-        else:
-            await _add(conn, c, a, read)
+    async with word.change(
+        db, c.paper.id, cause=Cause.VERDICT, rules=rules, job=c.job, name="record text pass"
+    ) as done:
+        return await record(done.unit, a)
+
+
+async def record(unit: WriteUnit, a: Attempt) -> bool:
+    """Store one try's outcome, in the unit of a change of the paper. With an answer: the Brief,
+    the Weight and the Gist from the full text, labelled with the revision the pass was queued
+    for, with `brief.written` and, when that revision is still the paper's, `gist.written`.
+    Without: the pass fails or waits for its text, as one for a dropped paper does whatever it
+    got. A pass a re-run's ceiling stopped goes back unworked. Returns False when the worker no
+    longer held the pass."""
+    c = a.claimed
+    if not await store_.held(unit, c):
+        return False
+    read = _read_of(a.text)
+    if a.retry_asked:
+        await store_.retry_asked(unit, c)
+    if a.waiting or await papers_store.dropped(unit, c.paper.id):
+        a.waiting = True  # a dropped paper's pass writes nothing; `claim` leaves it alone
+        await store_.awaiting(unit, c, a.error)
+    elif a.stopped:
+        await store_.wait_again(unit, c, a.error or "stopped at the ceiling")
+    elif a.output is None or a.model is None or read is None:
+        error = a.error or "no answer"
+        await store_.failed(
+            unit,
+            c,
+            error,
+            counts=a.counts,
+            text=read,
+            unusable=a.unusable,
+            refused=a.refused,
+        )
+    else:
+        await _add(unit, c, a, read)
     return True
 
 
-async def _add(conn: psycopg.AsyncConnection, c: Claimed, a: Attempt, read: TextRead) -> None:
+async def _add(unit: WriteUnit, c: Claimed, a: Attempt, read: TextRead) -> None:
     """The Brief, the Weight and the Gist from the full text, with their events."""
     assert a.output is not None and a.model is not None
     queued_for = c.paper.model_copy(update={"revision": c.revision})
-    current = await papers_store.still_current(conn, queued_for)
+    current = await papers_store.still_current(unit, queued_for)
     out = a.output
     written = await store_.add(
-        conn,
+        unit,
         c,
         read,
         brief=out.brief,
@@ -193,7 +203,7 @@ async def _add(conn: psycopg.AsyncConnection, c: Claimed, a: Attempt, read: Text
         model=a.model,
     )
     await events.emit(
-        conn,
+        unit,
         events.BRIEF_WRITTEN,
         c.paper.id,
         revision=c.revision,
@@ -203,7 +213,7 @@ async def _add(conn: psycopg.AsyncConnection, c: Claimed, a: Attempt, read: Text
     # A Gist from an older revision's full text is never current (section 8).
     if current:
         await events.emit(
-            conn,
+            unit,
             events.GIST_WRITTEN,
             c.paper.id,
             revision=c.revision,
@@ -212,33 +222,38 @@ async def _add(conn: psycopg.AsyncConnection, c: Claimed, a: Attempt, read: Text
         )
 
 
-async def still_wanted(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
+async def still_wanted(db: DatabaseGate, c: Claimed, rules: word.Rules) -> str | None:
     """Settle the paper of a claimed pass before anything is spent on it, under its lock, as
-    `word.settle` judges the database now, whatever trigger was missed: None when the pass
+    a settle judges the database now, whatever trigger was missed: None when the pass
     still runs as claimed; else why not. One no longer wanted is dropped; one wanted for
     another reason is relabelled and given back, to run on its next claim; one for a paper
     dropped since its claim is given back, left for the owner's word as `record` leaves it."""
-    async with word.change(conn, c.paper.id, cause=Cause.VERDICT, job=c.job):
-        return await judged(conn, c)
+    async with word.change(
+        db, c.paper.id, cause=Cause.VERDICT, rules=rules, job=c.job, name="judge claimed pass"
+    ) as done:
+        return await judged(done.unit, c, rules)
 
 
-async def judged(conn: psycopg.AsyncConnection, c: Claimed) -> str | None:
-    """`still_wanted`'s judgement, inside a change of the paper (`word.change`): the Deep worker
-    makes it again just before it submits, since the archive read can be long. It settles the
-    paper itself, with the pass as claimed, since it reads what that settle decided; the
-    change's own settle then finds the pass running, or given back as judged, and leaves it."""
-    if not await store_.held(conn, c):
+async def judged(unit: WriteUnit, c: Claimed, rules: word.Rules) -> str | None:
+    """`still_wanted`'s judgement, in the unit of a change of the paper (`word.change`): the
+    Deep worker makes it again just before it submits, since the archive read can be long. It
+    settles the paper itself, with the pass as claimed, since it reads what that settle decided;
+    the change's own settle then finds the pass running, or given back as judged, and leaves
+    it."""
+    if not await store_.held(unit, c):
         return "lost"
-    if await papers_store.dropped(conn, c.paper.id):  # `settle` leaves its pass alone
-        await store_.release(conn, c)
+    if await papers_store.dropped(unit, c.paper.id):  # a settle leaves its pass alone
+        await store_.release(unit, c)
         return "fulltext_dismissed"
-    await word.settle(conn, c.paper.id, cause=Cause.VERDICT, claimed=c.id, job=c.job)
-    label = await store_.label_of(conn, c.id)
+    await word.settle_many(
+        unit, [c.paper.id], cause=Cause.VERDICT, rules=rules, claimed=c.id, job=c.job
+    )
+    label = await store_.label_of(unit, c.id)
     if label is None:
         return "fulltext_dropped"
     # A Deep pass the owner asked for meanwhile runs all the same, now as their request.
     if label != (c.kind, c.reason) and c.kind != PassKind.DEEP:
-        await store_.release(conn, c)
+        await store_.release(unit, c)
         return "fulltext_relabelled"
     return None
 
@@ -278,6 +293,7 @@ async def work(
     passes are worked only by its `job`, on its run, until its ceiling is reached."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
+    db, rules = DatabaseGate.over(conn), word.rules(config)
     lease, wide, owners = LEASE, False, False if run and job is None else None
     if run and (until := run.gateway.batching_until()):
         lease, wide = until - datetime.now(UTC) + DRAIN + LEASE, True
@@ -307,7 +323,7 @@ async def work(
         tried.update(c.id for c in claimed)
         wanted = []
         for c in claimed:
-            if (why := await still_wanted(conn, c)) is None:
+            if (why := await still_wanted(db, c, rules)) is None:
                 wanted.append(c)
             elif why != "lost":
                 counts[why] += 1
@@ -315,7 +331,7 @@ async def work(
                     run.add(why)
         attempts = await asyncio.gather(*(read_one(c) for c in wanted))
         for a in attempts:
-            if a.text is None and await record(conn, a):
+            if a.text is None and await record_in_change(db, a, rules):
                 counts[_outcome(a)] += 1
                 if run:
                     run.add(_outcome(a))
@@ -333,7 +349,7 @@ async def work(
             try:
                 async with _write(texts, r.gateway) as answered:
                     async for a in answered:
-                        if await record(conn, a):
+                        if await record_in_change(db, a, rules):
                             counts[_outcome(a)] += 1
                             r.add(_outcome(a))
             finally:

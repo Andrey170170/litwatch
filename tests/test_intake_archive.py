@@ -16,6 +16,7 @@ from litwatch.intake.collect import _state
 from litwatch.integrations.archive import Archive
 from litwatch.jobs import intake as intake_job
 from litwatch.store import papers, runs
+from tests import settling
 from tests.conftest import paper
 from tests.fakes_http import FakeArchive, mock
 
@@ -84,7 +85,9 @@ async def outbox(conn) -> list[tuple[str, str, dict]]:
 async def test_the_source_stores_new_papers_and_applies_revisions(conn):
     fake = FakeArchive()
     fake.listing = [item(1), item(2, abstract=None)]
-    result = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
+    result = await archive_intake.collect(
+        conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+    )
     assert (result.fetched, result.inserted, result.details["skipped"]) == (1, 1, ["2610.00002"])
     stored = await papers.get(conn, "2610.00001")
     assert stored.published == "2026-10-02T00:00:00+00:00" and stored.version == 1
@@ -92,9 +95,13 @@ async def test_the_source_stores_new_papers_and_applies_revisions(conn):
     assert row["metadata_source"] == "archive"
 
     fake.listing = [item(1, version=2, abstract="Rewritten entirely.", updated="2026-10-09")]
-    revised = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
+    revised = await archive_intake.collect(
+        conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+    )
     assert (revised.updated, revised.rewritten) == (1, ["2610.00001"])
-    again = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
+    again = await archive_intake.collect(
+        conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+    )
     assert (again.inserted, again.updated, again.rewritten) == (0, 0, [])
     assert await outbox(conn) == [
         ("paper.added", "2610.00001", {"version": 1, "source": "archive"}),
@@ -118,13 +125,17 @@ async def test_the_archive_never_rolls_back_what_arxiv_sent(conn):
     ]
     for listed in unproven:
         fake.listing = [listed]
-        result = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
+        result = await archive_intake.collect(
+            conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+        )
         assert result.updated == 0, listed
     stored = await papers.get(conn, oai.id)
     assert (stored.abstract, stored.version, stored.updated) == ("Current.", 2, at)
 
     fake.listing = [item(1, version=2, title=oai.title, abstract="Fixed.", updated="2026-10-10")]
-    later = await archive_intake.collect(conn, client(fake), ["cs.CL"], SINCE, UNTIL)
+    later = await archive_intake.collect(
+        conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+    )
     assert later.updated == 1
     stored = await papers.get(conn, oai.id)
     assert (stored.abstract, stored.updated) == ("Fixed.", "2026-10-10T00:00:00+00:00")
