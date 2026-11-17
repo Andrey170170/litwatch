@@ -22,11 +22,14 @@ milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
 
 ### A1. Database gate
 
-Shape, blueprint, drive. Inputs: the measurement of where work waits (2026-11-09/10).
+Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architecture/a1-database-gate.md); blueprint
+and drive next. Input: the measurement of where work waits
+([`notes/where-work-waits.md`](notes/where-work-waits.md), 2026-11-09/10).
 
 - **Settling a paper made cheap** (review, project 1): one taxonomy snapshot per transaction, current verdicts only,
   each paper settled once.
-- **The SQL outside `store`** (review, project 4): the 31 places listed in `tests/test_sql_home.py`.
+- **The SQL outside `store`** (review, project 4): the places listed in `tests/test_sql_home.py` (30 calls in 17
+  functions on 2026-11-17).
 - **Tests for `change` with several papers** (review, project 7): overlapping sets in reverse order across two
   connections, rollback when a later paper fails; shared test helpers into support modules.
 - **`/summary` reworked** (review): spend summed once, narrow reads instead of full Settings data; with it:
@@ -36,8 +39,6 @@ Shape, blueprint, drive. Inputs: the measurement of where work waits (2026-11-09
     week) use the browser's date; the summary should carry today's date
     ([`notes/schedule-zone-today.md`](notes/schedule-zone-today.md)).
 - **Calibrate reads each topic's pool once** (review).
-- **Ratings on the generated text:** ✓/✗ on a Gist and a Brief, from Calibrate and from the paper's ladder, stored
-  against the exact text rated (feedback.md, data.md's `text_ratings`). No table, endpoint or control yet.
 - **Smaller read gaps:**
   - unclassified papers listed on Papers, not only counted (the API can return them);
   - code and weights links from the analysis, not only from a Deep card's URL;
@@ -73,6 +74,9 @@ Shape, blueprint, drive.
   (feedback.md). Owner memberships are stored already, but classify-by-hand only accepts papers awaiting
   classification. Placeholder: `web/src/routes/settings/calibrate.tsx`. The paper page's class and text correction
   forms get Needs you's safeguards with it (review, project 8).
+- **Ratings on the generated text:** ✓/✗ on a Gist and a Brief, from Calibrate and from the paper's ladder, stored
+  against the exact text rated (feedback.md, data.md's `text_ratings`). No table, endpoint or control yet;
+  the control needs a UI decision. Moved here from A1 (2026-11-17), beside Calibrate's corrections.
 - **The topic editor says a re-run of its version was not run** ("Version 4 has a re-run not run ›"), an open
   question from the settings sketch.
 
