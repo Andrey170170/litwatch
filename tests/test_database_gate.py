@@ -431,7 +431,7 @@ async def test_a_write_unit_refuses_locks_it_cannot_take(db, named, error):
 
 async def test_a_session_lock_held_by_one_gate_is_busy_for_another(db, conn):
     async with DatabaseGate(conn.test_dsn, conn.test_schema) as other:
-        async with db.held("run"):
+        async with db.held("run") as mine:
             with pytest.raises(BusyError, match="the run lock is held by another session"):
                 async with other.held("run"):
                     pass
@@ -439,7 +439,8 @@ async def test_a_session_lock_held_by_one_gate_is_busy_for_another(db, conn):
                 async with db.held("run"):
                     pass
             assert await other.held_elsewhere("run")
-            assert not await db.held_elsewhere("run")  # its own
+            assert await db.held_elsewhere("run")  # another task of this process holding it counts
+            assert not await db.held_elsewhere("run", mine=mine)  # the holder's own does not
             async with db.read("a unit meanwhile") as unit:  # the lock is not a unit
                 assert (await backend(unit)) not in await holders(conn, RUN)
         assert not await other.held_elsewhere("run")

@@ -151,6 +151,20 @@ never commits.
 - the Fetch and Compute gates: A5;
 - ratings on the generated text: A3.
 
+## Notes for later stages
+
+Found while building, owned by the stage named.
+
+- **P4: the schedule lock is taken twice on one session today.** `jobs/scheduler.py` holds it for the kind, then
+  `jobs/publications.run` takes `job_lock(conn, "publications")` again (`tests/test_publications.py` keeps that).
+  `db.held` takes each hold on its own connection, so the second take would be busy: P4 makes one of them the holder
+  rather than the gate re-entrant.
+- **P4: the run lock's "held elsewhere" needs the caller's own hold.** `db.held_elsewhere("run", mine=…)` leaves out
+  only the hold passed in; another task of the same process holding it counts. The nightly passes its `Hold` to its
+  full-text step, so that step is not restricted by its own nightly.
+- **P4 or P6: the migration lock** is still taken in `store/db.py` (on the advisory-lock list); it moves behind the
+  gate before that list is empty.
+
 ## Evidence
 
 Filled in as stages land.

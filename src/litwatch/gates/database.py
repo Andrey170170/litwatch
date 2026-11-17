@@ -72,6 +72,14 @@ class BusyError(RuntimeError):
     """Another session holds the session lock asked for."""
 
 
+@dataclass(frozen=True)
+class Hold:
+    """A session lock `DatabaseGate.held` took: its name and the backend that holds it."""
+
+    name: str
+    pid: int
+
+
 class BridgeError(RuntimeError):
     """A bridged connection (`DatabaseGate.over`) was already inside a transaction."""
 
@@ -352,7 +360,6 @@ class DatabaseGate:
                 name="litwatch",
             )
         # The backends holding each session lock for this gate, by lock name.
-        self._holders: dict[str, set[int]] = {}
 
     @classmethod
     def over(cls, conn: Connection) -> DatabaseGate:
@@ -448,11 +455,12 @@ class DatabaseGate:
                 yield unit
 
     @asynccontextmanager
-    async def held(self, name: str, key_arg: str | int | None = None) -> AsyncIterator[None]:
+    async def held(self, name: str, key_arg: str | int | None = None) -> AsyncIterator[Hold]:
         """Hold the session lock `name` (one of `HELD_ACROSS_CALLS`) for the block, on a
         connection of its own outside the pool; `key_arg` is what a keyed one is taken for (the
         job kind, the integration). Raises `BusyError` when another session holds it, another
-        `held` of this gate included: the lock is not taken twice."""
+        `held` of this gate included: the lock is not taken twice. Yields the `Hold`, which
+        `held_elsewhere` takes to leave the holder's own hold out."""
         if name not in HELD_ACROSS_CALLS:
             raise ValueError(f"{name!r} is not a session lock held across calls")
         lock = LOCKS[name]
@@ -463,13 +471,9 @@ class DatabaseGate:
             taken = await conn.execute(_statement("pg_try_advisory_lock", lock), params)
             if not (await taken.fetchone())[0]:
                 raise BusyError(f"the {label} lock is held by another session")
-            holders = self._holders.setdefault(name, set())
-            pid = conn.info.backend_pid
-            holders.add(pid)
             try:
-                yield
+                yield Hold(name, conn.info.backend_pid)
             finally:
-                holders.discard(pid)
                 # A connection that ended let the lock go while the block still ran under it.
                 try:
                     freed = await conn.execute(_statement("pg_advisory_unlock", lock), params)
@@ -481,9 +485,10 @@ class DatabaseGate:
         finally:
             await conn.close()
 
-    async def held_elsewhere(self, name: str) -> bool:
-        """Whether a session other than this gate's own `held` holds the session lock `name`:
-        for the run lock, whether a job is running. For the locks without an argument."""
+    async def held_elsewhere(self, name: str, *, mine: Hold | None = None) -> bool:
+        """Whether a session holds the session lock `name`, other than the caller's own `mine`:
+        for the run lock, whether a job is running. Another task's hold in this process counts.
+        For the locks without an argument."""
         lock = LOCKS[name]
         if name not in HELD_ACROSS_CALLS or lock.arg is not None:
             raise ValueError(f"{name!r} is not a session lock without an argument")
@@ -492,9 +497,11 @@ class DatabaseGate:
             "SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_database d ON d.oid = l.database "
             "WHERE d.datname = current_database() AND l.locktype = 'advisory' AND l.granted "
             "AND l.classid = 0 AND l.objid = %s AND l.objsubid = 1 "
-            "AND l.pid <> ALL(%s::int[])) AS held"
+            "AND l.pid IS DISTINCT FROM %s) AS held"
         )
-        params = (lock.key, sorted(self._holders.get(name, ())))
+        if mine is not None and mine.name != name:
+            raise ValueError(f"the hold given is {mine.name!r}'s, not {name!r}'s")
+        params = (lock.key, mine.pid if mine else None)
         if self._bridged is not None:  # a plain read: inside a transaction or not
             return (await (await self._bridged.execute(query, params)).fetchone())["held"]
         async with self._connection(f"held_elsewhere {name}") as conn:
