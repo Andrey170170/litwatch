@@ -4,6 +4,7 @@ lease, revisions, and what the owner sees of it."""
 
 import asyncio
 import json
+from collections import Counter
 
 import httpx
 import pytest
@@ -36,6 +37,7 @@ from litwatch.core.fulltext import (
     to_relabel,
     wanted,
 )
+from litwatch.feedback import word
 from litwatch.fulltext import brief, trim
 from litwatch.gates.database import DatabaseGate
 from litwatch.jobs import nightly
@@ -593,6 +595,27 @@ async def test_a_pass_wanted_for_another_reason_at_claim_runs_on_its_next_claim(
     (row,) = await passes(db)
     assert (row["kind"], row["reason"], row["state"]) == ("weight", "area", "awaiting_text")
     assert await work(db, fake, writer) == {"briefs_written": 1}
+
+
+async def test_a_claimed_pass_settles_its_paper_once_in_each_unit(db, monkeypatch):
+    # The claim's judgement settles the paper itself, and its change leaves it settled.
+    await graded(db, "central")
+    settles: Counter[tuple[int, str]] = Counter()
+    units: list[object] = []  # kept alive, so no two units share an id
+    names: set[str] = set()
+    settle_many = word.settle_many
+
+    async def counted(unit, paper_ids, **kwargs):
+        ids = sorted(set(paper_ids))
+        units.append(unit)
+        settles.update((id(unit), paper_id) for paper_id in ids)
+        names.update(unit.name for _ in ids)
+        return await settle_many(unit, ids, **kwargs)
+
+    monkeypatch.setattr(word, "settle_many", counted)
+    assert await work(db, ready(FakeArchive()), Writer()) == {"briefs_written": 1}
+    assert "judge claimed pass" in names
+    assert max(settles.values()) == 1
 
 
 async def test_a_paper_dismissed_after_its_pass_is_claimed_spends_nothing(db, monkeypatch):

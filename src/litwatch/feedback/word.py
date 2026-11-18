@@ -105,8 +105,9 @@ class Settled:
 @dataclass
 class Change:
     """A change to some papers (`change`): its write unit, which the block's reads and writes
-    run in; the papers it locked, in id order; and what settling them did, filled when the
-    change exits."""
+    run in; the papers it locked, in id order; and what settling them did, by paper. A block
+    that settles a paper itself, after its last write that settling reads, records it here,
+    and the change leaves it; the change fills in the rest when it exits."""
 
     unit: WriteUnit
     paper_ids: tuple[str, ...]
@@ -124,7 +125,8 @@ async def change(
 ) -> AsyncIterator[Change]:
     """Change the papers in one write unit, `name`'s: the taxonomy lock, shared, and the papers'
     locks in id order as it opens, then the block's checks and writes, then a settle of each
-    paper once, in id order, before commit, for `cause` (`settle_many`). The block may return
+    paper once, in id order, before commit, for `cause` (`settle_many`), but for those the
+    block settled itself (`Change.settled`). The block may return
     early with nothing to record: the papers are settled all the same, which changes nothing
     then. An exception rolls the change back, unsettled.
 
@@ -135,7 +137,8 @@ async def change(
     async with db.write(name, taxonomy="shared", papers=ids) as unit:
         current = Change(unit, ids)
         yield current
-        current.settled = await settle_many(unit, ids, cause=cause, rules=rules, job=job)
+        rest = [i for i in ids if i not in current.settled]
+        current.settled |= await settle_many(unit, rest, cause=cause, rules=rules, job=job)
 
 
 def _value(e: Effective | None) -> dict[str, str | None]:
@@ -205,9 +208,9 @@ async def settle_many(
         return {}
     if unit.taxonomy != "exclusive" and (unlocked := sorted(set(ids) - unit.papers)):
         raise RuntimeError(f"unit {unit.name!r} settles papers it did not lock: {unlocked[:5]}")
-    # Followed topics in the owner's order; a draft topic is not used.
-    topics = {t.slug: t for t in await taxonomy_store.topics(unit) if t.status != Status.DRAFT}
     tree = await taxonomy_store.load(unit)
+    # Followed topics in the owner's order; a draft topic is not used.
+    topics = {t.slug: t for t in (tree.topics if tree else []) if t.status != Status.DRAFT}
     settled: dict[str, Settled] = {}
     for start in range(0, len(ids), CHUNK):
         chunk = ids[start : start + CHUNK]

@@ -231,21 +231,22 @@ async def still_wanted(db: DatabaseGate, c: Claimed, rules: word.Rules) -> str |
     async with word.change(
         db, c.paper.id, cause=Cause.VERDICT, rules=rules, job=c.job, name="judge claimed pass"
     ) as done:
-        return await judged(done.unit, c, rules)
+        return await judged(done, c, rules)
 
 
-async def judged(unit: WriteUnit, c: Claimed, rules: word.Rules) -> str | None:
-    """`still_wanted`'s judgement, in the unit of a change of the paper (`word.change`): the
-    Deep worker makes it again just before it submits, since the archive read can be long. It
-    settles the paper itself, with the pass as claimed, since it reads what that settle decided;
-    the change's own settle then finds the pass running, or given back as judged, and leaves
-    it."""
+async def judged(done: word.Change, c: Claimed, rules: word.Rules) -> str | None:
+    """`still_wanted`'s judgement, in a change of the paper (`word.change`): the Deep worker
+    makes it again just before it submits, since the archive read can be long. It settles the
+    paper itself, with the pass as claimed, since it reads what that settle decided, and the
+    change leaves it settled: what the block writes after it (a pass given back, or submitted)
+    is no input a settle reads anew. A pass lost or dismissed is left to the change's settle."""
+    unit = done.unit
     if not await store_.held(unit, c):
         return "lost"
     if await papers_store.dropped(unit, c.paper.id):  # a settle leaves its pass alone
         await store_.release(unit, c)
         return "fulltext_dismissed"
-    await word.settle_many(
+    done.settled |= await word.settle_many(
         unit, [c.paper.id], cause=Cause.VERDICT, rules=rules, claimed=c.id, job=c.job
     )
     label = await store_.label_of(unit, c.id)

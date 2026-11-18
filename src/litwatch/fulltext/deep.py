@@ -178,7 +178,7 @@ async def _work_one(
             # request may have taken the pass over since its claim, and then the submission and
             # its attempt are theirs.
             unit = done.unit
-            if why := await judged(unit, c, rules):
+            if why := await judged(done, c, rules):
                 return why
             reason = await store_.submitted(unit, c, text)
             if reason is None:

@@ -139,16 +139,8 @@ async def deep_facts_of(
         open_pass = (
             DeepPass(row["id"], row["reason"], PassState(row["state"])) if row["id"] else None
         )
-        # A paper has one open Deep pass: the first row is its only one.
-        found.setdefault(
-            row["paper_id"],
-            DeepFacts(
-                row["revision"],
-                row["dropped"],
-                open_pass,
-                row["has_card"],
-                frozenset(row["picked_by"]),
-            ),
+        found[row["paper_id"]] = DeepFacts(
+            row["revision"], row["dropped"], open_pass, row["has_card"], frozenset(row["picked_by"])
         )
     return found
 

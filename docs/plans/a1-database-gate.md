@@ -192,3 +192,11 @@ Found while building, owned by the stage named.
 ## Evidence
 
 Filled in as stages land.
+
+- **P2** (V3, V4), on a copy of production taken 2026-11-17 (22,549 papers), restored before each run:
+  - V3: `litwatch library sync` at the base (7965b778) and at P2 both settle 22,526 papers with 0 grades changed,
+    0 saved and 0 unsaved. Effective grades, rarities, library, full-text passes, jobs and outbox counts dumped
+    after each run are identical. The sync took about 2m51s at the base and 11.8 s at P2.
+  - V4: the Field is `language-models`, which `settle_topic` finds 8,547 papers for today (6,777 was the count in
+    the wait note). Its `settle_topic`, under the exclusive taxonomy lock and rolled back, went from 162,275
+    statements and 69.7–70.5 s at the base to 203 statements and 3.3–3.5 s at P2, over three runs each.
