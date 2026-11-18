@@ -246,3 +246,7 @@ Filled in as stages land.
   traceback, no `gate nesting:` line and no slow unit; its only warnings are four model refusals. Every `/status`
   component is healthy. Blocked locks were not sampled during this run (`log_lock_waits` is off); Postgres counts
   no deadlock since 2026-10-22. From P3 on, a read-only `pg_locks` sampler watches each checked night.
+- **P4, sandbox nightly (intermediate evidence):** a sandbox built from the archive's papers of 2026-11-17 (319) with
+  production's taxonomy, no integrations but the archive, `LITWATCH_STRICT_GATES=1`, `litwatch nightly --no-fetch
+  --limit 25`: exit 0 in 54 s, $0.08; 25 classified, 25 analysed, 23 graded, 4 full-text passes reconciled, 1 digest
+  written and 4 with nothing new. The log has no warning, error, `gate nesting`, slow unit or pool timeout.
