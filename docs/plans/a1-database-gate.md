@@ -173,8 +173,11 @@ Found while building, owned by the stage named.
   `fulltext.deep._work`, which the Deep loop shares, and goes with it in P4. `feedback.calibrate.answer`,
   `intake.batch.store`, `word.sync` and `word.settle_all` take `db` already.
 - **P4 to P6: `db.lend(name)`, P3's transitional means.** An entry calling a Service that still takes a raw
-  connection borrows a pool connection, in autocommit and outside any unit; the gate refuses to lend while a unit is
-  open on the task, as it refuses a unit. It goes in P6, when nothing is left to lend to. Each place, with the stage
+  connection borrows one outside any unit: a connection of its own, as `held`'s are, opened for the loan and closed
+  at its end, in autocommit and outside the pool, so a loan held across a network call (arXiv's waits, up to 45 s)
+  or one whose Service opens units of its own (`grade_now`) takes no pool slot. The gate refuses to lend while a
+  unit is open on the task, as it refuses a unit. It goes in P6, when nothing is left to lend to. Each place, with
+  the stage
   whose Service move takes it away:
   - P4: `api/reading.py` `set_publication` and `bibtex_selection` (`jobs.publications`); `api/settings.py`
     `grade_now` (`jobs.context.model_run`, its run record and journal); `api/jobs.py` `replay_offer` and
@@ -191,8 +194,10 @@ Found while building, owned by the stage named.
   `feedback.calibrate.sessions`, `session`, `precision` and `matters_no_topic` (P5), and `jobs.reruns.scope_papers`,
   `per_paper` and `unpriced` (P4). The stage that moves each types it.
 - **P4: the app's loops still take `app.state.dsn`** and open their own connections; the routes, MCP and the
-  monitor use `app.state.db`, which the app's lifespan opens first and closes last (a pool of at most 10). Tests that
-  call the app without its lifespan open its gate through `tests.conftest.AppClient`.
+  monitor use `app.state.db` (a pool of at most 10). `serve` opens one gate for the process before it migrates,
+  gives it to the app and so to the monitor, and closes it after both servers return; an app given no gate opens
+  its own in its lifespan, first, and closes it last. Tests that call the app without its lifespan open its gate
+  through `tests.conftest.AppClient`.
 - **P5: two SQL calls are left in the entries** (`tests/test_sql_home.py`): `api/integrations.py`
   `search_outside`'s look-up of the papers held, and `api/reading.py` `_bibtex`'s read of their citations. Both
   run in read units now.

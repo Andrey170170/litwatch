@@ -66,16 +66,22 @@ Since = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The first d
 Until = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The last day.")]
 
 
-def _run[T](work: Callable[[DatabaseGate], Awaitable[T]], *, migrate: bool = True) -> T:
+def _run[T](
+    work: Callable[[DatabaseGate], Awaitable[T]],
+    *,
+    migrate: bool = True,
+    db: DatabaseGate | None = None,
+) -> T:
     """Run `work` with the command's Database gate, the process's one, on the configured
-    database, migrated first."""
+    database, migrated first: `db` when the command built it already (unopened), else a new
+    one. The gate is open for the run and closed at its end."""
     logs.setup()
 
     async def main() -> T:
-        async with DatabaseGate(configuration.database_url()) as db:
+        async with db or DatabaseGate(configuration.database_url()) as gate:
             if migrate:
-                await _migrate(db)
-            return await work(db)
+                await _migrate(gate)
+            return await work(gate)
 
     try:
         return asyncio.run(main())
@@ -921,9 +927,11 @@ def serve(
         loaded = integrations.load(cfg)
     except integrations.IntegrationError as exc:
         raise SystemExit(str(exc)) from exc
-    _run(_migrate, migrate=False)  # the app opens a gate of its own, after this one closed
     from litwatch import fulltext  # noqa: PLC0415
 
+    # The process's one gate: migrations, then the app and the monitor beside it, which read
+    # it until both servers have returned. The app does not open or close a gate it is given.
+    db = DatabaseGate(configuration.database_url())
     try:
         app_ = create_app(
             configuration.database_url(),
@@ -933,11 +941,15 @@ def serve(
             read_token=configuration.secret("LITWATCH_READ_TOKEN"),
             archive=fulltext.archive_for(cfg),
             mcp_token=configuration.secret("LITWATCH_MCP_TOKEN"),
+            db=db,
         )
     except ValueError as exc:  # the MCP token reuses another
         raise SystemExit(str(exc)) from exc
-    logs.setup()
-    asyncio.run(_serve(app_, host, port, metrics_port))
+
+    async def serving(db: DatabaseGate) -> None:
+        await _serve(app_, host, port, metrics_port)
+
+    _run(serving, db=db)
 
 
 async def _serve(app_: Any, host: str, port: int, metrics_port: int | None) -> None:

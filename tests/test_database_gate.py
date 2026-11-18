@@ -557,16 +557,16 @@ async def test_the_bridge_refuses_a_connection_in_a_transaction(conn, probe):
     assert await count(conn) == 0
 
 
-async def test_a_lent_connection_is_the_pools_in_autocommit_beside_its_units(conn, probe):
+async def test_a_lent_connection_is_its_own_in_autocommit_and_takes_no_pool_slot(conn, probe):
     async with DatabaseGate(conn.test_dsn, conn.test_schema, max_size=1, timeout=0.2) as db:
         async with db.lend("the borrower") as lent:
-            await lent.execute("INSERT INTO probe VALUES (1)")
+            await lent.execute("INSERT INTO probe VALUES (1)")  # in the gate's schema
             assert await count(conn) == 1  # committed as it ran: no unit around it
-            with pytest.raises(PoolTimeoutError, match="'the unit' waited"):
-                async with db.read("the unit"):  # the pool's one connection is lent
-                    pass
-        async with db.write("the unit") as unit:  # back in the pool at the block's end
-            await unit.execute("INSERT INTO probe VALUES (2)")
+            # The pool's one connection is free while the loan is out: a Service on the loan
+            # that opens a unit of its own does not wait for it.
+            async with db.write("the unit") as unit:
+                await unit.execute("INSERT INTO probe VALUES (2)")
+        assert lent.closed  # opened for the loan, closed at its end
     assert await count(conn) == 2
 
 

@@ -20,7 +20,8 @@ own, outside the pool.
 
 While code moves onto the gate (A1's P3 to P6), two things serve what has not moved yet:
 `DatabaseGate.over(conn)`, a gate on one given connection, and `db.lend(name)`, a pool
-connection lent outside any unit to an entry calling a Service that still takes one.
+connection of its own, outside the pool, lent outside any unit to an entry calling a Service
+that still takes one.
 """
 
 from __future__ import annotations
@@ -466,15 +467,28 @@ class DatabaseGate:
 
     @asynccontextmanager
     async def lend(self, name: str) -> AsyncIterator[Connection]:
-        """Transitional, going in A1's P6: a pool connection lent outside any unit to an entry
-        (`name`, for the pool's timeout) calling a Service that still takes a raw connection
-        until P4 or P5 moves it (the plan's notes list each). It is autocommit, as
-        `store.connect`'s are, and back in the pool at the block's end. It refuses while a unit
-        is open on the task, as opening a unit does: work on it would run beside the unit, not
-        in it."""
+        """Transitional, going in A1's P6: a connection lent outside any unit to an entry
+        (`name`) calling a Service that still takes a raw connection until P4 or P5 moves it
+        (the plan's notes list each). Like `held`'s, it is a connection of its own, opened for
+        the loan and closed at its end, outside the pool: a loan held across a network call, or
+        one whose Service opens units of its own, takes no pool slot. It is autocommit, as
+        `store.connect`'s are. It refuses while a unit is open on the task, as opening a unit
+        does: work on it would run beside the unit, not in it. A bridged gate lends its one
+        connection."""
         outside_unit(f"lending a connection for {name!r}")
-        async with self._connection(name) as conn:
+        if self._bridged is not None:
+            _idle(self._bridged)
+            yield self._bridged
+            return
+        conn = await psycopg.AsyncConnection.connect(
+            self._dsn, row_factory=dict_row, autocommit=True
+        )
+        try:
+            if self._schema:
+                await self._configure(conn)
             yield conn
+        finally:
+            await conn.close()
 
     @asynccontextmanager
     async def held(self, name: str, key_arg: str | int | None = None) -> AsyncIterator[Hold]:

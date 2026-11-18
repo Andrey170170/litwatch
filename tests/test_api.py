@@ -27,6 +27,14 @@ async def client(conn):
         yield c
 
 
+async def test_an_app_given_a_gate_leaves_opening_and_closing_it_to_its_giver(db):
+    app = create_app("postgresql://unused", TOKEN, db=db)
+    async with app.router.lifespan_context(app):
+        pass
+    async with db.read("after the app stopped"):  # `serve`'s monitor still reads through it
+        pass
+
+
 AUTH = {"authorization": f"Bearer {TOKEN}"}
 READ = {"authorization": f"Bearer {READ_TOKEN}"}
 

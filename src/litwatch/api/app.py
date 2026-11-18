@@ -36,8 +36,9 @@ WEB = Path(str(resources.files("litwatch.api").joinpath("web")))
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """The app's Database gate, open while it serves: opened before anything starts, closed
-    after everything has stopped."""
-    async with app.state.db, _running(app):
+    after everything has stopped, when the app owns it. A gate given to `create_app` is its
+    giver's to open and close."""
+    async with app.state.db if app.state.owns_db else contextlib.nullcontext(), _running(app):
         yield
 
 
@@ -132,10 +133,12 @@ def create_app(
     read_token: str | None = None,
     archive: ArchiveClient | None = None,
     mcp_token: str | None = None,
+    db: DatabaseGate | None = None,
 ) -> FastAPI:
-    """The app over one database, through one Database gate (`app.state.db`), which its
-    lifespan opens and closes. Every request but the health check and signing in needs
-    the shared token, as a bearer header or the cookie set by `/api/session`; `read_token`,
+    """The app over one database, through one Database gate (`app.state.db`): `db`, open
+    while the app serves, or else one of its own on `dsn`, which its lifespan opens and
+    closes (`serve` gives the process's one). Every request but the health check and signing
+    in needs the shared token, as a bearer header or the cookie set by `/api/session`; `read_token`,
     when given, may only read papers (`deps.READABLE`). `integrations` are the loaded ones:
     the dispatcher delivers to those that react to events, search asks those that are search
     providers, and the app closes them all when it stops.
@@ -149,7 +152,7 @@ def create_app(
     )
     app.state.dsn, app.state.token, app.state.read_token = dsn, token, read_token
     # The routes, MCP and the monitor use the gate; the loops still take `dsn` until A1's P4.
-    app.state.db = DatabaseGate(dsn)
+    app.state.db, app.state.owns_db = db or DatabaseGate(dsn), db is None
     app.state.config, app.state.gateway = config or Config(), gateway
     app.state.publications = publications or Dblp()
     app.state.integrations = integrations or []

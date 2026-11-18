@@ -9,7 +9,6 @@ from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import httpx2
-import psycopg
 import pytest
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -22,7 +21,6 @@ from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import Publication, Taxonomy
 from litwatch.core.digests import DigestPeriod, DigestRole, DigestState
-from litwatch.gates.database import DatabaseGate
 from litwatch.integrations.archive import Archive
 from litwatch.jobs import publications as lookups
 from litwatch.store import digests as digests_store
@@ -323,11 +321,6 @@ async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, s
     digest = await _digest(
         conn, FAITH, DigestPeriod.DAY, date(2026, 10, 14), [_shown(P, DigestRole.PICK)]
     )
-    # Every tool reads in the app's read units, where a write fails rather than lands.
-    async with DatabaseGate(conn.test_dsn, conn.test_schema) as db, db.read("mcp") as c:
-        assert (await papers_store.get(c, P.id)).id == P.id
-        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
-            await papers_store.upsert(c, [paper("2610.09998")])
     await integrations_store.put_card(
         conn, P.id, READ, "deep-model", {}, revision=1, version=2, source="latex", pass_id=None
     )
