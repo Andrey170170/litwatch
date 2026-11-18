@@ -7,12 +7,10 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-import psycopg
-
 from litwatch import events
 from litwatch.core import Publication
+from litwatch.gates.database import DatabaseGate, Hold
 from litwatch.jobs.context import run_record
-from litwatch.jobs.lock import job_lock
 from litwatch.publications.dblp import PublicationSource, SourceError
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
@@ -28,19 +26,20 @@ COPY_DEADLINE = 8.0
 
 
 async def store_record(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     paper_id: str,
     record: Publication | None,
     *,
     by_owner: bool = False,
 ) -> bool:
-    """Store a record, with `publication.found` when it is new for the paper. Returns
-    whether it was stored."""
-    async with conn.transaction():
-        stored, before = await store.put(conn, paper_id, record, by_owner=by_owner)
+    """Store a record, with `publication.found` when it is new for the paper, in a unit holding
+    the paper's publication lock. Returns whether it was stored."""
+    lock = ("publication", paper_id)
+    async with db.write("store publication", locks=[lock]) as unit:
+        stored, before = await store.put(unit, paper_id, record, by_owner=by_owner)
         if stored and record and record != before:
             await events.emit(
-                conn,
+                unit,
                 events.PUBLICATION_FOUND,
                 paper_id,
                 dblp_key=record.dblp_key,
@@ -53,14 +52,15 @@ async def store_record(
 
 
 async def look_up(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     source: PublicationSource,
     paper_id: str,
     deadline: float | None = None,
 ) -> Publication | None:
     """Ask the source and store its answer, unless the owner has chosen. Raises SourceError
     when the source cannot be asked, or does not answer within `deadline` seconds."""
-    paper = await papers_store.get(conn, paper_id)
+    async with db.read("publication lookup: paper") as unit:
+        paper = await papers_store.get(unit, paper_id)
     try:
         async with asyncio.timeout(deadline):
             record = await source.find(
@@ -68,16 +68,17 @@ async def look_up(
             )
     except TimeoutError as exc:
         raise SourceError(f"no answer within {deadline} s") from exc
-    await store_record(conn, paper_id, record)
+    await store_record(db, paper_id, record)
     return record
 
 
 async def for_copy(
-    conn: psycopg.AsyncConnection, source: PublicationSource, paper_id: str
+    db: DatabaseGate, source: PublicationSource, paper_id: str
 ) -> Publication | None:
     """The record to cite one paper by: looked up first unless the owner chose or a lookup
     is recent. When the source cannot be asked, what is stored."""
-    row = await store.get(conn, paper_id)
+    async with db.read("publication for a copy") as unit:
+        row = await store.get(unit, paper_id)
     stale = row is None or (
         not row["by_owner"]
         and row["record"] is None
@@ -85,25 +86,31 @@ async def for_copy(
     )
     if stale:
         try:
-            return await look_up(conn, source, paper_id, COPY_DEADLINE)
+            return await look_up(db, source, paper_id, COPY_DEADLINE)
         except SourceError as exc:
             log.warning("publication lookup for %s failed: %s", paper_id, exc)
-    return (await store.found(conn, [paper_id])).get(paper_id)
+    async with db.read("publication stored") as unit:
+        return (await store.found(unit, [paper_id])).get(paper_id)
 
 
 async def run(
-    conn: psycopg.AsyncConnection, source: PublicationSource, limit: int = LIMIT
+    db: DatabaseGate, source: PublicationSource, limit: int = LIMIT, *, hold: Hold
 ) -> dict[str, int]:
     """Look up the library papers that are due, as a `publications` run. Runs never overlap:
-    each takes its due papers once, so one that died beside another would go unseen."""
-    async with job_lock(conn, "publications"), run_record(conn, "publications") as record:
+    each takes its due papers once, so one that died beside another would go unseen. The
+    caller holds the schedule lock for `publications` (`hold`): the scheduler, or the CLI."""
+    if (hold.name, hold.key_arg) != ("schedule", "publications"):
+        raise ValueError(f"a publications run is held by its schedule lock, not {hold}")
+    async with run_record(db, "publications") as record:
         record.fields["cost"] = 0
         counts = record.counts
         counts |= {"looked_up": 0, "found": 0, "failed": 0}
         failures = 0
-        for paper_id in await store.due(conn, limit):
+        async with db.read("publications due") as unit:
+            due = await store.due(unit, limit)
+        for paper_id in due:
             try:
-                found = await look_up(conn, source, paper_id)
+                found = await look_up(db, source, paper_id)
             except SourceError as exc:
                 counts["failed"] += 1
                 failures += 1

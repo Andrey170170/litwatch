@@ -3,8 +3,7 @@ full-text rows of `weights` and `gists`)."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -28,6 +27,7 @@ from litwatch.core.fulltext import (
     TextPass,
     TextRead,
 )
+from litwatch.gates.database import WriteUnit
 from litwatch.store.papers import COLUMNS, row_to_paper
 from litwatch.store.taxonomy import lock_shared, row_to_class
 
@@ -276,25 +276,6 @@ class Claimed:
     job: int | None = None  # the re-run whose pass it is, which its settling keeps working
 
 
-# Held by the worker that works the Deep passes, so the service's and a terminal's never run
-# side by side: cards are made one at a time.
-DEEP_WORKER_LOCK = 7213915
-
-
-@asynccontextmanager
-async def deep_worker(conn: psycopg.AsyncConnection) -> AsyncIterator[bool]:
-    """Hold the Deep worker's lock for the block if no other worker holds it; yields whether
-    it is held."""
-    row = await (
-        await conn.execute("SELECT pg_try_advisory_lock(%s) AS locked", (DEEP_WORKER_LOCK,))
-    ).fetchone()
-    try:
-        yield row["locked"]
-    finally:
-        if row["locked"]:
-            await conn.execute("SELECT pg_advisory_unlock(%s)", (DEEP_WORKER_LOCK,))
-
-
 # Whether Deep pass `f` has an attempt open: its job was submitted, or may have been.
 STARTED = "EXISTS (SELECT 1 FROM deep_attempts a WHERE a.pass_id = f.id AND a.ended_at IS NULL)"
 
@@ -410,17 +391,16 @@ async def release_job(conn: psycopg.AsyncConnection, job_id: int) -> None:
     )
 
 
-async def take_back(conn: psycopg.AsyncConnection, lease: timedelta) -> int:
+async def take_back(unit: WriteUnit, lease: timedelta) -> int:
     """End the leases on text passes taken for longer than `lease`: a batching nightly's, which a
     nightly holding the run lock calls, so the run that held them is dead. Returns how many. The
-    taxonomy lock is taken shared first, as in `retry_failed`."""
-    async with conn.transaction():
-        await lock_shared(conn)
-        cur = await conn.execute(
-            "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' "
-            "WHERE kind <> 'deep' AND state = 'running' AND lease_until - tried_at > %s",
-            (lease,),
-        )
+    unit holds the taxonomy lock shared, as in `retry_failed`."""
+    await lock_shared(unit)
+    cur = await unit.execute(
+        "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' "
+        "WHERE kind <> 'deep' AND state = 'running' AND lease_until - tried_at > %s",
+        (lease,),
+    )
     return cur.rowcount
 
 
@@ -759,17 +739,16 @@ async def candidates(conn: psycopg.AsyncConnection, lookback: timedelta) -> list
     return [r["id"] for r in rows]
 
 
-async def retry_failed(conn: psycopg.AsyncConnection, runs: int) -> int:
+async def retry_failed(unit: WriteUnit, runs: int) -> int:
     """Make every failed pass with fewer than `runs` failed runs ready: the run tries it again,
-    and the archive what it gave up on. The taxonomy lock is taken shared first, as every
-    settle takes it, so this never deadlocks with a taxonomy save dropping passes."""
-    async with conn.transaction():
-        await lock_shared(conn)
-        cur = await conn.execute(
-            "UPDATE fulltext_passes SET state = 'ready', retry_text = true "
-            "WHERE state = 'failed' AND failed_runs < %s",
-            (runs,),
-        )
+    and the archive what it gave up on. The unit holds the taxonomy lock shared, as every settle
+    does, so this never deadlocks with a taxonomy save dropping passes."""
+    await lock_shared(unit)
+    cur = await unit.execute(
+        "UPDATE fulltext_passes SET state = 'ready', retry_text = true "
+        "WHERE state = 'failed' AND failed_runs < %s",
+        (runs,),
+    )
     return cur.rowcount
 
 

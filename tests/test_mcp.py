@@ -27,7 +27,7 @@ from litwatch.store import digests as digests_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, fixture_read, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, fixture_read, gate_on, paper
 from tests.fakes_http import FakeArchive, mock
 from tests.test_archive_text import a_pdf
 from tests.test_reading import P, Q, analyse, classify, grade
@@ -389,7 +389,8 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
         container="Advances in Neural Information Processing Systems",
         year=2026,
     )
-    await lookups.store_record(conn, P.id, published)
+    async with gate_on(conn) as db:
+        await lookups.store_record(db, P.id, published)
     async with serving(_app(conn, fake)) as http:
         for path, body in [
             (f"/api/labels/{FAITH.slug}/{P.id}", {"value": "related"}),

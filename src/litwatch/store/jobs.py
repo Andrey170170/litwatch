@@ -10,6 +10,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core.fulltext import REQUESTED
+from litwatch.gates.database import Identity, WriteUnit
 from litwatch.store.failures import ACTIONABLE
 from litwatch.store.fulltext import STARTED, STUCK, stuck_params
 from litwatch.store.reading import SHOWN_MEMBER
@@ -22,8 +23,13 @@ ACTIVE = ("tonight", "queued", "running")
 # The kinds the owner waits on, which go first: each is one short chunk, keeping no run open.
 FIRST = ("process", "digest")
 
-# The session that runs a job, as `runs.start` records a run's.
-_ME = "pg_backend_pid(), (SELECT backend_start FROM pg_stat_activity WHERE pid = pg_backend_pid())"
+# The session a job runs in the name of (`DatabaseGate.identity`), as `runs.start` records a
+# run's: its parameters are `_mine(me)`.
+_ME = "%(pid)s::integer, %(started)s::timestamptz"
+
+
+def _mine(me: Identity) -> dict[str, Any]:
+    return {"pid": me.pid, "started": me.started}
 
 
 async def create(
@@ -189,8 +195,10 @@ async def take_back(conn: psycopg.AsyncConnection) -> list[int]:
     return [r["id"] for r in rows]
 
 
-async def claim(conn: psycopg.AsyncConnection, *, fresh: bool = True) -> dict[str, Any] | None:
-    """The most urgent job this session may run now, marked running in its name: Process jobs
+async def claim(
+    conn: psycopg.AsyncConnection, *, me: Identity, fresh: bool = True
+) -> dict[str, Any] | None:
+    """The most urgent job the session `me` may run now, marked running in its name: Process jobs
     and digests written again first (`FIRST`: the owner waits on them), then the oldest in the
     queue. Runnable are the queued jobs, those this session already runs, and those on
     tonight's run once a nightly run has finished after they were put there, none before its
@@ -216,7 +224,7 @@ async def claim(conn: psycopg.AsyncConnection, *, fresh: bool = True) -> dict[st
                    changed_at = CASE WHEN j.state = 'running' THEN j.changed_at ELSE now() END
             FROM chosen WHERE j.id = chosen.id RETURNING j.*
             """,
-            {"fresh": fresh, "first": list(FIRST)},
+            {"fresh": fresh, "first": list(FIRST)} | _mine(me),
         )
     ).fetchone()
 
@@ -227,28 +235,39 @@ async def progress(
     done: int,
     counts: dict[str, int],
     ladder: dict[str, Any] | None = None,
+    *,
+    me: Identity,
 ) -> dict[str, Any] | None:
     """Record how far the job got and what its steps recorded so far (a re-run's `ladder` too,
-    when given), for a job this session runs; None when it is no longer this session's."""
+    when given), for a job the session `me` runs; None when it is no longer that session's."""
     return await (
         await conn.execute(
             f"""
-            UPDATE jobs SET done = %s, counts = %s, ladder = coalesce(%s, ladder)
-            WHERE id = %s AND state = 'running' AND (backend_pid, backend_start) = ({_ME})
+            UPDATE jobs SET done = %(done)s, counts = %(counts)s,
+                   ladder = coalesce(%(ladder)s, ladder)
+            WHERE id = %(id)s AND state = 'running' AND (backend_pid, backend_start) = ({_ME})
             RETURNING *
             """,
-            (done, Jsonb(counts), Jsonb(ladder) if ladder is not None else None, job_id),
+            {
+                "done": done,
+                "counts": Jsonb(counts),
+                "ladder": Jsonb(ladder) if ladder is not None else None,
+                "id": job_id,
+            }
+            | _mine(me),
         )
     ).fetchone()
 
 
-async def wait(conn: psycopg.AsyncConnection, job_id: int, until: datetime) -> None:
-    """The job, still this session's, is not claimed again before `until`: what it has left
+async def wait(
+    conn: psycopg.AsyncConnection, job_id: int, until: datetime, *, me: Identity
+) -> None:
+    """The job, still the session `me`'s, is not claimed again before `until`: what it has left
     waits for the archive."""
     await conn.execute(
-        f"UPDATE jobs SET wake_at = %s WHERE id = %s AND state = 'running' "
+        f"UPDATE jobs SET wake_at = %(until)s WHERE id = %(id)s AND state = 'running' "
         f"AND (backend_pid, backend_start) = ({_ME})",
-        (until, job_id),
+        {"until": until, "id": job_id} | _mine(me),
     )
 
 
@@ -266,9 +285,14 @@ async def spent(conn: psycopg.AsyncConnection, job_id: int) -> float:
 
 
 async def finish(
-    conn: psycopg.AsyncConnection, job_id: int, state: str, error: str | None = None
+    conn: psycopg.AsyncConnection,
+    job_id: int,
+    state: str,
+    error: str | None = None,
+    *,
+    me: Identity,
 ) -> None:
-    """End this session's run of the job as done, failed, discarded or stopped (by its ceiling,
+    """End the session `me`'s run of the job as done, failed, discarded or stopped (by its ceiling,
     `error` saying where). One done that the owner asked again while it ran (`settle_process`)
     goes back in the queue from its first paper instead, so its steps take what the owner's
     action left due."""
@@ -282,7 +306,7 @@ async def finish(
                            THEN 0 ELSE done END
         WHERE id = %(id)s AND state = 'running' AND (backend_pid, backend_start) = ({_ME})
         """,
-        {"state": state, "error": error, "id": job_id},
+        {"state": state, "error": error, "id": job_id} | _mine(me),
     )
 
 
@@ -347,22 +371,21 @@ async def listing(
     ).fetchall()
 
 
-# The class of advisory locks one per topic serializes making its re-runs in (`open_rerun`).
-RERUN_LOCK = 7213916
+def _holds(unit: WriteUnit, lock: str | tuple[str, str]) -> None:
+    if lock not in unit.locks:
+        raise RuntimeError(f"unit {unit.name!r} reads for a job it makes without the {lock} lock")
 
 
-async def open_rerun(conn: psycopg.AsyncConnection, scope: dict[str, Any]) -> dict[str, Any] | None:
+async def open_rerun(unit: WriteUnit, scope: dict[str, Any]) -> dict[str, Any] | None:
     """The newest re-run not ended (not run, on tonight's run, queued or running) with the
     same topic version, scopes and date range as `scope`, its row locked: one asked for again
     after a lost reply. The version is the one it grades under; the revision beside it only
-    names it. The topic's re-run lock is held to the transaction's end, so two asking at once
-    make one."""
+    names it. The unit holds the topic's re-run lock (`("rerun", topic)`), so two asking at
+    once make one."""
+    _holds(unit, ("rerun", scope["topic"]))
     same = {k: scope.get(k) for k in ("topic", "version", "scopes", "since", "until")}
-    await conn.execute(
-        "SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (RERUN_LOCK, scope["topic"])
-    )
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM jobs WHERE kind = 'rerun' AND state = ANY(%s) "
             "AND jsonb_build_object('topic', scope -> 'topic', 'version', scope -> 'version', "
             "'scopes', scope -> 'scopes', 'since', scope -> 'since', 'until', scope -> 'until') "
@@ -372,16 +395,12 @@ async def open_rerun(conn: psycopg.AsyncConnection, scope: dict[str, Any]) -> di
     ).fetchone()
 
 
-# The advisory lock making replays is taken under (`open_replay`).
-REPLAY_LOCK = 7213917
-
-
-async def open_replay(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
+async def open_replay(unit: WriteUnit) -> dict[str, Any] | None:
     """The newest replay not ended (not run, on tonight's run, queued or running), its row
-    locked. The replay lock is held to the transaction's end, so two asking at once make one."""
-    await conn.execute("SELECT pg_advisory_xact_lock(%s)", (REPLAY_LOCK,))
+    locked. The unit holds the replay lock, so two asking at once make one."""
+    _holds(unit, "replay")
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM jobs WHERE kind = 'replay' AND state = ANY(%s) "
             "ORDER BY id DESC LIMIT 1 FOR UPDATE",
             ([*NOT_RUN, *ACTIVE],),

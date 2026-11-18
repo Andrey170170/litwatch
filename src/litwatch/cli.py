@@ -20,13 +20,12 @@ from litwatch import logs, seeds, store
 from litwatch.archive import ArchiveError
 from litwatch.core import Paper, Taxonomy
 from litwatch.feedback import word
-from litwatch.gates.database import Connection, DatabaseGate, PoolTimeoutError, ReadUnit
+from litwatch.gates.database import BusyError, Connection, DatabaseGate, PoolTimeoutError, ReadUnit
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
-from litwatch.jobs.lock import BusyError, run_lock
 from litwatch.publications import Dblp
 from litwatch.store import papers as papers_store
 from litwatch.store import runs
@@ -90,8 +89,8 @@ def _run[T](
 
 
 async def _migrate(db: DatabaseGate) -> list[str]:
-    # Transitional: the migration lock moves behind the gate in A1's P4 or P6.
-    async with db.lend("migrate") as conn:
+    # Transitional: the migrations run on a lent connection until A1's P6.
+    async with db.startup("migration"), db.lend("migrate") as conn:
         return await store.migrate(conn)
 
 
@@ -127,8 +126,7 @@ def intake(
         return
 
     async def work(db: DatabaseGate) -> Any:
-        async with db.lend("intake") as conn, run_lock(conn):  # transitional: intake, P5
-            return await intake_job.run(conn, cfg, days)
+        return await intake_job.run(db, cfg, days)
 
     result = _run(work)
     console.print(
@@ -145,8 +143,7 @@ def _catalog_from(cfg: configuration.Config, since: date) -> None:
         )
 
     async def work(db: DatabaseGate) -> Any:
-        async with db.lend("catalog pass") as conn, run_lock(conn):  # transitional: intake, P5
-            return await intake_job.catalog_from(conn, cfg, since, report)
+        return await intake_job.catalog_from(db, cfg, since, report)
 
     try:
         done = _run(work)
@@ -179,9 +176,7 @@ def intake_archive(
     async def work(db: DatabaseGate) -> Any:
         client = archive_integration.source(cfg)
         try:
-            # Transitional: intake moves onto the gate in P5.
-            async with db.lend("intake from the archive") as conn, run_lock(conn):
-                return await intake_job.from_archive(conn, cfg, client, first, last)
+            return await intake_job.from_archive(db, cfg, client, first, last)
         finally:
             await client.aclose()
 
@@ -217,10 +212,9 @@ def nightly(
     cfg = configuration.load(config)
 
     async def work(db: DatabaseGate) -> tuple[int, Any]:
-        async with db.lend("nightly") as conn:  # transitional: the nightly moves in P4
-            run_id = await nightly_job.run(
-                conn, cfg, fetch=fetch, days=days, limit=limit, with_digests=digests
-            )
+        run_id = await nightly_job.run(
+            db, cfg, fetch=fetch, days=days, limit=limit, with_digests=digests
+        )
         return run_id, await _run_record(db, run_id)
 
     run_id, run = _run(work)
@@ -246,8 +240,7 @@ def digests_write(since: Since, until: Until, config: ConfigPath = None) -> None
     cfg = configuration.load(config)
 
     async def work(db: DatabaseGate) -> tuple[int, Any]:
-        async with db.lend("write digests") as conn:  # transitional: digests move in P5
-            run_id = await digests_job.window(conn, cfg, since.date(), until.date())
+        run_id = await digests_job.window(db, cfg, since.date(), until.date())
         return run_id, await _run_record(db, run_id)
 
     run_id, run = _run(work)
@@ -550,8 +543,8 @@ def eval_replay(
         raise typer.Exit(1)
 
     async def work(db: DatabaseGate) -> dict[str, Any]:
-        async with db.lend("replay") as conn:  # transitional: replay moves in P5
-            if r.eval_run_id is None:
+        if r.eval_run_id is None:
+            async with db.lend("replay") as conn:  # transitional: replay moves in P5
                 params = {
                     "cohorts": cohort,
                     "negatives": sample,
@@ -559,8 +552,8 @@ def eval_replay(
                     "limit": limit,
                 }
                 await replay.start(conn, cfg, r, params, note)
-                console.print(f"replay {r.eval_run_id}")
-            return await replay.run(conn, cfg, r)
+            console.print(f"replay {r.eval_run_id}")
+        return await replay.run(db, cfg, r)
 
     counts = _run(work)
     console.print_json(data=counts)
@@ -886,11 +879,12 @@ def publications(
     scheduler does daily, or for one paper."""
 
     async def work(db: DatabaseGate) -> Any:
-        async with db.lend("publications") as conn:  # transitional: publications move in P4
-            if paper:
-                found = await lookups.look_up(conn, Dblp(), paper)
-                return found.model_dump(mode="json") if found else None
-            return await lookups.run(conn, Dblp(), limit)
+        if paper:
+            found = await lookups.look_up(db, Dblp(), paper)
+            return found.model_dump(mode="json") if found else None
+        # The scheduler's lock for the kind: a run here and a scheduled one never overlap.
+        async with db.held("schedule", "publications") as hold:
+            return await lookups.run(db, Dblp(), limit, hold=hold)
 
     console.print_json(data=_run(work))
 
@@ -1028,7 +1022,7 @@ def fulltext_queue(
         options = {k: v for k, v in options.items() if k not in ("use", "enabled")}
         maker = deep_integration.load("deep", options, cfg)
 
-    async def work_deep(conn: Connection) -> Counter[str]:
+    async def work_deep(db: DatabaseGate) -> Counter[str]:
         total: Counter[str] = Counter()
         deadline = asyncio.get_running_loop().time() + wait
         while True:
@@ -1036,7 +1030,7 @@ def fulltext_queue(
             if limit is not None and worked >= limit:
                 return total
             done = await deep_passes.work(
-                conn,
+                db,
                 archive,
                 maker,
                 rules=word.rules(cfg),
@@ -1052,18 +1046,11 @@ def fulltext_queue(
 
     async def work(db: DatabaseGate) -> Counter[str]:
         try:
-            # Transitional: the full-text and Deep loops move onto the gate in P4.
-            async with db.lend("fulltext") as conn:
-                if maker is not None:
-                    return await work_deep(conn)
-                return await fulltext.work_waiting(
-                    conn,
-                    cfg,
-                    archive,
-                    limit=limit,
-                    wait=wait,
-                    report=lambda d: console.print(dict(d)),
-                )
+            if maker is not None:
+                return await work_deep(db)
+            return await fulltext.work_waiting(
+                db, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
+            )
         finally:
             await archive.aclose()
             if maker is not None:

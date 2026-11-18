@@ -57,7 +57,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(
             asyncio.create_task(
                 fulltext.run_forever(
-                    app.state.dsn,
+                    app.state.db,
                     app.state.config,
                     archive,
                     app.state.gateway,
@@ -69,7 +69,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
             tasks.append(
                 asyncio.create_task(
                     deep_passes.run_forever(
-                        app.state.dsn,
+                        app.state.db,
                         archive,
                         maker,
                         app.state.deep_wake,
@@ -82,7 +82,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(
             asyncio.create_task(
                 scheduler.run_forever(
-                    app.state.dsn, app.state.config, app.state.gateway, app.state.publications
+                    app.state.db, app.state.config, app.state.gateway, app.state.publications
                 )
             )
         )
@@ -94,7 +94,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         tasks.append(
             asyncio.create_task(
                 worker.run_forever(
-                    app.state.dsn,
+                    app.state.db,
                     app.state.config,
                     app.state.gateway,
                     app.state.jobs_wake,
@@ -104,7 +104,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
             )
         )
     if reacting := events.reacting(app.state.integrations):
-        tasks.append(asyncio.create_task(dispatch.run_forever(app.state.dsn, reacting)))
+        tasks.append(asyncio.create_task(dispatch.run_forever(app.state.db, reacting)))
     try:
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield
@@ -150,8 +150,8 @@ def create_app(
     app = FastAPI(
         title="litwatch", docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lifespan
     )
-    app.state.dsn, app.state.token, app.state.read_token = dsn, token, read_token
-    # The routes, MCP and the monitor use the gate; the loops still take `dsn` until A1's P4.
+    app.state.token, app.state.read_token = token, read_token
+    # The routes, MCP, the monitor and the loops all use the one gate.
     app.state.db, app.state.owns_db = db or DatabaseGate(dsn), db is None
     app.state.config, app.state.gateway = config or Config(), gateway
     app.state.publications = publications or Dblp()

@@ -18,9 +18,9 @@ from litwatch.config import Schedule
 from litwatch.core import Cause, Depth, Status
 from litwatch.core.fulltext import REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY
 from litwatch.feedback import misses
+from litwatch.gates.database import DatabaseGate, identity_of
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
-from litwatch.jobs.lock import run_lock
 from litwatch.llm import Gateway, prices
 from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
@@ -80,9 +80,9 @@ def asked(models: Scripted, role: str, title: str) -> int:
 # -- V1: a job runs its papers through the steps, and only those ---------------------------------
 
 
-async def test_a_process_job_runs_its_paper_through_every_step_and_no_other(conn, models):
+async def test_a_process_job_runs_its_paper_through_every_step_and_no_other(conn, db, models):
     job = await queued(conn, A.id)
-    w = worker.Worker(conn, CONFIG, models.gateway)
+    w = worker.Worker(db, CONFIG, models.gateway)
     assert await work_out(w) == 1
 
     assert await classified(conn) == {A.id}  # B and C are due a nightly, and wait for it
@@ -98,16 +98,16 @@ async def test_a_process_job_runs_its_paper_through_every_step_and_no_other(conn
     (run,) = await rows(conn, "SELECT * FROM runs WHERE job_id = %s", job)
     assert (run["kind"], run["error"]) == ("job", None) and run["finished_at"] is not None
     assert run["cost"] > 0 and run["counts"]["classified"] == 1
-    await nightly.run(conn, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
+    await nightly.run(db, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
     async with api(conn) as http:
         nights = (await http.get("/api/settings/runs")).json()
     assert [r["kind"] for r in nights] == ["nightly"]
 
 
-async def test_a_job_of_many_chunks_is_one_run(conn, models, monkeypatch):
+async def test_a_job_of_many_chunks_is_one_run(conn, db, models, monkeypatch):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await queued(conn, A.id, B.id)
-    w = worker.Worker(conn, CONFIG, models.gateway)
+    w = worker.Worker(db, CONFIG, models.gateway)
     assert await work_out(w) == 2
     assert await classified(conn) == {A.id, B.id}
     (run,) = await rows(conn, "SELECT * FROM runs WHERE job_id = %s", job)
@@ -115,31 +115,31 @@ async def test_a_job_of_many_chunks_is_one_run(conn, models, monkeypatch):
     assert (await jobs_store.get(conn, job))["state"] == "done"
 
 
-async def test_a_job_whose_paper_failed_a_step_fails_and_says_where(conn, models):
+async def test_a_job_whose_paper_failed_a_step_fails_and_says_where(conn, db, models):
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     failed = await jobs_store.get(conn, job)
     assert (failed["state"], failed["error"]) == ("failed", "classification failed on 1")
 
     # Try again starts it over: what is still due runs, nothing else.
     del models.decisions[A.title]
     assert (await jobs_store.move(conn, job, ("failed",), "queued"))["error"] is None
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     again = await jobs_store.get(conn, job)
     assert (again["state"], again["counts"]["classified"]) == ("done", 1)
 
 
-async def test_a_job_tried_again_on_a_step_waiting_for_the_owner_fails_again(conn, models):
+async def test_a_job_tried_again_on_a_step_waiting_for_the_owner_fails_again(conn, db, models):
     """Three runs in a row failed, the step waits for the owner on Needs you: Try again has
     nothing due and fails again, saying so, until the owner acts there; then the job goes back
     in the queue by itself and does what is left."""
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
     for _ in range(3):
-        await work_out(worker.Worker(conn, CONFIG, models.gateway))
+        await work_out(worker.Worker(db, CONFIG, models.gateway))
         await jobs_store.move(conn, job, ("failed",), "queued")
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     stuck = await jobs_store.get(conn, job)
     assert stuck["state"] == "failed"
     assert stuck["error"] == "classification failed on 1 (waits on Needs you)"
@@ -151,13 +151,13 @@ async def test_a_job_tried_again_on_a_step_waiting_for_the_owner_fails_again(con
     ) as change:  # as Needs you's own retry does
         await failures.succeeded(change.unit, A.id, "classification")
     assert (await jobs_store.get(conn, job))["state"] == "queued"
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     assert (await jobs_store.get(conn, job))["state"] == "done"
     assert asked(models, "classify", A.title) == 4
 
 
 async def test_a_failure_the_owner_clears_while_the_job_ends_still_settles_it(
-    conn, models, monkeypatch
+    conn, db, models, monkeypatch
 ):
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
@@ -176,13 +176,13 @@ async def test_a_failure_the_owner_clears_while_the_job_ends_still_settles_it(
             return found
 
         monkeypatch.setattr(failures, "open_on", raced)
-        assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)
+        assert await worker.Worker(db, CONFIG, models.gateway).step(AFTERNOON)
         await owner
     assert (await jobs_store.get(conn, job))["state"] == "queued"  # failed, then settled
 
 
 async def test_a_failure_the_owner_clears_before_the_job_ends_runs_the_step_again(
-    conn, models, monkeypatch
+    conn, db, models, monkeypatch
 ):
     """Analysis fails; while the job grades, the owner's Try again clears the failure. The job
     does not end done with the analysis left: it goes back in the queue and does it."""
@@ -200,7 +200,7 @@ async def test_a_failure_the_owner_clears_before_the_job_ends_runs_the_step_agai
 
     monkeypatch.setattr(nightly, "grade", owner_retries)
     job = await queued(conn, A.id)
-    w = worker.Worker(conn, CONFIG, models.gateway)
+    w = worker.Worker(db, CONFIG, models.gateway)
     assert await w.step(AFTERNOON)
     assert (await jobs_store.get(conn, job))["state"] == "queued"
     monkeypatch.setattr(nightly, "grade", grade)
@@ -210,13 +210,13 @@ async def test_a_failure_the_owner_clears_before_the_job_ends_runs_the_step_agai
 
 
 async def test_a_failed_job_put_back_by_a_settle_gives_its_passes_the_owners_priorities(
-    conn, models
+    conn, db, models
 ):
     """The settle that clears the paper's last failure puts its job back first, then gives the
     passes it queued the owner's priorities, in one go."""
     models.decisions[A.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
     models.fits = {(r, A.title): {"reason": "Core.", "fit": "central"} for r in ("judge", "check")}
-    await nightly.run(conn, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
+    await nightly.run(db, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
     job = await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "failed")
     await conn.execute(
         "INSERT INTO step_failures (paper_id, step, topic, paper_revision, failed_runs, last_error)"
@@ -250,7 +250,7 @@ async def test_a_failed_job_settles_when_the_topic_it_failed_grading_on_is_pause
     assert (await jobs_store.get(conn, job))["state"] == "queued"  # nothing waits on it now
 
 
-async def test_a_job_answers_a_call_a_dead_nightly_left_in_an_ended_batch_from_it(conn, models):
+async def test_a_job_answers_a_call_a_dead_nightly_left_in_an_ended_batch_from_it(conn, db, models):
     """The nightly batched the paper's analysis and died before reading it: the job reads the
     ended batch rather than paying for the call again."""
     models.decisions[A.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
@@ -267,20 +267,20 @@ async def test_a_job_answers_a_call_a_dead_nightly_left_in_an_ended_batch_from_i
         gw.batch_until(datetime.now(UTC) + timedelta(hours=1))
         return gw
 
-    async with model_run(conn, CONFIG, "nightly", gateway=batches) as night:
-        await nightly.classify(conn, CONFIG, night, ids=[A.id])
-        await nightly.analyse(conn, CONFIG, night, ids=[A.id])
+    async with model_run(db, CONFIG, "nightly", gateway=batches) as night:
+        await nightly.classify(db, CONFIG, night, ids=[A.id])
+        await nightly.analyse(db, CONFIG, night, ids=[A.id])
     assert anthropic.batched and not anthropic.calls
     await conn.execute("DELETE FROM analyses")  # as if it died before reading the batch
     await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")
 
     job = await queued(conn, A.id)
-    await work_out(worker.Worker(conn, CONFIG, plain))
+    await work_out(worker.Worker(db, CONFIG, plain))
     assert (await jobs_store.get(conn, job))["state"] == "done"
     assert [r for r, _ in anthropic.calls if r.model == "test-analyse"] == []  # not paid again
 
 
-async def test_a_job_whose_run_cannot_start_fails_and_says_why(conn, models, monkeypatch):
+async def test_a_job_whose_run_cannot_start_fails_and_says_why(conn, db, models, monkeypatch):
     """Its gateway cannot be built (an unreadable key file, say): the job fails with the error,
     rather than the worker failing, taking it back and trying it again forever."""
 
@@ -289,13 +289,13 @@ async def test_a_job_whose_run_cannot_start_fails_and_says_why(conn, models, mon
 
     monkeypatch.setattr(worker, "model_run", unreadable)
     job = await queued(conn, A.id)
-    assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)
+    assert await worker.Worker(db, CONFIG, models.gateway).step(AFTERNOON)
     failed = await jobs_store.get(conn, job)
     assert (failed["state"], failed["error"]) == ("failed", "OSError: the key file is unreadable")
 
 
 async def test_a_job_whose_paper_is_dismissed_while_it_runs_is_discarded_however_it_ends(
-    conn, models, monkeypatch
+    conn, db, models, monkeypatch
 ):
     async def dismissed_then_broken(*_, **__):
         async with (
@@ -307,24 +307,24 @@ async def test_a_job_whose_paper_is_dismissed_while_it_runs_is_discarded_however
 
     monkeypatch.setattr(nightly, "analyse", dismissed_then_broken)
     job = await queued(conn, A.id)
-    assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)
+    assert await worker.Worker(db, CONFIG, models.gateway).step(AFTERNOON)
     assert (await jobs_store.get(conn, job))["state"] == "discarded"
 
 
-async def test_a_failed_job_whose_paper_the_owner_dismisses_is_discarded(conn, models):
+async def test_a_failed_job_whose_paper_the_owner_dismisses_is_discarded(conn, db, models):
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     async with settling.change(conn, A.id, cause=Cause.OWNER) as change:
         await papers_store.dismiss(change.unit, A.id)
     assert (await jobs_store.get(conn, job))["state"] == "discarded"
 
 
-async def test_a_process_jobs_passes_go_as_the_owners_requests(conn, models):
+async def test_a_process_jobs_passes_go_as_the_owners_requests(conn, db, models):
     models.decisions[A.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
     models.fits = {(r, A.title): {"reason": "Core.", "fit": "central"} for r in ("judge", "check")}
     await queued(conn, A.id)
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     passes = await rows(conn, "SELECT * FROM fulltext_passes WHERE paper_id = %s", A.id)
     assert {p["kind"] for p in passes} == {"brief", "deep"}
     for p in passes:
@@ -332,12 +332,14 @@ async def test_a_process_jobs_passes_go_as_the_owners_requests(conn, models):
         assert p["priority"] == first, p
 
 
-async def test_a_process_jobs_paper_the_nightly_took_first_still_goes_as_the_owners(conn, models):
+async def test_a_process_jobs_paper_the_nightly_took_first_still_goes_as_the_owners(
+    conn, db, models
+):
     """Process while the nightly is due: the night processes the paper, its passes the owner's."""
     models.decisions[A.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
     models.fits = {(r, A.title): {"reason": "Core.", "fit": "central"} for r in ("judge", "check")}
     await queued(conn, A.id)
-    await nightly.run(conn, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
+    await nightly.run(db, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
     passes = await rows(conn, "SELECT * FROM fulltext_passes WHERE paper_id = %s", A.id)
     assert {(p["kind"], p["priority"]) for p in passes} == {
         ("brief", TEXT_REQUEST_PRIORITY),
@@ -346,14 +348,14 @@ async def test_a_process_jobs_paper_the_nightly_took_first_still_goes_as_the_own
 
 
 async def test_a_job_that_raises_fails_with_its_error_and_its_run_records_it(
-    conn, models, monkeypatch
+    conn, db, models, monkeypatch
 ):
     async def broken(*_, **__):
         raise RuntimeError("the store went away")
 
     monkeypatch.setattr(nightly, "analyse", broken)
     job = await queued(conn, A.id)
-    assert await worker.Worker(conn, CONFIG, models.gateway).step(AFTERNOON)
+    assert await worker.Worker(db, CONFIG, models.gateway).step(AFTERNOON)
     failed = await jobs_store.get(conn, job)
     assert (failed["state"], failed["error"]) == ("failed", "RuntimeError: the store went away")
     (run,) = await rows(conn, "SELECT * FROM runs WHERE job_id = %s", job)
@@ -363,10 +365,10 @@ async def test_a_job_that_raises_fails_with_its_error_and_its_run_records_it(
 # -- V2: one job, one worker; a dead job is taken back --------------------------------------------
 
 
-async def test_two_workers_never_run_one_job(conn, models):
+async def test_two_workers_never_run_one_job(conn, db, models):
     job = await queued(conn, A.id)
-    async with await store.sibling(conn) as other:
-        first = worker.Worker(conn, CONFIG, models.gateway)
+    async with DatabaseGate(conn.test_dsn, conn.test_schema) as other:  # another process
+        first = worker.Worker(db, CONFIG, models.gateway)
         second = worker.Worker(other, CONFIG, models.gateway)
         ran = await asyncio.gather(first.step(AFTERNOON), second.step(AFTERNOON))
         await second.close(RuntimeError("test over"))
@@ -378,22 +380,26 @@ async def test_two_workers_never_run_one_job(conn, models):
 async def test_a_claim_in_progress_is_skipped_and_a_running_job_is_its_sessions(conn, models):
     job = await queued(conn, A.id)
     async with await store.sibling(conn) as other:
+        me, them = await identity_of(conn), await identity_of(other)
         async with conn.transaction():
-            mine = await jobs_store.claim(conn)
-            assert await jobs_store.claim(other) is None  # locked: skipped, not waited on
+            mine = await jobs_store.claim(conn, me=me)
+            assert await jobs_store.claim(other, me=them) is None  # locked: skipped, not waited on
         assert mine["id"] == job
-        assert await jobs_store.claim(other) is None  # running in a live session not its own
-        assert (await jobs_store.claim(conn))["id"] == job  # its own, chosen again
+        assert (
+            await jobs_store.claim(other, me=them) is None
+        )  # running in a live session not its own
+        assert (await jobs_store.claim(conn, me=me))["id"] == job  # its own, chosen again
 
 
 async def test_a_process_job_taken_back_after_its_chunk_does_what_the_owner_left_due(
-    conn, models, monkeypatch
+    conn, db, models, monkeypatch
 ):
     """Its session died after recording its chunk, before ending it; meanwhile the owner's Try
     again left analysis due. Taken back, it starts over from its paper and does it."""
     models.analyses[A.title] = {"broken": True}
     job = await queued(conn, A.id)
-    dead = await store.sibling(conn)
+    dead = DatabaseGate(conn.test_dsn, conn.test_schema)  # another process's
+    await dead.open()
     gone = worker.Worker(dead, CONFIG, models.gateway)
 
     async def dies(*_):
@@ -414,17 +420,18 @@ async def test_a_process_job_taken_back_after_its_chunk_does_what_the_owner_left
     async with settling.change(conn, A.id, cause=Cause.OWNER) as change:  # as Needs you's Try again
         await failures.succeeded(change.unit, A.id, "analysis")
 
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     assert (await jobs_store.get(conn, job))["state"] == "done"
     assert asked(models, "analyse", A.title) == 2
 
 
 async def test_a_job_whose_session_died_is_taken_back_and_finishes_without_redoing_work(
-    conn, models, monkeypatch
+    conn, db, models, monkeypatch
 ):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await queued(conn, A.id, B.id)
-    dead = await store.sibling(conn)
+    dead = DatabaseGate(conn.test_dsn, conn.test_schema)  # another process's
+    await dead.open()
     gone = worker.Worker(dead, CONFIG, models.gateway)
     assert await gone.step(AFTERNOON)  # A's chunk, then its process dies
     pid = (await jobs_store.get(conn, job))["backend_pid"]
@@ -435,7 +442,7 @@ async def test_a_job_whose_session_died_is_taken_back_and_finishes_without_redoi
             break
         await asyncio.sleep(0.05)
 
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     finished = await jobs_store.get(conn, job)
     assert (finished["state"], finished["done"], finished["counts"]["classified"]) == ("done", 2, 2)
     assert asked(models, "classify", A.title) == 1 and asked(models, "classify", B.title) == 1
@@ -451,28 +458,68 @@ async def test_a_job_whose_session_died_is_taken_back_and_finishes_without_redoi
     assert executions[0]["finished_at"] is None and listed["cost"] == sum(c["cost"] for c in calls)
 
 
-async def test_a_job_taken_back_mid_chunk_skips_the_steps_it_had_done(conn, models):
+async def test_a_job_taken_back_mid_chunk_skips_the_steps_it_had_done(conn, db, models):
     """Its process died after classifying the paper and before recording the chunk: the paper
     is analysed and graded, and not classified again."""
     job = await queued(conn, A.id)
-    async with await store.sibling(conn) as dead:
-        await jobs_store.claim(dead)
+    async with DatabaseGate(conn.test_dsn, conn.test_schema) as dead:  # another process's
+        async with dead.write("claim") as unit:
+            await jobs_store.claim(unit, me=await dead.identity())
         async with model_run(dead, CONFIG, "job", gateway=models.gateway) as run:
             await nightly.classify(dead, CONFIG, run, ids=[A.id])
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     assert asked(models, "classify", A.title) == 1 and asked(models, "analyse", A.title) == 1
     assert (await jobs_store.get(conn, job))["state"] == "done"
+
+
+async def test_a_job_claimed_in_one_unit_records_progress_and_ends_from_others(conn, db, models):
+    """A claim names the gate's presence session, not the pool connection its unit ran on: the
+    job records progress and ends from other units, on whatever connections they get."""
+    job = await queued(conn, A.id)
+    me = await db.identity()
+    async with db.write("claim") as unit:
+        assert (await jobs_store.claim(unit, me=me))["id"] == job
+    await db._pool.drain()  # every connection the pool had is replaced
+    async with db.write("progress") as unit:
+        assert await jobs_store.progress(unit, job, 1, {}, me=await identity_of(conn)) is None
+        assert (await jobs_store.progress(unit, job, 1, {}, me=me))["done"] == 1
+    async with db.write("finish") as unit:
+        await jobs_store.finish(unit, job, "done", me=me)
+    assert (await jobs_store.get(conn, job))["state"] == "done"
+
+
+async def test_a_worker_whose_presence_session_ended_takes_its_job_back_and_goes_on(
+    conn, db, models, monkeypatch
+):
+    """The presence session drops mid-job (the connection cut): the worker's next step ends the
+    job's run, the job goes back in the queue, and the worker claims it afresh in the new
+    session's name and finishes it, redoing nothing."""
+    monkeypatch.setattr(worker, "CHUNK", 1)
+    job = await queued(conn, A.id, B.id)
+    w = worker.Worker(db, CONFIG, models.gateway)
+    assert await w.step(AFTERNOON)  # A's chunk; the job stays open on its run
+    first = await db.identity()
+    await conn.execute("SELECT pg_terminate_backend(%s, 10000)", (first.pid,))
+
+    await work_out(w)
+    assert (await db.identity()) != first
+    finished = await jobs_store.get(conn, job)
+    assert (finished["state"], finished["done"]) == ("done", 2)
+    assert asked(models, "classify", A.title) == 1 and asked(models, "classify", B.title) == 1
+    ended, again = await rows(conn, "SELECT * FROM runs WHERE job_id = %s ORDER BY id", job)
+    assert ended["error"] == "RuntimeError: the worker's session ended" and ended["finished_at"]
+    assert again["error"] is None and again["finished_at"] is not None
 
 
 # -- V3: the nightly first; the most urgent job at every chunk ----------------------------------
 
 
-async def test_no_chunk_starts_while_a_nightly_is_due_or_running(conn, models):
+async def test_no_chunk_starts_while_a_nightly_is_due_or_running(conn, db, models):
     job = await queued(conn, A.id)
-    w = worker.Worker(conn, SCHEDULED, models.gateway)
+    w = worker.Worker(db, SCHEDULED, models.gateway)
     assert not await w.step(NIGHT)  # due at 02:00, not started
     async with await store.sibling(conn) as nightly_session:
-        night = await runs.start(nightly_session, "nightly")
+        night = await runs.start(nightly_session, "nightly", me=await identity_of(nightly_session))
         assert not await w.step(NIGHT + timedelta(minutes=1))  # started, still running
         await runs.finish(nightly_session, night)
     assert (await jobs_store.get(conn, job))["state"] == "queued" and not await classified(conn)
@@ -480,14 +527,14 @@ async def test_no_chunk_starts_while_a_nightly_is_due_or_running(conn, models):
     assert await classified(conn) == {A.id}
 
 
-async def test_a_nightly_due_mid_job_runs_before_its_next_chunk(conn, models, monkeypatch):
+async def test_a_nightly_due_mid_job_runs_before_its_next_chunk(conn, db, models, monkeypatch):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await queued(conn, A.id, B.id)
-    w = worker.Worker(conn, SCHEDULED, models.gateway)
+    w = worker.Worker(db, SCHEDULED, models.gateway)
     assert await w.step(NIGHT - timedelta(minutes=10))  # A's chunk, before the nightly is due
     assert not await w.step(NIGHT)  # due now: the job waits
     assert (await jobs_store.get(conn, job))["done"] == 1
-    await nightly.run(conn, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
+    await nightly.run(db, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
     assert await classified(conn) == {A.id, B.id, C.id}  # the night took B and C
     assert await w.step(NIGHT + timedelta(minutes=30))
     finished = await jobs_store.get(conn, job)
@@ -495,10 +542,10 @@ async def test_a_nightly_due_mid_job_runs_before_its_next_chunk(conn, models, mo
     assert asked(models, "classify", B.title) == 1  # not again for the job
 
 
-async def test_a_held_run_lock_holds_every_chunk(conn, models):
+async def test_a_held_run_lock_holds_every_chunk(conn, db, models):
     job = await queued(conn, A.id)
-    w = worker.Worker(conn, CONFIG, models.gateway)
-    async with await store.sibling(conn) as other, run_lock(other):
+    w = worker.Worker(db, CONFIG, models.gateway)
+    async with db.held("run"):  # as another task's job or nightly
         assert not await w.step(AFTERNOON)
     # Not claimed either: a job is chosen under the lock, so the oldest is never passed over.
     assert (await jobs_store.get(conn, job))["state"] == "queued" and not await classified(conn)
@@ -507,7 +554,7 @@ async def test_a_held_run_lock_holds_every_chunk(conn, models):
 
 
 async def test_a_process_job_queued_during_a_longer_job_goes_at_its_next_chunk(
-    conn, models, monkeypatch
+    conn, db, models, monkeypatch
 ):
     """A re-run of the Field topic over B and C, a chunk each; prices for its model let it
     run under its ceiling."""
@@ -515,7 +562,7 @@ async def test_a_process_job_queued_during_a_longer_job_goes_at_its_next_chunk(
     monkeypatch.setattr(worker, "CHUNK", 1)
     scope = {"topic": AGENTS.slug, "revision": 1, "scopes": ["members"], "papers": [B.id, C.id]}
     longer = await jobs_store.create(conn, "rerun", scope, 2, "queued", ceiling=1.0)
-    w = worker.Worker(conn, CONFIG, models.gateway)
+    w = worker.Worker(db, CONFIG, models.gateway)
     assert await w.step(AFTERNOON)  # B
     process = await queued(conn, A.id)
     assert await w.step(AFTERNOON)  # A: the Process job first
@@ -527,12 +574,12 @@ async def test_a_process_job_queued_during_a_longer_job_goes_at_its_next_chunk(
     assert (await jobs_store.get(conn, longer))["state"] == "done"
 
 
-async def test_a_job_with_tonights_run_waits_for_a_nightly_to_finish(conn, models):
+async def test_a_job_with_tonights_run_waits_for_a_nightly_to_finish(conn, db, models):
     job = await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "offered")
     await jobs_store.move(conn, job, jobs_store.NOT_RUN, "tonight")
-    w = worker.Worker(conn, CONFIG, models.gateway)
+    w = worker.Worker(db, CONFIG, models.gateway)
     assert not await w.step(AFTERNOON)
-    await nightly.run(conn, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
+    await nightly.run(db, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
     asked_before = asked(models, "classify", A.title)
     assert await w.step(AFTERNOON)
     assert (await jobs_store.get(conn, job))["state"] == "done"
@@ -559,7 +606,7 @@ def keys(group: list[dict]) -> list[str]:
 async def test_jobs_are_listed_in_the_four_groups_with_the_cards_asked_for(conn, models):
     offered = await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "offered")
     running = await queued(conn, B.id)
-    await jobs_store.claim(conn)
+    await jobs_store.claim(conn, me=await identity_of(conn))
     failed = await jobs_store.create(conn, "process", {"papers": [C.id]}, 1, "failed")
     gone = await jobs_store.create(conn, "process", {"papers": ["2610.00009"]}, 1, "discarded")
     (card,) = await rows(
@@ -662,7 +709,7 @@ async def test_a_process_job_whose_paper_waits_on_the_owner_is_not_tried_again(c
     assert (processed.status_code, processed.json()["state"]) == (202, "queued")
 
 
-async def test_process_fetches_the_paper_and_queues_its_job_once(conn, models, monkeypatch):
+async def test_process_fetches_the_paper_and_queues_its_job_once(conn, db, models, monkeypatch):
     elsewhere = paper("2610.09999", title="Elsewhere")
     monkeypatch.setattr(
         misses, "fetch_by_ids", answering(lambda ids: [elsewhere] if elsewhere.id in ids else [])
@@ -684,7 +731,7 @@ async def test_process_fetches_the_paper_and_queues_its_job_once(conn, models, m
     }
     assert missing.status_code == 404
 
-    await work_out(worker.Worker(conn, CONFIG, models.gateway))
+    await work_out(worker.Worker(db, CONFIG, models.gateway))
     assert await classified(conn) == {elsewhere.id}
     async with api(conn) as http:
         page = (await http.get(f"/api/papers/{elsewhere.id}")).json()
@@ -700,11 +747,11 @@ async def test_process_asked_again_while_its_job_runs_only_answers_with_it(conn,
     """A retry after a lost reply, while the job runs and has not classified the paper yet: it
     answers with the job and does not ask it again, so the job ends done, not queued."""
     job = await queued(conn, A.id)
-    await jobs_store.claim(conn)
+    await jobs_store.claim(conn, me=await identity_of(conn))
     async with api(conn) as http:
         again = await http.post("/api/jobs/process", json={"paper_id": A.id})
     assert (again.status_code, again.json()["id"], again.json()["state"]) == (202, job, "running")
-    await jobs_store.finish(conn, job, "done")
+    await jobs_store.finish(conn, job, "done", me=await identity_of(conn))
     assert (await jobs_store.get(conn, job))["state"] == "done"
 
 
@@ -721,7 +768,7 @@ async def test_process_asked_twice_at_once_never_asks_its_running_job_again(
             settling.change(other, A.id, cause=Cause.OWNER) as change,
         ):
             await jobs_store.process(change.unit, A.id)
-        return (await jobs_store.claim(conn))["id"]
+        return (await jobs_store.claim(conn, me=await identity_of(conn)))["id"]
 
     async def overtaken(*args, **kwargs):
         nonlocal first
@@ -736,7 +783,7 @@ async def test_process_asked_twice_at_once_never_asks_its_running_job_again(
         second = await http.post("/api/jobs/process", json={"paper_id": A.id})
     job = await first
     assert second.status_code == 202 and second.json()["id"] == job
-    await jobs_store.finish(conn, job, "done")
+    await jobs_store.finish(conn, job, "done", me=await identity_of(conn))
     assert [r["state"] for r in await rows(conn, "SELECT state FROM jobs")] == ["done"]
 
 
@@ -781,12 +828,12 @@ async def test_process_holds_its_job_so_a_try_again_meanwhile_waits_and_is_refus
 async def test_the_paper_page_reads_the_job_before_the_paper(conn, models, monkeypatch):
     """The job ends while the page is read: the page says it still runs, so it is read again."""
     job = await queued(conn, A.id)
-    await jobs_store.claim(conn)
+    await jobs_store.claim(conn, me=await identity_of(conn))
     read = api_reading.reading.paper
 
     async def ended_meanwhile(c, paper_id):
         found = await read(c, paper_id)
-        await jobs_store.finish(conn, job, "done")
+        await jobs_store.finish(conn, job, "done", me=await identity_of(conn))
         return found
 
     monkeypatch.setattr(api_reading.reading, "paper", ended_meanwhile)

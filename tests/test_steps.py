@@ -26,7 +26,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
 from tests import settling
-from tests.conftest import TREE, AppClient, paper
+from tests.conftest import TREE, AppClient, gate_on, paper
 from tests.fakes import ScriptedProvider
 
 CLASSIFY = RoleConfig(provider="openrouter", model="test/decider")
@@ -135,7 +135,8 @@ async def models(conn):
 
 
 async def night(conn, models: Scripted, config: Config = CONFIG) -> dict:
-    run_id = await nightly.run(conn, config, fetch=False, gateway=models.gateway)
+    async with gate_on(conn) as db:
+        run_id = await nightly.run(db, config, fetch=False, gateway=models.gateway)
     return (await runs.get(conn, run_id))["counts"]
 
 
@@ -411,7 +412,9 @@ async def test_a_retry_that_did_not_count_still_comes_after_new_papers(conn, mod
     assert [p.id for p in await classifications_store.due(conn, FAILED_RUNS, limit=1)] == [B.id]
 
 
-async def test_a_failing_record_stops_every_call_before_the_run_closes(conn, models, monkeypatch):
+async def test_a_failing_record_stops_every_call_before_the_run_closes(
+    conn, db, models, monkeypatch
+):
     """B's call never returns; recording A fails. The run must not end with B still asking."""
     stalled, cancelled = asyncio.Event(), []
 
@@ -436,7 +439,7 @@ async def test_a_failing_record_stops_every_call_before_the_run_closes(conn, mod
 
     monkeypatch.setattr(classification, "record", boom)
     with pytest.raises(RuntimeError):
-        await nightly.run(conn, CONFIG, fetch=False, gateway=gateway)
+        await nightly.run(db, CONFIG, fetch=False, gateway=gateway)
     assert cancelled == [B.id]
     (run,) = await rows(conn, "SELECT error, finished_at FROM runs")
     assert run["finished_at"] and "the database went away" in run["error"]
@@ -446,14 +449,14 @@ async def test_a_failing_record_stops_every_call_before_the_run_closes(conn, mod
     "failure", [RuntimeError("the journal's connection went away"), asyncio.CancelledError()]
 )
 async def test_a_journal_that_fails_after_the_job_keeps_the_jobs_error_and_its_cost(
-    conn, monkeypatch, failure
+    conn, db, monkeypatch, failure
 ):
     async def lost(self):
         raise failure
 
     monkeypatch.setattr(CallJournal, "by_role", lost)
     with pytest.raises(ValueError, match="the job's own"):
-        async with model_run(conn, CONFIG, "nightly", gateway=lambda config, journal: None) as run:
+        async with model_run(db, CONFIG, "nightly", gateway=lambda config, journal: None) as run:
             call = await run.journal.start("judge", "m", "key", None)
             await run.journal.record(call, Usage(model="m", cost=0.25))
             raise ValueError("the job's own")
@@ -463,17 +466,17 @@ async def test_a_journal_that_fails_after_the_job_keeps_the_jobs_error_and_its_c
 
 
 async def test_a_run_that_cannot_close_after_the_job_failed_raises_the_jobs_error(
-    conn, monkeypatch
+    conn, db, monkeypatch
 ):
     async def unclosable(*args, **kwargs):
         raise RuntimeError("could not close")
 
     monkeypatch.setattr(runs, "finish", unclosable)
     with pytest.raises(ValueError, match="the job's own"):
-        async with run_record(conn, "intake"):
+        async with run_record(db, "intake"):
             raise ValueError("the job's own")
     with pytest.raises(RuntimeError, match="could not close"):  # nothing else to report
-        async with run_record(conn, "intake"):
+        async with run_record(db, "intake"):
             pass
 
 

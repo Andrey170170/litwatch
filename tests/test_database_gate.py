@@ -1,12 +1,11 @@
 """The Database gate (docs/plans/a1-database-gate.md, V1 and V2's gate part): units, the order
-of their locks, the nesting check, the session locks, the bridge. On real Postgres. Where a
-test needs a lock held elsewhere, today's own lock code holds it: the gate and the code not yet
-moved onto it must exclude each other."""
+of their locks, the nesting check, the session locks, the presence session, the bridge. On real
+Postgres. Where a test needs a lock held elsewhere, it takes it at its key written out, as the
+code before the gate did: a process from before it and one after must exclude each other."""
 
 import asyncio
 import json
 import logging
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -27,12 +26,9 @@ from litwatch.gates.database import (
     WriteUnit,
     outside_unit,
 )
-from litwatch.jobs import lock as jobs_lock
 from litwatch.llm import Gateway, Request
 from litwatch.llm.types import DecisionRequest, Predicate
-from litwatch.store import fulltext as fulltext_store
-from litwatch.store import jobs as jobs_store
-from litwatch.store import outbox
+from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from tests.fakes import BatchingProvider, ScriptedProvider
 
@@ -339,7 +335,8 @@ async def test_locks_are_taken_taxonomy_then_papers_by_id_then_the_rest(db, conn
 async def test_the_other_locks_are_taken_in_the_registrys_order(db, conn):
     topic = uuid4().hex
     async with conn.transaction():
-        await jobs_store.open_rerun(conn, {"topic": topic})  # today's code holds the re-run lock
+        # The re-run lock, held as the code before the gate took it.
+        await conn.execute("SELECT pg_advisory_xact_lock(7213916, hashtext(%s))", (topic,))
         held = Held(db.write("u", locks=["replay", ("rerun", topic), ("retally", 7)]))
         (pid,) = await waiters(conn, await keyed(conn, 7213916, topic))
         assert await granted(conn, pid) == {}  # the replay lock, named first, comes after it
@@ -465,40 +462,59 @@ async def test_a_keyed_session_lock_is_busy_only_for_its_key(db):
                 pass
 
 
-@asynccontextmanager
-async def todays(conn, name: str):
-    """Today's own holder of a session lock, on `conn`; yields whether it got the lock."""
-    try:
-        if name == "run":
-            async with jobs_lock.run_lock(conn):
-                yield True
-        elif name == "schedule":
-            async with jobs_lock.job_lock(conn, "publications"):
-                yield True
-        elif name == "dispatch":
-            async with outbox.dispatching(conn, "zotero") as locked:
-                yield locked
-        else:
-            async with fulltext_store.deep_worker(conn) as locked:
-                yield locked
-    except jobs_lock.BusyError:
-        yield False
+# Each session lock's key as the code before the gate took it, and its argument.
+SESSION = {
+    "run": ("7213911", None),
+    "schedule": ("7213913, hashtext(%s)", "publications"),
+    "dispatch": ("7213914, hashtext(%s)", "zotero"),
+    "deep-worker": ("7213915", None),
+}
 
 
-SESSION = {"run": None, "schedule": "publications", "dispatch": "zotero", "deep-worker": None}
+async def todays(conn, name: str) -> bool:
+    """Take a session lock on `conn` as the code before the gate did; whether it got it."""
+    key, arg = SESSION[name]
+    query = f"SELECT pg_try_advisory_lock({key}) AS ok"
+    return (await (await conn.execute(query, (arg,) if arg else None)).fetchone())["ok"]
+
+
+async def let_go(conn, name: str) -> None:
+    key, arg = SESSION[name]
+    await conn.execute(f"SELECT pg_advisory_unlock({key})", (arg,) if arg else None)
 
 
 @pytest.mark.parametrize("name", SESSION)
 async def test_the_session_locks_are_todays(db, conn, name):
-    async with todays(conn, name) as locked:
-        assert locked
-        with pytest.raises(BusyError):
-            async with db.held(name, SESSION[name]):
-                pass
-    async with db.held(name, SESSION[name]), todays(conn, name) as locked:
-        assert not locked
-    async with todays(conn, name) as locked:
-        assert locked
+    arg = SESSION[name][1]
+    assert await todays(conn, name)
+    with pytest.raises(BusyError):
+        async with db.held(name, arg):
+            pass
+    await let_go(conn, name)
+    async with db.held(name, arg):
+        assert not await todays(conn, name)
+    assert await todays(conn, name)
+    await let_go(conn, name)
+
+
+async def test_the_migration_lock_is_todays_and_waits_for_its_holder(db, conn):
+    await conn.execute("SELECT pg_advisory_lock(7213910)")
+    held = asyncio.Event()
+
+    async def migrate():
+        async with db.startup("migration"):
+            held.set()
+
+    task = asyncio.create_task(migrate())
+    await waiters(conn, (0, 7213910, 1))  # it waits, rather than failing as a held lock does
+    assert not held.is_set()
+    await conn.execute("SELECT pg_advisory_unlock(7213910)")
+    async with asyncio.timeout(WAIT):
+        await task
+    assert held.is_set()
+    with pytest.raises(ValueError, match="not a startup lock"):
+        async with db.startup("run"):
+            pass
 
 
 async def test_only_the_listed_session_locks_are_held_across_calls(db):
@@ -608,3 +624,46 @@ async def test_a_slow_unit_is_logged_with_its_name_and_duration(db, monkeypatch,
     (record,) = logged(caplog)
     assert record.levelno == logging.WARNING
     assert record.getMessage().startswith("slow unit: 'slow' was open for 0.")
+
+
+# -- the presence session --------------------------------------------------------------------------
+
+
+async def alive(conn, run_id: int) -> bool:
+    row = await (
+        await conn.execute(f"SELECT {runs.ALIVE} AS alive FROM runs r WHERE id = %s", (run_id,))
+    ).fetchone()
+    return row["alive"]
+
+
+async def test_a_run_stays_alive_while_its_pool_connections_are_replaced(conn):
+    async with DatabaseGate(conn.test_dsn, conn.test_schema, max_size=2) as db:
+        me = await db.identity()
+        async with db.write("open a run") as unit:
+            assert await backend(unit) != me.pid  # the presence session is no pool connection
+            run_id = await runs.start(unit, "nightly", me=me)
+        await db._pool.drain()  # every pool connection closed and replaced
+        assert await alive(conn, run_id)
+        assert await db.identity() == me
+    # The gate closed, its presence with it: the run is over.
+    assert not await alive(conn, run_id)
+
+
+async def test_a_presence_session_that_ended_is_opened_again_with_a_new_identity(conn, caplog):
+    async with DatabaseGate(conn.test_dsn, conn.test_schema) as db:
+        me = await db.identity()
+        async with db.write("open a run") as unit:
+            run_id = await runs.start(unit, "nightly", me=me)
+        await conn.execute("SELECT pg_terminate_backend(%s)", (me.pid,))
+        with caplog.at_level(logging.WARNING, logger=LOG):
+            again = await db.identity()
+        assert again != me
+        assert [r.getMessage() for r in logged(caplog)] == [
+            f"the presence session (backend {me.pid}) ended; opening another"
+        ]
+        assert not await alive(conn, run_id)  # what was claimed in the old one's name is over
+
+
+async def test_a_bridged_gates_presence_is_its_connection(conn):
+    me = await DatabaseGate.over(conn).identity()
+    assert me.pid == conn.info.backend_pid

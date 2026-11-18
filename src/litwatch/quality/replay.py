@@ -37,6 +37,7 @@ from litwatch.config import Config, RoleConfig
 from litwatch.core import Depth, Fit, Paper, Status, Taxonomy
 from litwatch.core.classification import Source, keyword, with_ancestors
 from litwatch.core.evaluation import Outcome, Recall, Share
+from litwatch.gates.database import DatabaseGate
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.llm.decisions import chat_request
 from litwatch.llm.gateway import VALIDATION_VERSION
@@ -45,6 +46,7 @@ from litwatch.store import calls
 from litwatch.store import evaluation as store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store.db import transaction
 
 KIND = "replay"
 # The evaluation labels: in the checkout, and where the image puts them.
@@ -303,7 +305,7 @@ async def start(
         "thresholds": config.classification.model_dump(mode="json"),
         "left_out": r.left_out,
     }
-    async with conn.transaction():
+    async with transaction(conn):
         r.eval_run_id = await store.start(conn, KIND, models, topics, params, note)
         await store.put_labels(
             conn, r.eval_run_id, [(x.paper_id, x.topic, x.cohort, x.positive) for x in r.labels]
@@ -332,7 +334,7 @@ def _concluded(tree: Taxonomy, c: classification.Classification, topic: str) -> 
 
 
 async def run(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     r: Replay,
     *,
@@ -341,9 +343,11 @@ async def run(
     """Classify the papers and grade the pairs left to do, recording each as it concludes, as a
     run of its own. Returns the run record's counts."""
     assert r.eval_run_id is not None, "start the replay first"
-    async with model_run(conn, config, calls.EVAL, gateway=gateway) as mr:
-        await work(conn, config, r, mr)
-        await store.finish(conn, r.eval_run_id)
+    async with model_run(db, config, calls.EVAL, gateway=gateway) as mr:
+        # Transitional: the replay's steps take a connection until P5 moves them.
+        async with db.lend("replay") as conn:
+            await work(conn, config, r, mr)
+            await store.finish(conn, r.eval_run_id)
         return mr.counts
 
 

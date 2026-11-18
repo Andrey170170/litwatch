@@ -15,9 +15,9 @@ from litwatch.intake import archive as archive_intake
 from litwatch.intake.collect import _state
 from litwatch.integrations.archive import Archive
 from litwatch.jobs import intake as intake_job
-from litwatch.store import papers, runs
+from litwatch.store import papers
 from tests import settling
-from tests.conftest import paper
+from tests.conftest import paper, started
 from tests.fakes_http import FakeArchive, mock
 
 SINCE, UNTIL = date(2026, 10, 1), date(2026, 10, 14)
@@ -141,12 +141,12 @@ async def test_the_archive_never_rolls_back_what_arxiv_sent(conn):
     assert (stored.abstract, stored.updated) == ("Fixed.", "2026-10-10T00:00:00+00:00")
 
 
-async def test_the_job_records_its_run_and_arxiv_intake_does_not_go_on_from_it(conn):
+async def test_the_job_records_its_run_and_arxiv_intake_does_not_go_on_from_it(conn, db):
     fake = FakeArchive()
     fake.listing = [item(1), item(2)]
     config = Config(intake=Intake(categories=("cs.CL", "cs.AI")))
     old = (date(2026, 1, 1), date(2026, 1, 14))
-    result = await intake_job.from_archive(conn, config, client(fake), *old)
+    result = await intake_job.from_archive(db, config, client(fake), *old)
     assert result.inserted == 2
     assert fake.listings[0]["categories"] == "cs.CL,cs.AI"
     run = await (await conn.execute("SELECT * FROM runs")).fetchone()
@@ -159,7 +159,7 @@ async def test_the_job_records_its_run_and_arxiv_intake_does_not_go_on_from_it(c
 
     # The next arXiv harvest starts from its own window, not the archive read's.
     since = datetime.now(UTC).date() - timedelta(days=3)
-    run_id = await runs.start(conn, "intake")
+    run_id = await started(conn, "intake")
     assert (await _state(conn, "cs.CL", since, run_id))["discovery_from"] == since
 
 
@@ -175,10 +175,10 @@ class Stalling:
         await asyncio.Event().wait()
 
 
-async def test_a_cancelled_intake_records_its_run_as_finished(conn):
+async def test_a_cancelled_intake_records_its_run_as_finished(conn, db):
     archive = Stalling([paper("2610.00001")])
     config = Config(intake=Intake(categories=("cs.CL",)))
-    job = asyncio.create_task(intake_job.from_archive(conn, config, archive, SINCE, UNTIL))
+    job = asyncio.create_task(intake_job.from_archive(db, config, archive, SINCE, UNTIL))
     await archive.listed.wait()
     job.cancel()
     with pytest.raises(asyncio.CancelledError):

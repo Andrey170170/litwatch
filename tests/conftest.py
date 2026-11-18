@@ -19,7 +19,8 @@ from litwatch import store
 from litwatch.core import Depth, Paper, Taxonomy, TaxonomyClass, Topic
 from litwatch.events import dispatch
 from litwatch.feedback import word
-from litwatch.gates.database import STRICT_ENV, DatabaseGate
+from litwatch.gates.database import STRICT_ENV, DatabaseGate, identity_of
+from litwatch.store import runs
 from tests.settling import RULES
 
 
@@ -151,8 +152,27 @@ async def conn():
 @pytest.fixture
 async def db(conn):
     """The Database gate on `conn`'s schema, with a pool of its own."""
-    async with DatabaseGate(conn.test_dsn, conn.test_schema) as gate:
+    async with gate_on(conn) as gate:
         yield gate
+
+
+@pytest.fixture
+async def gate(conn):
+    """The Database gate on `conn`'s schema, as `db`, for the modules whose own `db` fixture is
+    a seeded connection."""
+    async with gate_on(conn) as g:
+        yield g
+
+
+def gate_on(conn) -> DatabaseGate:
+    """A Database gate of its own on `conn`'s schema, with its own presence session: as another
+    process's. Opened and closed with `async with`."""
+    return DatabaseGate(conn.test_dsn, conn.test_schema)
+
+
+async def started(conn, kind: str, *args: Any, **kwargs: Any) -> int:
+    """`store.runs.start` in the name of `conn`'s own session, alive while `conn` is open."""
+    return await runs.start(conn, kind, *args, me=await identity_of(conn), **kwargs)
 
 
 class AppClient(httpx.AsyncClient):
@@ -191,30 +211,38 @@ class AppClient(httpx.AsyncClient):
             await self.gate.close()
 
 
-async def settled(conn, timeout: float = 20.0) -> None:
-    """Wait until every event in the outbox is settled. The test cluster is shared: another
-    session's open transaction holds back delivery of every event written after it began."""
+async def settled(on, timeout: float = 20.0) -> None:
+    """Wait until every event in the outbox is settled, read on a connection or a gate. The test
+    cluster is shared: another session's open transaction holds back delivery of every event
+    written after it began."""
     query = (
         "SELECT NOT EXISTS (SELECT 1 FROM outbox "
         "WHERE xid >= pg_snapshot_xmin(pg_current_snapshot())) AS ok"
     )
+
+    async def ok() -> bool:
+        if isinstance(on, DatabaseGate):
+            async with on.read("settled") as unit:  # a fresh snapshot each time
+                return (await (await unit.execute(query)).fetchone())["ok"]
+        return (await (await on.execute(query)).fetchone())["ok"]
+
     for _ in range(int(timeout / 0.05)):
-        if (await (await conn.execute(query)).fetchone())["ok"]:
+        if await ok():
             return
         await asyncio.sleep(0.05)
     raise AssertionError("events stayed unsettled: a transaction on the cluster is held open")
 
 
-async def start(conn, integration) -> None:
+async def start(db: DatabaseGate, integration) -> None:
     """`dispatch.start`, once what came before is settled, so it is all behind the cursor."""
-    await settled(conn)
-    await dispatch.start(conn, integration)
+    await settled(db)
+    await dispatch.start(db, integration)
 
 
-async def deliver(conn, integration, now=None) -> int:
+async def deliver(db: DatabaseGate, integration, now=None) -> int:
     """`dispatch.deliver`, once the events written so far are settled."""
-    await settled(conn)
-    return await dispatch.deliver(conn, integration, now)
+    await settled(db)
+    return await dispatch.deliver(db, integration, now)
 
 
 def answering(answer):

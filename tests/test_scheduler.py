@@ -8,11 +8,11 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from litwatch import store
 from litwatch.api import create_app
 from litwatch.config import Config, Schedule
+from litwatch.gates.database import BusyError
 from litwatch.jobs import scheduler, worker
-from litwatch.jobs.lock import BusyError
+from tests.conftest import gate_on
 
 DAY = datetime(2026, 10, 12, tzinfo=UTC)  # a Monday
 
@@ -33,27 +33,30 @@ def test_a_job_is_due_once_after_its_time_and_not_long_after():
     assert not scheduler.is_due(weekly, at(7, 1, days=1), last_run=at(7, 0, days=-7))
 
 
-async def test_a_tick_runs_what_is_due_and_retries_a_job_that_finds_the_lock_taken(conn):
+async def test_a_tick_runs_what_is_due_and_retries_a_job_that_finds_the_lock_taken(db):
     ran = []
 
     async def runs(kind):
-        async def run(c):
-            ran.append(kind)
-            await c.execute("INSERT INTO runs (kind, started_at) VALUES (%s, %s)", (kind, at(6, 1)))
+        async def run(db, hold):
+            ran.append((kind, hold.name, hold.key_arg))  # run under its kind's schedule lock
+            async with db.write("record the run") as unit:
+                await unit.execute(
+                    "INSERT INTO runs (kind, started_at) VALUES (%s, %s)", (kind, at(6, 1))
+                )
 
         return run
 
-    async def busy(c):
+    async def busy(db, hold):
         raise BusyError("another job")
 
     todo = [
         scheduler.Job("nightly", "0 6 * * *", await runs("nightly")),
         scheduler.Job("weekly", "0 6 * * 1", busy),
     ]
-    assert await scheduler.tick(conn, todo, at(6, 1)) == ["nightly"]
+    assert await scheduler.tick(db, todo, at(6, 1)) == ["nightly"]
     # The nightly run is on record now; the weekly one waits for the lock.
-    assert await scheduler.tick(conn, todo, at(6, 2)) == []
-    assert ran == ["nightly"]
+    assert await scheduler.tick(db, todo, at(6, 2)) == []
+    assert ran == [("nightly", "schedule", "nightly")]
 
 
 def test_the_repeated_hour_of_a_fall_back_is_scheduled_like_any_other():
@@ -81,23 +84,16 @@ def test_the_next_fire_steps_through_a_fall_back_in_the_zone():
     assert scheduler.next_fire("0 7 * * 1", at(7, 1)) == at(7, 0, days=7)
 
 
-async def test_a_job_another_scheduler_is_deciding_on_is_left_to_it(conn):
+async def test_a_job_another_scheduler_is_deciding_on_is_left_to_it(conn, db):
     ran = []
 
-    async def run(c):
+    async def run(db, hold):
         ran.append("nightly")
 
     todo = [scheduler.Job("nightly", "0 6 * * *", run)]
-    async with await store.sibling(conn) as other:
-        await other.execute(
-            "SELECT pg_advisory_lock(%s, hashtext('nightly'))", (scheduler.SCHEDULE_LOCK,)
-        )
-        assert await scheduler.tick(conn, todo, at(6, 1)) == []
-        # Released before the connection closes: a closing backend lets go of its locks late.
-        await other.execute(
-            "SELECT pg_advisory_unlock(%s, hashtext('nightly'))", (scheduler.SCHEDULE_LOCK,)
-        )
-    assert await scheduler.tick(conn, todo, at(6, 1)) == ["nightly"]
+    async with gate_on(conn) as other, other.held("schedule", "nightly"):  # another process's
+        assert await scheduler.tick(db, todo, at(6, 1)) == []
+    assert await scheduler.tick(db, todo, at(6, 1)) == ["nightly"]
 
 
 async def test_shutdown_waits_for_the_job_in_progress_to_finish_its_record(monkeypatch):

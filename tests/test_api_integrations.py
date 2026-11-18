@@ -101,15 +101,15 @@ async def make(conn):
         await c.aclose()
 
 
-async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_on(conn, make):
+async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_on(conn, db, make):
     carder = Carder()
     config = Config(integrations={"carder": {"use": "x.y"}, "old": {"enabled": False}})
     client = await make([carder, Shelf("shelf")], config)
-    await start(conn, carder)
+    await start(db, carder)
     first = await events.emit(conn, events.CARD_REQUESTED, P.id)
     await events.emit(conn, events.PAPER_SAVED, P.id)
     carder.fail = {first}
-    await deliver(conn, carder)
+    await deliver(db, carder)
 
     cards = {c["name"]: c for c in (await client.get("/api/settings/integrations")).json()}
     assert list(cards) == ["carder", "shelf", "old"]
@@ -142,7 +142,7 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
     assert (await client.post("/api/settings/integrations/carder/skip")).status_code == 409
     assert (await client.post("/api/settings/integrations/carder/retry")).status_code == 409
     assert (await client.post("/api/settings/integrations/nobody/retry")).status_code == 404
-    await deliver(conn, carder)
+    await deliver(db, carder)
     cards = {c["name"]: c for c in (await client.get("/api/settings/integrations")).json()}
     assert cards["carder"]["failing"] is None and cards["carder"]["skipped"] == 1
 

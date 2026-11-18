@@ -13,14 +13,14 @@ from litwatch.config import Config
 from litwatch.core import Status
 from litwatch.core.digests import DigestPeriod, DigestState
 from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
-from litwatch.jobs.lock import run_lock
 from litwatch.store import digests as store_
 from litwatch.store import taxonomy as taxonomy_store
 
 
 async def window(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     first: date,
     last: date,
@@ -33,7 +33,12 @@ async def window(
     (as the nightly run does) so a day of the window does not take their papers. Published ones
     stay. Returns the run id."""
     rules = word.rules(config)
-    async with run_lock(conn), model_run(conn, config, "digests", gateway=gateway) as run:
+    async with (
+        db.held("run"),
+        model_run(db, config, "digests", gateway=gateway) as run,
+        # Transitional: the digests take a connection until P5 moves them.
+        db.lend("write digests") as conn,
+    ):
         tree = await taxonomy_store.load(conn)
         if tree is not None:
             await digests.retry_failed(conn, run, tree, rules=rules)

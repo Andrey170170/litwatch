@@ -12,8 +12,6 @@ from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
-import psycopg
-
 from litwatch import analysis, classification, digests, fulltext, grading, intake
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Cause
@@ -22,7 +20,6 @@ from litwatch.feedback import word
 from litwatch.gates.database import DatabaseGate
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
-from litwatch.jobs.lock import run_lock
 from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
 from litwatch.store import digests as digests_store
@@ -35,7 +32,7 @@ log = logging.getLogger(__name__)
 
 
 async def classify(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     run: ModelRun,
     limit: int | None = None,
@@ -44,13 +41,16 @@ async def classify(
     """Classify every paper whose current text has no classification, up to `limit`, of `ids`
     when given (a job's papers). A paper whose answers were unusable `FAILED_RUNS` runs in a row
     is left for the owner (awaiting classification)."""
-    tree = await taxonomy_store.load(conn)
+    async with db.read("classify: due") as unit:
+        tree = await taxonomy_store.load(unit)
+        papers = (
+            [] if tree is None else await classifications_store.due(unit, FAILED_RUNS, limit, ids)
+        )
     if tree is None:
         log.warning("no taxonomy: nothing is classified until one is imported")
         return
-    papers = await classifications_store.due(conn, FAILED_RUNS, limit, ids)
     thresholds = config.classification.thresholds
-    db, rules = DatabaseGate.over(conn), word.rules(config)
+    rules = word.rules(config)
     async with classification.classify(papers, tree, run.gateway, thresholds) as found:
         async for c in found:
             async with word.change(
@@ -62,7 +62,7 @@ async def classify(
 
 
 async def analyse(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     run: ModelRun,
     limit: int | None = None,
@@ -71,8 +71,9 @@ async def analyse(
     """Analyse every paper whose current text is classified and not analysed, up to `limit`, of
     `ids` when given. A paper whose answers were unusable `FAILED_RUNS` runs in a row is left for
     the owner, who can have it tried again."""
-    papers = await analyses_store.due(conn, FAILED_RUNS, limit, ids)
-    db, rules = DatabaseGate.over(conn), word.rules(config)
+    async with db.read("analyse: due") as unit:
+        papers = await analyses_store.due(unit, FAILED_RUNS, limit, ids)
+    rules = word.rules(config)
     async with analysis.analyse(papers, run.gateway) as found:
         async for a in found:
             async with word.change(
@@ -84,7 +85,7 @@ async def analyse(
 
 
 async def grade(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     run: ModelRun,
     limit: int | None = None,
@@ -93,11 +94,12 @@ async def grade(
     """Grade every paper whose current text is due a grading for some topic, up to `limit` papers,
     of `ids` when given (`grading.due`). A grading whose answers were unusable `FAILED_RUNS` runs in
     a row is left for the owner, who can have it graded now."""
-    tree = await taxonomy_store.load(conn)
-    if tree is None:
-        return
-    due, passes = await grading.due(conn, tree, FAILED_RUNS, limit, ids)
-    db, rules = DatabaseGate.over(conn), word.rules(config)
+    async with db.read("grade: due") as unit:
+        tree = await taxonomy_store.load(unit)
+        if tree is None:
+            return
+        due, passes = await grading.due(unit, tree, FAILED_RUNS, limit, ids)
+    rules = word.rules(config)
     async with grading.grade(due, run.gateway, config.grading) as found:
         async for g in found:
             async with word.change(
@@ -106,11 +108,12 @@ async def grade(
                 recorded = await grading.record(done.unit, g)
             if recorded:
                 run.add("graded" if g.verdict is not None else "grading_failed")
-    await verdicts_store.passed(conn, passes)  # only once every grading is recorded
+    async with db.write("grading passes") as unit:  # only once every grading is recorded
+        await verdicts_store.passed(unit, passes)
 
 
 async def text_passes(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     run: ModelRun,
     limit: int | None = None,
@@ -125,19 +128,20 @@ async def text_passes(
     have their text asked for now, and the service's worker runs each once its text is there.
     Returns how the tries ended."""
     # Only one nightly runs at a time, so a lease longer than a worker's is a dead run's.
-    run.add("fulltext_taken_back", await fulltext_store.take_back(conn, LEASE))
-    reconciled = await fulltext_store.candidates(conn, RECONCILE_LOOKBACK)
-    await word.settle_all(
-        DatabaseGate.over(conn), reconciled, cause=Cause.VERDICT, rules=word.rules(config)
-    )
+    async with db.write("take back text passes", taxonomy="shared") as unit:
+        run.add("fulltext_taken_back", await fulltext_store.take_back(unit, LEASE))
+    async with db.read("reconcile text passes") as unit:
+        reconciled = await fulltext_store.candidates(unit, RECONCILE_LOOKBACK)
+    await word.settle_all(db, reconciled, cause=Cause.VERDICT, rules=word.rules(config))
     run.add("fulltext_reconciled", len(reconciled))
-    run.add("fulltext_retried", await fulltext_store.retry_failed(conn, FAILED_RUNS))
+    async with db.write("retry failed text passes", taxonomy="shared") as unit:
+        run.add("fulltext_retried", await fulltext_store.retry_failed(unit, FAILED_RUNS))
     archive = fulltext.archive_for(config)
     if archive is None:
         log.warning("no archive configured: full-text passes wait")
         return Counter()
     try:
-        return await fulltext.work(conn, config, archive, run=run, limit=limit, deadline=deadline)
+        return await fulltext.work(db, config, archive, run=run, limit=limit, deadline=deadline)
     finally:
         await archive.aclose()
 
@@ -145,8 +149,13 @@ async def text_passes(
 WAIT_TICK_SECONDS = 30.0  # how often the wait looks at the passes it waits for
 
 
+async def _waiting(db: DatabaseGate, since: datetime) -> bool:
+    async with db.read("digest wait: passes") as unit:
+        return bool(await digests_store.waiting_passes(unit, since))
+
+
 async def wait_for_texts(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     run: ModelRun,
     since: datetime,
@@ -165,7 +174,7 @@ async def wait_for_texts(
     if archive is None:
         return
     try:
-        while await digests_store.waiting_passes(conn, since):
+        while await _waiting(db, since):
             left = deadline - time.monotonic()
             if left <= 0:
                 run.add("digest_wait_ended", 1)  # some passes still running: digests went on
@@ -173,25 +182,26 @@ async def wait_for_texts(
             await asyncio.sleep(min(tick, left))
             if limit is None or limit > 0:
                 done = await fulltext.work(
-                    conn, config, archive, run=run, limit=limit, deadline=deadline
+                    db, config, archive, run=run, limit=limit, deadline=deadline
                 )
                 limit = None if limit is None else limit - fulltext.worked(done)
     finally:
         await archive.aclose()
 
 
-async def write_digests(
-    conn: psycopg.AsyncConnection, config: Config, run: ModelRun, today: date
-) -> None:
+async def write_digests(db: DatabaseGate, config: Config, run: ModelRun, today: date) -> None:
     """The night's digests, those of `today`."""
-    tree = await taxonomy_store.load(conn)
+    async with db.read("digests: taxonomy") as unit:
+        tree = await taxonomy_store.load(unit)
     if tree is None:
         return
-    await digests.nightly(conn, run, tree, today, rules=word.rules(config))
+    # Transitional: the digests take a connection until P5 moves them.
+    async with db.lend("nightly digests") as conn:
+        await digests.nightly(conn, run, tree, today, rules=word.rules(config))
 
 
 async def run(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     *,
     fetch: bool = True,
@@ -223,29 +233,32 @@ async def run(
     batch_night = config.schedule.night(until) if night == "schedule" else night
     today = today or until.astimezone(config.schedule.zone).date()
     async with (
-        run_lock(conn),
-        model_run(conn, config, "nightly", window=(since, until), gateway=gateway) as run,
+        db.held("run"),
+        model_run(db, config, "nightly", window=(since, until), gateway=gateway) as run,
     ):
         if fetch:
-            result = await intake.collect(
-                conn,
-                config.intake.categories,
-                since,
-                run.run_id,
-                archive=archive_integration.harvester(config),
-                rules=word.rules(config),
-            )
-            await runs.update(
-                conn,
-                run.run_id,
-                fetched=result.fetched,
-                inserted=result.inserted,
-                updated=result.updated,
-                intake=result.details,
-            )
+            # Transitional: intake takes a connection until P5 moves it.
+            async with db.lend("nightly intake") as conn:
+                result = await intake.collect(
+                    conn,
+                    config.intake.categories,
+                    since,
+                    run.run_id,
+                    archive=archive_integration.harvester(config),
+                    rules=word.rules(config),
+                )
+            async with db.write("nightly: intake") as unit:
+                await runs.update(
+                    unit,
+                    run.run_id,
+                    fetched=result.fetched,
+                    inserted=result.inserted,
+                    updated=result.updated,
+                    intake=result.details,
+                )
             run.counts["rewritten"] = len(result.rewritten)
         try:
-            await _steps(conn, config, run, until, today, limit, with_digests, batch_night)
+            await _steps(db, config, run, until, today, limit, with_digests, batch_night)
             await run.gateway.settle()  # the batches a dead run left are accounted for too
         finally:
             await run.gateway.close()
@@ -253,7 +266,7 @@ async def run(
 
 
 async def _steps(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     run: ModelRun,
     until: datetime,
@@ -264,15 +277,16 @@ async def _steps(
 ) -> None:
     since = until
     if night:  # a run started in the night's window waits for the passes since its first run
-        since = await runs.first_since(conn, "nightly", night[0]) or until
+        async with db.read("nightly: first run tonight") as unit:
+            since = await runs.first_since(unit, "nightly", night[0]) or until
     # Outside the night's window the deadline is now: no batch is sent, and those a dead run
     # left open are cancelled and settled as at a deadline.
     run.gateway.batch_until(night[1] if night else datetime.now(UTC))
     await run.gateway.recover()
     batching = run.gateway.batching
-    await classify(conn, config, run, limit)
-    await analyse(conn, config, run, limit)
-    await grade(conn, config, run, limit)
+    await classify(db, config, run, limit)
+    await analyse(db, config, run, limit)
+    await grade(db, config, run, limit)
     # The digests wait for the passes they depend on: until the night's deadline; from now and
     # at most `wait_minutes` outside the night, or when nothing batches (the passes go as
     # normal calls), though never past the night's deadline.
@@ -281,9 +295,9 @@ async def _steps(
         left = max(0.0, (night[1] - datetime.now(UTC)).total_seconds())
         wait = left if batching else min(left, wait)
     deadline = time.monotonic() + wait
-    done = await text_passes(conn, config, run, limit, deadline)
+    done = await text_passes(db, config, run, limit, deadline)
     if not with_digests:
         return
     left = None if limit is None else limit - fulltext.worked(done)
-    await wait_for_texts(conn, config, run, since, deadline, limit=left)
-    await write_digests(conn, config, run, today)
+    await wait_for_texts(db, config, run, since, deadline, limit=left)
+    await write_digests(db, config, run, today)

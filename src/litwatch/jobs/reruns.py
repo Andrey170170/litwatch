@@ -18,15 +18,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any, Literal
 
-import psycopg
-
 from litwatch import fulltext, grading
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config, RoleConfig
 from litwatch.core import Cause, Depth, Paper, Status, Taxonomy, Topic
 from litwatch.core.grading import GRADERS
 from litwatch.feedback import word
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import DatabaseGate, Identity, ReadUnit
 from litwatch.jobs.context import ModelRun
 from litwatch.llm.ceiling import Bound, Ceiling, anthropic_bound, route
 from litwatch.llm.types import DEFAULT_MAX_TOKENS
@@ -53,7 +51,7 @@ class Range:
 
 
 async def scope_papers(
-    conn: psycopg.AsyncConnection,
+    conn: ReadUnit,
     config: Config,
     tree: Taxonomy,
     topic: Topic,
@@ -79,9 +77,7 @@ async def scope_papers(
             return await jobs_store.published_between(conn, since, until)
 
 
-async def per_paper(
-    conn: psycopg.AsyncConnection, config: Config, topic: Topic
-) -> tuple[float | None, list[str]]:
+async def per_paper(conn: ReadUnit, config: Config, topic: Topic) -> tuple[float | None, list[str]]:
     """What grading one paper for the topic costs, by its graders' mean costs (an Area's `check`
     by the share of its verdicts that escalated), and the roles with no calls to estimate by:
     with any, no estimate."""
@@ -105,7 +101,7 @@ def _per_million(price: float) -> float:
     return math.ceil(price * 1e6 * 1e6) / 1e6
 
 
-async def bound(conn: psycopg.AsyncConnection, role: RoleConfig) -> Bound | None:
+async def bound(conn: ReadUnit, role: RoleConfig) -> Bound | None:
     """An OpenRouter route's price bound from what its model's last 200 calls were charged
     (`store.calls.charged_prices`), sent as `provider.max_price`: a chat route with its output
     cap where the role sets none (`DEFAULT_MAX_TOKENS`, as Anthropic's); a Decisions route
@@ -127,9 +123,7 @@ def roles(topic: Topic) -> tuple[str, ...]:
     return (*GRADERS[topic.depth], "brief")
 
 
-async def bounds(
-    conn: psycopg.AsyncConnection, config: Config, names: Iterable[str]
-) -> dict[str, Bound | None]:
+async def bounds(conn: ReadUnit, config: Config, names: Iterable[str]) -> dict[str, Bound | None]:
     """The OpenRouter routes' bounds, for every model of the lists of a job's roles (`names`):
     a re-run's (`roles`), a replay's."""
     found: dict[str, Bound | None] = {}
@@ -140,9 +134,7 @@ async def bounds(
     return found
 
 
-async def unpriced(
-    conn: psycopg.AsyncConnection, config: Config, names: Iterable[str]
-) -> list[str]:
+async def unpriced(conn: ReadUnit, config: Config, names: Iterable[str]) -> list[str]:
     """The models of the lists of a job's roles (`names`) that have no price bound, as `role:
     model`: a job under a ceiling does not send their calls."""
     names = tuple(names)
@@ -160,7 +152,7 @@ async def unpriced(
 
 
 async def ceiling(
-    conn: psycopg.AsyncConnection, config: Config, job: dict[str, Any], names: Iterable[str]
+    conn: ReadUnit, config: Config, job: dict[str, Any], names: Iterable[str]
 ) -> Ceiling:
     """The job's ceiling as its run opens: what is left of it after what its runs spent, over
     the routes of its roles (`names`)."""
@@ -192,18 +184,20 @@ def active_topic(tree: Taxonomy | None, slug: str) -> Topic | None:
 
 
 async def work(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     run: ModelRun,
     job: dict[str, Any],
     tree: Taxonomy,
     archive: ArchiveClient | None,
     size: int,
+    *,
+    me: Identity,
 ) -> Chunk:
     """The re-run's next chunk: grade the next `size` papers of its scope that have no verdict
     under the topic's current version (D3), each recorded verdict settling its paper; once its
     scope is graded, work the text passes it queued. Calls go through the run's gateway, under
-    the job's ceiling."""
+    the job's ceiling. Its progress is recorded for the session `me` runs it in the name of."""
     slug = job["scope"]["topic"]
     topic = active_topic(tree, slug)
     assert topic is not None  # the worker ends a re-run whose topic is not active
@@ -211,12 +205,13 @@ async def work(
     papers = job["scope"]["papers"]
     if job["done"] < len(papers):
         ids = papers[job["done"] : job["done"] + size]
-        todo = await verdicts_store.ungraded_under(conn, slug, topic.version, ids)
-        found = await papers_store.get_many(conn, todo)
+        async with db.read("re-run: to grade") as unit:
+            todo = await verdicts_store.ungraded_under(unit, slug, topic.version, ids)
+            found = await papers_store.get_many(unit, todo)
         ladder = dict(job["ladder"])
         name = tree.get(slug).name
         due = [_due(p, topic, name, ladder.get(p.id)) for p in found]
-        db, rules = DatabaseGate.over(conn), word.rules(config)
+        rules = word.rules(config)
         async with grading.grade(due, run.gateway, config.grading) as results:
             async for g in results:
                 if g.verdict is None:
@@ -242,42 +237,48 @@ async def work(
                     counts["graded"] += 1
                     ladder.pop(g.due.paper.id, None)
         reached = run.gateway.ceiling is not None and run.gateway.ceiling.reached
-        if not reached:  # a grading the ceiling cut short is not a failure: it is done on
-            # What the chunk leaves without a verdict under the version on its current text (a
-            # grading that failed, or one whose text changed meanwhile) fails, for Try again.
-            left = await verdicts_store.ungraded_under(conn, slug, topic.version, ids)
-            counts["grading_failed"] += len(left)
-        # How far it is, from the verdicts themselves: Try again and a run taken back count
-        # what earlier tries graded.
-        graded = await verdicts_store.graded_under(conn, slug, topic.version, papers)
-        after = await _progress(
-            conn, job, run, counts, job["done"] + (0 if reached else len(ids)), graded, ladder
-        )
+        async with db.read("re-run: graded") as unit:
+            if not reached:  # a grading the ceiling cut short is not a failure: it is done on
+                # What the chunk leaves without a verdict under the version on its current text
+                # (a grading that failed, or one whose text changed meanwhile) fails, for Try
+                # again.
+                left = await verdicts_store.ungraded_under(unit, slug, topic.version, ids)
+                counts["grading_failed"] += len(left)
+            # How far it is, from the verdicts themselves: Try again and a run taken back count
+            # what earlier tries graded.
+            graded = await verdicts_store.graded_under(unit, slug, topic.version, papers)
+        done_n = job["done"] + (0 if reached else len(ids))
+        after = await _progress(db, job, run, counts, done_n, graded, ladder, me=me)
         if after is None:
             return Chunk("gone")
         if reached:
             return Chunk("stopped", f"stopped at the ceiling after {graded} of {len(papers)}")
         return Chunk("more")
     if archive is None:  # nothing reads the full text: the passes stay the job's, for Run now
-        if left := await fulltext_store.job_open(conn, job["id"]):
+        if left := await _open_passes(db, job):
             return Chunk("stopped", f"stopped with {left} full-text passes left: no archive")
     else:
-        done = await fulltext.work(conn, config, archive, run=run, job=job["id"], limit=size)
+        done = await fulltext.work(db, config, archive, run=run, job=job["id"], limit=size)
         counts.update({k: v for k, v in done.items() if k != "awaiting_text"})
-        after = await _progress(conn, job, run, counts, job["done"], on_run=False)
+        after = await _progress(db, job, run, counts, job["done"], on_run=False, me=me)
         if after is None:
             return Chunk("gone")
         if run.gateway.ceiling is not None and run.gateway.ceiling.reached:
-            left = await fulltext_store.job_open(conn, job["id"])
+            left = await _open_passes(db, job)
             return Chunk("stopped", f"stopped at the ceiling with {left} full-text passes left")
-        if await fulltext_store.job_open(conn, job["id"]):
+        if await _open_passes(db, job):
             return Chunk("more" if fulltext.worked(done) else "waiting")
     failed_n = job["counts"].get("grading_failed", 0) + counts["grading_failed"]
     return Chunk("done", failed=failed_n)
 
 
+async def _open_passes(db: DatabaseGate, job: dict[str, Any]) -> int:
+    async with db.read("re-run: passes open") as unit:
+        return await fulltext_store.job_open(unit, job["id"])
+
+
 async def _progress(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     job: dict[str, Any],
     run: ModelRun,
     counts: Counter[str],
@@ -286,10 +287,11 @@ async def _progress(
     ladder: dict[str, Any] | None = None,
     *,
     on_run: bool = True,
+    me: Identity,
 ) -> dict[str, Any] | None:
     """Record the chunk on the job (with its scope's papers `graded` so far, when counted) and,
-    unless they are there already (`on_run`), on its run; None when the job is no longer this
-    session's."""
+    unless they are there already (`on_run`), on its run; None when the job is no longer the
+    session `me`'s."""
     merged = dict(job["counts"])
     for k, v in counts.items():
         merged[k] = merged.get(k, 0) + v
@@ -297,7 +299,8 @@ async def _progress(
             run.add(k, v)
     if graded is not None:
         merged["graded"] = graded
-    return await jobs_store.progress(conn, job["id"], done, merged, ladder)
+    async with db.write("re-run: progress") as unit:
+        return await jobs_store.progress(unit, job["id"], done, merged, ladder, me=me)
 
 
 def _due(paper: Paper, topic: Topic, name: str, ladder: dict[str, Any] | None) -> grading.Due:

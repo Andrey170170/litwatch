@@ -23,10 +23,6 @@ BEFORE_THE_RULE = {
     "intake/collect.py:_snapshots": 1,
     "intake/collect.py:_state": 3,
     "intake/collect.py:collect": 3,
-    "jobs/lock.py:held_elsewhere": 1,
-    "jobs/lock.py:job_lock": 2,
-    "jobs/lock.py:run_lock": 2,
-    "jobs/scheduler.py:tick": 2,
 }
 
 DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)

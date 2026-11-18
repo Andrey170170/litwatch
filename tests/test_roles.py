@@ -35,7 +35,7 @@ SHARED = {"config", "logs", "concurrency", "writing"}
 CYCLES_BEFORE_THE_RULE = {
     ("digests", "jobs"),  # digests -> jobs.context
     ("feedback", "intake"),  # feedback.misses -> intake.batch, intake.search
-    ("fulltext", "jobs"),  # fulltext -> jobs.context, jobs.lock; fulltext.deep -> jobs.worker
+    ("fulltext", "jobs"),  # fulltext -> jobs.context; fulltext.deep -> jobs.worker
     ("intake", "feedback"),  # intake.batch -> feedback.word
     ("jobs", "digests"),  # jobs.digests, jobs.nightly -> digests
     ("jobs", "fulltext"),  # jobs.nightly, jobs.reruns -> fulltext

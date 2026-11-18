@@ -7,22 +7,14 @@ import re
 from pathlib import Path
 
 from litwatch.gates.database import HELD_ACROSS_CALLS, REGISTRY
-from litwatch.jobs import lock as jobs_lock
-from litwatch.store import calls, db, fulltext, jobs, outbox, publications, taxonomy
+from litwatch.store import taxonomy
 
 SRC = Path(__file__).parent.parent / "src" / "litwatch"
 GATE = "gates/database.py"
 
-# Mentions of an advisory-lock function per file, before the rule; to move into the gate.
+# Mentions of an advisory-lock function per file, before the rule; to move into the gate. The
+# taxonomy lock's raw-connection branch goes in P6, with the last caller passing a connection.
 LOCKS_BEFORE_THE_RULE = {
-    "jobs/lock.py": 4,
-    "jobs/scheduler.py": 2,
-    "store/calls.py": 2,
-    "store/db.py": 2,
-    "store/fulltext.py": 2,
-    "store/jobs.py": 2,
-    "store/outbox.py": 2,
-    "store/publications.py": 1,
     "store/taxonomy.py": 2,
 }
 
@@ -31,32 +23,18 @@ LOCKS_BEFORE_THE_RULE = {
 CONNECTIONS_BEFORE_THE_RULE = {
     "digests/__init__.py",
     "events/__init__.py",
-    "events/dispatch.py",
     "feedback/calibrate.py",
     "feedback/misses.py",
-    "fulltext/__init__.py",
-    "fulltext/deep.py",
-    "grading/__init__.py",
     "intake/archive.py",
     "intake/catalog.py",
     "intake/collect.py",
     "integrations/__init__.py",
     "integrations/archive.py",
-    "integrations/deep.py",
     "integrations/notion.py",
     "integrations/webdav.py",
     "integrations/webhook.py",
     "integrations/zotero.py",
-    "jobs/context.py",
     "jobs/digests.py",
-    "jobs/intake.py",
-    "jobs/lock.py",
-    "jobs/nightly.py",
-    "jobs/publications.py",
-    "jobs/replays.py",
-    "jobs/reruns.py",
-    "jobs/scheduler.py",
-    "jobs/worker.py",
     "quality/ladders.py",
     "quality/replay.py",
 }
@@ -88,8 +66,8 @@ def test_connections_stay_in_the_gate_and_store():
 
 
 def test_the_registry_has_todays_keys():
-    """Until the code that takes a lock itself has moved onto the gate, both take the same key,
-    made the same way, or they would not exclude each other."""
+    """The keys the code took before the gate, made the same way, so a process from before it
+    and one after exclude each other while a deploy replaces one with the other."""
     assert [(lock.name, lock.key, lock.scope, lock.arg) for lock in REGISTRY] == [
         ("taxonomy", 7213913, "unit", None),
         ("paper", 7213912, "unit", "text"),
@@ -103,20 +81,8 @@ def test_the_registry_has_todays_keys():
         ("deep-worker", 7213915, "session", None),
         ("migration", 7213910, "startup", None),
     ]
-    # The constants of the code not yet moved; each line goes with its constant. The paper lock
-    # has none left: only the gate takes it.
-    assert {lock.name: lock.key for lock in REGISTRY if lock.name != "paper"} == {
-        "taxonomy": taxonomy.TAXONOMY_LOCK,
-        "publication": publications.PUBLICATION_LOCK,
-        "rerun": jobs.RERUN_LOCK,
-        "replay": jobs.REPLAY_LOCK,
-        "retally": calls.RETALLY_LOCK,
-        "run": jobs_lock.RUN_LOCK,
-        "schedule": jobs_lock.SCHEDULE_LOCK,
-        "dispatch": outbox.DISPATCH_LOCK,
-        "deep-worker": fulltext.DEEP_WORKER_LOCK,
-        "migration": db.MIGRATION_LOCK,
-    }
+    # The taxonomy lock's own code still takes it on a raw connection, until P6.
+    assert next(lock.key for lock in REGISTRY if lock.name == "taxonomy") == taxonomy.TAXONOMY_LOCK
 
 
 def test_the_locks_held_across_calls_only_shrink():

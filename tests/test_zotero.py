@@ -99,21 +99,21 @@ def zotero(fake: FakeZotero, **kw) -> Zotero:
     return Zotero(client(fake), **kw)
 
 
-async def run(conn, *integrations) -> None:
+async def run(db, *integrations) -> None:
     for integration in integrations:
-        await deliver(conn, integration)
+        await deliver(db, integration)
 
 
 # -- zotero ----------------------------------------------------------------------------------------
 
 
-async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_deleted(world):
+async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_deleted(world, db):
     conn, fake = world, FakeZotero()
     z = zotero(fake)
-    await start(conn, z)
+    await start(db, z)
 
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
     (item,) = fake.tops()
     key = item["key"]
     assert await state.zotero_item(conn, P.id) == key
@@ -123,27 +123,27 @@ async def test_a_library_paper_gets_an_item_that_follows_its_grade_and_is_never_
     assert "litwatch:screen schema=2" in note and "Chain-of-thought faithfulness" in note
 
     await say(conn, LabelValue.RELATED)
-    await run(conn, z)
+    await run(db, z)
     assert fake.collection_names(key) == {"Litwatch", "Tier 2"}
     assert "litwatch:watch:cot-faithfulness:relevant" in fake.tags(key)
     assert "litwatch:watch:cot-faithfulness:must_read" not in fake.tags(key)
 
     # Unsaved: out of the collections and tagged dropped, but still there.
     await settling.toggle(conn, P.id, Hand.UNSAVE)
-    await run(conn, z)
+    await run(db, z)
     assert fake.collection_names(key) == set()
     assert fake.tags(key) == {"litwatch:dropped"}
     assert not any(c.startswith("DELETE") for c in fake.calls)
 
     # Saved again: back, and the same item.
     await settling.toggle(conn, P.id, Hand.SAVE)
-    await run(conn, z)
+    await run(db, z)
     assert [i["key"] for i in fake.tops()] == [key]
     assert fake.collection_names(key) == {"Litwatch", "Tier 2"}
     assert "litwatch:dropped" not in fake.tags(key)
 
 
-async def test_an_item_0x_made_is_found_and_updated_not_made_again(world):
+async def test_an_item_0x_made_is_found_and_updated_not_made_again(world, db):
     conn, fake = world, FakeZotero()
     # Found by its title; 0.x's tier and selection tags give way to v1's grade tag.
     fake.add_item(
@@ -157,9 +157,9 @@ async def test_an_item_0x_made_is_found_and_updated_not_made_again(world):
     )
     fake.items["OLDITEM1"]["data"]["tags"].append({"tag": "read-later"})
     z = zotero(fake)
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
 
     assert [i["key"] for i in fake.tops()] == ["OLDITEM1"]
     assert fake.tags("OLDITEM1") == {
@@ -169,7 +169,7 @@ async def test_an_item_0x_made_is_found_and_updated_not_made_again(world):
     assert fake.collection_names("OLDITEM1") == {"MINE", "Litwatch", "Tier 1"}
 
 
-async def test_an_item_whose_title_differs_is_found_by_its_arxiv_id(world):
+async def test_an_item_whose_title_differs_is_found_by_its_arxiv_id(world, db):
     conn, fake = world, FakeZotero()
     # The owner retitled 0.x's item; another item only cites the paper in its abstract.
     fake.add_item(
@@ -194,28 +194,28 @@ async def test_an_item_whose_title_differs_is_found_by_its_arxiv_id(world):
         },
     )
     z = zotero(fake)
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
 
     assert len(fake.tops()) == 3
     assert await state.zotero_item(conn, P.id) == "OLDITEM1"
 
 
-async def test_grades_published_versions_and_cards_reach_the_notes(world):
+async def test_grades_published_versions_and_cards_reach_the_notes(world, db):
     conn, fake = world, FakeZotero()
     z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
     (item,) = fake.tops()
     key = item["key"]
     assert "Chain-of-thought faithfulness</b> · must read" in fake.notes(key)[0]
 
     await lookups.store_record(
-        conn, P.id, Publication(venue="NeurIPS", year=2026, doi="10.1/x"), by_owner=True
+        db, P.id, Publication(venue="NeurIPS", year=2026, doi="10.1/x"), by_owner=True
     )
-    await run(conn, z)
+    await run(db, z)
     (note,) = fake.notes(key)
     assert "NeurIPS 2026" in note and "doi:10.1/x" in note
 
@@ -223,7 +223,7 @@ async def test_grades_published_versions_and_cards_reach_the_notes(world):
     noted = CARD | {"process_notes": [{"kind": "access", "source": "service", "note": NOTED}]}
     await state.put_card(conn, P.id, noted, "deep-model", {"cells": 3}, **LABEL)
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
-    await run(conn, z)
+    await run(db, z)
     notes = fake.notes(key)
     assert len(notes) == 2
     assert any("Probes predict unfaithful reasoning." in n for n in notes)
@@ -233,21 +233,21 @@ async def test_grades_published_versions_and_cards_reach_the_notes(world):
 
 
 @pytest.mark.parametrize("name", ["scarce", "icl"])
-async def test_a_deep_read_gets_no_note_and_no_card_tags_and_still_sets_the_inbox(world, name):
+async def test_a_deep_read_gets_no_note_and_no_card_tags_and_still_sets_the_inbox(world, db, name):
     """A read has none of the fields a Deep card's note and tags were built from (R5): its
     `card.ready` is handled all the same, and a ready read counts for the inbox."""
     conn, fake = world, FakeZotero()
     z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
     (item,) = fake.tops()
     key = item["key"]
     assert "INBOX" not in fake.items[key]["data"]["collections"]  # no card yet
 
     await state.put_card(conn, P.id, fixture_read(name), "deep-model", {"cells": 3}, **LABEL)
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
-    await run(conn, z)
+    await run(db, z)
     assert (await outbox.cursor(conn, z.name)).failing is None
     (note,) = fake.notes(key)  # the screen note alone
     assert "litwatch:screen" in note and "litwatch:enrichment" not in json.dumps(fake.items)
@@ -255,14 +255,14 @@ async def test_a_deep_read_gets_no_note_and_no_card_tags_and_still_sets_the_inbo
     assert "INBOX" in fake.items[key]["data"]["collections"]
 
 
-async def test_a_card_written_again_as_a_read_leaves_its_note_and_tags_on_the_item(world):
+async def test_a_card_written_again_as_a_read_leaves_its_note_and_tags_on_the_item(world, db):
     conn, fake = world, FakeZotero()
     z = zotero(fake)
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "must_read")
     await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, **LABEL)
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
-    await run(conn, z)
+    await run(db, z)
     (item,) = fake.tops()
     key = item["key"]
     before = (sorted(fake.notes(key)), fake.tags(key))
@@ -270,19 +270,19 @@ async def test_a_card_written_again_as_a_read_leaves_its_note_and_tags_on_the_it
 
     await state.put_card(conn, P.id, fixture_read("scarce"), "deep-model", {}, **LABEL)
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
-    await run(conn, z)
+    await run(db, z)
     assert (await outbox.cursor(conn, z.name)).failing is None
     assert (sorted(fake.notes(key)), fake.tags(key)) == before  # what is on the item stays
 
 
-async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(world):
+async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(world, db):
     conn, fake = world, FakeZotero()
     z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "must_read")
     await state.put_card(conn, P.id, CARD, "deep-model", {}, **LABEL)
     await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
-    await run(conn, z)
+    await run(db, z)
     (item,) = fake.tops()
     key = item["key"]
 
@@ -291,23 +291,23 @@ async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(worl
 
     assert inbox()
     await say(conn, LabelValue.RELATED)  # below must read: out of the inbox
-    await run(conn, z)
+    await run(db, z)
     assert not inbox() and "Tier 2" in fake.collection_names(key)
     await say(conn, LabelValue.CENTRAL)  # back
-    await run(conn, z)
+    await run(db, z)
     assert inbox()
     await settling.toggle(conn, P.id, Hand.UNSAVE)  # unsaved: out with the other collections
-    await run(conn, z)
+    await run(db, z)
     assert not inbox() and fake.collection_names(key) == set()
 
 
-async def test_a_create_whose_answer_was_lost_is_made_once(world):
+async def test_a_create_whose_answer_was_lost_is_made_once(world, db):
     conn, fake = world, FakeZotero()
     fake.lose_answers = 100  # every create happens, then answers 502
     z = zotero(fake)
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
     assert (await outbox.cursor(conn, z.name)).failing is None
     (item,) = fake.tops()
     assert sorted(c["data"]["name"] for c in fake.collections.values()) == [
@@ -319,7 +319,7 @@ async def test_a_create_whose_answer_was_lost_is_made_once(world):
     assert await state.zotero_item(conn, P.id) == item["key"]
 
 
-async def test_whats_there_is_looked_for_past_the_first_page(world):
+async def test_whats_there_is_looked_for_past_the_first_page(world, db):
     conn, fake = world, FakeZotero()
     # Many collections before litwatch's own, and an 0.x item with many notes before its own.
     for i in range(120):
@@ -339,9 +339,9 @@ async def test_whats_there_is_looked_for_past_the_first_page(world):
         },
     )
     z = zotero(fake)
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
 
     names = [c["data"]["name"] for c in fake.collections.values()]
     assert names.count("Litwatch") == 1 and "Litwatch" in fake.collection_names("OLDITEM1")
@@ -349,26 +349,26 @@ async def test_whats_there_is_looked_for_past_the_first_page(world):
     assert len(screens) == 1 and "schema=2" in screens[0]
 
 
-async def test_an_item_is_found_past_the_first_page_of_matches(world):
+async def test_an_item_is_found_past_the_first_page_of_matches(world, db):
     conn, fake = world, FakeZotero()
     # Thirty other items whose titles contain the paper's, then the paper's own.
     for i in range(30):
         fake.add_item(f"REPLY{i:03d}", {"itemType": "preprint", "title": f"{P.title}: reply {i}"})
     fake.add_item("THEITEM1", {"itemType": "preprint", "title": P.title})
     z = zotero(fake)
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
     assert len(fake.tops()) == 31
     assert await state.zotero_item(conn, P.id) == "THEITEM1"
 
 
-async def test_a_paper_never_in_the_library_gets_no_item(world):
+async def test_a_paper_never_in_the_library_gets_no_item(world, db):
     conn, fake = world, FakeZotero()
     z = zotero(fake)
-    await start(conn, z)
+    await start(db, z)
     await grade(conn, "adjacent")
-    await run(conn, z)
+    await run(db, z)
     assert fake.items == {} and fake.calls == []
 
 
@@ -387,19 +387,19 @@ def pdfs(monkeypatch):
     return fake, dav, arxiv, w
 
 
-async def test_a_must_read_pdf_waits_for_its_item_then_is_stored_once(world, pdfs):
+async def test_a_must_read_pdf_waits_for_its_item_then_is_stored_once(world, db, pdfs):
     conn = world
     fake, dav, arxiv, w = pdfs
     z = zotero(fake)
     for integration in (z, w):
-        await start(conn, integration)
+        await start(db, integration)
     await grade(conn, "must_read")
 
-    await run(conn, w)  # before zotero made the item: retried later
+    await run(db, w)  # before zotero made the item: retried later
     assert (await outbox.cursor(conn, w.name)).failing is not None
-    await run(conn, z)
+    await run(db, z)
     await outbox.retry(conn, w.name)
-    await run(conn, w)
+    await run(db, w)
 
     (item,) = fake.tops()
     (attachment,) = fake.attachments(item["key"])
@@ -421,65 +421,65 @@ async def test_a_must_read_pdf_waits_for_its_item_then_is_stored_once(world, pdf
     assert len(fake.attachments(item["key"])) == 1 and len(arxiv.calls) == 1
 
 
-async def test_an_overruled_or_unsaved_must_read_fetches_no_pdf_until_it_is_back(world, pdfs):
+async def test_an_overruled_or_unsaved_must_read_fetches_no_pdf_until_it_is_back(world, db, pdfs):
     conn = world
     fake, dav, arxiv, w = pdfs
     z = zotero(fake)
     for integration in (z, w):
-        await start(conn, integration)
+        await start(db, integration)
 
     # The verdict says must read; the owner says relevant before webdav gets to it.
     await grade(conn, "must_read")
     await say(conn, LabelValue.RELATED)
-    await run(conn, z, w)
+    await run(db, z, w)
     assert arxiv.calls == [] and dav.files == {}
 
     # Must read again, but unsaved by hand: still nothing.
     await say(conn, LabelValue.CENTRAL)
     await settling.toggle(conn, P.id, Hand.UNSAVE)
-    await run(conn, z, w)
+    await run(db, z, w)
     assert arxiv.calls == []
 
     # Saved again: `paper.saved` does what was skipped.
     await settling.toggle(conn, P.id, Hand.SAVE)
-    await run(conn, z, w)
+    await run(db, z, w)
     assert arxiv.calls == [f"/pdf/{P.id}"] and await state.webdav_file(conn, P.id)
 
 
-async def test_an_interrupted_upload_is_finished_not_taken_for_done(world, pdfs):
+async def test_an_interrupted_upload_is_finished_not_taken_for_done(world, db, pdfs):
     conn = world
     fake, dav, arxiv, w = pdfs
     z = zotero(fake)
     for integration in (z, w):
-        await start(conn, integration)
+        await start(db, integration)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
     dav.fail = {".prop"}  # the zip arrives, the prop does not
-    await run(conn, w)
+    await run(db, w)
     (item,) = fake.tops()
     (attachment,) = fake.attachments(item["key"])
     assert (await state.webdav_file(conn, P.id))["state"] == "pending"
     assert (await outbox.cursor(conn, w.name)).failing is not None
 
     await outbox.retry(conn, w.name)
-    await run(conn, w)
+    await run(db, w)
     assert fake.attachments(item["key"]) == [attachment]
     assert {f"{attachment}.zip", f"{attachment}.prop"} <= set(dav.files)
     assert (await state.webdav_file(conn, P.id))["state"] == "stored"
 
 
-async def test_an_attachment_made_by_a_lost_create_is_found_and_finished(world, pdfs):
+async def test_an_attachment_made_by_a_lost_create_is_found_and_finished(world, db, pdfs):
     conn = world
     fake, dav, arxiv, w = pdfs
     z = zotero(fake)
     for integration in (z, w):
-        await start(conn, integration)
+        await start(db, integration)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
     fake.lose_answers = 1  # the attachment is made; its answer is lost
-    await run(conn, w)
+    await run(db, w)
     await outbox.retry(conn, w.name)
-    await run(conn, w)
+    await run(db, w)
     (item,) = fake.tops()
     (attachment,) = fake.attachments(item["key"])
     assert await state.webdav_file(conn, P.id) == {
@@ -490,20 +490,20 @@ async def test_an_attachment_made_by_a_lost_create_is_found_and_finished(world, 
     assert f"{attachment}.prop" in dav.files
 
 
-async def test_the_owners_own_pdf_is_left_alone(world, pdfs):
+async def test_the_owners_own_pdf_is_left_alone(world, db, pdfs):
     conn = world
     fake, dav, arxiv, w = pdfs
     z = zotero(fake)
     for integration in (z, w):
-        await start(conn, integration)
+        await start(db, integration)
     await grade(conn, "must_read")
-    await run(conn, z)
+    await run(db, z)
     (item,) = fake.tops()
     fake.add_item(
         "OWNERPDF",
         {"itemType": "attachment", "parentItem": item["key"], "contentType": "application/pdf"},
     )
-    await run(conn, w)
+    await run(db, w)
     assert await state.webdav_file(conn, P.id) == {
         "item_key": item["key"],
         "attachment_key": "OWNERPDF",
@@ -512,14 +512,14 @@ async def test_the_owners_own_pdf_is_left_alone(world, pdfs):
     assert arxiv.calls == [] and dav.files == {}
 
 
-async def test_an_item_made_again_gets_its_pdf_again(world, pdfs):
+async def test_an_item_made_again_gets_its_pdf_again(world, db, pdfs):
     conn = world
     fake, dav, arxiv, w = pdfs
     z = zotero(fake)
     for integration in (z, w):
-        await start(conn, integration)
+        await start(db, integration)
     await grade(conn, "must_read")
-    await run(conn, z, w)
+    await run(db, z, w)
     (first,) = fake.tops()
     assert (await state.webdav_file(conn, P.id))["state"] == "stored"
 
@@ -528,7 +528,7 @@ async def test_an_item_made_again_gets_its_pdf_again(world, pdfs):
         del fake.items[key]
     await settling.toggle(conn, P.id, Hand.UNSAVE)
     await settling.toggle(conn, P.id, Hand.SAVE)
-    await run(conn, z, w)
+    await run(db, z, w)
     (second,) = fake.tops()
     assert second["key"] != first["key"]
     (attachment,) = fake.attachments(second["key"])

@@ -9,10 +9,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Publication
-
-# Held while a paper's record is compared and stored, so two lookups of a paper never both
-# take a record for new.
-PUBLICATION_LOCK = 7213914
+from litwatch.gates.database import WriteUnit
 
 # A library paper with no published record is looked up again monthly for two years.
 RECHECK = timedelta(days=30)
@@ -38,22 +35,22 @@ async def found(conn: psycopg.AsyncConnection, ids: list[str]) -> dict[str, Publ
 
 
 async def put(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     paper_id: str,
     record: Publication | None,
     *,
     by_owner: bool = False,
 ) -> tuple[bool, Publication | None]:
     """Store a lookup's result, or the owner's choice. Returns whether it was stored (a
-    lookup never replaces the owner's choice) and the record stored before. Call it inside
-    a transaction: the paper is locked while the two are compared, even before its first row."""
-    await conn.execute(
-        "SELECT pg_advisory_xact_lock(%s, hashtext(%s))", (PUBLICATION_LOCK, paper_id)
-    )
+    lookup never replaces the owner's choice) and the record stored before. The unit holds the
+    paper's publication lock (`("publication", paper_id)`), so two lookups of a paper never
+    both take a record for new, even before its first row."""
+    if ("publication", paper_id) not in unit.locks:
+        raise RuntimeError(f"unit {unit.name!r} stores a publication without its lock")
     before = await (
-        await conn.execute("SELECT record FROM publications WHERE paper_id = %s", (paper_id,))
+        await unit.execute("SELECT record FROM publications WHERE paper_id = %s", (paper_id,))
     ).fetchone()
-    stored = await conn.execute(
+    stored = await unit.execute(
         """
         INSERT INTO publications AS p (paper_id, record, by_owner) VALUES (%s, %s, %s)
         ON CONFLICT (paper_id) DO UPDATE SET record = EXCLUDED.record,
