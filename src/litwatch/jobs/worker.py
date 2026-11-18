@@ -299,9 +299,11 @@ class Worker:
         await self._close(job["id"], exc)
 
     async def _end_rerun(self, job: dict[str, Any], state: str, error: str | None) -> None:
+        """End the re-run and let go of its passes, in one unit, only if it is still this
+        worker's: one a peer took back is the peer's, and so are its passes."""
         async with self.db.write("end re-run", taxonomy="shared") as unit:
-            await jobs_store.finish(unit, job["id"], state, error, me=self._me)
-            await fulltext_store.release_job(unit, job["id"])
+            if await jobs_store.finish(unit, job["id"], state, error, me=self._me):
+                await fulltext_store.release_job(unit, job["id"])
 
     async def _run_of(self, job: dict[str, Any]) -> ModelRun:
         """The run this worker records the job's work on, of kind `job` (`eval` for a replay):

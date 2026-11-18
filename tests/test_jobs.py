@@ -463,8 +463,9 @@ async def test_a_job_taken_back_mid_chunk_skips_the_steps_it_had_done(conn, db, 
     is analysed and graded, and not classified again."""
     job = await queued(conn, A.id)
     async with DatabaseGate(conn.test_dsn, conn.test_schema) as dead:  # another process's
+        me = await dead.identity()
         async with dead.write("claim") as unit:
-            await jobs_store.claim(unit, me=await dead.identity())
+            await jobs_store.claim(unit, me=me)
         async with model_run(dead, CONFIG, "job", gateway=models.gateway) as run:
             await nightly.classify(dead, CONFIG, run, ids=[A.id])
     await work_out(worker.Worker(db, CONFIG, models.gateway))

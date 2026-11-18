@@ -291,12 +291,14 @@ async def finish(
     error: str | None = None,
     *,
     me: Identity,
-) -> None:
+) -> bool:
     """End the session `me`'s run of the job as done, failed, discarded or stopped (by its ceiling,
     `error` saying where). One done that the owner asked again while it ran (`settle_process`)
     goes back in the queue from its first paper instead, so its steps take what the owner's
-    action left due."""
-    await conn.execute(
+    action left due. Returns whether it did: False when the job is no longer `me`'s (taken
+    back, then claimed again or put back in the queue), whose cleanup is then not `me`'s
+    either."""
+    cur = await conn.execute(
         f"""
         UPDATE jobs SET error = %(error)s, changed_at = now(),
                backend_pid = NULL, backend_start = NULL,
@@ -308,6 +310,7 @@ async def finish(
         """,
         {"state": state, "error": error, "id": job_id} | _mine(me),
     )
+    return cur.rowcount == 1
 
 
 async def listing(

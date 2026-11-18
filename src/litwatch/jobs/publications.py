@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from litwatch import events
 from litwatch.core import Publication
-from litwatch.gates.database import DatabaseGate, Hold
+from litwatch.gates.database import DatabaseGate
 from litwatch.jobs.context import run_record
 from litwatch.publications.dblp import PublicationSource, SourceError
 from litwatch.store import papers as papers_store
@@ -93,14 +93,10 @@ async def for_copy(
         return (await store.found(unit, [paper_id])).get(paper_id)
 
 
-async def run(
-    db: DatabaseGate, source: PublicationSource, limit: int = LIMIT, *, hold: Hold
-) -> dict[str, int]:
+async def run(db: DatabaseGate, source: PublicationSource, limit: int = LIMIT) -> dict[str, int]:
     """Look up the library papers that are due, as a `publications` run. Runs never overlap:
     each takes its due papers once, so one that died beside another would go unseen. The
-    caller holds the schedule lock for `publications` (`hold`): the scheduler, or the CLI."""
-    if (hold.name, hold.key_arg) != ("schedule", "publications"):
-        raise ValueError(f"a publications run is held by its schedule lock, not {hold}")
+    caller holds the schedule lock for `publications`: the scheduler, or the CLI."""
     async with run_record(db, "publications") as record:
         record.fields["cost"] = 0
         counts = record.counts

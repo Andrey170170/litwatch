@@ -73,8 +73,8 @@ def _migrations() -> list[tuple[int, str, str]]:
 
 async def migrate(conn: psycopg.AsyncConnection) -> list[str]:
     """Apply every migration not yet applied, in order. Returns the names applied. A process
-    holds the migration lock around it (`DatabaseGate.startup("migration")`), so two never
-    apply one twice.
+    runs it on the migration lock's own session (`DatabaseGate.startup("migration")`), so two
+    never apply one twice, and it cannot go on after the lock went with its session.
 
     A 0.x database is refused, so pointing v1 at the wrong database by accident changes
     nothing.

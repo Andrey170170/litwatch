@@ -164,8 +164,8 @@ async def db(conn):
 
 async def run(gate, source, limit: int = lookups.LIMIT) -> dict[str, int]:
     """A publications run as the CLI starts one, holding the job's schedule lock."""
-    async with gate.held("schedule", "publications") as hold:
-        return await lookups.run(gate, source, limit, hold=hold)
+    async with gate.held("schedule", "publications"):
+        return await lookups.run(gate, source, limit)
 
 
 async def events(conn):
@@ -206,13 +206,9 @@ async def test_runs_never_overlap(db, gate):
             await run(gate, source)
         assert await scheduler.tick(gate, [job], now) == []  # left to the run in progress
     assert source.asked == []
-    # The scheduler runs it under the lock it decided under, the one hold of the lock.
+    # The scheduler runs it under the lock it decided under, which the run takes no more.
     assert await scheduler.tick(gate, [job], now) == ["publications"]
     assert len(source.asked) == 2
-    # A run is held by the lock, never by another.
-    async with gate.held("run") as other_lock:
-        with pytest.raises(ValueError, match="schedule lock"):
-            await lookups.run(gate, source, hold=other_lock)
 
 
 async def test_a_run_stops_when_dblp_keeps_failing(db, gate, monkeypatch):

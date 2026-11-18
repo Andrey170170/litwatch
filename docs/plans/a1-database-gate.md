@@ -136,7 +136,7 @@ never commits.
 | **P1** | **The gate.** Pool; typed units; the lock registry and its order; the session locks on their list; the nesting check (a unit inside a unit, and the model gateway's `complete`, `decide` and batch submit); the slow-unit warning; the `over(conn)` bridge; the two new search checks with today's lists. Nothing uses it yet. | The gate's tests pass (V1, V2), and CI is green with the new checks. |
 | **P2** | **Settling and `change`.** `change` becomes a Service over a write unit, with `settle_many` doing batched reads. The steps' `record(unit, …)` move with it, and so does every write that settles inside a transaction of its own: those transactions become units now, and the rest of their modules move in their later stage. A taxonomy edit settles each paper once. `automatic_deep` becomes an input. Plus the multi-paper `change` tests. | Equivalence on the sandbox (V3), the timing before and after (V4), the change tests (V2). Deployed with P1, then a clean night (V7). |
 | **P3** | **Entries.** The API's `Conn` becomes `db`, with plain reads in read units. The CLI builds one gate per process. MCP and the monitor app move too. | The API tests and the stack smoke test pass, then a clean night (V7). |
-| **P4** | **Loops and bookkeeping.** The scheduler, jobs worker, dispatch, full-text and Deep loops, and publications move. The model run's journal writes in units of its own instead of on a sibling connection. The session locks move into the gate, and retally's becomes a unit's lock. | The advisory-lock list is empty. One sandbox nightly over a small window with the check strict, as intermediate evidence: intake and digests still run partly outside the gate. Then a clean night (V7). |
+| **P4** | **Loops and bookkeeping.** The scheduler, jobs worker, dispatch, full-text and Deep loops, and publications move. The model run's journal writes in units of its own instead of on a sibling connection. The session locks move into the gate, and retally's becomes a unit's lock. | The advisory-lock list holds one entry, the taxonomy lock's raw-SQL branch (`store/taxonomy.py`), until P6. One sandbox nightly over a small window with the check strict, as intermediate evidence: intake and digests still run partly outside the gate. Then a clean night (V7). |
 | **P5** | **The remaining Services.** Intake, digests, Calibrate, misses, quality, replay. The SQL outside `store` moves into it, `events.emit` included, which ends `store`'s imports of `events` and `llm`. | `tests/test_sql_home.py`'s list is empty, `store`'s import-linter ignores are gone, then a clean night. |
 | **P6** | **Tightening.** `store.connect` and `sibling` go, the bridge stays only as a test helper, and store parameters are renamed `unit`. The connection list is empty. `ty` runs in CI with its baseline (D2). | Every A1 check list is empty and CI is green; the sandbox nightly on the whole gate (V6); then a clean night. |
 | **P7** | **Folded items,** one PR each, in parallel: `/summary` with the sidebar's count and today in the schedule's zone; Calibrate reading its pool once; the four read gaps; intake leaving unchanged rows alone; the drops from `notes/still-used.md`. | Each shown by its kind (V8), then deployed together. |
@@ -179,8 +179,9 @@ Found while building, owned by the stage named.
   in autocommit and outside the pool, so a loan held across a network call (arXiv's waits, up to 45 s) takes no pool
   slot. The gate refuses to lend while a unit is open on the task, as it refuses a unit. It goes in P6, when nothing
   is left to lend to. P4 removed the API's `set_publication`, `bibtex_selection`, `grade_now`, `replay_offer` and
-  `run_replay` loans and the CLI's `nightly`, `publications` and `fulltext`. Each place left, with the stage whose
-  move takes it away:
+  `run_replay` loans and the CLI's `nightly`, `publications`, `fulltext` and `_migrate` (whose migrations run on
+  the migration lock's own session, `db.startup("migration")`). Each place left, with the stage whose move takes it
+  away:
   - P5, in the entries: `api/deps.py` `resolve_paper` (`feedback.misses.resolve`, for `report_miss`, `process` and
     `request_card`); `api/settings.py` `draw` and `more` (`feedback.calibrate`); `cli.py` `eval replay` (prepare,
     and the evaluation run's start), `eval ladders` and `eval ladders-report`.
@@ -189,8 +190,6 @@ Found while building, owned by the stage named.
     (`digests write`), the worker's `_digest` (`jobs.digests.again`) and the nightly's intake (`intake.collect`) and
     digests (`write_digests`); `jobs.replays.work` (`quality.replay.work`) and `quality.replay.run` (`work`, and
     `store.evaluation.finish`).
-  - P6: `cli.py` `_migrate` (`store.migrate`, under `db.startup("migration")`), which `serve` and every migrating
-    command run.
   - Not owned by a stage yet: an integration's `handle`, `setup` and `idle` (`events.dispatch`) are lent a
     connection each call, since `events.Reacting` takes one. P5 or P6 gives them `db` or a unit; until then the
     connection list keeps `integrations/`.
@@ -207,6 +206,10 @@ Found while building, owned by the stage named.
 - **A2: the presence session's reconnect.** `db.identity()` checks the presence with a `SELECT 1` each time it is
   asked (a run's start, each worker step) and opens it again when it dropped; between asks a drop goes unseen until
   the next. Leases replace it (`docs/backlog.md`, A2).
+- **A2: work is not fenced when its ownership is lost.** Ownership lives on side sessions (the session locks' and
+  the presence) that the pooled work never watches, so a block goes on after its lock's or the presence's session
+  dropped, and a run whose last close fails stays alive. The cases and A2's acceptance are in `docs/backlog.md`, A2,
+  "Work fenced when its ownership is lost".
 - **P5: two SQL calls are left in the entries** (`tests/test_sql_home.py`): `api/integrations.py`
   `search_outside`'s look-up of the papers held, and `api/reading.py` `_bibtex`'s read of their citations. Both
   run in read units now.

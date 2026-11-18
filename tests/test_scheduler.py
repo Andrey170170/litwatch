@@ -37,8 +37,8 @@ async def test_a_tick_runs_what_is_due_and_retries_a_job_that_finds_the_lock_tak
     ran = []
 
     async def runs(kind):
-        async def run(db, hold):
-            ran.append((kind, hold.name, hold.key_arg))  # run under its kind's schedule lock
+        async def run(db):
+            ran.append(kind)
             async with db.write("record the run") as unit:
                 await unit.execute(
                     "INSERT INTO runs (kind, started_at) VALUES (%s, %s)", (kind, at(6, 1))
@@ -46,7 +46,7 @@ async def test_a_tick_runs_what_is_due_and_retries_a_job_that_finds_the_lock_tak
 
         return run
 
-    async def busy(db, hold):
+    async def busy(db):
         raise BusyError("another job")
 
     todo = [
@@ -56,7 +56,7 @@ async def test_a_tick_runs_what_is_due_and_retries_a_job_that_finds_the_lock_tak
     assert await scheduler.tick(db, todo, at(6, 1)) == ["nightly"]
     # The nightly run is on record now; the weekly one waits for the lock.
     assert await scheduler.tick(db, todo, at(6, 2)) == []
-    assert ran == [("nightly", "schedule", "nightly")]
+    assert ran == ["nightly"]
 
 
 def test_the_repeated_hour_of_a_fall_back_is_scheduled_like_any_other():
@@ -87,7 +87,7 @@ def test_the_next_fire_steps_through_a_fall_back_in_the_zone():
 async def test_a_job_another_scheduler_is_deciding_on_is_left_to_it(conn, db):
     ran = []
 
-    async def run(db, hold):
+    async def run(db):
         ran.append("nightly")
 
     todo = [scheduler.Job("nightly", "0 6 * * *", run)]

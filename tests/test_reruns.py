@@ -711,6 +711,30 @@ async def test_a_rerun_with_no_archive_stops_keeping_its_passes_and_a_discarded_
     assert (await text_pass(conn))["job_id"] is None
 
 
+async def test_a_rerun_taken_back_before_its_owner_ends_it_keeps_its_passes(
+    conn, db, models, monkeypatch
+):
+    """The stale owner's end leaves alone a re-run a peer put back in the queue meanwhile, and
+    its passes with it: let go, the ordinary queue would work them outside its ceiling."""
+    job = await focus_rerun(conn, models, ceiling=1.0)
+    w = worker.Worker(db, CONFIG, models.gateway)
+    assert await w.step(AFTERNOON)  # graded: its passes queued, the job's
+    assert (await text_pass(conn))["job_id"] == job
+
+    async def taken_back(*args, **kwargs) -> reruns.Chunk:
+        await conn.execute(
+            "UPDATE jobs SET state = 'queued', backend_pid = NULL, backend_start = NULL "
+            "WHERE id = %s",
+            (job,),
+        )
+        return reruns.Chunk("done")
+
+    monkeypatch.setattr(reruns, "work", taken_back)
+    assert await w.step(AFTERNOON)
+    assert (await jobs_store.get(conn, job))["state"] == "queued"
+    assert (await text_pass(conn))["job_id"] == job
+
+
 async def test_a_worker_holding_its_most_runs_open_starts_only_process_jobs(
     conn, db, models, monkeypatch
 ):

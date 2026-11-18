@@ -4,6 +4,7 @@ Postgres. Where a test needs a lock held elsewhere, it takes it at its key writt
 code before the gate did: a process from before it and one after must exclude each other."""
 
 import asyncio
+import contextlib
 import json
 import logging
 from datetime import UTC, datetime, timedelta
@@ -515,6 +516,40 @@ async def test_the_migration_lock_is_todays_and_waits_for_its_holder(db, conn):
     with pytest.raises(ValueError, match="not a startup lock"):
         async with db.startup("run"):
             pass
+
+
+async def test_the_migrations_run_on_the_migration_locks_own_session(db, conn):
+    """So they cannot outlive the lock: its session dropped, they stop with it."""
+    async with db.startup("migration") as session:
+        assert await holders(conn, (0, 7213910, 1)) == [session.info.backend_pid]
+        assert session.autocommit
+        row = await (await session.execute("SELECT current_schema() AS here")).fetchone()
+        assert row == {"here": conn.test_schema}  # dict rows, on the gate's schema
+
+
+@contextlib.asynccontextmanager
+async def identity(db):
+    yield await db.identity()
+
+
+@pytest.mark.parametrize(
+    "asking",
+    [
+        lambda db: db.held("run"),
+        lambda db: db.startup("migration"),
+        identity,
+    ],
+    ids=["held", "startup", "identity"],
+)
+async def test_a_session_lock_or_the_identity_asked_for_inside_a_unit_raises_when_strict(
+    db, asking
+):
+    async with db.read("the outer"):
+        with pytest.raises(NestingError, match="while unit 'the outer' is open"):
+            async with asking(db):
+                pass
+    async with asking(db):  # after it, they are had again
+        pass
 
 
 async def test_only_the_listed_session_locks_are_held_across_calls(db):

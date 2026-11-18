@@ -452,7 +452,9 @@ class DatabaseGate:
         and closed with it. Asked for, it is checked first: one that dropped (the database
         restarted, the connection was cut) is opened again, with a new identity, and what was
         claimed in the old one's name is no longer alive, so `store.jobs.take_back` puts it
-        back. A bridged gate's presence is its one connection."""
+        back. A bridged gate's presence is its one connection. Asked for outside units, as a
+        unit is opened."""
+        outside_unit("asking for the presence session's identity")
         if self._bridged is not None:
             if self._identity is None:
                 self._identity = await identity_of(self._bridged)
@@ -568,42 +570,52 @@ class DatabaseGate:
         `held_elsewhere` takes to leave the holder's own hold out."""
         if name not in HELD_ACROSS_CALLS:
             raise ValueError(f"{name!r} is not a session lock held across calls")
-        async with self._session_lock(LOCKS[name], key_arg, wait=False) as hold:
+        async with self._session_lock(LOCKS[name], key_arg, wait=False) as (hold, _):
             yield hold
 
     @asynccontextmanager
-    async def startup(self, name: str) -> AsyncIterator[None]:
+    async def startup(self, name: str) -> AsyncIterator[Connection]:
         """Hold the startup lock `name` (the migration lock) for the block, on a connection of
-        its own outside the pool, waiting while another process holds it."""
+        its own outside the pool, waiting while another process holds it. Yields that
+        connection, autocommit with dict rows on the gate's schema, for the work the lock
+        guards (`store.migrate`): on the lock's own session, that work cannot outlive the lock
+        when the session drops."""
         lock = LOCKS.get(name)
         if lock is None or lock.scope != "startup":
             raise ValueError(f"{name!r} is not a startup lock")
-        async with self._session_lock(lock, None, wait=True):
-            yield
+        async with self._session_lock(lock, None, wait=True) as (_, conn):
+            yield conn
 
     @asynccontextmanager
     async def _session_lock(
         self, lock: Lock, key_arg: str | int | None, *, wait: bool
-    ) -> AsyncIterator[Hold]:
-        """A session lock on a connection of its own: waited for, or tried once (`BusyError`
-        when another session holds it). Its loss with its connection is logged."""
+    ) -> AsyncIterator[tuple[Hold, Connection]]:
+        """A session lock on a connection of its own, autocommit with dict rows on the gate's
+        schema: waited for, or tried once (`BusyError` when another session holds it). Yields
+        the hold and its connection. Its loss with its connection is logged. Refused while a
+        unit is open on the task, as opening a unit is."""
         params = _params(lock, key_arg)
         label = lock.name if key_arg is None else f"{lock.name} ({key_arg})"
-        conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
+        outside_unit(f"taking the {label} lock")
+        conn = await psycopg.AsyncConnection.connect(
+            self._dsn, row_factory=dict_row, autocommit=True
+        )
         try:
+            if self._schema:
+                await self._configure(conn)
             if wait:
                 await conn.execute(_statement("pg_advisory_lock", lock), params)
             else:
                 taken = await conn.execute(_statement("pg_try_advisory_lock", lock), params)
-                if not (await taken.fetchone())[0]:
+                if not (await taken.fetchone())["ok"]:
                     raise BusyError(f"the {label} lock is held by another session")
             try:
-                yield Hold(lock.name, conn.info.backend_pid, key_arg)
+                yield Hold(lock.name, conn.info.backend_pid, key_arg), conn
             finally:
                 # A connection that ended let the lock go while the block still ran under it.
                 try:
                     freed = await conn.execute(_statement("pg_advisory_unlock", lock), params)
-                    lost = not (await freed.fetchone())[0]
+                    lost = not (await freed.fetchone())["ok"]
                 except psycopg.Error:
                     lost = True
                 if lost:

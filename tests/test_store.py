@@ -4,8 +4,9 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from litwatch import store
+from litwatch import cli, store
 from litwatch.store import db
+from tests.conftest import gate_on
 
 
 async def tables(conn) -> set[str]:
@@ -17,6 +18,15 @@ async def tables(conn) -> set[str]:
 
 async def test_migrations_apply_once(conn):
     assert await store.migrate(conn) == []
+    assert {"papers", "runs", "inference_calls", "outbox"} <= await tables(conn)
+
+
+async def test_the_cli_migrates_the_gates_schema_under_the_migration_lock(conn):
+    for table in await tables(conn):
+        await conn.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
+    async with gate_on(conn) as gate:
+        applied = await cli._migrate(gate)
+    assert applied == [name for _, name, _ in db._migrations()]
     assert {"papers", "runs", "inference_calls", "outbox"} <= await tables(conn)
 
 

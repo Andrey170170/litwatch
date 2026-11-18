@@ -89,8 +89,8 @@ def _run[T](
 
 
 async def _migrate(db: DatabaseGate) -> list[str]:
-    # Transitional: the migrations run on a lent connection until A1's P6.
-    async with db.startup("migration"), db.lend("migrate") as conn:
+    # On the migration lock's own session, so the migrations cannot outlive the lock.
+    async with db.startup("migration") as conn:
         return await store.migrate(conn)
 
 
@@ -883,8 +883,8 @@ def publications(
             found = await lookups.look_up(db, Dblp(), paper)
             return found.model_dump(mode="json") if found else None
         # The scheduler's lock for the kind: a run here and a scheduled one never overlap.
-        async with db.held("schedule", "publications") as hold:
-            return await lookups.run(db, Dblp(), limit, hold=hold)
+        async with db.held("schedule", "publications"):
+            return await lookups.run(db, Dblp(), limit)
 
     console.print_json(data=_run(work))
 

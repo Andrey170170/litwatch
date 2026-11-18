@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 from croniter import croniter
 
 from litwatch.config import Config
-from litwatch.gates.database import BusyError, DatabaseGate, Hold
+from litwatch.gates.database import BusyError, DatabaseGate
 from litwatch.jobs import nightly, publications
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.publications import Dblp, PublicationSource
@@ -36,8 +36,8 @@ TICK_SECONDS = 30
 class Job:
     kind: str  # the run kind it records, which is also how its last run is found
     cron: str
-    # Run under the kind's schedule lock, which the scheduler holds (the `Hold`).
-    run: Callable[[DatabaseGate, Hold], Awaitable[object]]
+    # Run under the kind's schedule lock, which the scheduler holds.
+    run: Callable[[DatabaseGate], Awaitable[object]]
 
 
 def last_fire(cron: str, now: datetime) -> datetime:
@@ -68,12 +68,12 @@ def jobs(
     gateway: GatewayFactory = default_gateway,
     source: PublicationSource | None = None,
 ) -> list[Job]:
-    async def run_nightly(db: DatabaseGate, hold: Hold) -> object:
+    async def run_nightly(db: DatabaseGate) -> object:
         return await nightly.run(db, config, gateway=gateway)
 
-    async def run_publications(db: DatabaseGate, hold: Hold) -> object:
+    async def run_publications(db: DatabaseGate) -> object:
         # No model calls and no run lock: it only reads DBLP and writes publications.
-        return await publications.run(db, source or Dblp(), hold=hold)
+        return await publications.run(db, source or Dblp())
 
     return [
         Job("nightly", config.schedule.nightly, run_nightly),
@@ -87,15 +87,15 @@ async def _due(db: DatabaseGate, job: Job, now: datetime) -> bool:
 
 
 async def tick(db: DatabaseGate, todo: list[Job], now: datetime) -> list[str]:
-    """Run every job that is due at `now`, in order, each under its kind's schedule lock, which
-    it is given. Returns the kinds that ran."""
+    """Run every job that is due at `now`, in order, each under its kind's schedule lock.
+    Returns the kinds that ran."""
     ran = []
     for job in todo:
         if not await _due(db, job, now):
             continue  # asked again under the lock, which only a job that is due takes
         held = contextlib.AsyncExitStack()
         try:
-            hold = await held.enter_async_context(db.held("schedule", job.kind))
+            await held.enter_async_context(db.held("schedule", job.kind))
         except BusyError:
             continue  # another scheduler is deciding or running it
         async with held:
@@ -103,7 +103,7 @@ async def tick(db: DatabaseGate, todo: list[Job], now: datetime) -> list[str]:
                 continue
             log.info("scheduler: %s is due", job.kind)
             try:
-                await job.run(db, hold)
+                await job.run(db)
             except BusyError:
                 log.info("scheduler: %s waits, another job holds the run lock", job.kind)
                 continue
