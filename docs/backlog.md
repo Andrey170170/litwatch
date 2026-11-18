@@ -61,6 +61,12 @@ Shape, blueprint, drive.
 - **A first Deep read while the paper's Process job runs** marks the job as asked again by the owner, so it runs
   once more over what is due when it ends: harmless but the paper shows Processing longer. Narrow the trigger to
   owner changes that affect the job's steps (Codex on #127).
+- **Leases replace the presence session.** A1's P4 made each process's Database gate hold a presence connection
+  outside its pool, whose `(pid, backend_start)` (`DatabaseGate.identity`) stands for the process in run records and
+  job claims (`runs.start`, `ALIVE`, the job SQL, `take_back`); a presence that drops is opened again under a new
+  identity, and the worker closes its runs and claims afresh. The Work gate's work records replace it with leases
+  and heartbeats, and the presence connection goes (decided 2026-11-18, `docs/plans/a1-database-gate.md`, "Choices
+  made without asking").
 
 ### A3. Lanes and the Orchestrator
 
