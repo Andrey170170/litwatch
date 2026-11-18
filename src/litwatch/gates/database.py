@@ -473,13 +473,8 @@ class DatabaseGate:
         the loan and closed at its end, outside the pool: a loan held across a network call, or
         one whose Service opens units of its own, takes no pool slot. It is autocommit, as
         `store.connect`'s are. It refuses while a unit is open on the task, as opening a unit
-        does: work on it would run beside the unit, not in it. A bridged gate lends its one
-        connection."""
+        does: work on it would run beside the unit, not in it."""
         outside_unit(f"lending a connection for {name!r}")
-        if self._bridged is not None:
-            _idle(self._bridged)
-            yield self._bridged
-            return
         conn = await psycopg.AsyncConnection.connect(
             self._dsn, row_factory=dict_row, autocommit=True
         )

@@ -48,7 +48,7 @@ def authorised(request: Request) -> None:
     raise HTTPException(status_code=401, detail="missing or wrong token")
 
 
-def _db(request: Request) -> DatabaseGate:
+async def _db(request: Request) -> DatabaseGate:
     return request.app.state.db
 
 

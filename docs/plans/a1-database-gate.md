@@ -229,3 +229,10 @@ Filled in as stages land.
   - V4: the Field is `language-models`, which `settle_topic` finds 8,547 papers for today (6,777 was the count in
     the wait note). Its `settle_topic`, under the exclusive taxonomy lock and rolled back, went from 162,275
     statements and 69.7–70.5 s at the base to 203 statements and 3.3–3.5 s at P2, over three runs each.
+- **P1+P2, V7:** deployed 2026-11-17 17:40 MST as `litwatch:1.0.0-dev-0236ac41`. The night of 2026-11-18 (run 113)
+  finished in 42 min with no error: 643 classified, 695 graded, 44 Briefs, 5 digests, $3.71, in line with the week
+  (40 min to 1 h 6 min on nights with new papers). Its events per type kept the previous night's proportions (one
+  `grade.changed` per verdict recorded, 14 saved, 1 unsaved). From the deploy to 08:30 the log has no error, no
+  traceback, no `gate nesting:` line and no slow unit; its only warnings are four model refusals. Every `/status`
+  component is healthy. Blocked locks were not sampled during this run (`log_lock_waits` is off); Postgres counts
+  no deadlock since 2026-10-22. From P3 on, a read-only `pg_locks` sampler watches each checked night.
