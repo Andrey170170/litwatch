@@ -6,11 +6,11 @@ import pytest
 from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Cause, Fit, Opinion, Verdict
-from litwatch.feedback import word
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
+from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
 
 TOKEN = "s3cret"
@@ -69,7 +69,7 @@ async def test_a_topic_edit_applies_forward_and_a_depth_change_settles_its_paper
             opinions={},
         ),
     )  # fmt: skip
-    assert (await word.settle(conn, P.id, cause=Cause.VERDICT)).saved
+    assert (await settling.settle(conn, P.id, cause=Cause.VERDICT)).saved
     area = body | {"depth": "area", "rubric": None}
     assert (await client.put(f"/api/settings/topics/{FAITH.slug}", json=area)).status_code == 200
     row = await (await conn.execute("SELECT saved FROM library")).fetchone()
@@ -209,22 +209,23 @@ async def _classify(conn, paper, probabilities, primary):
         response={"probabilities": probabilities},
         model="m",
     )
-    assert await classification.record(conn, c)
+    async with settling.change(conn, paper.id, cause=Cause.VERDICT) as change:
+        assert await classification.record(change.unit, c)
 
 
 async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     from litwatch.core import Reaction, ReactionReason, ReactionValue
-    from litwatch.feedback import misses
 
     # Reported before any stage ran: every cell pending.
-    await misses.report(conn, Q.id, FAITH.slug)
+    await settling.report_miss(conn, Q.id, FAITH.slug)
     (m,) = (await client.get("/api/settings/misses")).json()
     assert (m["paper_id"], m["topic"], m["trace"]["classified"]) == (Q.id, FAITH.slug, False)
     assert m["trace"]["classifier"] is None and m["trace"]["graded"] is False
     # Classified by hand from Needs you: the owner's word, not the classifier's; still pending.
     from litwatch import classification
 
-    assert await classification.by_hand(conn, Q, TREE, [FAITH.slug])
+    async with settling.change(conn, Q.id, cause=Cause.OWNER) as change:
+        assert await classification.by_hand(change.unit, Q, TREE, [FAITH.slug])
     (m,) = (await client.get("/api/settings/misses")).json()
     assert m["trace"]["classified"] is False and m["trace"]["probability"] is None
     # Classified under the Focus threshold, kept in by the band; graded by both labs.
@@ -274,7 +275,7 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     assert (band["trace"]["classifier"], band["trace"]["uncertain"]) == (False, False)
 
     # Reactions over 30 days per topic and reason, for Overview.
-    await word.react(
+    await settling.react(
         conn,
         Reaction(
             paper_id=Q.id,
@@ -283,7 +284,7 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
             reason=ReactionReason.OVERRATED,
         ),
     )
-    await word.react(
+    await settling.react(
         conn, Reaction(paper_id=Q.id, topic="agents", value=ReactionValue.UP, reason=None)
     )
     page = (await client.get("/api/settings/quality")).json()
@@ -318,10 +319,9 @@ async def test_a_miss_reads_the_verdict_as_its_depth_graded_it(client, conn):
     """A Field topic is graded by `field_grade` alone, an Area topic by the judge with the check
     on doubt: the trace carries the graders asked and the Fit that stands by that depth's rule,
     not a Focus pair read as pending."""
-    from litwatch.feedback import misses
 
-    await misses.report(conn, Q.id, AGENTS.slug)
-    await misses.report(conn, Q.id, INTERP.slug)
+    await settling.report_miss(conn, Q.id, AGENTS.slug)
+    await settling.report_miss(conn, Q.id, INTERP.slug)
     await verdicts.add(
         conn,
         Verdict(

@@ -23,8 +23,10 @@ import psycopg
 from litwatch import fulltext, grading
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config, RoleConfig
-from litwatch.core import Depth, Paper, Status, Taxonomy, Topic
+from litwatch.core import Cause, Depth, Paper, Status, Taxonomy, Topic
 from litwatch.core.grading import GRADERS
+from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.jobs.context import ModelRun
 from litwatch.llm.ceiling import Bound, Ceiling, anthropic_bound, route
 from litwatch.llm.types import DEFAULT_MAX_TOKENS
@@ -214,6 +216,7 @@ async def work(
         ladder = dict(job["ladder"])
         name = tree.get(slug).name
         due = [_due(p, topic, name, ladder.get(p.id)) for p in found]
+        db, rules = DatabaseGate.over(conn), word.rules(config)
         async with grading.grade(due, run.gateway, config.grading) as results:
             async for g in results:
                 if g.verdict is None:
@@ -224,7 +227,18 @@ async def work(
                         # Both sides refused stops the grading: the next try asks both again.
                         "refused": [] if g.stops else sorted(g.refused),
                     }
-                elif await grading.record(conn, g, job=job["id"]):
+                    continue
+                # The change names the job, whose passes its settle queues.
+                async with word.change(
+                    db,
+                    g.due.paper.id,
+                    cause=Cause.VERDICT,
+                    rules=rules,
+                    job=job["id"],
+                    name="record re-run grading",
+                ) as done:
+                    recorded = await grading.record(done.unit, g)
+                if recorded:
                     counts["graded"] += 1
                     ladder.pop(g.due.paper.id, None)
         reached = run.gateway.ceiling is not None and run.gateway.ceiling.reached

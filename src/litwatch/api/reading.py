@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -15,7 +16,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from litwatch import store
 from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, budget_lines, protected, set_token_cookie, token_ok
+from litwatch.api.deps import Conn, Rules, budget_lines, protected, set_token_cookie, token_ok
 from litwatch.archive import ArchiveClient, ArchiveError
 from litwatch.core import (
     Cause,
@@ -43,12 +44,12 @@ from litwatch.core.rules import FAILED_RUNS, REACTION_WORDS
 from litwatch.events import Integration
 from litwatch.feedback import misses, word
 from litwatch.feedback.word import Settled
+from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.intake.search import NoAnswerError
 from litwatch.jobs import publications as lookups
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import digests as digests_store
-from litwatch.store import feedback as feedback_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
@@ -73,14 +74,14 @@ def _config(request: Request) -> Any:
     return request.app.state.config
 
 
-async def _shown(c: psycopg.AsyncConnection, slug: str) -> tuple[str, Topic] | None:
+async def _shown(c: psycopg.AsyncConnection | ReadUnit, slug: str) -> tuple[str, Topic] | None:
     """The shown topic on class `slug`, with its class's name."""
     tree = await taxonomy_store.load(c)
     topic = next((t for t in tree.shown() if t.slug == slug), None) if tree else None
     return (tree.get(slug).name, topic) if topic else None
 
 
-async def _topic(c: psycopg.AsyncConnection, slug: str) -> tuple[str, Topic]:
+async def _topic(c: psycopg.AsyncConnection | ReadUnit, slug: str) -> tuple[str, Topic]:
     """The shown topic on class `slug`, with its class's name; 404 for any other."""
     found = await _shown(c, slug)
     if found is None:
@@ -88,7 +89,7 @@ async def _topic(c: psycopg.AsyncConnection, slug: str) -> tuple[str, Topic]:
     return found
 
 
-async def _known(c: psycopg.AsyncConnection, paper_id: str) -> None:
+async def _known(c: psycopg.AsyncConnection | ReadUnit, paper_id: str) -> None:
     if await papers_store.get(c, paper_id) is None:
         raise HTTPException(status_code=404, detail="no such paper")
 
@@ -828,13 +829,20 @@ def _speaks(topic: Topic | None, reason: ReactionReason | None) -> bool:
 
 
 # Each action below is a change of the paper (`word.change`): it checks the topic and the paper
-# under the paper's lock, after the taxonomy's, shared, then writes, and the paper is settled in
-# the same transaction: a topic edited meanwhile cannot take a write, or a message, it no
-# longer qualifies for.
+# in the change's unit, under the paper's lock, after the taxonomy's, shared, then writes, and
+# the paper is settled in the same unit: a topic edited meanwhile cannot take a write, or a
+# message, it no longer qualifies for.
+
+
+def _owners(
+    c: psycopg.AsyncConnection, rules: Rules, paper_id: str, name: str
+) -> AbstractAsyncContextManager[word.Change]:
+    """The owner's change of the paper, in a unit `name`'s on the request's connection."""
+    return word.change(DatabaseGate.over(c), paper_id, cause=Cause.OWNER, rules=rules, name=name)
 
 
 @router.put("/reactions/{paper_id:path}", responses=NOT_FOUND)
-async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
+async def react(paper_id: str, body: s.ReactionIn, c: Conn, rules: Rules) -> s.Ack:
     """A thumb for the topic of the surface it was given on, replacing the one there. Wrong
     topic and great find on a Focus topic are the owner's word, and say so."""
     try:
@@ -843,10 +851,10 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
-        await _known(c, paper_id)
-        name, topic = await _topic(c, body.topic) if body.topic else (None, None)
-        await word_store.set_reaction(c, reaction)
+    async with _owners(c, rules, paper_id, "react") as change:
+        await _known(change.unit, paper_id)
+        name, topic = await _topic(change.unit, body.topic) if body.topic else (None, None)
+        await word.react(change.unit, reaction)
     settled = change.settled[paper_id]
     if not _speaks(topic, body.reason):
         return _ack(settled)
@@ -856,14 +864,14 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn) -> s.Ack:
 
 
 @router.delete("/reactions/{paper_id:path}")
-async def unreact(paper_id: str, c: Conn, topic: str | None = None) -> s.Ack:
+async def unreact(paper_id: str, c: Conn, rules: Rules, topic: str | None = None) -> s.Ack:
     """Clear a thumb: it takes back its own word and nothing else. A thumb on a topic no longer
     shown can be cleared too; it carried no word, so nothing is said."""
-    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
-        thumbs = await word_store.reactions_for(c, paper_id)
+    async with _owners(c, rules, paper_id, "clear reaction") as change:
+        thumbs = await word_store.reactions_for(change.unit, paper_id)
         thumb = next((r for r in thumbs if r.topic == topic), None)
-        shown = await _shown(c, topic) if thumb and topic else None
-        await word_store.clear_reaction(c, paper_id, topic)
+        shown = await _shown(change.unit, topic) if thumb and topic else None
+        await word.unreact(change.unit, paper_id, topic)
     settled = change.settled[paper_id]
     if shown and _speaks(shown[1], thumb.reason):
         return _ack(settled, f"Mark on {shown[0]} taken back")
@@ -871,36 +879,38 @@ async def unreact(paper_id: str, c: Conn, topic: str | None = None) -> s.Ack:
 
 
 @router.put("/library/{paper_id:path}", responses=NOT_FOUND)
-async def save(paper_id: str, body: s.SaveIn, c: Conn) -> s.Ack:
+async def save(paper_id: str, body: s.SaveIn, c: Conn, rules: Rules) -> s.Ack:
     """Save or unsave by hand; the newest use outranks every other reason."""
-    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
-        await _known(c, paper_id)
-        await word_store.set_hand(c, paper_id, Hand.SAVE if body.saved else Hand.UNSAVE)
+    async with _owners(c, rules, paper_id, "save") as change:
+        await _known(change.unit, paper_id)
+        await word.toggle(change.unit, paper_id, Hand.SAVE if body.saved else Hand.UNSAVE)
     return _ack(change.settled[paper_id])
 
 
 @router.put("/labels/{topic}/{paper_id:path}", responses=NOT_FOUND)
-async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn) -> s.Ack:
+async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn, rules: Rules) -> s.Ack:
     """The Fit control on a paper's page: the owner's own word on any shown topic (origin
     `reader`). Unsure is stored and counts nowhere."""
     given = Label(paper_id=paper_id, topic=topic, value=body.value, origin=LabelOrigin.READER)
-    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
-        await _topic(c, topic)
-        await _known(c, paper_id)
-        await feedback_store.set_label(c, given)
+    async with _owners(c, rules, paper_id, "label") as change:
+        await _topic(change.unit, topic)
+        await _known(change.unit, paper_id)
+        await word.label(change.unit, given)
     return _ack(change.settled[paper_id])
 
 
 @router.delete("/labels/{topic}/{paper_id:path}")
-async def unlabel(topic: str, paper_id: str, c: Conn) -> s.Ack:
+async def unlabel(topic: str, paper_id: str, c: Conn, rules: Rules) -> s.Ack:
     """Tapping the filled segment: the label goes, and the verdict's Fit stands again."""
-    return _ack((await word.unlabel(c, paper_id, topic)).settled[paper_id])
+    async with _owners(c, rules, paper_id, "clear label") as change:
+        await word.unlabel(change.unit, paper_id, topic)
+    return _ack(change.settled[paper_id])
 
 
 @router.post(
     "/misses", responses={**NOT_FOUND, 409: {"description": "Not a Focus topic"}, **ARXIV_SILENT}
 )
-async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
+async def report_miss(body: s.MissIn, c: Conn, rules: Rules) -> s.Ack:
     """File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper
     litwatch lacks is fetched first, as Process fetches it, with no transaction open, and
     stored in the report's own, so a refused report stores nothing."""
@@ -910,12 +920,12 @@ async def report_miss(body: s.MissIn, c: Conn) -> s.Ack:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    async with word.change(c, paper_id, cause=Cause.OWNER) as change:
-        name, topic = await _topic(c, body.topic)
+    async with _owners(c, rules, paper_id, "report miss") as change:
+        name, topic = await _topic(change.unit, body.topic)
         if topic.depth != Depth.FOCUS:
             raise HTTPException(status_code=409, detail="not a Focus topic")
-        await misses.keep(c, paper_id, fetched)
-        _, _, new = await misses.report(c, paper_id, body.topic, body.fit)
+        await misses.keep(change.unit, paper_id, fetched)
+        _, new = await misses.report(change.unit, paper_id, body.topic, body.fit)
     settled = change.settled[paper_id]
     if not new:
         return _ack(settled, f"Already reported as missed for {name}")

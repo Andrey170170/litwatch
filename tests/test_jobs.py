@@ -18,7 +18,7 @@ from litwatch.api import reading as api_reading
 from litwatch.config import Schedule
 from litwatch.core import Cause, Depth, Status
 from litwatch.core.fulltext import REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY
-from litwatch.feedback import misses, word
+from litwatch.feedback import misses
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
 from litwatch.jobs.lock import run_lock
@@ -27,6 +27,7 @@ from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import AGENTS, TREE, answering, paper
 from tests.fakes import BatchingProvider, ScriptedProvider
 from tests.test_batches import FAST
@@ -146,8 +147,10 @@ async def test_a_job_tried_again_on_a_step_waiting_for_the_owner_fails_again(con
     assert asked(models, "classify", A.title) == 3
 
     del models.decisions[A.title]
-    async with word.change(conn, A.id, cause=Cause.OWNER):  # as Needs you's own retry does
-        await failures.succeeded(conn, A.id, "classification")
+    async with settling.change(
+        conn, A.id, cause=Cause.OWNER
+    ) as change:  # as Needs you's own retry does
+        await failures.succeeded(change.unit, A.id, "classification")
     assert (await jobs_store.get(conn, job))["state"] == "queued"
     await work_out(worker.Worker(conn, CONFIG, models.gateway))
     assert (await jobs_store.get(conn, job))["state"] == "done"
@@ -163,13 +166,13 @@ async def test_a_failure_the_owner_clears_while_the_job_ends_still_settles_it(
     async with await store.sibling(conn) as other:
 
         async def clear():  # Needs you's retry, from another request
-            async with word.change(other, A.id, cause=Cause.OWNER):
-                await failures.succeeded(other, A.id, "classification")
+            async with settling.change(other, A.id, cause=Cause.OWNER) as change:
+                await failures.succeeded(change.unit, A.id, "classification")
 
         async def raced(*args):
             nonlocal owner
             found = await read(*args)
-            owner = asyncio.create_task(clear())
+            owner = settling.apart(clear())
             await asyncio.sleep(0.3)
             return found
 
@@ -188,8 +191,11 @@ async def test_a_failure_the_owner_clears_before_the_job_ends_runs_the_step_agai
     grade = nightly.grade
 
     async def owner_retries(*args, **kwargs):
-        async with await store.sibling(conn) as owner, word.change(owner, A.id, cause=Cause.OWNER):
-            await failures.succeeded(owner, A.id, "analysis")  # as Needs you's Try again
+        async with (
+            await store.sibling(conn) as owner,
+            settling.change(owner, A.id, cause=Cause.OWNER) as change,
+        ):
+            await failures.succeeded(change.unit, A.id, "analysis")  # as Needs you's Try again
         del models.analyses[A.title]
         return await grade(*args, **kwargs)
 
@@ -218,8 +224,10 @@ async def test_a_failed_job_put_back_by_a_settle_gives_its_passes_the_owners_pri
         " VALUES (%s, 'analysis', '', 1, 3, 'unusable')",
         (A.id,),
     )
-    async with word.change(conn, A.id, cause=Cause.OWNER):  # as Needs you's own retry does
-        await failures.succeeded(conn, A.id, "analysis")
+    async with settling.change(
+        conn, A.id, cause=Cause.OWNER
+    ) as change:  # as Needs you's own retry does
+        await failures.succeeded(change.unit, A.id, "analysis")
     assert (await jobs_store.get(conn, job))["state"] == "queued"
     passes = await rows(conn, "SELECT * FROM fulltext_passes WHERE paper_id = %s", A.id)
     assert {(p["kind"], p["priority"]) for p in passes} == {
@@ -239,7 +247,7 @@ async def test_a_failed_job_settles_when_the_topic_it_failed_grading_on_is_pause
         t.model_copy(update={"status": Status.PAUSED}) if t.depth == Depth.FOCUS else t
         for t in TREE.topics
     ]
-    await word.save_taxonomy(conn, TREE.model_copy(update={"topics": paused}))
+    await settling.save_taxonomy(conn, TREE.model_copy(update={"topics": paused}))
     assert (await jobs_store.get(conn, job))["state"] == "queued"  # nothing waits on it now
 
 
@@ -262,7 +270,7 @@ async def test_a_job_answers_a_call_a_dead_nightly_left_in_an_ended_batch_from_i
 
     async with model_run(conn, CONFIG, "nightly", gateway=batches) as night:
         await nightly.classify(conn, CONFIG, night, ids=[A.id])
-        await nightly.analyse(conn, night, ids=[A.id])
+        await nightly.analyse(conn, CONFIG, night, ids=[A.id])
     assert anthropic.batched and not anthropic.calls
     await conn.execute("DELETE FROM analyses")  # as if it died before reading the batch
     await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")
@@ -291,8 +299,11 @@ async def test_a_job_whose_paper_is_dismissed_while_it_runs_is_discarded_however
     conn, models, monkeypatch
 ):
     async def dismissed_then_broken(*_, **__):
-        async with await store.sibling(conn) as owner, word.change(owner, A.id, cause=Cause.OWNER):
-            await papers_store.dismiss(owner, A.id)
+        async with (
+            await store.sibling(conn) as owner,
+            settling.change(owner, A.id, cause=Cause.OWNER) as change,
+        ):
+            await papers_store.dismiss(change.unit, A.id)
         raise RuntimeError("the store went away")
 
     monkeypatch.setattr(nightly, "analyse", dismissed_then_broken)
@@ -305,8 +316,8 @@ async def test_a_failed_job_whose_paper_the_owner_dismisses_is_discarded(conn, m
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
     await work_out(worker.Worker(conn, CONFIG, models.gateway))
-    async with word.change(conn, A.id, cause=Cause.OWNER):
-        await papers_store.dismiss(conn, A.id)
+    async with settling.change(conn, A.id, cause=Cause.OWNER) as change:
+        await papers_store.dismiss(change.unit, A.id)
     assert (await jobs_store.get(conn, job))["state"] == "discarded"
 
 
@@ -401,8 +412,8 @@ async def test_a_process_job_taken_back_after_its_chunk_does_what_the_owner_left
             break
         await asyncio.sleep(0.05)
     del models.analyses[A.title]
-    async with word.change(conn, A.id, cause=Cause.OWNER):  # as Needs you's Try again
-        await failures.succeeded(conn, A.id, "analysis")
+    async with settling.change(conn, A.id, cause=Cause.OWNER) as change:  # as Needs you's Try again
+        await failures.succeeded(change.unit, A.id, "analysis")
 
     await work_out(worker.Worker(conn, CONFIG, models.gateway))
     assert (await jobs_store.get(conn, job))["state"] == "done"
@@ -707,15 +718,18 @@ async def test_process_asked_twice_at_once_never_asks_its_running_job_again(
     process_of, first = jobs_store.process_of, None
 
     async def queued_and_claimed():  # the first request, then the worker
-        async with await store.sibling(conn) as other, word.change(other, A.id, cause=Cause.OWNER):
-            await jobs_store.process(other, A.id)
+        async with (
+            await store.sibling(conn) as other,
+            settling.change(other, A.id, cause=Cause.OWNER) as change,
+        ):
+            await jobs_store.process(change.unit, A.id)
         return (await jobs_store.claim(conn))["id"]
 
     async def overtaken(*args, **kwargs):
         nonlocal first
         found = await process_of(*args, **kwargs)
         if first is None:
-            first = asyncio.create_task(queued_and_claimed())
+            first = settling.apart(queued_and_claimed())
             await asyncio.sleep(0.3)
         return found
 

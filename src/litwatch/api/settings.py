@@ -16,12 +16,13 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ValidationError
 
 from litwatch import classification, grading, seeds
-from litwatch.api.deps import Conn, budget_lines, protected
+from litwatch.api.deps import Conn, Rules, budget_lines, protected
 from litwatch.core import FAILED_RUNS, Cause, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.core.budget import month_start
 from litwatch.core.classification import thresholds
 from litwatch.core.grading import GRADERS
 from litwatch.feedback import calibrate, word
+from litwatch.gates.database import DatabaseGate, WriteUnit
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import model_run
 from litwatch.store import digests as digests_store
@@ -94,13 +95,13 @@ async def keyword_matches(slug: str, c: Conn) -> dict[str, int]:
 
 
 @router.put("/topics/{slug}", responses={404: {"description": "No such class"}})
-async def save_topic(slug: str, body: dict[str, Any], c: Conn) -> Topic:
+async def save_topic(slug: str, body: dict[str, Any], c: Conn, rules: Rules) -> Topic:
     """Follow class `slug`, or edit its topic. The class takes the subject as its description.
     Edits apply forward; a change of depth or content settles the topic's papers again (see
     feedback.word.save_taxonomy)."""
-    async with c.transaction():
-        await taxonomy_store.lock(c)
-        tree = await taxonomy_store.load(c)
+    # The tree is read and saved under the taxonomy lock, held exclusively.
+    async with DatabaseGate.over(c).write("save topic", taxonomy="exclusive") as unit:
+        tree = await taxonomy_store.load(unit)
         if tree is None or slug not in {cls.slug for cls in tree.classes}:
             raise HTTPException(status_code=404, detail="no such class")
         try:
@@ -110,7 +111,7 @@ async def save_topic(slug: str, body: dict[str, Any], c: Conn) -> Topic:
             raise HTTPException(
                 status_code=422, detail=exc.errors(include_url=False, include_context=False)
             ) from exc
-        await word.save_taxonomy(c, changed)
+        await word.save_taxonomy(unit, changed, rules=rules)
     return topic
 
 
@@ -119,11 +120,12 @@ class Order(BaseModel):
 
 
 @router.put("/topics-order", status_code=204)
-async def order(body: Order, c: Conn) -> None:
+async def order(body: Order, c: Conn, rules: Rules) -> None:
     """The owner's order, which topic lists and cards follow. The list must name every topic
     once."""
     try:
-        await word.reorder(c, body.slugs)
+        async with DatabaseGate.over(c).write("reorder topics", taxonomy="exclusive") as unit:
+            await word.reorder(unit, body.slugs, rules=rules)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -332,30 +334,49 @@ WAITING = {
 }
 
 
+async def _waiting(
+    unit: WriteUnit,
+    paper_id: str,
+    revision: int,
+    step: failures.Step = "classification",
+    topic: str = "",
+) -> Paper:
+    """The paper, if `step` still waits for the owner on it at `revision` (`failures.waiting`);
+    409 if its text changed or it no longer waits (a nightly rewrite, another action, its topic
+    paused). Read in the unit that acts, under the paper's lock."""
+    paper = await papers_store.lock(unit, paper_id)
+    if paper is None:
+        raise HTTPException(status_code=404, detail="no such paper")
+    if paper.revision != revision:
+        raise HTTPException(status_code=409, detail="the paper's text changed meanwhile")
+    if not await failures.waiting(unit, paper, step, FAILED_RUNS, topic):
+        raise HTTPException(status_code=409, detail=f"{step} is not waiting for the owner")
+    return paper
+
+
 @asynccontextmanager
 async def _awaiting(
-    c: Any, paper_id: str, revision: int, step: failures.Step = "classification", topic: str = ""
-) -> AsyncIterator[Paper]:
-    """The paper, in a change of it (`word.change`) that is the action's, if `step` still waits
-    for the owner on it at `revision` (`failures.waiting`); 409 if its text changed or it no
-    longer waits (a nightly rewrite, another action, its topic paused). Eligibility is read
-    after the locks, in the transaction that acts, and the paper is settled at its end."""
-    async with word.change(c, paper_id, cause=Cause.OWNER):
-        paper = await papers_store.lock(c, paper_id)
-        if paper is None:
-            raise HTTPException(status_code=404, detail="no such paper")
-        if paper.revision != revision:
-            raise HTTPException(status_code=409, detail="the paper's text changed meanwhile")
-        if not await failures.waiting(c, paper, step, FAILED_RUNS, topic):
-            raise HTTPException(status_code=409, detail=f"{step} is not waiting for the owner")
-        yield paper
+    c: Any,
+    rules: Rules,
+    paper_id: str,
+    revision: int,
+    step: failures.Step = "classification",
+    topic: str = "",
+) -> AsyncIterator[tuple[WriteUnit, Paper]]:
+    """A change of the paper (`word.change`) that is the action's, if `step` still waits for the
+    owner on it (`_waiting`): its unit, which the action writes in, and the paper. Eligibility
+    is read after the locks, in the unit that acts, and the paper is settled at its end."""
+    async with word.change(
+        DatabaseGate.over(c), paper_id, cause=Cause.OWNER, rules=rules, name=f"owner on {step}"
+    ) as done:
+        yield done.unit, await _waiting(done.unit, paper_id, revision, step, topic)
 
 
 @router.post("/classification/{paper_id:path}/dismiss", status_code=204, responses=WAITING)
-async def dismiss(paper_id: str, body: Awaiting, c: Conn) -> None:
+async def dismiss(paper_id: str, body: Awaiting, c: Conn, rules: Rules) -> None:
     """Litwatch drops the paper from processing; it stays searchable in the archive."""
-    async with _awaiting(c, paper_id, body.revision):
-        await papers_store.dismiss(c, paper_id)
+    async with _awaiting(c, rules, paper_id, body.revision) as (unit, _):
+        await papers_store.dismiss(unit, paper_id)
 
 
 class ClassesIn(Awaiting):
@@ -364,16 +385,16 @@ class ClassesIn(Awaiting):
 
 
 @router.put("/classification/{paper_id:path}", responses=WAITING)
-async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn) -> dict[str, Any]:
+async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn, rules: Rules) -> dict[str, Any]:
     """The owner names the paper's classes, which go on as usual with source `owner`."""
     # The change's shared taxonomy lock holds the tree still until the classification is
     # recorded, and the paper is classified and settled together.
-    async with _awaiting(c, paper_id, body.revision) as paper:
-        tree = await taxonomy_store.load(c)
+    async with _awaiting(c, rules, paper_id, body.revision) as (unit, paper):
+        tree = await taxonomy_store.load(unit)
         if tree is None:
             raise HTTPException(status_code=409, detail="no taxonomy")
         try:
-            await classification.by_hand(c, paper, tree, body.classes, body.primary)
+            await classification.by_hand(unit, paper, tree, body.classes, body.primary)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
@@ -388,7 +409,7 @@ class CorrectionIn(Awaiting):
 
 
 @router.post("/classification/{paper_id:path}/correction", status_code=204, responses=WAITING)
-async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
+async def correct(paper_id: str, body: CorrectionIn, c: Conn, rules: Rules) -> None:
     """Fix the text classification choked on. It counts as a rewrite: the next run classifies
     the corrected paper."""
     title = (body.title or "").strip() or None
@@ -396,15 +417,15 @@ async def correct(paper_id: str, body: CorrectionIn, c: Conn) -> None:
     if not (title or abstract):
         raise HTTPException(status_code=422, detail="give a title or an abstract")
     # The new text and the grades without its old Weight, together.
-    async with _awaiting(c, paper_id, body.revision):
-        await papers_store.correct(c, paper_id, title, abstract)
+    async with _awaiting(c, rules, paper_id, body.revision) as (unit, _):
+        await papers_store.correct(unit, paper_id, title, abstract)
 
 
 @router.post("/analysis/{paper_id:path}/retry", status_code=204, responses=WAITING)
-async def retry_analysis(paper_id: str, body: Awaiting, c: Conn) -> None:
+async def retry_analysis(paper_id: str, body: Awaiting, c: Conn, rules: Rules) -> None:
     """Analysis failed three runs in a row on this text: give it three more, from the next run."""
-    async with _awaiting(c, paper_id, body.revision, "analysis"):
-        await failures.succeeded(c, paper_id, "analysis")  # forgets the count
+    async with _awaiting(c, rules, paper_id, body.revision, "analysis") as (unit, _):
+        await failures.succeeded(unit, paper_id, "analysis")  # forgets the count
 
 
 class GradedOut(BaseModel):
@@ -417,22 +438,25 @@ class GradedOut(BaseModel):
 
 @router.post("/grading/{topic}/{paper_id:path}/now", responses=WAITING)
 async def grade_now(
-    topic: str, paper_id: str, body: Awaiting, request: Request, c: Conn
+    topic: str, paper_id: str, body: Awaiting, request: Request, c: Conn, rules: Rules
 ) -> GradedOut:
     """A grading failed three runs in a row on this text: grade it now, as a run of its own.
     It counts as the first of three more runs. Until it is recorded the grading stays a pending
     failure, so a request cut short leaves it to the next nightly run; 409 when the paper's text
     changed, it was dismissed or the topic was paused while it was graded."""
-    # The topic is read under the taxonomy lock, shared.
-    async with word.change(c, paper_id, cause=Cause.OWNER):
-        tree = await taxonomy_store.load(c)
+    db = DatabaseGate.over(c)
+    # The topic is read under the taxonomy lock, shared, in the change that resets the count.
+    async with word.change(
+        db, paper_id, cause=Cause.OWNER, rules=rules, name="grade now: reset"
+    ) as done:
+        tree = await taxonomy_store.load(done.unit)
         followed = tree.topic(topic) if tree else None
         if tree is None or followed is None:
             raise HTTPException(status_code=404, detail="no such topic")
         if followed.status != Status.ACTIVE:
             raise HTTPException(status_code=409, detail=f"{topic} is {followed.status}: not graded")
-        async with _awaiting(c, paper_id, body.revision, "grading", topic) as paper:
-            await failures.reset(c, paper_id, "grading", topic)
+        paper = await _waiting(done.unit, paper_id, body.revision, "grading", topic)
+        await failures.reset(done.unit, paper_id, "grading", topic)
     config = request.app.state.config
     due = [grading.Due(paper, followed, tree.get(topic).name)]
     recorded = False
@@ -441,7 +465,11 @@ async def grade_now(
         grading.grade(due, run.gateway, config.grading) as found,
     ):
         async for g in found:
-            if recorded := await grading.record(c, g):
+            async with word.change(
+                db, paper.id, cause=Cause.VERDICT, rules=rules, name="grade now: record"
+            ) as done:
+                recorded = await grading.record(done.unit, g)
+            if recorded:
                 run.add("graded" if g.verdict is not None else "grading_failed")
     if not recorded:
         raise HTTPException(
@@ -459,27 +487,29 @@ PASS_WAITING = {
 
 
 @router.post("/fulltext/{pass_id}/now", status_code=204, responses=PASS_WAITING)
-async def run_pass_now(pass_id: int, request: Request, c: Conn) -> None:
+async def run_pass_now(pass_id: int, request: Request, c: Conn, rules: Rules) -> None:
     """A full-text pass (a Deep card's included) failed three runs in a row, or awaits its text
     over a week: run it now. It is first in line for its worker, with three more runs; its text
     is asked for again at urgent priority. 409 when it no longer waits for the owner (it ran,
     the paper's text changed, it was dropped)."""
-    await _run_now(pass_id, request, c, pdf=False)
+    await _run_now(pass_id, request, c, rules, pdf=False)
 
 
 @router.post("/fulltext/{pass_id}/pdf", status_code=204, responses=PASS_WAITING)
-async def use_pdf(pass_id: int, request: Request, c: Conn) -> None:
+async def use_pdf(pass_id: int, request: Request, c: Conn, rules: Rules) -> None:
     """ "Use the PDF", for a paper whose LaTeX reads badly: run the pass now, as above, reading
     the paper's PDF from then on instead of its LaTeX."""
-    await _run_now(pass_id, request, c, pdf=True)
+    await _run_now(pass_id, request, c, rules, pdf=True)
 
 
-async def _run_now(pass_id: int, request: Request, c: Any, *, pdf: bool) -> None:
+async def _run_now(pass_id: int, request: Request, c: Any, rules: Rules, *, pdf: bool) -> None:
     paper_id = await fulltext_store.paper_of(c, pass_id)  # a pass never changes paper
     if paper_id is None:
         raise HTTPException(status_code=404, detail="no such full-text pass")
-    async with word.change(c, paper_id, cause=Cause.OWNER):  # as every write to a paper's passes
-        if not await fulltext_store.run_now(c, pass_id, FAILED_RUNS, pdf=pdf):
+    async with word.change(  # as every write to a paper's passes
+        DatabaseGate.over(c), paper_id, cause=Cause.OWNER, rules=rules, name="run pass now"
+    ) as done:
+        if not await fulltext_store.run_now(done.unit, pass_id, FAILED_RUNS, pdf=pdf):
             raise HTTPException(status_code=409, detail="the pass is not waiting for the owner")
     request.app.state.fulltext_wake.set()
     request.app.state.deep_wake.set()
@@ -526,9 +556,11 @@ async def more(session_id: int, c: Conn) -> dict[str, int]:
 
 
 @router.put("/calibrate/{session_id}/items/{position}", status_code=204, responses=NO_ITEM)
-async def answer(session_id: int, position: int, body: calibrate.Answer, c: Conn) -> None:
+async def answer(
+    session_id: int, position: int, body: calibrate.Answer, c: Conn, rules: Rules
+) -> None:
     try:
-        await calibrate.answer(c, session_id, position, body)
+        await calibrate.answer(DatabaseGate.over(c), session_id, position, body, rules=rules)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

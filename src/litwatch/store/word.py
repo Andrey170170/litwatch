@@ -12,19 +12,6 @@ from psycopg.types.json import Jsonb
 from litwatch.core import Effective, Grade, Hand, Rarity, Reaction, Weight
 from litwatch.core.grading import DEPTH_OFFSETS
 
-# Advisory lock namespace for settling one paper; the second key is the paper id's hash.
-SETTLE_LOCK = 7213912
-
-
-async def lock_settles(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> None:
-    """Take the papers' settle locks, in the order given, to the end of the transaction."""
-    async with conn.cursor() as cur:
-        await cur.executemany(
-            "SELECT pg_advisory_xact_lock(%s, hashtext(%s))",
-            [(SETTLE_LOCK, paper_id) for paper_id in paper_ids],
-        )
-
-
 # -- reactions -------------------------------------------------------------------------------------
 
 
@@ -68,6 +55,19 @@ async def reactions_for(conn: psycopg.AsyncConnection, paper_id: str) -> list[Re
     return [_reaction(r) for r in rows]
 
 
+async def reactions_of(
+    conn: psycopg.AsyncConnection, paper_ids: list[str]
+) -> dict[str, list[Reaction]]:
+    """The thumbs on each of the papers that has any, by paper."""
+    rows = await (
+        await conn.execute("SELECT * FROM reactions WHERE paper_id = ANY(%s)", (paper_ids,))
+    ).fetchall()
+    found: dict[str, list[Reaction]] = {}
+    for r in rows:
+        found.setdefault(r["paper_id"], []).append(_reaction(r))
+    return found
+
+
 # -- effective grades and rarity ------------------------------------------------------------------
 
 
@@ -80,6 +80,25 @@ async def effective_for(conn: psycopg.AsyncConnection, paper_id: str) -> dict[st
         )
     ).fetchall()
     return {r["topic"]: Effective(fit=r["fit"], grade=r["grade"], rarity=r["rarity"]) for r in rows}
+
+
+async def effective_of(
+    conn: psycopg.AsyncConnection, paper_ids: list[str]
+) -> dict[str, dict[str, Effective]]:
+    """`effective_for` of each of the papers that has a stored grade, by paper."""
+    rows = await (
+        await conn.execute(
+            "SELECT paper_id, topic, fit, grade, rarity FROM effective_grades "
+            "WHERE paper_id = ANY(%s)",
+            (paper_ids,),
+        )
+    ).fetchall()
+    found: dict[str, dict[str, Effective]] = {}
+    for r in rows:
+        found.setdefault(r["paper_id"], {})[r["topic"]] = Effective(
+            fit=r["fit"], grade=r["grade"], rarity=r["rarity"]
+        )
+    return found
 
 
 async def focus_grades(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Grade]:
@@ -96,8 +115,9 @@ async def focus_grades(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str
 
 async def keeps_pdf(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
     """Whether the storage policy keeps the paper's PDF (archive.md): it is saved, or graded
-    relevant or above on a followed topic. A paused topic is followed (`feedback.word.settle`
-    keeps its grades): its papers keep their PDFs, so pausing and resuming changes none."""
+    relevant or above on a followed topic. A paused topic is followed (a settle,
+    `feedback.word.settle_many`, keeps its grades): its papers keep their PDFs, so pausing and
+    resuming changes none."""
     row = await (
         await conn.execute(
             """
@@ -134,32 +154,40 @@ async def set_effective(
     )
 
 
-async def rarity_of(
-    conn: psycopg.AsyncConnection, paper_id: str
-) -> tuple[Rarity, str | None, Weight | None] | None:
-    """The stored level, best topic and the Weight the level was set with."""
-    row = await (
-        await conn.execute(
-            "SELECT level, best_topic, weight FROM rarities WHERE paper_id = %s", (paper_id,)
-        )
-    ).fetchone()
-    if row is None:
-        return None
-    return Rarity(row["level"]), row["best_topic"], Weight(row["weight"]) if row["weight"] else None
-
-
-async def topic_papers(conn: psycopg.AsyncConnection, slug: str) -> list[str]:
-    """The papers the topic has a grade, verdict, label, reaction or grading failure for, in id
-    order."""
+async def rarities_of(
+    conn: psycopg.AsyncConnection, paper_ids: list[str]
+) -> dict[str, tuple[Rarity, str | None, Weight | None]]:
+    """The stored level, best topic and the Weight the level was set with, of each of the
+    papers that has a rarity, by paper."""
     rows = await (
         await conn.execute(
-            "SELECT paper_id FROM effective_grades WHERE topic = %(t)s "
-            "UNION SELECT paper_id FROM verdicts WHERE topic = %(t)s "
-            "UNION SELECT paper_id FROM labels WHERE topic = %(t)s "
-            "UNION SELECT paper_id FROM reactions WHERE topic = %(t)s "
-            "UNION SELECT paper_id FROM step_failures WHERE step = 'grading' AND topic = %(t)s "
+            "SELECT paper_id, level, best_topic, weight FROM rarities WHERE paper_id = ANY(%s)",
+            (paper_ids,),
+        )
+    ).fetchall()
+    return {
+        r["paper_id"]: (
+            Rarity(r["level"]),
+            r["best_topic"],
+            Weight(r["weight"]) if r["weight"] else None,
+        )
+        for r in rows
+    }
+
+
+async def topic_papers(conn: psycopg.AsyncConnection, slugs: list[str]) -> list[str]:
+    """The papers any of the topics has a grade, verdict, label, reaction or grading failure
+    for, each once, in id order."""
+    rows = await (
+        await conn.execute(
+            "SELECT paper_id FROM effective_grades WHERE topic = ANY(%(t)s) "
+            "UNION SELECT paper_id FROM verdicts WHERE topic = ANY(%(t)s) "
+            "UNION SELECT paper_id FROM labels WHERE topic = ANY(%(t)s) "
+            "UNION SELECT paper_id FROM reactions WHERE topic = ANY(%(t)s) "
+            "UNION SELECT paper_id FROM step_failures "
+            "WHERE step = 'grading' AND topic = ANY(%(t)s) "
             "ORDER BY 1",
-            {"t": slug},
+            {"t": slugs},
         )
     ).fetchall()
     return [r["paper_id"] for r in rows]
@@ -200,6 +228,17 @@ async def in_collection(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
     return row is not None
 
 
+async def collected(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> set[str]:
+    """Those of the papers that are in the collection (`in_collection`)."""
+    rows = await (
+        await conn.execute(
+            "SELECT DISTINCT paper_id FROM classifications WHERE paper_id = ANY(%s)",
+            (paper_ids,),
+        )
+    ).fetchall()
+    return {r["paper_id"] for r in rows}
+
+
 async def set_rarity(
     conn: psycopg.AsyncConnection,
     paper_id: str,
@@ -225,6 +264,16 @@ async def library_row(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str,
     return await (
         await conn.execute("SELECT * FROM library WHERE paper_id = %s", (paper_id,))
     ).fetchone()
+
+
+async def library_rows(
+    conn: psycopg.AsyncConnection, paper_ids: list[str]
+) -> dict[str, dict[str, Any]]:
+    """`library_row` of each of the papers that has one, by paper."""
+    rows = await (
+        await conn.execute("SELECT * FROM library WHERE paper_id = ANY(%s)", (paper_ids,))
+    ).fetchall()
+    return {r["paper_id"]: r for r in rows}
 
 
 async def set_hand(conn: psycopg.AsyncConnection, paper_id: str, hand: Hand) -> None:

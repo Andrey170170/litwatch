@@ -13,6 +13,7 @@ import psycopg
 from litwatch import intake
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
+from litwatch.feedback import word
 from litwatch.intake import archive as archive_intake
 from litwatch.intake import catalog
 from litwatch.intake.http import XmlClient
@@ -46,6 +47,7 @@ async def run(
             since,
             record.run_id,
             archive=archive_integration.harvester(config),
+            rules=word.rules(config),
         )
         _record(record, result)
     log.info(
@@ -95,7 +97,9 @@ async def from_archive(
         datetime.combine(until + timedelta(days=1), time.min, UTC),
     )
     async with run_record(conn, "intake", window=window) as record:
-        result = await archive_intake.collect(conn, client, config.intake.categories, since, until)
+        result = await archive_intake.collect(
+            conn, client, config.intake.categories, since, until, rules=word.rules(config)
+        )
         _record(record, result)
     log.info(
         "run %s intake from the archive: %s papers (%s new, %s updated)",

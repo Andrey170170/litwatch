@@ -15,11 +15,13 @@ from litwatch.core import (
     ReactionValue,
     Verdict,
 )
-from litwatch.feedback import calibrate, word
+from litwatch.feedback import calibrate
 from litwatch.feedback.calibrate import Answer
+from litwatch.gates.database import DatabaseGate
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
+from tests import settling
 from tests.conftest import AGENTS, FAITH, TREE, paper
 
 ABOVE = [paper(f"2610.0010{i}") for i in range(3)]
@@ -32,7 +34,7 @@ async def db(conn):
     await papers_store.upsert(conn, ABOVE + BELOW)
     for p, fit in [(p, "related") for p in ABOVE] + [(p, "none") for p in BELOW]:
         await verdicts.add(conn, verdict(p.id, Fit(fit)))
-        await word.settle(conn, p.id, cause=Cause.VERDICT)
+        await settling.settle(conn, p.id, cause=Cause.VERDICT)
     return conn
 
 
@@ -47,12 +49,18 @@ def verdict(paper_id: str, fit: Fit, **opinions: Fit) -> Verdict:
     )
 
 
+async def answer(conn, session_id: int, position: int, given: Answer) -> None:
+    await calibrate.answer(
+        DatabaseGate.over(conn), session_id, position, given, rules=settling.RULES
+    )
+
+
 async def items(conn, session_id):
     return (await calibrate.session(conn, session_id))["items"]
 
 
 async def test_a_draw_is_even_across_groups_seeded_and_skips_labelled_papers(db):
-    await word.label(
+    await settling.label(
         db,
         Label(
             paper_id=ABOVE[0].id,
@@ -81,8 +89,8 @@ async def test_answers_become_labels_and_appraisals(db):
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     assert item["verdict"] == "related"  # the pipeline's side, for the review
     with pytest.raises(ValueError, match="required"):
-        await calibrate.answer(db, session_id, item["position"], Answer(fit={}))
-    await calibrate.answer(
+        await answer(db, session_id, item["position"], Answer(fit={}))
+    await answer(
         db,
         session_id,
         item["position"],
@@ -108,7 +116,7 @@ async def test_a_fit_moved_between_topics_keeps_the_paper_in_the_library_through
     """An item's labels are written together and settled once: moving its Fit from one Focus
     topic to another emits no unsave and save between them."""
     second = AGENTS.model_copy(update={"depth": Depth.FOCUS, "rubric": "Tool use, end to end."})
-    await word.save_taxonomy(db, TREE.following(second))
+    await settling.save_taxonomy(db, TREE.following(second))
     session_id = await calibrate.draw(db, seed=1, size=4)
     # Drawn above the line on its Focus topic: graded relevant, so in the library.
     (item,) = [
@@ -116,7 +124,7 @@ async def test_a_fit_moved_between_topics_keeps_the_paper_in_the_library_through
     ]
     before = await library_events(db, item["paper_id"])
     moved = {FAITH.slug: LabelValue.NONE, AGENTS.slug: LabelValue.RELATED}
-    await calibrate.answer(db, session_id, item["position"], Answer(fit=moved))
+    await answer(db, session_id, item["position"], Answer(fit=moved))
     assert await library_events(db, item["paper_id"]) == before
 
 
@@ -135,18 +143,14 @@ async def test_precision_judges_the_drawn_verdict_and_ignores_the_unanswered(db)
     session_id = await calibrate.draw(db, seed=3, size=6)
     above = [i for i in await items(db, session_id) if i["why"] == "above"]
     below = [i for i in await items(db, session_id) if i["why"] == "below"]
-    await calibrate.answer(
+    await answer(
         db,
         session_id,
         above[0]["position"],
         Answer(fit={FAITH.slug: LabelValue.RELATED}),
     )
-    await calibrate.answer(
-        db, session_id, above[1]["position"], Answer(fit={FAITH.slug: LabelValue.NONE})
-    )
-    await calibrate.answer(
-        db, session_id, below[0]["position"], Answer(fit={FAITH.slug: LabelValue.UNSURE})
-    )
+    await answer(db, session_id, above[1]["position"], Answer(fit={FAITH.slug: LabelValue.NONE}))
+    await answer(db, session_id, below[0]["position"], Answer(fit={FAITH.slug: LabelValue.UNSURE}))
     (row,) = await calibrate.precision(db)
     assert (row["precision"], row["precision_n"]) == (0.5, 2)
     assert (row["dropped"], row["dropped_n"]) == (None, 0)
@@ -161,7 +165,7 @@ async def test_more_takes_in_straddling_splits_and_thumbed_papers_once(db):
             update={"split": True}
         ),
     )
-    await word.react(
+    await settling.react(
         db,
         Reaction(
             paper_id=BELOW[0].id,
@@ -182,7 +186,7 @@ async def test_more_takes_in_straddling_splits_and_thumbed_papers_once(db):
 async def test_an_answer_counts_even_when_the_paper_had_a_label_since_the_draw(db):
     session_id = await calibrate.draw(db, seed=3, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
-    await word.label(
+    await settling.label(
         db,
         Label(
             paper_id=item["paper_id"],
@@ -191,7 +195,7 @@ async def test_an_answer_counts_even_when_the_paper_had_a_label_since_the_draw(d
             origin=LabelOrigin.READER,
         ),
     )
-    await calibrate.answer(
+    await answer(
         db,
         session_id,
         item["position"],
@@ -235,10 +239,10 @@ async def test_an_answer_does_not_renew_a_label_it_leaves_as_it_was(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     fit = {FAITH.slug: LabelValue.NONE}
-    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
+    await answer(db, session_id, item["position"], Answer(fit=fit))
     at = "SELECT labelled_at FROM labels WHERE paper_id = %s AND topic = %s"
     before = await (await db.execute(at, (item["paper_id"], FAITH.slug))).fetchone()
-    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
+    await answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
     after = await (await db.execute(at, (item["paper_id"], FAITH.slug))).fetchone()
     assert after["labelled_at"] == before["labelled_at"]
 
@@ -250,11 +254,11 @@ async def test_an_appraisal_edit_after_the_first_answer_writes_no_label(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     with pytest.raises(ValueError, match="required"):
-        await calibrate.answer(db, session_id, item["position"], Answer(fit={}, value="fine"))
+        await answer(db, session_id, item["position"], Answer(fit={}, value="fine"))
     fit = {FAITH.slug: LabelValue.NONE}
-    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
-    await word.unlabel(db, item["paper_id"], FAITH.slug)
-    await calibrate.answer(db, session_id, item["position"], Answer(fit={}, value="matters"))
+    await answer(db, session_id, item["position"], Answer(fit=fit))
+    await settling.unlabel(db, item["paper_id"], FAITH.slug)
+    await answer(db, session_id, item["position"], Answer(fit={}, value="matters"))
     labels = await (
         await db.execute("SELECT * FROM labels WHERE paper_id = %s", (item["paper_id"],))
     ).fetchall()
@@ -268,17 +272,17 @@ async def test_fit_names_only_focus_topics(db):
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     fit = {FAITH.slug: LabelValue.NONE, "interpretability": LabelValue.NONE}
     with pytest.raises(ValueError, match="not Focus topics: interpretability"):
-        await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
+        await answer(db, session_id, item["position"], Answer(fit=fit))
 
 
 async def test_an_appraisal_can_be_cleared(db):
     session_id = await calibrate.draw(db, seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     fit = {FAITH.slug: LabelValue.NONE}
-    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
-    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
+    await answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
+    await answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
     assert len(await calibrate.matters_no_topic(db)) == 1
-    await calibrate.answer(db, session_id, item["position"], Answer(fit=fit))
+    await answer(db, session_id, item["position"], Answer(fit=fit))
     assert await calibrate.matters_no_topic(db) == []
     rows = await (await db.execute("SELECT count(*) AS n FROM appraisals")).fetchone()
     assert rows["n"] == 2  # matters once, then cleared
@@ -301,7 +305,7 @@ async def test_the_sessions_list_counts_answers_that_differ_from_the_verdict(db)
         (below[0], LabelValue.RELATED),  # differs
         (below[1], LabelValue.UNSURE),  # answered, never differs
     ):
-        await calibrate.answer(db, session_id, item["position"], Answer(fit={FAITH.slug: fit}))
+        await answer(db, session_id, item["position"], Answer(fit={FAITH.slug: fit}))
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     transport = httpx.ASGITransport(app=create_app(dsn, "t", Config()))
     async with httpx.AsyncClient(

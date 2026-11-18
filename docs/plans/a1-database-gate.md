@@ -55,7 +55,9 @@ Each stage runs in production before the next starts.
   - It reads labels, reactions, weights and current verdicts (not their history) in one query each for the whole
     set, in chunks of 500 papers.
   - The per-paper rule stays in Python.
-  - `rules` carries `automatic_deep`, which today is a module global.
+  - `rules` carries `automatic_deep`, which was a module global the CLI set when it loaded the configuration. It
+    is `word.Rules` now: a boundary that has the configuration reads it with `word.rules(config)`, and one that
+    has none takes `rules` from its caller (the API through the `deps.Rules` dependency).
   - A taxonomy edit collects every paper its changed topics reach and settles each once.
 - **Store parameters are renamed** from `conn` to `unit` in P6, by script, once every caller passes units. Doing it
   in one go keeps the earlier PRs' diffs readable.
@@ -164,7 +166,37 @@ Found while building, owned by the stage named.
   full-text step, so that step is not restricted by its own nightly.
 - **P4 or P6: the migration lock** is still taken in `store/db.py` (on the advisory-lock list); it moves behind the
   gate before that list is empty.
+- **P3 to P5: P2's boundaries still build the bridge.** Where a caller holds a raw connection, P2 opens its units
+  on `DatabaseGate.over(conn)`: the API's owner actions (`api/reading.py`, `api/settings.py`, `api/jobs.py`,
+  `api/integrations.py`, P3), the nightly's steps, the jobs worker, re-runs, and the full-text and Deep loops (P4),
+  intake's collectors, the digests and the CLI's `taxonomy import`, `library sync` and `fulltext --deep` (P5, the
+  CLI in P3). Each becomes the caller's `db`. `feedback.calibrate.answer`, `intake.batch.store`, `word.sync` and
+  `word.settle_all` take `db` already.
+- **P3 to P5: a block inside a P2 unit must not use the raw connection.** On the bridge the unit and the connection
+  are one session, so a statement on the connection inside the unit works by accident; on the pool it would run
+  outside the unit. P2's units pass the unit everywhere, and the stage that drops a bridge checks its blocks again.
+- **P6: `store.db.transaction(conn)`** stands in for `conn.transaction()` in the store functions reached both with
+  a unit and with a connection (`taxonomy.load`, `save` and `set_order`, `papers.upsert` and `correct`,
+  `digests.record`, `integrations.put_card`): a transaction on a connection, nothing on a unit. `taxonomy.lock`
+  and `lock_shared` likewise only check a unit's hold. Both go when no caller passes a connection.
+- **P4: `fulltext.deep._service_failed`** and `store.fulltext.take_back` and `retry_failed` still open their own
+  transactions on a connection; no settle runs in them, so P2 left them.
+- **P3: an owner action that may only answer is not a `change`.** `api/jobs.process` and
+  `api/integrations.request_card` return early when the work is already under way, and a `change` would settle
+  the paper on that path too. They open `db.write(..., taxonomy="shared", papers=[id])` themselves and call
+  `settle_many` after they wrote, as `intake.batch.store` does for the papers a page rewrote. The worker's `_end`
+  and `api/jobs.act` open the same unit for the papers' locks alone and settle nothing, as before.
+- **V4: `word.settle_topic` has no caller in the code** since a taxonomy edit collects its papers itself
+  (`save_taxonomy`). It is kept for V4's measurement and for a one-topic re-settle by hand.
 
 ## Evidence
 
 Filled in as stages land.
+
+- **P2** (V3, V4), on a copy of production taken 2026-11-17 (22,549 papers), restored before each run:
+  - V3: `litwatch library sync` at the base (7965b778) and at P2 both settle 22,526 papers with 0 grades changed,
+    0 saved and 0 unsaved. Effective grades, rarities, library, full-text passes, jobs and outbox counts dumped
+    after each run are identical. The sync took about 2m51s at the base and 11.8 s at P2.
+  - V4: the Field is `language-models`, which `settle_topic` finds 8,547 papers for today (6,777 was the count in
+    the wait note). Its `settle_topic`, under the exclusive taxonomy lock and rolled back, went from 162,275
+    statements and 69.7–70.5 s at the base to 203 statements and 3.3–3.5 s at P2, over three runs each.

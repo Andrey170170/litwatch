@@ -4,6 +4,7 @@ lease, revisions, and what the owner sees of it."""
 
 import asyncio
 import json
+from collections import Counter
 
 import httpx
 import pytest
@@ -36,8 +37,9 @@ from litwatch.core.fulltext import (
     to_relabel,
     wanted,
 )
-from litwatch.feedback import misses, word
+from litwatch.feedback import word
 from litwatch.fulltext import brief, trim
+from litwatch.gates.database import DatabaseGate
 from litwatch.jobs import nightly
 from litwatch.llm import Gateway, ProviderError
 from litwatch.store import analyses as analyses_store
@@ -46,6 +48,7 @@ from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import FAITH, INTERP, TREE, paper
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
@@ -126,7 +129,7 @@ async def graded(conn, fit: str, topic: str = FAITH.slug) -> None:
             paper_id=P.id, topic=topic, topic_version="v", fit=Fit(fit), reason="r", opinions={}
         ),
     )
-    await word.settle(conn, P.id, cause=Cause.VERDICT)
+    await settling.settle(conn, P.id, cause=Cause.VERDICT)
 
 
 async def analysed(conn, weight: str, paper_id: str = P.id) -> None:
@@ -140,7 +143,7 @@ async def analysed(conn, weight: str, paper_id: str = P.id) -> None:
     )
     current = await papers_store.get(conn, paper_id)
     await analyses_store.add(conn, current, "interpretability", found, "m")
-    await word.settle(conn, paper_id, cause=Cause.VERDICT)
+    await settling.settle(conn, paper_id, cause=Cause.VERDICT)
 
 
 async def passes(conn) -> list[dict]:
@@ -164,6 +167,11 @@ async def events(conn, *types: str) -> list[dict]:
 
 async def work(conn, fake: FakeArchive, writer: Writer, **kwargs):
     return await fulltext.work(conn, CONFIG, archive(fake), gateway=writer.gateway, **kwargs)
+
+
+async def record(conn, attempt: fulltext.Attempt) -> bool:
+    """Record a pass's attempt as the worker does, in a change of its paper."""
+    return await fulltext.record_in_change(DatabaseGate.over(conn), attempt, settling.RULES)
 
 
 def ready(fake: FakeArchive, version: int = 1) -> FakeArchive:
@@ -233,9 +241,9 @@ async def test_the_owners_word_queues_a_pass_and_takes_back_one_not_started(db):
     said = Label(
         paper_id=P.id, topic=FAITH.slug, value=LabelValue.CENTRAL, origin=LabelOrigin.READER
     )
-    await word.label(db, said)
+    await settling.label(db, said)
     assert [r["kind"] for r in await passes(db)] == ["brief"]
-    await word.label(db, said.model_copy(update={"value": LabelValue.ADJACENT}))
+    await settling.label(db, said.model_copy(update={"value": LabelValue.ADJACENT}))
     assert await passes(db) == []  # not started and no longer wanted: dropped
 
 
@@ -244,7 +252,9 @@ async def test_a_paused_topic_queues_nothing_and_drops_its_pass(db):
     assert len(await passes(db)) == 1
     tree = await taxonomy_store.load(db)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)
-    await word.save_taxonomy(db, tree.following(faith.model_copy(update={"status": Status.PAUSED})))
+    await settling.save_taxonomy(
+        db, tree.following(faith.model_copy(update={"status": Status.PAUSED}))
+    )
     assert await passes(db) == []
 
 
@@ -252,7 +262,7 @@ async def test_an_area_counts_a_must_read_its_descendant_graded(db):
     async def status(slug: str, value: Status) -> None:
         tree = await taxonomy_store.load(db)
         topic = next(t for t in tree.topics if t.slug == slug)
-        await word.save_taxonomy(db, tree.following(topic.model_copy(update={"status": value})))
+        await settling.save_taxonomy(db, tree.following(topic.model_copy(update={"status": value})))
 
     await analysed(db, "solid")
     await graded(db, "central")  # must read in the Focus topic, ungraded by the Area itself
@@ -268,7 +278,7 @@ async def test_an_area_counts_a_must_read_its_descendant_graded(db):
     moved = [
         c.model_copy(update={"parent": None}) if c.slug == FAITH.slug else c for c in tree.classes
     ]
-    await word.save_taxonomy(db, tree.model_copy(update={"classes": moved}))
+    await settling.save_taxonomy(db, tree.model_copy(update={"classes": moved}))
     assert await passes(db) == []
 
 
@@ -282,9 +292,11 @@ async def test_a_pass_running_when_its_topic_is_paused_is_dropped_once_it_stops(
     (claimed,) = await fulltext_store.claim(db, LEASE)
     tree = await taxonomy_store.load(db)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)
-    await word.save_taxonomy(db, tree.following(faith.model_copy(update={"status": Status.PAUSED})))
+    await settling.save_taxonomy(
+        db, tree.following(faith.model_copy(update={"status": Status.PAUSED}))
+    )
     assert len(await passes(db)) == 1  # running: left to finish
-    assert await fulltext.record(db, fulltext.Attempt(claimed, **attempt))
+    assert await record(db, fulltext.Attempt(claimed, **attempt))
     assert await passes(db) == []  # back in the queue, no longer wanted: dropped
 
 
@@ -585,6 +597,27 @@ async def test_a_pass_wanted_for_another_reason_at_claim_runs_on_its_next_claim(
     assert await work(db, fake, writer) == {"briefs_written": 1}
 
 
+async def test_a_claimed_pass_settles_its_paper_once_in_each_unit(db, monkeypatch):
+    # The claim's judgement settles the paper itself, and its change leaves it settled.
+    await graded(db, "central")
+    settles: Counter[tuple[int, str]] = Counter()
+    units: list[object] = []  # kept alive, so no two units share an id
+    names: set[str] = set()
+    settle_many = word.settle_many
+
+    async def counted(unit, paper_ids, **kwargs):
+        ids = sorted(set(paper_ids))
+        units.append(unit)
+        settles.update((id(unit), paper_id) for paper_id in ids)
+        names.update(unit.name for _ in ids)
+        return await settle_many(unit, ids, **kwargs)
+
+    monkeypatch.setattr(word, "settle_many", counted)
+    assert await work(db, ready(FakeArchive()), Writer()) == {"briefs_written": 1}
+    assert "judge claimed pass" in names
+    assert max(settles.values()) == 1
+
+
 async def test_a_paper_dismissed_after_its_pass_is_claimed_spends_nothing(db, monkeypatch):
     await graded(db, "central")
     claim = fulltext_store.claim
@@ -609,7 +642,7 @@ async def test_a_pass_whose_paper_was_rewritten_after_its_claim_is_dropped_unrea
 
     async def claim_then_rewrite(conn, *args, **kwargs):
         claimed = await claim(conn, *args, **kwargs)
-        await word.settle_all(
+        await settling.settle_all(
             conn, (await papers_store.upsert(conn, [rewrite])).rewritten, cause=Cause.VERDICT
         )
         return claimed
@@ -627,7 +660,9 @@ async def test_the_reconcile_leaves_out_a_paper_its_area_grades_below_must_read(
     await graded(db, "adjacent", INTERP.slug)  # the Area's own grade stands over it
     tree = await taxonomy_store.load(db)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)
-    await word.save_taxonomy(db, tree.following(faith.model_copy(update={"status": Status.PAUSED})))
+    await settling.save_taxonomy(
+        db, tree.following(faith.model_copy(update={"status": Status.PAUSED}))
+    )
     assert await passes(db) == []
     await db.execute("UPDATE verdicts SET recorded_at = now() - interval '3 days'")
     assert await fulltext_store.candidates(db, RECONCILE_LOOKBACK) == []
@@ -694,7 +729,7 @@ async def test_a_lease_holds_a_pass_until_it_runs_out(db):
     (again,) = await fulltext_store.claim(db, LEASE)  # its worker died: tried again
     assert again.id == held.id
     # The first worker, back late, records nothing over the second's.
-    assert await fulltext.record(db, fulltext.Attempt(held, error="late", counts=True)) is False
+    assert await record(db, fulltext.Attempt(held, error="late", counts=True)) is False
     assert (await passes(db))[0]["failed_runs"] == 0
 
 
@@ -711,7 +746,7 @@ async def test_the_limit_is_taken_in_sql_least_recently_tried_first(db):
         opinions={},
     )
     await verdicts.add(db, found)
-    await word.settle(db, other.id, cause=Cause.VERDICT)
+    await settling.settle(db, other.id, cause=Cause.VERDICT)
     fake = FakeArchive(status="pending")
     assert await work(db, fake, Writer(), limit=1) == {"awaiting_text": 1}
     assert await work(db, fake, Writer(), limit=1) == {"awaiting_text": 1}
@@ -732,7 +767,7 @@ async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(db, monkeyp
             opinions={},
         )
         await verdicts.add(db, found)
-        await word.settle(db, other.id, cause=Cause.VERDICT)
+        await settling.settle(db, other.id, cause=Cause.VERDICT)
 
     class Fetching(FakeArchive):
         def handle(self, req):
@@ -779,7 +814,7 @@ async def test_a_new_version_with_the_same_text_is_answered_from_the_journal(db,
     writer = Writer()
     await work(db, ready(FakeArchive()), writer)
     await papers_store.upsert(db, [P.model_copy(update={"version": 2})])
-    await word.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
+    await settling.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
     fake = FakeArchive()
     fake.texts[P.id] = (2, BODY + " Revised." if changed else BODY)
     await work(db, fake, writer)
@@ -798,13 +833,13 @@ async def test_a_new_update_of_unknown_version_is_read_again_once(db):
     later = P.model_copy(update={"version": None, "updated": "2026-10-20T00:00:00+00:00"})
     assert (await papers_store.upsert(db, [later])).rewritten == []
     assert await fulltext_store.outdated(db) == [P.id]
-    await word.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
+    await settling.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
     assert [r["state"] for r in await passes(db)] == ["done", "awaiting_text"]
     fake = FakeArchive()
     fake.texts[P.id] = (None, BODY)  # the archive cannot say either: its historical LaTeX
     assert await work(db, fake, Writer()) == {"briefs_written": 1}
     assert await fulltext_store.outdated(db) == []  # once, not again
-    await word.settle(db, P.id, cause=Cause.VERDICT)
+    await settling.settle(db, P.id, cause=Cause.VERDICT)
     assert len(await passes(db)) == 2
     # The archive then says which version it was: the version the first pass read, not the
     # one the last pass read, which is unknown, so it is read again.
@@ -817,7 +852,7 @@ async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revisi
     await graded(db, "central")
     (claimed,) = await fulltext_store.claim(db, LEASE)
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
-    await word.settle_all(
+    await settling.settle_all(
         db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
     )
     # The running pass is kept; the old verdict still stands, so revision 2 has one queued.
@@ -829,7 +864,7 @@ async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revisi
     answer = brief.Output.model_validate(ANSWER)
     text = PaperText(BODY, 1, "latex")
     done = fulltext.Attempt(claimed, text=text, output=answer, model="test-brief")
-    assert await fulltext.record(db, done)
+    assert await record(db, done)
     (b,) = await (await db.execute("SELECT paper_revision FROM briefs")).fetchall()
     assert b["paper_revision"] == 1
     assert await analyses_store.weight_of(db, P.id) is None  # not revision 2's Weight
@@ -847,7 +882,7 @@ async def test_a_rewrite_whose_settle_was_cut_short_is_settled_by_the_nightly_sw
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
     assert (await papers_store.upsert(db, [rewrite])).rewritten == [P.id]  # and no settle
     assert await fulltext_store.outdated(db) == [P.id]
-    await word.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
+    await settling.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
     assert await fulltext_store.outdated(db) == []
 
@@ -857,7 +892,7 @@ async def test_an_owners_fetch_over_an_older_version_settles_its_rewrite(db):
     # meanwhile): stored as intake stores it, and its rewrite settled with it (L5-2, #66).
     await graded(db, "central")
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
-    stored, inserted = await misses.keep(db, P.id, rewrite)
+    stored, inserted = await settling.keep(db, P.id, rewrite)
     assert (stored.version, stored.title, inserted) == (2, rewrite.title, False)
     assert await fulltext_store.outdated(db) == []
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
@@ -870,7 +905,7 @@ async def test_a_pass_that_finishes_after_its_paper_is_dismissed_writes_nothing(
     answer = brief.Output.model_validate(ANSWER)
     text = PaperText(BODY, 1, "latex")
     done = fulltext.Attempt(claimed, text=text, output=answer, model="test-brief")
-    assert await fulltext.record(db, done)
+    assert await record(db, done)
     assert await (await db.execute("SELECT * FROM briefs")).fetchall() == []
     assert await analyses_store.weight_of(db, P.id) is None
     assert await events(db, "brief.written", "gist.written") == []
@@ -882,7 +917,7 @@ async def test_a_pass_that_finishes_after_its_paper_is_dismissed_writes_nothing(
 async def test_a_pass_not_started_before_a_rewrite_is_dropped(db):
     await graded(db, "central")
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
-    await word.settle_all(
+    await settling.settle_all(
         db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
     )
     # The pass for revision 1 is gone; the old verdict still stands, so revision 2 has one.

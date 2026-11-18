@@ -12,13 +12,13 @@ from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Cause, Fit, Verdict
 from litwatch.core.digests import DigestPeriod, DigestState
-from litwatch.feedback import word
 from litwatch.store import digests as digests_store
 from litwatch.store import failures, verdicts
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import FAITH, TREE, paper
 
 TOKEN = "s3cret"
@@ -70,7 +70,7 @@ async def stop_pass(conn) -> int:
         opinions={},
     )  # fmt: skip
     await verdicts.add(conn, central)
-    await word.settle(conn, R.id, cause=Cause.VERDICT)
+    await settling.settle(conn, R.id, cause=Cause.VERDICT)
     (row,) = await (
         await conn.execute("SELECT id FROM fulltext_passes WHERE kind = 'brief'")
     ).fetchall()

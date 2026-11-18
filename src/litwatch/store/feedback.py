@@ -47,11 +47,15 @@ async def delete_label(conn: psycopg.AsyncConnection, paper_id: str, topic: str)
     await conn.execute("DELETE FROM labels WHERE paper_id = %s AND topic = %s", (paper_id, topic))
 
 
-async def labels_for(conn: psycopg.AsyncConnection, paper_id: str) -> list[Label]:
+async def labels_of(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> dict[str, list[Label]]:
+    """The owner's labels on each of the papers that has any, by paper."""
     rows = await (
-        await conn.execute("SELECT * FROM labels WHERE paper_id = %s", (paper_id,))
+        await conn.execute("SELECT * FROM labels WHERE paper_id = ANY(%s)", (paper_ids,))
     ).fetchall()
-    return [_label(r) for r in rows]
+    found: dict[str, list[Label]] = {}
+    for r in rows:
+        found.setdefault(r["paper_id"], []).append(_label(r))
+    return found
 
 
 async def labels(conn: psycopg.AsyncConnection, topic: str | None = None) -> list[Label]:

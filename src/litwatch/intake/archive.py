@@ -16,6 +16,8 @@ from datetime import date
 import psycopg
 
 from litwatch.archive import ArchiveClient
+from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.intake import batch
 from litwatch.intake.collect import IntakeResult
 from litwatch.store import papers as papers_store
@@ -29,10 +31,12 @@ async def collect(
     categories: Iterable[str],
     since: date,
     until: date,
+    *,
+    rules: word.Rules,
 ) -> IntakeResult:
     """Store the window's papers a page at a time (`batch.store`), each page in its own
-    transaction with the settles of its rewrites, so an interrupted read keeps what it stored,
-    settled, and a repeat changes nothing. A record without a title or abstract is skipped:
+    unit with the settles of its rewrites, by `rules`, so an interrupted read keeps what it
+    stored, settled, and a repeat changes nothing. A record without a title or abstract is skipped:
     there is nothing to judge."""
     categories = tuple(dict.fromkeys(categories))
     result = IntakeResult(
@@ -46,10 +50,11 @@ async def collect(
         }
     )
     seen: set[str] = set()
+    db = DatabaseGate.over(conn)
     async for page in client.papers(since, until, categories):
         usable = [p for p in page if p.title and p.abstract]
         result.details["skipped"] += [p.id for p in page if not (p.title and p.abstract)]
-        stored = await batch.store(conn, usable, source=papers_store.ARCHIVE)
+        stored = await batch.store(db, usable, source=papers_store.ARCHIVE, rules=rules)
         result.inserted += stored.inserted
         result.updated += stored.updated
         result.rewritten += stored.rewritten

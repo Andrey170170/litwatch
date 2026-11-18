@@ -14,19 +14,26 @@ from pathlib import Path
 from litwatch import classification, config, store
 from litwatch.core import Cause
 from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
+
+# The seeding queues no automatic Deep card; the stack's own settles do, by its configuration.
+RULES = word.Rules(automatic_deep=False)
 
 
 async def main(fixture: Path, slug: str) -> None:
     ids = [item["id"] for item in json.loads(fixture.read_text())]
     async with await store.connect(config.database_url()) as conn:
+        db = DatabaseGate.over(conn)
         tree = await taxonomy_store.load(conn)
         for paper_id in ids:
             # Classified by hand and settled together.
-            async with word.change(conn, paper_id, cause=Cause.OWNER):
-                paper = await papers_store.get(conn, paper_id)
-                if paper is None or not await classification.by_hand(conn, paper, tree, [slug]):
+            async with word.change(db, paper_id, cause=Cause.OWNER, rules=RULES) as change:
+                paper = await papers_store.get(change.unit, paper_id)
+                if paper is None or not await classification.by_hand(
+                    change.unit, paper, tree, [slug]
+                ):
                     raise SystemExit(f"{paper_id}: not stored, or changed meanwhile")
     print(f"classified {len(ids)} papers into {slug}")
 

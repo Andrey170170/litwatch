@@ -1,4 +1,4 @@
-"""Deep card passes (docs/specs/v1/pipeline.md, section 6; integrations.md). `word.settle` queues
+"""Deep card passes (docs/specs/v1/pipeline.md, section 6; integrations.md). A settle queues
 an automatic one for a Focus must read or a published Area pick with no card, unless it is
 unsaved, and `request` the owner's, which no settle drops. They are worked by their own worker,
 one at a time, since a card takes up to most of an hour: a claimed pass is settled under its
@@ -48,7 +48,8 @@ from litwatch.config import Config
 from litwatch.core import Cause
 from litwatch.core.fulltext import REQUESTED, TextRead
 from litwatch.feedback import word
-from litwatch.fulltext import TICK_SECONDS, judged, read, record, still_wanted
+from litwatch.fulltext import TICK_SECONDS, judged, read, record_in_change, still_wanted
+from litwatch.gates.database import DatabaseGate, WriteUnit
 from litwatch.integrations.deep import Deep, RejectedError
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
@@ -64,17 +65,17 @@ NOTHING_RAN = dict.fromkeys(
 )
 
 
-async def request(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
+async def request(unit: WriteUnit, paper_id: str) -> int | None:
     """The owner asks for a Deep card on the paper, whatever its grade, a card already made
     included ("Write again"): their request takes over the open Deep pass or queues one, with
-    `card.requested`, under the paper's lock. Returns the pass's id; None for a paper that is
-    not there or dropped, whose passes are never worked."""
-    async with word.change(conn, paper_id, cause=Cause.OWNER):
-        found = await store_.deep_facts(conn, paper_id)
-        if found is None or found.dropped:
-            return None
-        pass_id = await store_.request_card(conn, paper_id, found.revision)
-        await events.emit(conn, events.CARD_REQUESTED, paper_id, pass_id=pass_id)
+    `card.requested`, in a unit holding the paper's lock, which settles the paper after it (a
+    change of the paper, `word.change`). Returns the pass's id; None for a paper that is not
+    there or dropped, whose passes are never worked."""
+    found = await store_.deep_facts(unit, paper_id)
+    if found is None or found.dropped:
+        return None
+    pass_id = await store_.request_card(unit, paper_id, found.revision)
+    await events.emit(unit, events.CARD_REQUESTED, paper_id, pass_id=pass_id)
     return pass_id
 
 
@@ -83,24 +84,26 @@ async def work(
     archive: ArchiveClient,
     deep: Deep,
     *,
+    rules: word.Rules,
     limit: int | None = None,
     config: Config | None = None,
 ) -> Counter[str]:
     """Work the Deep passes that are due, one at a time, up to `limit` claimed, unless another
-    worker is working them. With the `config`'s schedule, a re-run's (background) passes wait
-    while a nightly run is running or due (pipeline.md, section 10). Returns how the tries
-    ended."""
+    worker is working them; their papers are settled by `rules`. With the `config`'s schedule,
+    a re-run's (background) passes wait while a nightly run is running or due (pipeline.md,
+    section 10). Returns how the tries ended."""
     async with store_.deep_worker(conn) as mine:
         if not mine:
             log.info("another worker is working the Deep passes")
             return Counter()
-        return await _work(conn, archive, deep, limit, config)
+        return await _work(conn, archive, deep, rules, limit, config)
 
 
 async def _work(
     conn: psycopg.AsyncConnection,
     archive: ArchiveClient,
     deep: Deep,
+    rules: word.Rules,
     limit: int | None,
     config: Config | None,
 ) -> Counter[str]:
@@ -108,6 +111,7 @@ async def _work(
 
     counts: Counter[str] = Counter()
     tried: set[int] = set()
+    db = DatabaseGate.over(conn)
     while limit is None or len(tried) < limit:
         if until := await cards.paused_until(conn, PAUSE):
             log.debug("the deep queue waits after a service failure, until %s", until)
@@ -123,9 +127,9 @@ async def _work(
         tried.add(c.id)
         # A pass with an attempt open has started: its job is followed whatever the paper wants.
         attempt = await cards.open_attempt(conn, c.id)
-        why = None if attempt else await still_wanted(conn, c)
+        why = None if attempt else await still_wanted(db, c, rules)
         if why is None:
-            why = await _work_one(conn, archive, deep, c, attempt)
+            why = await _work_one(conn, db, archive, deep, c, attempt, rules)
         if why != "lost":
             counts[why] += 1
     return counts
@@ -133,14 +137,17 @@ async def _work(
 
 async def _work_one(
     conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     archive: ArchiveClient,
     deep: Deep,
     c: Claimed,
     attempt: dict | None,
+    rules: word.Rules,
 ) -> str:
     """Follow the pass's job, one left running by a failed poll or a dead worker, or one a
     submission whose answer never came started, found by its key; else read the paper's text
-    and submit it. Then record how the job ended."""
+    and submit it. Then record how the job ended. What it writes about the paper goes in
+    changes of it, on `db`, the gate over `conn`."""
     if attempt is not None and attempt["job_id"] is None:
         try:
             job_id = await deep.client.job_for(_key(attempt["id"], c))
@@ -155,34 +162,39 @@ async def _work_one(
             # tried as a first try is.
             await cards.attempt_ended(conn, attempt["id"], None, "its submission started no job")
             attempt = None
-            if why := await still_wanted(conn, c):
+            if why := await still_wanted(db, c, rules):
                 return why
     if attempt is None:
         a = await read(archive, c)
         if a.text is None:  # awaiting text, or none to be had
-            await record(conn, a)
+            await record_in_change(db, a, rules)
             return "awaiting_text" if a.waiting else "card_failed"
         text = TextRead(a.text.version, a.text.source, a.text.sha256)
-        async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
+        async with word.change(
+            db, c.paper.id, cause=Cause.VERDICT, rules=rules, name="submit deep pass"
+        ) as done:
             # Under the paper's lock, judged again as at its claim: the paper may have been
             # dropped or unsaved during the read, and nothing is spent then. The owner's
             # request may have taken the pass over since its claim, and then the submission and
             # its attempt are theirs.
-            if why := await judged(conn, c):
+            unit = done.unit
+            if why := await judged(done, c, rules):
                 return why
-            reason = await store_.submitted(conn, c, text)
+            reason = await store_.submitted(unit, c, text)
             if reason is None:
                 return "lost"
             requested = reason == REQUESTED
-            submission = await deep.submission(conn, c.paper, a.text)
-            attempt_id = await cards.add_attempt(conn, c.paper.id, c.id, automatic=not requested)
+            submission = await deep.submission(unit, c.paper, a.text)
+            attempt_id = await cards.add_attempt(unit, c.paper.id, c.id, automatic=not requested)
         try:
             job_id = await deep.client.submit(submission, key=_key(attempt_id, c))
         except RejectedError as exc:
             # Sent again it would be turned down again: the paper's failure, which counts. A
             # wrong extension name in the configuration shows so too, as its topic's papers stop.
             error = f"the deep service rejected the submission: {exc}"
-            return await _ended(conn, c, attempt_id, NOTHING_RAN, error, "paper", ran=False)
+            return await _ended(
+                db, c, attempt_id, NOTHING_RAN, error, "paper", rules=rules, ran=False
+            )
         except httpx.HTTPError as exc:
             # The service may have taken it all the same: found by its key after the pause.
             return await _service_failed(conn, c, attempt_id, f"submitting failed: {exc}")
@@ -199,7 +211,7 @@ async def _work_one(
         return await _service_failed(conn, c, attempt["id"], outcome.error or "")
     if outcome.error or outcome.result is None:
         return await _ended(
-            conn,
+            db,
             c,
             attempt["id"],
             outcome.usage,
@@ -207,17 +219,21 @@ async def _work_one(
             "service" if outcome.failure == "service" else "paper",
             outcome.trace,
             outcome.reviews,
+            rules=rules,
         )
-    async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
-        if not await store_.held(conn, c):
+    async with word.change(
+        db, c.paper.id, cause=Cause.VERDICT, rules=rules, name="record deep card"
+    ) as done:
+        unit = done.unit
+        if not await store_.held(unit, c):
             return "lost"
-        revision, text = await store_.read_of(conn, c.id)
+        revision, text = await store_.read_of(unit, c.id)
         assert text is not None  # recorded before the job was submitted
         await cards.attempt_ended(
-            conn, attempt["id"], outcome.usage, None, trace=outcome.trace, reviews=outcome.reviews
+            unit, attempt["id"], outcome.usage, None, trace=outcome.trace, reviews=outcome.reviews
         )
         await cards.put_card(
-            conn,
+            unit,
             c.paper.id,
             outcome.result,
             outcome.model,
@@ -228,8 +244,8 @@ async def _work_one(
             pass_id=c.id,
             figures=outcome.figures,
         )
-        await store_.done(conn, c, text)
-        await events.emit(conn, events.CARD_READY, c.paper.id, model=outcome.model, pass_id=c.id)
+        await store_.done(unit, c, text)
+        await events.emit(unit, events.CARD_READY, c.paper.id, model=outcome.model, pass_id=c.id)
     usage = outcome.usage or {}
     log.info(
         "%s: deep card in %s turns, list cost $%.2f",
@@ -247,7 +263,7 @@ def _key(attempt_id: int, c: Claimed) -> str:
 
 
 async def _ended(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     c: Claimed,
     attempt_id: int,
     usage: dict | None,
@@ -256,6 +272,7 @@ async def _ended(
     trace: list | None = None,
     reviews: list | None = None,
     *,
+    rules: word.Rules,
     ran: bool = True,
 ) -> str:
     """An attempt that made no card: its usage (None, unknown), the error, whose `failure` it
@@ -263,16 +280,19 @@ async def _ended(
     fails the pass for this run, a run that counts; the service's puts it back in the queue,
     which pauses. A job that never `ran` leaves the card's last stats as they were."""
     log.warning("%s: deep card failed (%s): %s", c.paper.id, failure, error)
-    async with word.change(conn, c.paper.id, cause=Cause.VERDICT):
-        await cards.attempt_ended(conn, attempt_id, usage, error, failure, trace, reviews)
-        if not await store_.held(conn, c):
+    async with word.change(
+        db, c.paper.id, cause=Cause.VERDICT, rules=rules, name="record deep failure"
+    ) as done:
+        unit = done.unit
+        await cards.attempt_ended(unit, attempt_id, usage, error, failure, trace, reviews)
+        if not await store_.held(unit, c):
             return "lost"
-        await cards.card_failed(conn, c.paper.id, error, usage if ran else None)
+        await cards.card_failed(unit, c.paper.id, error, usage if ran else None)
         if failure == "service":
-            await store_.wait_again(conn, c, error)
+            await store_.wait_again(unit, c, error)
             return "card_service_failed"
-        revision, text = await store_.read_of(conn, c.id)
-        await store_.failed(conn, c, error, counts=True, text=text)
+        revision, text = await store_.read_of(unit, c.id)
+        await store_.failed(unit, c, error, counts=True, text=text)
     return "card_failed"
 
 
@@ -294,6 +314,8 @@ async def run_forever(
     deep: Deep,
     wake: asyncio.Event | None = None,
     config: Config | None = None,
+    *,
+    rules: word.Rules,
 ) -> None:
     """The service's Deep worker: work the Deep passes every `TICK_SECONDS`, or as soon as
     `wake` is set (the owner asked for a card), until cancelled. Each tick opens its own
@@ -303,7 +325,7 @@ async def run_forever(
     while True:
         try:
             async with await store.connect(dsn) as conn:
-                if done := await work(conn, archive, deep, config=config):
+                if done := await work(conn, archive, deep, rules=rules, config=config):
                     log.info("deep cards: %s", dict(done))
         except asyncio.CancelledError:
             raise

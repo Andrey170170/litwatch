@@ -14,6 +14,7 @@ from litwatch.intake.http import SourceError, XmlClient
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
 from litwatch.store import runs
+from tests import settling
 from tests.fakes_http import FakeArchive, mock
 
 NOW = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=1)
@@ -78,7 +79,9 @@ async def checkpoint(conn) -> date | None:
 
 async def collect(conn, fake: FakeArchive, categories=("cs.CL",)):
     run_id = await runs.start(conn, "intake", SINCE, NOW)
-    return await intake.collect(conn, categories, SINCE, run_id, archive=lambda: archive(fake))
+    return await intake.collect(
+        conn, categories, SINCE, run_id, archive=lambda: archive(fake), rules=settling.RULES
+    )
 
 
 async def walk(conn, arxiv: Arxiv, fake: FakeArchive, since: date):
@@ -252,7 +255,9 @@ async def test_an_archive_client_that_cannot_be_made_fails_only_the_pass(conn, m
     opener = archive_integration.harvester(Config(integrations={"archive": {"harvest": True}}))
     run_id = await runs.start(conn, "intake", SINCE, NOW)
 
-    result = await intake.collect(conn, ("cs.CL",), SINCE, run_id, archive=opener)
+    result = await intake.collect(
+        conn, ("cs.CL",), SINCE, run_id, archive=opener, rules=settling.RULES
+    )
 
     assert result.details["status"] == "complete" and result.inserted == 1
     assert result.details["catalog"]["error"].startswith("FileNotFoundError")

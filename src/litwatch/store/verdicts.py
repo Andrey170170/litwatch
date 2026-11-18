@@ -7,7 +7,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from litwatch.core import Opinion, Verdict
+from litwatch.core import Fit, Opinion, Verdict
 from litwatch.core.classification import Membership
 
 # A current verdict that waits for the owner's word, over its columns (pipeline.md, section 4):
@@ -62,12 +62,24 @@ async def add(conn: psycopg.AsyncConnection, verdict: Verdict) -> Verdict:
     return _verdict(row)
 
 
-async def for_paper(conn: psycopg.AsyncConnection, paper_id: str) -> list[Verdict]:
-    """Every verdict on the paper, for every topic."""
+async def current_fits(
+    conn: psycopg.AsyncConnection, paper_ids: list[str]
+) -> dict[str, dict[str, Fit]]:
+    """The Fit of each paper's current verdict per topic, by paper, for those that have one: the
+    verdict `core.current_verdict` picks from the history (the newest paper revision that has
+    one, then the most recently recorded), without reading the history."""
     rows = await (
-        await conn.execute("SELECT * FROM verdicts WHERE paper_id = %s ORDER BY id", (paper_id,))
+        await conn.execute(
+            "SELECT DISTINCT ON (paper_id, topic) paper_id, topic, fit FROM verdicts "
+            "WHERE paper_id = ANY(%s) "
+            "ORDER BY paper_id, topic, paper_revision DESC, recorded_at DESC, id DESC",
+            (paper_ids,),
+        )
     ).fetchall()
-    return [_verdict(r) for r in rows]
+    found: dict[str, dict[str, Fit]] = {}
+    for r in rows:
+        found.setdefault(r["paper_id"], {})[r["topic"]] = Fit(r["fit"])
+    return found
 
 
 async def candidates(

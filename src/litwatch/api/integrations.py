@@ -17,13 +17,14 @@ from fastapi import HTTPException, Query, Request
 
 from litwatch import events
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, protected
+from litwatch.api.deps import Conn, Rules, protected
 from litwatch.api.jobs import DROPPED
 from litwatch.archive import ArchiveError
 from litwatch.core import FAILED_RUNS, Cause, SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
+from litwatch.gates.database import DatabaseGate
 from litwatch.intake.search import NoAnswerError
 from litwatch.integrations.archive import Archive
 from litwatch.integrations.deep import Deep
@@ -197,7 +198,7 @@ CARD_REFUSED = {
 
 
 @router.post("/papers/{paper_id:path}/card", status_code=202, responses=CARD_REFUSED)
-async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardRequested:
+async def request_card(paper_id: str, request: Request, c: Conn, rules: Rules) -> s.CardRequested:
     """Ask for a Deep card on this paper, whatever its grade, or for a new one ("Write again")
     when it has one: the request goes through the full-text queue, first in line, and the card
     shows on the paper once it is written. Asking again while one is queued or being written
@@ -212,37 +213,38 @@ async def request_card(paper_id: str, request: Request, c: Conn) -> s.CardReques
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    async with c.transaction():
-        # Asked again while the request is open and its Process job under way: answered as it
-        # stands, before any change, whose settle would ask a running job again
-        # (`settle_process`) and run it once more for nothing. Under the paper's locks, so a
-        # request in flight has either committed or not started.
-        await word.lock_many(c, [paper_id])
-        open_pass = await fulltext_store.open_deep(c, paper_id)
+    # The owner's change of the paper, in a unit opened here and settled by hand, since a
+    # request asked again while it is open and its Process job under way is answered as it
+    # stands, before any change, whose settle would ask a running job again (`settle_process`)
+    # and run it once more for nothing. Under the paper's locks, so a request in flight has
+    # either committed or not started.
+    db = DatabaseGate.over(c)
+    async with db.write("request card", taxonomy="shared", papers=[paper_id]) as unit:
+        open_pass = await fulltext_store.open_deep(unit, paper_id)
         if (
             open_pass is not None
             and open_pass["reason"] == REQUESTED
             and open_pass["state"] != "failed"
-            and await jobs_store.processing(c, paper_id)
-            and not await papers_store.dropped(c, paper_id)
+            and await jobs_store.processing(unit, paper_id)
+            and not await papers_store.dropped(unit, paper_id)
         ):
             return s.CardRequested(pass_id=open_pass["id"])
-        async with word.change(c, paper_id, cause=Cause.OWNER):
-            await misses.keep(c, paper_id, fetched)
-            pass_id = await deep_passes.request(c, paper_id)
-            if pass_id is None:
-                raise HTTPException(status_code=409, detail=DROPPED)
-            # Outside the collection, the paper is processed now too, as Process does: with the
-            # schedule on, which runs the jobs worker, a taxonomy to sort it into, and no step of
-            # the paper waiting on the owner.
-            processing = (
-                request.app.state.config.schedule.enabled
-                and not await word_store.in_collection(c, paper_id)
-                and await taxonomy_store.load(c) is not None
-                and not await failures.waits_on_owner(c, [paper_id], FAILED_RUNS)
-            )
-            if processing:
-                await jobs_store.process(c, paper_id)
+        await misses.keep(unit, paper_id, fetched)
+        pass_id = await deep_passes.request(unit, paper_id)
+        if pass_id is None:
+            raise HTTPException(status_code=409, detail=DROPPED)
+        # Outside the collection, the paper is processed now too, as Process does: with the
+        # schedule on, which runs the jobs worker, a taxonomy to sort it into, and no step of
+        # the paper waiting on the owner.
+        processing = (
+            request.app.state.config.schedule.enabled
+            and not await word_store.in_collection(unit, paper_id)
+            and await taxonomy_store.load(unit) is not None
+            and not await failures.waits_on_owner(unit, [paper_id], FAILED_RUNS)
+        )
+        if processing:
+            await jobs_store.process(unit, paper_id)
+        await word.settle_many(unit, [paper_id], cause=Cause.OWNER, rules=rules)
     request.app.state.deep_wake.set()
     if processing:
         request.app.state.jobs_wake.set()

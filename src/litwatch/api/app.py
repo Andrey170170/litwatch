@@ -22,6 +22,7 @@ from litwatch.core import (
     SEARCH_TIMEOUT_SECONDS,
 )
 from litwatch.events import Integration, dispatch
+from litwatch.feedback import word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.jobs import scheduler, worker
 from litwatch.jobs.context import GatewayFactory, default_gateway
@@ -58,7 +59,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             tasks.append(
                 asyncio.create_task(
                     deep_passes.run_forever(
-                        app.state.dsn, archive, maker, app.state.deep_wake, app.state.config
+                        app.state.dsn,
+                        archive,
+                        maker,
+                        app.state.deep_wake,
+                        app.state.config,
+                        rules=word.rules(app.state.config),
                     )
                 )
             )

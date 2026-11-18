@@ -19,10 +19,10 @@ from pydantic import BaseModel, Field
 from litwatch import events
 from litwatch.concurrency import bounded
 from litwatch.config import Grading
-from litwatch.core import Cause, Depth, Fit, Opinion, Paper, Status, Taxonomy, Topic, Verdict
+from litwatch.core import Depth, Fit, Opinion, Paper, Status, Taxonomy, Topic, Verdict
 from litwatch.core.grading import FIT_DEFINITIONS, grading_topics
 from litwatch.core.grading import grade as derived
-from litwatch.feedback import word
+from litwatch.gates.database import WriteUnit
 from litwatch.llm import CallError, Gateway, Request
 from litwatch.llm.types import DecisionRequest, Predicate
 from litwatch.store import analyses as analyses_store
@@ -276,46 +276,45 @@ async def due(
     return due, passes
 
 
-async def record(conn: psycopg.AsyncConnection, g: Graded, *, job: int | None = None) -> bool:
-    """Store one grading with `verdict.recorded` and settle the paper (its effective grade,
-    rarity and library state follow); or record its failure. Returns False when there was
-    nothing to record: the paper's text changed meanwhile, it was dismissed, or the topic is
-    no longer active (paused during the call: a paused topic grades nothing). A re-run's
-    grading names its `job`, whose passes the settle queues."""
+async def record(unit: WriteUnit, g: Graded) -> bool:
+    """Store one grading with `verdict.recorded`, or record its failure, in the unit of a
+    change of the paper (`word.change`), which settles it: its effective grade, rarity and
+    library state follow. Returns False when there was nothing to record: the paper's text
+    changed meanwhile, it was dismissed, or the topic is no longer active (paused during the
+    call: a paused topic grades nothing)."""
     paper, slug = g.due.paper, g.due.topic.slug
-    async with word.change(conn, paper.id, cause=Cause.VERDICT, job=job):
-        if not await papers_store.still_current(conn, paper):
-            return False
-        if slug not in {t.slug for t in await taxonomy_store.topics(conn, Status.ACTIVE)}:
-            return False
-        if g.verdict is None:
-            error = g.error or "no answer"
-            await failures.failed(
-                conn,
-                paper,
-                "grading",
-                error,
-                counts=g.unusable,
-                topic=slug,
-                refused=g.refused,
-                stops=g.stops,
-            )
-            return True
-        stored = await store.add(conn, g.verdict)
-        await failures.succeeded(conn, paper.id, "grading", slug)
-        weight = await analyses_store.current_weight(conn, paper.id)
-        await events.emit(
-            conn,
-            events.VERDICT_RECORDED,
-            paper.id,
+    if not await papers_store.still_current(unit, paper):
+        return False
+    if slug not in {t.slug for t in await taxonomy_store.topics(unit, Status.ACTIVE)}:
+        return False
+    if g.verdict is None:
+        error = g.error or "no answer"
+        await failures.failed(
+            unit,
+            paper,
+            "grading",
+            error,
+            counts=g.unusable,
             topic=slug,
-            revision=paper.revision,
-            verdict_id=stored.id,
-            fit=stored.fit.value,
-            weight=weight.value if weight else None,
-            grade=derived(stored.fit, weight).value,
-            split=stored.split,
-            escalated=stored.escalated,
-            one_lab=stored.one_lab,
+            refused=g.refused,
+            stops=g.stops,
         )
+        return True
+    stored = await store.add(unit, g.verdict)
+    await failures.succeeded(unit, paper.id, "grading", slug)
+    weight = await analyses_store.current_weight(unit, paper.id)
+    await events.emit(
+        unit,
+        events.VERDICT_RECORDED,
+        paper.id,
+        topic=slug,
+        revision=paper.revision,
+        verdict_id=stored.id,
+        fit=stored.fit.value,
+        weight=weight.value if weight else None,
+        grade=derived(stored.fit, weight).value,
+        split=stored.split,
+        escalated=stored.escalated,
+        one_lab=stored.one_lab,
+    )
     return True

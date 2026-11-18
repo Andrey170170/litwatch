@@ -19,6 +19,7 @@ from litwatch.store import failures, runs, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, answering, paper
 
 TOKEN = "s3cret"
@@ -49,14 +50,14 @@ async def classify(conn, p, *classes, keyword=()) -> None:
     ]
     found += [Membership(slug=k, source=Source.KEYWORD) for k in keyword]
     await classifications_store.replace(conn, p, found, VERSIONS)
-    await word.settle(conn, p.id, cause=Cause.VERDICT)
+    await settling.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def analyse(conn, p, weight="solid", *, code=False, gist="Probes find hidden steps.") -> None:
     facets = Facets(contribution="method", releases_code=code, releases_weights=False)
     found = Analysis(gist=gist, weight=Weight(weight), weight_reason="Sound work.", facets=facets)
     await analyses_store.add(conn, p, "other", found, "test")
-    await word.settle(conn, p.id, cause=Cause.VERDICT)
+    await settling.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def grade(conn, p, fit: str, topic=FAITH, *, check=None, escalated=False) -> None:
@@ -79,7 +80,7 @@ async def grade(conn, p, fit: str, topic=FAITH, *, check=None, escalated=False) 
             escalated=escalated,
         ),
     )
-    await word.settle(conn, p.id, cause=Cause.VERDICT)
+    await settling.settle(conn, p.id, cause=Cause.VERDICT)
 
 
 async def stop(conn, p, step: str, topic: str = "") -> None:
@@ -307,7 +308,7 @@ async def test_badges_and_rail_cover_every_followed_topic_whose_page_holds_the_p
 
 
 async def test_topics_are_grouped_by_depth_in_the_owners_order(client, conn, shelves):
-    await word.reorder(conn, [AGENTS.slug, INTERP.slug, FAITH.slug])
+    await settling.reorder(conn, [AGENTS.slug, INTERP.slug, FAITH.slug])
     groups = (await client.get("/api/topics")).json()
     assert [(g["depth"], [t["slug"] for t in g["topics"]]) for g in groups] == [
         ("focus", [FAITH.slug]),
@@ -401,7 +402,7 @@ async def test_a_paper_page_has_its_header_rail_classes_states_and_history(clien
 
     # Unfollowed, a topic leaves the rail; its verdict stays in the history.
     unfollowed = [t for t in TREE.topics if t.slug != AGENTS.slug]
-    await word.save_taxonomy(conn, TREE.model_copy(update={"topics": unfollowed}))
+    await settling.save_taxonomy(conn, TREE.model_copy(update={"topics": unfollowed}))
     page = (await client.get(f"/api/papers/{P.id}")).json()
     assert AGENTS.slug not in [t["topic"]["slug"] for t in page["topics"]]
     graded = [h for h in page["history"] if h["what"] == "graded"]
@@ -427,7 +428,7 @@ async def test_a_paper_page_names_its_own_open_states(client, conn):
         s["kind"] for s in (await client.get(f"/api/papers/{P.id}")).json()["states"]
     ]
     paused = FAITH.model_copy(update={"status": Status.PAUSED})
-    await word.save_taxonomy(conn, TREE.following(paused))
+    await settling.save_taxonomy(conn, TREE.following(paused))
     page = (await client.get(f"/api/papers/{P.id}")).json()
     assert [s["kind"] for s in page["states"]] == ["analysis_stopped"]
 
@@ -474,7 +475,7 @@ async def test_a_thumb_takes_a_reason_from_feedback_and_says_only_what_the_page_
     # A thumb on a topic no longer followed can still be cleared; it says nothing.
     await thumb("up", None, AGENTS.slug)
     unfollowed = [t for t in TREE.topics if t.slug != AGENTS.slug]
-    await word.save_taxonomy(conn, TREE.model_copy(update={"topics": unfollowed}))
+    await settling.save_taxonomy(conn, TREE.model_copy(update={"topics": unfollowed}))
     cleared = await client.delete(f"/api/reactions/{P.id}", params={"topic": AGENTS.slug})
     assert (cleared.status_code, cleared.json()["message"]) == (200, None)
     (left,) = await (
@@ -653,17 +654,16 @@ async def test_two_requests_storing_the_same_fetched_paper_both_get_it(conn, sec
     over it as intake would, and there is one `paper.added` (L5-2)."""
     from litwatch import store
     from litwatch.feedback import misses
-    from litwatch.intake import batch
 
     fetched = paper("2610.06666")
     async with await store.connect(conn.test_dsn, conn.test_schema) as other:
-        async with other.transaction():
-            first = await misses.keep(other, fetched.id, fetched)
+        async with settling.held(other, fetched.id) as change:
+            first = await misses.keep(change.unit, fetched.id, fetched)
             # The second runs into the first's settle lock, and waits on it.
             second = asyncio.create_task(
-                misses.keep(conn, fetched.id, fetched)
+                settling.keep(conn, fetched.id, fetched)
                 if second_caller == "owner"
-                else batch.store(conn, [fetched], source="arxiv")
+                else settling.store(conn, [fetched], source="arxiv")
             )
             for _ in range(100):
                 waiting = await (
@@ -697,15 +697,14 @@ async def test_an_owners_delayed_fetch_never_overwrites_newer_metadata(conn, mon
     stores newer metadata without a version (OAI's); the owner's older record then changes
     nothing, though its version cannot be compared (L6-3)."""
     from litwatch.feedback import misses
-    from litwatch.intake import batch
 
     pid = "2610.04444"
     older = paper(pid, title="As first submitted", version=1, updated="2026-10-01T10:00:00Z")
     monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: [older]))
     _, fetched = await misses.resolve(conn, pid)
     newer = paper(pid, title="As revised since", updated="2026-10-05T00:00:00Z")
-    await batch.store(conn, [newer], source="oai")
-    stored, inserted = await misses.keep(conn, pid, fetched)
+    await settling.store(conn, [newer], source="oai")
+    stored, inserted = await settling.keep(conn, pid, fetched)
     assert (stored.title, stored.version, inserted) == ("As revised since", None, False)
     assert stored.updated.startswith("2026-10-05")
     revised = await (
@@ -771,27 +770,18 @@ async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, c
     lock, so a correction being written meanwhile is seen, and stands."""
     from litwatch import store
     from litwatch.core import Label, LabelOrigin, LabelValue
-    from litwatch.store import feedback as feedback_store
 
     await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
     await client.delete(f"/api/labels/{FAITH.slug}/{Q.id}")
+    given = Label(paper_id=Q.id, topic=FAITH.slug, value=LabelValue.NONE, origin=LabelOrigin.READER)
     async with await store.sibling(conn) as other:
-        async with other.transaction():
-            await word.lock_many(other, [Q.id])  # a correction, part way through
+        async with settling.held(other, Q.id) as correction:  # part way through
             again = asyncio.create_task(
                 client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
             )
             await asyncio.sleep(0.5)
             assert not again.done()
-            await feedback_store.set_label(
-                other,
-                Label(
-                    paper_id=Q.id,
-                    topic=FAITH.slug,
-                    value=LabelValue.NONE,
-                    origin=LabelOrigin.READER,
-                ),
-            )
+            await word.label(correction.unit, given)
         assert (await again).status_code == 200
     (label,) = await (await conn.execute("SELECT value, origin FROM labels")).fetchall()
     assert (label["value"], label["origin"]) == ("none", "reader")
@@ -926,7 +916,7 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
         assert (await c.get("/api/papers/2610.08888")).status_code == 404
         assert fetched == [] and await papers_store.get(conn, pid) is None
 
-        assert (await misses.keep(conn, *await misses.resolve(conn, pid)))[1]
+        assert (await settling.keep(conn, *await misses.resolve(conn, pid)))[1]
         page = (await c.get(f"/api/papers/{pid}")).json()
         assert (page["stored"], page["in_collection"], page["next_run"]) == (True, False, True)
         assert fetched == [[pid]]

@@ -33,6 +33,7 @@ from litwatch.core.grading import GRADES, NO_WEIGHT
 from litwatch.core.rules import REACTION_WORDS
 from litwatch.store import jobs
 from litwatch.store.analyses import CURRENT_GIST
+from litwatch.store.db import transaction
 from litwatch.store.reading import SCOPE, STANDING, _rank, _scope
 
 _PUBLISHED = "(" + ", ".join(f"'{s.value}'" for s in PUBLISHED) + ")"
@@ -571,7 +572,7 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
     """Store the outcome, in place of a failed digest of the same topic and period; a published
     one stays as it is (None). Publishing emits `digest.written` with it and settles a failed
     job that wrote it again. Returns the digest's id."""
-    async with conn.transaction():
+    async with transaction(conn):
         row = await (
             await conn.execute(
                 f"""

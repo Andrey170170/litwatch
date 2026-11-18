@@ -20,7 +20,6 @@ from litwatch.core import Label, LabelValue, Status
 from litwatch.core.classification import Source
 from litwatch.core.digests import DigestPeriod, listing_day, plain, voice_problems
 from litwatch.digests import writer
-from litwatch.feedback import word
 from litwatch.jobs import digests as digests_job
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
@@ -31,6 +30,7 @@ from litwatch.store import digests as store_
 from litwatch.store import papers as papers_store
 from litwatch.store import reading, runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
 from tests.fakes import ScriptedProvider
 from tests.test_reading import analyse, classify, grade
@@ -105,13 +105,13 @@ async def area(conn, p, fit: str, weight: str = "solid") -> None:
 async def day(conn, w: Writer, on: date, config: Config | None = None) -> bool:
     tree = await taxonomy_store.load(conn)
     async with model_run(conn, config or Config(), "digests", gateway=w.gateway) as run:
-        return await digests.write_day(conn, run, tree, on)
+        return await digests.write_day(conn, run, tree, on, rules=settling.RULES)
 
 
 async def week(conn, w: Writer, monday: date) -> None:
     tree = await taxonomy_store.load(conn)
     async with model_run(conn, Config(), "digests", gateway=w.gateway) as run:
-        await digests.write_week(conn, run, tree, monday)
+        await digests.write_week(conn, run, tree, monday, rules=settling.RULES)
 
 
 async def shown(conn, topic: str, period: str, on: date) -> tuple[str, list[tuple[str, str]]]:
@@ -205,7 +205,7 @@ async def test_the_owners_word_never_makes_a_paper_due(db):
     await focus(db, P, "adjacent")
     await listed(db, TUE, P)
     label = Label(paper_id=P.id, topic=FAITH.slug, value=LabelValue.CENTRAL, origin="reader")
-    await word.label(db, label)
+    await settling.label(db, label)
     await day(db, Writer(), TUE)
     assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
 
@@ -310,11 +310,11 @@ async def test_the_owners_word_neither_makes_an_area_paper_due_nor_keeps_one(db)
     await classify(db, P, AGENTS.slug)
     await analyse(db, P)
     await verdicts.passed(db, [(P.id, 1)])
-    await word.label(
+    await settling.label(
         db, Label(paper_id=P.id, topic=INTERP.slug, value=LabelValue.RELATED, origin="reader")
     )
     await area(db, Q, "related")
-    await word.label(
+    await settling.label(
         db, Label(paper_id=Q.id, topic=INTERP.slug, value=LabelValue.ADJACENT, origin="reader")
     )
     await area(db, R, "related")
@@ -538,7 +538,7 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
     await listed(db, mon2, R)
     tree = await taxonomy_store.load(db)
     async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
-        await digests.nightly(db, run, tree, mon2)
+        await digests.nightly(db, run, tree, mon2, rules=settling.RULES)
     assert {p for p, _ in (await shown(db, INTERP.slug, "day", mon2))[1]} == {P.id, R.id}
     assert {p for p, _ in (await shown(db, INTERP.slug, "week", MON))[1]} == {P.id, Q.id}
     await listed(db, date(2026, 10, 19), S)
@@ -578,7 +578,7 @@ async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_
     await listed(db, mon2, Q)
     tree = await taxonomy_store.load(db)
     async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
-        await digests.nightly(db, run, tree, mon2)
+        await digests.nightly(db, run, tree, mon2, rules=settling.RULES)
     assert (P.id, "listed") in (await shown(db, FAITH.slug, "week", MON))[1]
     await week(db, w, mon2)
     state, papers = await shown(db, FAITH.slug, "week", mon2)
@@ -909,13 +909,13 @@ async def test_an_updated_must_read_is_the_pipelines_on_the_current_text(db):
     label = Label(
         paper_id=word_only.id, topic=AGENTS.slug, value=LabelValue.CENTRAL, origin="reader"
     )
-    await word.label(db, label)
+    await settling.label(db, label)
     await classify(db, kept, AGENTS.slug)
     await analyse(db, kept, "landmark")
     await grade(db, kept, "central", AGENTS)
     await verdicts.passed(db, [(kept.id, 1)])
     label = Label(paper_id=kept.id, topic=AGENTS.slug, value=LabelValue.RELATED, origin="reader")
-    await word.label(db, label)
+    await settling.label(db, label)
     grades = await (
         await db.execute(
             "SELECT paper_id, grade FROM effective_grades WHERE topic = %s", (AGENTS.slug,)
@@ -1075,7 +1075,7 @@ async def test_a_published_digest_is_a_record_but_for_the_set_aside_mark(db):
     before = await before.fetchone()
     # The owner sets P aside; a re-run of the day rewrites nothing.
     label = Label(paper_id=P.id, topic=FAITH.slug, value=LabelValue.ADJACENT, origin="reader")
-    await word.label(db, label)
+    await settling.label(db, label)
     await day(db, w, TUE)
     after = await (
         await db.execute("SELECT * FROM digests WHERE topic = %s", (FAITH.slug,))
@@ -1096,7 +1096,7 @@ async def test_a_published_digest_keeps_its_titles_and_its_set_aside_mark(db):
     await listed(db, TUE, P)
     await day(db, Writer(), TUE)
     label = Label(paper_id=P.id, topic=FAITH.slug, value=LabelValue.ADJACENT, origin="reader")
-    await word.label(db, label)
+    await settling.label(db, label)
     await grade(db, P, "adjacent")
     await db.execute("UPDATE papers SET title = 'A new title' WHERE id = %s", (P.id,))
     row = await (
@@ -1148,7 +1148,7 @@ async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(d
     await listed(db, WED, Q)
     tree = await taxonomy_store.load(db)
     async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
-        await digests.nightly(db, run, tree, WED)
+        await digests.nightly(db, run, tree, WED, rules=settling.RULES)
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
     assert await shown(db, FAITH.slug, "day", WED) == ("written", [(Q.id, "listed")])
     assert await store_.count_failed(db) == 0
@@ -1186,7 +1186,7 @@ async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db):
     assert (status["state"], status["digests_failed"]) == ("quiet", 0)
     tree = await taxonomy_store.load(db)
     async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
-        await digests.retry_failed(db, run, tree)
+        await digests.retry_failed(db, run, tree, rules=settling.RULES)
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"  # not written while paused
 
 
@@ -1218,7 +1218,7 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
     tree = await taxonomy_store.load(db)
     for _ in range(4):
         async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
-            await digests.retry_failed(db, run, tree)
+            await digests.retry_failed(db, run, tree, rules=settling.RULES)
     assert w.models == [opus, opus, sonnet, sonnet, sonnet, kimi, opus, opus, kimi]
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "written"
     found = await db.execute("SELECT model FROM digests WHERE topic = %s", (FAITH.slug,))
@@ -1274,7 +1274,7 @@ async def test_a_second_ask_with_no_answer_still_moves_the_next_attempt_down(db)
     assert (row["state"], row["error"]) == ("failed", "invalid: not JSON")
     tree = await taxonomy_store.load(db)
     async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
-        await digests.retry_failed(db, run, tree)
+        await digests.retry_failed(db, run, tree, rules=settling.RULES)
     assert w.models == [opus, opus, sonnet]
 
 
@@ -1559,8 +1559,12 @@ async def test_the_tab_steps_only_through_the_digests_it_shows(db):
     w = Writer()
     tree = await taxonomy_store.load(db)
     async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
-        await digests.write(db, run, tree, tree.topic(FAITH.slug), DigestPeriod.DAY, TUE)
-        await digests.write(db, run, tree, tree.topic(INTERP.slug), DigestPeriod.DAY, WED)
+        await digests.write(
+            db, run, tree, tree.topic(FAITH.slug), DigestPeriod.DAY, TUE, rules=settling.RULES
+        )
+        await digests.write(
+            db, run, tree, tree.topic(INTERP.slug), DigestPeriod.DAY, WED, rules=settling.RULES
+        )
     await taxonomy_store.save(db, TREE.model_copy(update={"topics": [INTERP, AGENTS]}))
     async with client(db, w) as http:
         wed = (await http.get(f"/api/digests/days/{WED}")).json()
@@ -1636,7 +1640,7 @@ async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_ru
         w.failures = []
         tree = await taxonomy_store.load(db)
         async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
-            await digests.retry_failed(db, run, tree)
+            await digests.retry_failed(db, run, tree, rules=settling.RULES)
         settled = (await http.get(f"/api/digests/{digest_id}")).json()
         assert (settled["state"], settled["job"]["state"]) == ("written", "done")
         assert (await http.get("/api/jobs")).json()["failed"] == []

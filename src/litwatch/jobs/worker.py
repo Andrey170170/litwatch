@@ -11,9 +11,9 @@ to stop, is one run of kind `job`, however many chunks that takes.
 
 A Process job runs the nightly's own steps (classification, analysis, grading) on its papers
 only; each recorded result settles its paper as in the nightly, and the full-text and Deep
-workers then take the passes it queued, as the owner's requests (`feedback.word.settle`). A job
-is done once its papers have no step left failed; else it fails, and settles when they do
-(`store.jobs.settle_process`).
+workers then take the passes it queued, as the owner's requests (`feedback.word.settle_many`).
+A job is done once its papers have no step left failed; else it fails, and settles when they
+do (`store.jobs.settle_process`).
 
 A re-run (`jobs.reruns`) grades its scope for its topic, then works the text passes it queued,
 through a gateway that holds its ceiling: one stopped by it waits on the owner as `stopped`. A
@@ -41,6 +41,7 @@ from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
 from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.jobs import digests as digest_jobs
 from litwatch.jobs import nightly, replays, reruns, scheduler
 from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
@@ -163,14 +164,14 @@ class Worker:
         Under the papers' settle locks, so an owner's action on them meanwhile settles the job
         after this."""
         papers = job["scope"]["papers"]
-        async with self.conn.transaction():
-            await word.lock_many(self.conn, papers)
-            if job["kind"] == "process" and await papers_store.dropped(self.conn, papers[0]):
+        db = DatabaseGate.over(self.conn)
+        async with db.write("end job", taxonomy="shared", papers=papers) as unit:
+            if job["kind"] == "process" and await papers_store.dropped(unit, papers[0]):
                 state, why = "discarded", None
             else:
-                why = error or failure(await failures.open_on(self.conn, papers, FAILED_RUNS))
+                why = error or failure(await failures.open_on(unit, papers, FAILED_RUNS))
                 state = "failed" if why else "done"
-            await jobs_store.finish(self.conn, job["id"], state, why)
+            await jobs_store.finish(unit, job["id"], state, why)
 
     async def _chunk(self, job: dict[str, Any], run: ModelRun) -> dict[str, Any] | None:
         """The job's next chunk of papers through classification, analysis and grading; returns
@@ -178,7 +179,7 @@ class Worker:
         ids = job["scope"]["papers"][job["done"] : job["done"] + CHUNK]
         before = run.tally()
         await nightly.classify(self.conn, self.config, run, ids=ids)
-        await nightly.analyse(self.conn, run, ids=ids)
+        await nightly.analyse(self.conn, self.config, run, ids=ids)
         await nightly.grade(self.conn, self.config, run, ids=ids)
         counts = Counter(job["counts"]) + (run.tally() - before)
         return await jobs_store.progress(self.conn, job["id"], job["done"] + len(ids), dict(counts))
@@ -252,7 +253,9 @@ class Worker:
         """A failed digest written again (`jobs.digests.again`), in one chunk."""
         try:
             run = await self._run_of(job)
-            state, why = await digest_jobs.again(self.conn, run, job["scope"]["digest"])
+            state, why = await digest_jobs.again(
+                self.conn, run, job["scope"]["digest"], rules=word.rules(self.config)
+            )
             await jobs_store.progress(self.conn, job["id"], 1, dict(run.tally()))
             await jobs_store.finish(self.conn, job["id"], state, why)
         except Exception as exc:

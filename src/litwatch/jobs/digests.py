@@ -12,6 +12,7 @@ from litwatch import digests
 from litwatch.config import Config
 from litwatch.core import Status
 from litwatch.core.digests import DigestPeriod, DigestState
+from litwatch.feedback import word
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.jobs.lock import run_lock
 from litwatch.store import digests as store_
@@ -31,23 +32,24 @@ async def window(
     written on those days, over the papers due now, after the failed digests are written again
     (as the nightly run does) so a day of the window does not take their papers. Published ones
     stay. Returns the run id."""
+    rules = word.rules(config)
     async with run_lock(conn), model_run(conn, config, "digests", gateway=gateway) as run:
         tree = await taxonomy_store.load(conn)
         if tree is not None:
-            await digests.retry_failed(conn, run, tree)
+            await digests.retry_failed(conn, run, tree, rules=rules)
         day = first
         while tree is not None and day <= last:
-            await digests.write_day(conn, run, tree, day)
+            await digests.write_day(conn, run, tree, day, rules=rules)
             if day.weekday() == 0 and day - timedelta(days=7) >= first:
-                await digests.write_week(conn, run, tree, day - timedelta(days=7))
+                await digests.write_week(conn, run, tree, day - timedelta(days=7), rules=rules)
             day += timedelta(days=1)
         if tree is not None and last.weekday() == 6 and last - timedelta(days=6) >= first:
-            await digests.write_week(conn, run, tree, last - timedelta(days=6))
+            await digests.write_week(conn, run, tree, last - timedelta(days=6), rules=rules)
         return run.run_id
 
 
 async def again(
-    conn: psycopg.AsyncConnection, run: ModelRun, digest_id: int
+    conn: psycopg.AsyncConnection, run: ModelRun, digest_id: int, *, rules: word.Rules
 ) -> tuple[str, str | None]:
     """Write a failed digest of an active topic again now, over the papers due for it now, on
     the job's run, under the run lock the jobs worker holds: how its job ends, `done` once the
@@ -63,7 +65,9 @@ async def again(
     if tree is None or topic is None or topic.status != Status.ACTIVE:
         status = topic.status.value if topic else "unfollowed"
         return "failed", f"its topic is {status}"
-    state = await digests.write(conn, run, tree, topic, DigestPeriod(row["period"]), row["day"])
+    state = await digests.write(
+        conn, run, tree, topic, DigestPeriod(row["period"]), row["day"], rules=rules
+    )
     if state == DigestState.FAILED:
         error = (await store_.get(conn, digest_id) or {}).get("error")
         return "failed", f"the writer failed again: {error or 'no text'}"
