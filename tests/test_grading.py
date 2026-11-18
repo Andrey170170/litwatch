@@ -5,7 +5,6 @@ through the real Gateway, as in test_steps."""
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 
-import httpx
 import pytest
 
 from litwatch import grading, intake, store
@@ -26,7 +25,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests import settling
-from tests.conftest import FAITH, INTERP, TREE
+from tests.conftest import FAITH, INTERP, TREE, AppClient
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
 from tests.test_intake import unavailable
@@ -224,9 +223,8 @@ async def test_a_grader_that_did_not_answer_is_retried_without_counting(conn, mo
 async def api(conn, models, config=CONFIG):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, config, gateway=models.gateway)
-    transport = httpx.ASGITransport(app=app)
     headers = {"authorization": f"Bearer {TOKEN}"}
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+    async with AppClient(app, base_url="http://t", headers=headers) as c:
         yield c
 
 

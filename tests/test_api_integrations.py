@@ -12,13 +12,14 @@ from litwatch import events, store
 from litwatch.api import create_app, monitor
 from litwatch.config import Config
 from litwatch.core import SearchHit
+from litwatch.gates.database import DatabaseGate
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.integrations.webhook import Webhook
 from litwatch.store import integrations as state
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import TREE, deliver, paper, settled, start
+from tests.conftest import TREE, AppClient, deliver, paper, settled, start
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -91,9 +92,7 @@ async def make(conn):
         app = create_app(dsn, TOKEN, config or Config(), integrations=list(integrations))
         if timeout is not None:
             app.state.search_timeout = timeout
-        c = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test", headers=AUTH
-        )
+        c = AppClient(app, base_url="http://test", headers=AUTH)
         clients.append(c)
         return c
 
@@ -158,7 +157,8 @@ async def test_an_integration_that_reacts_to_no_event_is_never_shown_behind(conn
     client = await make([deep])
     cards = (await client.get("/api/settings/integrations")).json()
     assert [(c["name"], c["lag"], c["failing"]) for c in cards] == [("deep", 0, None)]
-    assert "deep" not in (await monitor.facts(conn, Config(), [deep], None)).cursors
+    found = await monitor.facts(DatabaseGate.over(conn), Config(), [deep], None)
+    assert "deep" not in found.cursors
     await deep.aclose()
 
 

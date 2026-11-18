@@ -8,9 +8,10 @@ from fastapi import Request
 
 from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, budget_lines, protected
+from litwatch.api.deps import Db, budget_lines, protected
 from litwatch.api.reading import _looks, run_status
 from litwatch.feedback import calibrate
+from litwatch.gates.database import ReadUnit
 from litwatch.store import quality
 from litwatch.store import taxonomy as taxonomy_store
 
@@ -18,7 +19,12 @@ router = protected("/api")
 
 
 @router.get("/summary")
-async def summary(request: Request, c: Conn) -> s.Summary:
+async def summary(request: Request, db: Db) -> s.Summary:
+    async with db.read("summary") as c:
+        return await _summary(request, c)
+
+
+async def _summary(request: Request, c: ReadUnit) -> s.Summary:
     status = await run_status(request, c)
     tree = await taxonomy_store.load(c)
     since = quality.splits_window(await quality.last_night(c))
@@ -36,7 +42,7 @@ async def summary(request: Request, c: Conn) -> s.Summary:
     spend = await budget_lines(c, request.app.state.config.budget)
     # Budgets are per provider: once one has a budget, the spend set against them is theirs only.
     budgeted = [line for line in spend if line.budget is not None]
-    cards = await integrations_api.status(request, c)
+    cards = await integrations_api.cards(request, c)
     return s.Summary(
         status=status,
         topics=list(_looks(tree).values()),

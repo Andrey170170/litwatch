@@ -11,7 +11,6 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
-import psycopg
 import typer
 import yaml
 from rich.console import Console
@@ -21,7 +20,7 @@ from litwatch import logs, seeds, store
 from litwatch.archive import ArchiveError
 from litwatch.core import Paper, Taxonomy
 from litwatch.feedback import word
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import Connection, DatabaseGate, PoolTimeoutError, ReadUnit
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
@@ -67,26 +66,39 @@ Since = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The first d
 Until = Annotated[datetime, typer.Option(formats=["%Y-%m-%d"], help="The last day.")]
 
 
-def _run[T](work: Callable[[psycopg.AsyncConnection], Awaitable[T]], *, migrate: bool = True) -> T:
-    """Run `work` on a connection to the configured database, migrated first."""
+def _run[T](
+    work: Callable[[DatabaseGate], Awaitable[T]],
+    *,
+    migrate: bool = True,
+    db: DatabaseGate | None = None,
+) -> T:
+    """Run `work` with the command's Database gate, the process's one, on the configured
+    database, migrated first: `db` when the command built it already (unopened), else a new
+    one. The gate is open for the run and closed at its end."""
     logs.setup()
 
     async def main() -> T:
-        async with await store.connect(configuration.database_url()) as conn:
+        async with db or DatabaseGate(configuration.database_url()) as gate:
             if migrate:
-                await store.migrate(conn)
-            return await work(conn)
+                await _migrate(gate)
+            return await work(gate)
 
     try:
         return asyncio.run(main())
-    except (store.LegacyDatabaseError, BusyError) as exc:
+    except (store.LegacyDatabaseError, BusyError, PoolTimeoutError) as exc:
         raise SystemExit(str(exc)) from exc
+
+
+async def _migrate(db: DatabaseGate) -> list[str]:
+    # Transitional: the migration lock moves behind the gate in A1's P4 or P6.
+    async with db.lend("migrate") as conn:
+        return await store.migrate(conn)
 
 
 @db_app.command("migrate")
 def db_migrate() -> None:
     """Apply pending migrations."""
-    applied = _run(store.migrate, migrate=False)
+    applied = _run(_migrate, migrate=False)
     console.print("applied: " + (", ".join(applied) or "nothing, already up to date"))
 
 
@@ -114,8 +126,8 @@ def intake(
         _catalog_from(cfg, catalog_from.date())
         return
 
-    async def work(conn: psycopg.AsyncConnection) -> Any:
-        async with run_lock(conn):
+    async def work(db: DatabaseGate) -> Any:
+        async with db.lend("intake") as conn, run_lock(conn):  # transitional: intake, P5
             return await intake_job.run(conn, cfg, days)
 
     result = _run(work)
@@ -132,8 +144,8 @@ def _catalog_from(cfg: configuration.Config, since: date) -> None:
             f"{done['registered']} registered"
         )
 
-    async def work(conn: psycopg.AsyncConnection) -> Any:
-        async with run_lock(conn):
+    async def work(db: DatabaseGate) -> Any:
+        async with db.lend("catalog pass") as conn, run_lock(conn):  # transitional: intake, P5
             return await intake_job.catalog_from(conn, cfg, since, report)
 
     try:
@@ -164,10 +176,11 @@ def intake_archive(
     if first > last:
         raise typer.BadParameter("--since must not follow --until")
 
-    async def work(conn: psycopg.AsyncConnection) -> Any:
+    async def work(db: DatabaseGate) -> Any:
         client = archive_integration.source(cfg)
         try:
-            async with run_lock(conn):
+            # Transitional: intake moves onto the gate in P5.
+            async with db.lend("intake from the archive") as conn, run_lock(conn):
                 return await intake_job.from_archive(conn, cfg, client, first, last)
         finally:
             await client.aclose()
@@ -202,14 +215,22 @@ def nightly(
     """The nightly run as the scheduler runs it: intake, classification, analysis, grading,
     the full-text passes and the digests."""
     cfg = configuration.load(config)
-    run_id = _run(
-        lambda conn: nightly_job.run(
-            conn, cfg, fetch=fetch, days=days, limit=limit, with_digests=digests
-        )
-    )
-    run = _run(lambda conn: runs.get(conn, run_id))
+
+    async def work(db: DatabaseGate) -> tuple[int, Any]:
+        async with db.lend("nightly") as conn:  # transitional: the nightly moves in P4
+            run_id = await nightly_job.run(
+                conn, cfg, fetch=fetch, days=days, limit=limit, with_digests=digests
+            )
+        return run_id, await _run_record(db, run_id)
+
+    run_id, run = _run(work)
     console.print(f"run {run_id}: cost ${run['cost']}")
     console.print_json(data=run["counts"])
+
+
+async def _run_record(db: DatabaseGate, run_id: int) -> Any:
+    async with db.read("run record") as unit:
+        return await runs.get(unit, run_id)
 
 
 # -- digests --------------------------------------------------------------------------------------
@@ -223,8 +244,13 @@ def digests_write(since: Since, until: Until, config: ConfigPath = None) -> None
     from litwatch.jobs import digests as digests_job  # noqa: PLC0415
 
     cfg = configuration.load(config)
-    run_id = _run(lambda conn: digests_job.window(conn, cfg, since.date(), until.date()))
-    run = _run(lambda conn: runs.get(conn, run_id))
+
+    async def work(db: DatabaseGate) -> tuple[int, Any]:
+        async with db.lend("write digests") as conn:  # transitional: digests move in P5
+            run_id = await digests_job.window(conn, cfg, since.date(), until.date())
+        return run_id, await _run_record(db, run_id)
+
+    run_id, run = _run(work)
     console.print(f"run {run_id}: cost ${run['cost']}")
     console.print_json(data=run["counts"])
 
@@ -252,7 +278,11 @@ def deep_trace(
 
     zone = configuration.load(config).schedule.zone
 
-    async def work(conn: psycopg.AsyncConnection) -> tuple[Any, ...]:
+    async def work(db: DatabaseGate) -> tuple[Any, ...]:
+        async with db.read("deep trace") as unit:
+            return await trace_of(unit)
+
+    async def trace_of(conn: ReadUnit) -> tuple[Any, ...]:
         found = await cards.attempts(conn, paper)
         if not found:
             raise SystemExit(f"{paper} has no Deep attempts")
@@ -294,7 +324,12 @@ def deep_notes(
 
     zone = configuration.load(config).schedule.zone
     start = since.replace(tzinfo=zone) if since is not None else None
-    found = _run(lambda conn: cards.process_notes(conn, start), migrate=False)
+
+    async def work(db: DatabaseGate) -> Any:
+        async with db.read("deep notes") as unit:
+            return await cards.process_notes(unit, start)
+
+    found = _run(work, migrate=False)
     print(text.notes_text(found, zone), end="")
 
 
@@ -319,8 +354,7 @@ def taxonomy_import(
     rules = word.rules(configuration.load(config))  # its papers are settled by them
     tree = _taxonomy_file(path)
 
-    async def work(conn: psycopg.AsyncConnection) -> taxonomy_store.Saved:
-        db = DatabaseGate.over(conn)
+    async def work(db: DatabaseGate) -> taxonomy_store.Saved:
         async with db.write("import taxonomy", taxonomy="exclusive") as unit:
             return await word.save_taxonomy(unit, tree, rules=rules)
 
@@ -341,7 +375,12 @@ def taxonomy_export(
     path: Annotated[Path | None, typer.Argument(help="Default: standard output.")] = None,
 ) -> None:
     """Write the taxonomy in the database as YAML, in the format `import` reads."""
-    tree = _run(taxonomy_store.load)
+
+    async def work(db: DatabaseGate) -> Taxonomy | None:
+        async with db.read("export taxonomy") as unit:
+            return await taxonomy_store.load(unit)
+
+    tree = _run(work)
     if tree is None:
         raise SystemExit("no taxonomy yet: `litwatch taxonomy import` the seed first")
     text = seeds.dump_taxonomy(tree)
@@ -395,7 +434,7 @@ def eval_classify(
     roles = tomllib.loads(candidates.read_text())
     tree, evaluation = seeds.taxonomy(), classify.load(labels)
     ids = evaluation.papers[:limit]
-    found = _run(lambda conn: papers_store.get_many(conn, ids), migrate=False)
+    found = _run(lambda db: _papers(db, ids), migrate=False)
     if missing := len(ids) - len(found):
         console.print(f"[yellow]{missing} papers are not in the database and are left out[/yellow]")
     for name in candidate:
@@ -472,7 +511,11 @@ def eval_replay(
     if unknown := (set(cohort or []) | set(sample)) - set(replay.COHORTS):
         raise typer.BadParameter(f"no cohort {', '.join(sorted(unknown))}")
 
-    async def prepare(conn: psycopg.AsyncConnection) -> tuple[Any, dict[str, float]]:
+    async def prepare(db: DatabaseGate) -> tuple[Any, dict[str, float]]:
+        async with db.lend("replay: prepare") as conn:  # transitional: replay moves in P5
+            return await prepared(conn)
+
+    async def prepared(conn: Connection) -> tuple[Any, dict[str, float]]:
         if resume is not None:
             r = await replay.resume(conn, cfg, resume)
         else:
@@ -506,12 +549,18 @@ def eval_replay(
     if not yes and not typer.confirm("Spend it?"):
         raise typer.Exit(1)
 
-    async def work(conn: psycopg.AsyncConnection) -> dict[str, Any]:
-        if r.eval_run_id is None:
-            params = {"cohorts": cohort, "negatives": sample, "seed": replay.SEED, "limit": limit}
-            await replay.start(conn, cfg, r, params, note)
-            console.print(f"replay {r.eval_run_id}")
-        return await replay.run(conn, cfg, r)
+    async def work(db: DatabaseGate) -> dict[str, Any]:
+        async with db.lend("replay") as conn:  # transitional: replay moves in P5
+            if r.eval_run_id is None:
+                params = {
+                    "cohorts": cohort,
+                    "negatives": sample,
+                    "seed": replay.SEED,
+                    "limit": limit,
+                }
+                await replay.start(conn, cfg, r, params, note)
+                console.print(f"replay {r.eval_run_id}")
+            return await replay.run(conn, cfg, r)
 
     counts = _run(work)
     console.print_json(data=counts)
@@ -529,7 +578,11 @@ def eval_report(
     from litwatch.quality import replay  # noqa: PLC0415
     from litwatch.store import evaluation  # noqa: PLC0415
 
-    async def work(conn: psycopg.AsyncConnection) -> str | None:
+    async def work(db: DatabaseGate) -> str | None:
+        async with db.read("replay report") as unit:
+            return await report(unit)
+
+    async def report(conn: ReadUnit) -> str | None:
         found = eval_run if eval_run is not None else await evaluation.latest(conn, replay.KIND)
         run = await evaluation.get(conn, found) if found is not None else None
         if run is None or run["kind"] != replay.KIND:
@@ -561,7 +614,11 @@ def eval_digests(
 
     first, last = since.date(), until.date()
 
-    async def work(conn: psycopg.AsyncConnection) -> str:
+    async def work(db: DatabaseGate) -> str:
+        async with db.read("digests report") as unit:
+            return await report(unit)
+
+    async def report(conn: ReadUnit) -> str:
         tree = await taxonomy_store.load(conn)
         topics = tree.shown() if tree else []
         due = {
@@ -611,7 +668,7 @@ def eval_briefs(
     if text not in briefs.TEXTS:
         raise SystemExit(f"--text is one of {', '.join(briefs.TEXTS)}")
     entries = briefs.load(preferences)
-    found = _run(lambda conn: papers_store.get_many(conn, [e.id for e in entries]), migrate=False)
+    found = _run(lambda db: _papers(db, [e.id for e in entries]), migrate=False)
     by_id = {p.id: p for p in found}
     if missing := [e.id for e in entries if e.id not in by_id]:
         console.print(f"[yellow]not in the database, left out: {', '.join(missing)}[/yellow]")
@@ -653,10 +710,10 @@ def eval_briefs_report(
     entries = briefs.load(preferences)
     ids = [e.id for e in entries]
 
-    async def work(conn: psycopg.AsyncConnection) -> tuple[list[Paper], dict[str, str]]:
-        return await papers_store.get_many(conn, ids), await analyses_store.abstract_gists(
-            conn, ids
-        )
+    async def work(db: DatabaseGate) -> tuple[list[Paper], dict[str, str]]:
+        async with db.read("briefs report") as unit:
+            found = await papers_store.get_many(unit, ids)
+            return found, await analyses_store.abstract_gists(unit, ids)
 
     found, gists = _run(work, migrate=False)
     papers = {p.id: p for p in found}
@@ -714,9 +771,10 @@ def eval_ladders(
     ]
     archive = archive_for(cfg)
 
-    async def prepare(conn: psycopg.AsyncConnection) -> dict[str, Any]:
+    async def prepare(db: DatabaseGate) -> dict[str, Any]:
         try:
-            return await ladders.requests(conn, archive, chosen)
+            async with db.lend("ladders") as conn:  # transitional: ladders move in P5
+                return await ladders.requests(conn, archive, chosen)
         finally:
             if archive is not None:
                 await archive.aclose()
@@ -782,11 +840,12 @@ def eval_ladders_report(
     found, chosen = ladders.ladders(candidates), ladders.cases(cases)
     archive = archive_for(configuration.load(config))
 
-    async def work(conn: psycopg.AsyncConnection) -> tuple[dict[str, Any], dict[str, str]]:
+    async def work(db: DatabaseGate) -> tuple[dict[str, Any], dict[str, str]]:
         ids = sorted({c.paper for c in chosen if c.paper and c.set == "refusals"})
         try:
-            built = await ladders.requests(conn, archive, chosen)
-            found_papers = await ladders.papers(conn, archive, ids)
+            async with db.lend("ladders report") as conn:  # transitional: ladders move in P5
+                built = await ladders.requests(conn, archive, chosen)
+                found_papers = await ladders.papers(conn, archive, ids)
             return built, {p.id: p.title for p in found_papers.values()}
         finally:
             if archive is not None:
@@ -799,6 +858,12 @@ def eval_ladders_report(
     print(ladders.answers(found, chosen, calls, built, titles), end="")
 
 
+async def _papers(db: DatabaseGate, ids: list[str]) -> list[Paper]:
+    """The papers of `ids` the database holds, for an evaluation's dry run."""
+    async with db.read("evaluation papers") as unit:
+        return await papers_store.get_many(unit, ids)
+
+
 # -- library ---------------------------------------------------------------------------------------
 
 
@@ -807,7 +872,7 @@ def library_sync(config: ConfigPath = None) -> None:
     """Settle every paper with a verdict, a Weight or the owner's word: effective grades,
     rarity, the library, and their events. For a database written around the settle."""
     rules = word.rules(configuration.load(config))
-    console.print_json(data=_run(lambda conn: word.sync(DatabaseGate.over(conn), rules=rules)))
+    console.print_json(data=_run(lambda db: word.sync(db, rules=rules)))
 
 
 @app.command()
@@ -820,11 +885,12 @@ def publications(
     """Look up published versions on DBLP for the library papers that are due, as the
     scheduler does daily, or for one paper."""
 
-    async def work(conn: psycopg.AsyncConnection) -> Any:
-        if paper:
-            found = await lookups.look_up(conn, Dblp(), paper)
-            return found.model_dump(mode="json") if found else None
-        return await lookups.run(conn, Dblp(), limit)
+    async def work(db: DatabaseGate) -> Any:
+        async with db.lend("publications") as conn:  # transitional: publications move in P4
+            if paper:
+                found = await lookups.look_up(conn, Dblp(), paper)
+                return found.model_dump(mode="json") if found else None
+            return await lookups.run(conn, Dblp(), limit)
 
     console.print_json(data=_run(work))
 
@@ -861,9 +927,11 @@ def serve(
         loaded = integrations.load(cfg)
     except integrations.IntegrationError as exc:
         raise SystemExit(str(exc)) from exc
-    _run(store.migrate, migrate=False)
     from litwatch import fulltext  # noqa: PLC0415
 
+    # The process's one gate: migrations, then the app and the monitor beside it, which read
+    # it until both servers have returned. The app does not open or close a gate it is given.
+    db = DatabaseGate(configuration.database_url())
     try:
         app_ = create_app(
             configuration.database_url(),
@@ -873,11 +941,15 @@ def serve(
             read_token=configuration.secret("LITWATCH_READ_TOKEN"),
             archive=fulltext.archive_for(cfg),
             mcp_token=configuration.secret("LITWATCH_MCP_TOKEN"),
+            db=db,
         )
     except ValueError as exc:  # the MCP token reuses another
         raise SystemExit(str(exc)) from exc
-    logs.setup()
-    asyncio.run(_serve(app_, host, port, metrics_port))
+
+    async def serving(db: DatabaseGate) -> None:
+        await _serve(app_, host, port, metrics_port)
+
+    _run(serving, db=db)
 
 
 async def _serve(app_: Any, host: str, port: int, metrics_port: int | None) -> None:
@@ -956,7 +1028,7 @@ def fulltext_queue(
         options = {k: v for k, v in options.items() if k not in ("use", "enabled")}
         maker = deep_integration.load("deep", options, cfg)
 
-    async def work_deep(conn: psycopg.AsyncConnection) -> Counter[str]:
+    async def work_deep(conn: Connection) -> Counter[str]:
         total: Counter[str] = Counter()
         deadline = asyncio.get_running_loop().time() + wait
         while True:
@@ -978,13 +1050,20 @@ def fulltext_queue(
                 return total
             await asyncio.sleep(min(fulltext.TICK_SECONDS, left))
 
-    async def work(conn: psycopg.AsyncConnection) -> Counter[str]:
+    async def work(db: DatabaseGate) -> Counter[str]:
         try:
-            if maker is not None:
-                return await work_deep(conn)
-            return await fulltext.work_waiting(
-                conn, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
-            )
+            # Transitional: the full-text and Deep loops move onto the gate in P4.
+            async with db.lend("fulltext") as conn:
+                if maker is not None:
+                    return await work_deep(conn)
+                return await fulltext.work_waiting(
+                    conn,
+                    cfg,
+                    archive,
+                    limit=limit,
+                    wait=wait,
+                    report=lambda d: console.print(dict(d)),
+                )
         finally:
             await archive.aclose()
             if maker is not None:

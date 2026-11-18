@@ -31,7 +31,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import reading, runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, paper
 from tests.fakes import ScriptedProvider
 from tests.test_reading import analyse, classify, grade
 
@@ -1481,8 +1481,8 @@ def test_a_focus_weekly_brings_back_the_one_earlier_paper_its_text_marks():
 def client(conn, w: Writer, config: Config | None = None) -> httpx.AsyncClient:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, config or Config(), gateway=w.gateway)
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
+    return AppClient(
+        app,
         base_url="http://test",
         headers={"Authorization": f"Bearer {TOKEN}"},
     )

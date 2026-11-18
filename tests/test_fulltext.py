@@ -49,7 +49,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
-from tests.conftest import FAITH, INTERP, TREE, paper
+from tests.conftest import FAITH, INTERP, TREE, AppClient, paper
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
 from tests.test_steps import refusal
@@ -114,8 +114,8 @@ async def db(conn):
 def client(conn) -> tuple:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, CONFIG)
-    http = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
+    http = AppClient(
+        app,
         base_url="http://test",
         headers={"Authorization": f"Bearer {TOKEN}"},
     )

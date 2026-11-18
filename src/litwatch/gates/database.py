@@ -17,6 +17,11 @@ A write unit names its locks when it opens and the gate takes them in one order:
 then papers by id, then the other locks as `REGISTRY` lists them. The session locks held across
 network calls (`HELD_ACROSS_CALLS`) are not units: `db.held` keeps each on a connection of its
 own, outside the pool.
+
+While code moves onto the gate (A1's P3 to P6), two things serve what has not moved yet:
+`DatabaseGate.over(conn)`, a gate on one given connection, and `db.lend(name)`, a pool
+connection of its own, outside the pool, lent outside any unit to an entry calling a Service
+that still takes one.
 """
 
 from __future__ import annotations
@@ -65,7 +70,8 @@ class LateLockError(RuntimeError):
 
 
 class PoolTimeoutError(RuntimeError):
-    """A unit waited its whole timeout for a connection from the pool and got none."""
+    """A unit waited its whole timeout for a connection from the pool and got none, or the pool
+    opening made none in that time."""
 
 
 class BusyError(RuntimeError):
@@ -374,9 +380,15 @@ class DatabaseGate:
         await conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(self._schema)))
 
     async def open(self) -> None:
-        """Open the pool, waiting until its first connections are made."""
+        """Open the pool, waiting until its first connections are made; `PoolTimeoutError`
+        when none is made within the timeout (the database down or unreachable)."""
         if self._pool is not None:
-            await self._pool.open(wait=True, timeout=self.timeout)
+            try:
+                await self._pool.open(wait=True, timeout=self.timeout)
+            except PoolTimeout as exc:
+                raise PoolTimeoutError(
+                    f"the pool made no connection to the database in {self.timeout:g}s"
+                ) from exc
 
     async def close(self) -> None:
         if self._pool is not None:
@@ -452,6 +464,26 @@ class DatabaseGate:
             async with _entered(unit), conn.transaction():
                 await unit._take(paper_ids, others)
                 yield unit
+
+    @asynccontextmanager
+    async def lend(self, name: str) -> AsyncIterator[Connection]:
+        """Transitional, going in A1's P6: a connection lent outside any unit to an entry
+        (`name`) calling a Service that still takes a raw connection until P4 or P5 moves it
+        (the plan's notes list each). Like `held`'s, it is a connection of its own, opened for
+        the loan and closed at its end, outside the pool: a loan held across a network call, or
+        one whose Service opens units of its own, takes no pool slot. It is autocommit, as
+        `store.connect`'s are. It refuses while a unit is open on the task, as opening a unit
+        does: work on it would run beside the unit, not in it."""
+        outside_unit(f"lending a connection for {name!r}")
+        conn = await psycopg.AsyncConnection.connect(
+            self._dsn, row_factory=dict_row, autocommit=True
+        )
+        try:
+            if self._schema:
+                await self._configure(conn)
+            yield conn
+        finally:
+            await conn.close()
 
     @asynccontextmanager
     async def held(self, name: str, key_arg: str | int | None = None) -> AsyncIterator[Hold]:

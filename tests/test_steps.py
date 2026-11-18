@@ -26,7 +26,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
 from tests import settling
-from tests.conftest import TREE, paper
+from tests.conftest import TREE, AppClient, paper
 from tests.fakes import ScriptedProvider
 
 CLASSIFY = RoleConfig(provider="openrouter", model="test/decider")
@@ -495,9 +495,9 @@ async def client(conn, models):
 @asynccontextmanager
 async def api(conn) -> AsyncIterator[httpx.AsyncClient]:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    transport = httpx.ASGITransport(app=create_app(dsn, TOKEN, CONFIG))
     headers = {"authorization": f"Bearer {TOKEN}"}
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+    app = create_app(dsn, TOKEN, CONFIG)
+    async with AppClient(app, base_url="http://t", headers=headers) as c:
         yield c
 
 

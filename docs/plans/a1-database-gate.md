@@ -166,12 +166,41 @@ Found while building, owned by the stage named.
   full-text step, so that step is not restricted by its own nightly.
 - **P4 or P6: the migration lock** is still taken in `store/db.py` (on the advisory-lock list); it moves behind the
   gate before that list is empty.
-- **P3 to P5: P2's boundaries still build the bridge.** Where a caller holds a raw connection, P2 opens its units
-  on `DatabaseGate.over(conn)`: the API's owner actions (`api/reading.py`, `api/settings.py`, `api/jobs.py`,
-  `api/integrations.py`, P3), the nightly's steps, the jobs worker, re-runs, and the full-text and Deep loops (P4),
-  intake's collectors, the digests and the CLI's `taxonomy import`, `library sync` and `fulltext --deep` (P5, the
-  CLI in P3). Each becomes the caller's `db`. `feedback.calibrate.answer`, `intake.batch.store`, `word.sync` and
-  `word.settle_all` take `db` already.
+- **P4 and P5: P2's boundaries still build the bridge.** Where a caller holds a raw connection, P2 opens its units
+  on `DatabaseGate.over(conn)`: the nightly's steps, the jobs worker, re-runs, and the full-text and Deep loops (P4),
+  intake's collectors and the digests (P5). Each becomes the caller's `db`. P3 removed the API's owner actions'
+  bridges and the CLI's `taxonomy import` and `library sync`. `fulltext --deep`'s is not the CLI's: it is inside
+  `fulltext.deep._work`, which the Deep loop shares, and goes with it in P4. `feedback.calibrate.answer`,
+  `intake.batch.store`, `word.sync` and `word.settle_all` take `db` already.
+- **P4 to P6: `db.lend(name)`, P3's transitional means.** An entry calling a Service that still takes a raw
+  connection borrows one outside any unit: a connection of its own, as `held`'s are, opened for the loan and closed
+  at its end, in autocommit and outside the pool, so a loan held across a network call (arXiv's waits, up to 45 s)
+  or one whose Service opens units of its own (`grade_now`) takes no pool slot. The gate refuses to lend while a
+  unit is open on the task, as it refuses a unit. It goes in P6, when nothing is left to lend to. Each place, with
+  the stage
+  whose Service move takes it away:
+  - P4: `api/reading.py` `set_publication` and `bibtex_selection` (`jobs.publications`); `api/settings.py`
+    `grade_now` (`jobs.context.model_run`, its run record and journal); `api/jobs.py` `replay_offer` and
+    `run_replay` (`jobs.replays.offer` and `make`, in a transaction of their own on the lent connection);
+    `cli.py` `nightly`, `publications` and `fulltext` (with `--deep` too).
+  - P5: `api/deps.py` `resolve_paper` (`feedback.misses.resolve`, for `report_miss`, `process` and
+    `request_card`); `api/settings.py` `draw` and `more` (`feedback.calibrate`); `cli.py` `intake` (all three
+    forms, with the run lock taken on the lent connection), `digests write`, `eval replay`, `eval ladders` and
+    `eval ladders-report`.
+  - P4 or P6, with the migration lock: `cli.py` `_migrate` (`store.migrate`), which `serve` and every migrating
+    command run.
+- **P4 and P5: Service reads that take a read unit already.** Plain reads in Service modules are passed the
+  entry's read unit, their bodies unchanged, though their signatures still say a connection:
+  `feedback.calibrate.sessions`, `session`, `precision` and `matters_no_topic` (P5), and `jobs.reruns.scope_papers`,
+  `per_paper` and `unpriced` (P4). The stage that moves each types it.
+- **P4: the app's loops still take `app.state.dsn`** and open their own connections; the routes, MCP and the
+  monitor use `app.state.db` (a pool of at most 10). `serve` opens one gate for the process before it migrates,
+  gives it to the app and so to the monitor, and closes it after both servers return; an app given no gate opens
+  its own in its lifespan, first, and closes it last. Tests that call the app without its lifespan open its gate
+  through `tests.conftest.AppClient`.
+- **P5: two SQL calls are left in the entries** (`tests/test_sql_home.py`): `api/integrations.py`
+  `search_outside`'s look-up of the papers held, and `api/reading.py` `_bibtex`'s read of their citations. Both
+  run in read units now.
 - **P3 to P5: a block inside a P2 unit must not use the raw connection.** On the bridge the unit and the connection
   are one session, so a statement on the connection inside the unit works by accident; on the pool it would run
   outside the unit. P2's units pass the unit everywhere, and the stage that drops a bridge checks its blocks again.
@@ -200,3 +229,10 @@ Filled in as stages land.
   - V4: the Field is `language-models`, which `settle_topic` finds 8,547 papers for today (6,777 was the count in
     the wait note). Its `settle_topic`, under the exclusive taxonomy lock and rolled back, went from 162,275
     statements and 69.7–70.5 s at the base to 203 statements and 3.3–3.5 s at P2, over three runs each.
+- **P1+P2, V7:** deployed 2026-11-17 17:40 MST as `litwatch:1.0.0-dev-0236ac41`. The night of 2026-11-18 (run 113)
+  finished in 42 min with no error: 643 classified, 695 graded, 44 Briefs, 5 digests, $3.71, in line with the week
+  (40 min to 1 h 6 min on nights with new papers). Its events per type kept the previous night's proportions (one
+  `grade.changed` per verdict recorded, 14 saved, 1 unsaved). From the deploy to 08:30 the log has no error, no
+  traceback, no `gate nesting:` line and no slow unit; its only warnings are four model refusals. Every `/status`
+  component is healthy. Blocked locks were not sampled during this run (`log_lock_waits` is off); Postgres counts
+  no deadlock since 2026-10-22. From P3 on, a read-only `pg_locks` sampler watches each checked night.

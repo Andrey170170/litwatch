@@ -1,6 +1,7 @@
 """The scheduler: when a job is due, and that a restart neither repeats nor forgets a run."""
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -10,7 +11,7 @@ from pydantic import ValidationError
 from litwatch import store
 from litwatch.api import create_app
 from litwatch.config import Config, Schedule
-from litwatch.jobs import scheduler
+from litwatch.jobs import scheduler, worker
 from litwatch.jobs.lock import BusyError
 
 DAY = datetime(2026, 10, 12, tzinfo=UTC)  # a Monday
@@ -109,8 +110,13 @@ async def test_shutdown_waits_for_the_job_in_progress_to_finish_its_record(monke
             await asyncio.sleep(0)  # a job's cleanup awaits, as model_run's does
             recorded.append("finished")
 
+    async def idle(*args):
+        await asyncio.sleep(3600)
+
     monkeypatch.setattr(scheduler, "run_forever", forever)
+    monkeypatch.setattr(worker, "run_forever", idle)  # no database for it to poll
     app = create_app("postgresql://unused", "t", Config(schedule=Schedule(enabled=True)))
+    app.state.db = contextlib.nullcontext()  # no database: the gate the lifespan opens
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0)
     assert recorded == ["finished"]

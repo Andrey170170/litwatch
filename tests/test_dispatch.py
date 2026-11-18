@@ -259,6 +259,7 @@ async def test_the_app_dispatches_only_what_reacts_to_events_and_closes_every_in
 
     monkeypatch.setattr(dispatch, "run_forever", run_forever)
     app = create_app("postgresql://unused", "t", integrations=[deep, recorder])
+    app.state.db = contextlib.nullcontext()  # no database: the gate the lifespan opens
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0)
     assert handed == [recorder]

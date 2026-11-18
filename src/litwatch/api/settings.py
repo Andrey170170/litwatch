@@ -16,13 +16,13 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ValidationError
 
 from litwatch import classification, grading, seeds
-from litwatch.api.deps import Conn, Rules, budget_lines, protected
+from litwatch.api.deps import Db, Rules, budget_lines, protected
 from litwatch.core import FAILED_RUNS, Cause, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.core.budget import month_start
 from litwatch.core.classification import thresholds
 from litwatch.core.grading import GRADERS
 from litwatch.feedback import calibrate, word
-from litwatch.gates.database import DatabaseGate, WriteUnit
+from litwatch.gates.database import DatabaseGate, ReadUnit, WriteUnit
 from litwatch.jobs import scheduler
 from litwatch.jobs.context import model_run
 from litwatch.store import digests as digests_store
@@ -41,9 +41,10 @@ SECRET_WORDS = ("key", "token", "password", "secret", "authorization", "credenti
 
 
 @router.get("/taxonomy")
-async def taxonomy(c: Conn) -> Taxonomy | None:
+async def taxonomy(db: Db) -> Taxonomy | None:
     """The class tree and the followed topics; null before one is imported."""
-    return await taxonomy_store.load(c)
+    async with db.read("taxonomy") as unit:
+        return await taxonomy_store.load(unit)
 
 
 @router.get(
@@ -51,9 +52,10 @@ async def taxonomy(c: Conn) -> Taxonomy | None:
     response_class=PlainTextResponse,
     responses={404: {"description": "No taxonomy yet"}},
 )
-async def taxonomy_yaml(c: Conn) -> str:
+async def taxonomy_yaml(db: Db) -> str:
     """The taxonomy as YAML, in the format `litwatch taxonomy import` reads (Export YAML)."""
-    tree = await taxonomy_store.load(c)
+    async with db.read("taxonomy yaml") as unit:
+        tree = await taxonomy_store.load(unit)
     if tree is None:
         raise HTTPException(status_code=404, detail="no taxonomy yet")
     return seeds.dump_taxonomy(tree)
@@ -75,32 +77,34 @@ def _thresholds(request: Request, tree: Taxonomy | None) -> dict[str, float]:
 
 
 @router.get("/taxonomy/stats")
-async def taxonomy_stats(request: Request, c: Conn) -> TaxonomyStats:
-    tree = await taxonomy_store.load(c)
-    members = await quality.class_members(c, tree) if tree else {}
-    revisions = await quality.topic_revisions(c)
+async def taxonomy_stats(request: Request, db: Db) -> TaxonomyStats:
+    async with db.read("taxonomy stats") as unit:
+        tree = await taxonomy_store.load(unit)
+        members = await quality.class_members(unit, tree) if tree else {}
+        revisions = await quality.topic_revisions(unit)
     return TaxonomyStats(
         members=members, thresholds=_thresholds(request, tree), topic_revisions=revisions
     )
 
 
 @router.get("/topics/{slug}/keywords", responses={404: {"description": "No such topic"}})
-async def keyword_matches(slug: str, c: Conn) -> dict[str, int]:
+async def keyword_matches(slug: str, db: Db) -> dict[str, int]:
     """How many papers of the last 90 days each of the topic's keywords matches (the editor)."""
-    tree = await taxonomy_store.load(c)
-    topic = tree.topic(slug) if tree else None
-    if topic is None:
-        raise HTTPException(status_code=404, detail="no such topic")
-    return await quality.keyword_matches(c, topic.keywords)
+    async with db.read("keyword matches") as unit:
+        tree = await taxonomy_store.load(unit)
+        topic = tree.topic(slug) if tree else None
+        if topic is None:
+            raise HTTPException(status_code=404, detail="no such topic")
+        return await quality.keyword_matches(unit, topic.keywords)
 
 
 @router.put("/topics/{slug}", responses={404: {"description": "No such class"}})
-async def save_topic(slug: str, body: dict[str, Any], c: Conn, rules: Rules) -> Topic:
+async def save_topic(slug: str, body: dict[str, Any], db: Db, rules: Rules) -> Topic:
     """Follow class `slug`, or edit its topic. The class takes the subject as its description.
     Edits apply forward; a change of depth or content settles the topic's papers again (see
     feedback.word.save_taxonomy)."""
     # The tree is read and saved under the taxonomy lock, held exclusively.
-    async with DatabaseGate.over(c).write("save topic", taxonomy="exclusive") as unit:
+    async with db.write("save topic", taxonomy="exclusive") as unit:
         tree = await taxonomy_store.load(unit)
         if tree is None or slug not in {cls.slug for cls in tree.classes}:
             raise HTTPException(status_code=404, detail="no such class")
@@ -120,11 +124,11 @@ class Order(BaseModel):
 
 
 @router.put("/topics-order", status_code=204)
-async def order(body: Order, c: Conn, rules: Rules) -> None:
+async def order(body: Order, db: Db, rules: Rules) -> None:
     """The owner's order, which topic lists and cards follow. The list must name every topic
     once."""
     try:
-        async with DatabaseGate.over(c).write("reorder topics", taxonomy="exclusive") as unit:
+        async with db.write("reorder topics", taxonomy="exclusive") as unit:
             await word.reorder(unit, body.slugs, rules=rules)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -134,8 +138,13 @@ async def order(body: Order, c: Conn, rules: Rules) -> None:
 
 
 @router.get("/quality")
-async def quality_page(request: Request, c: Conn) -> dict[str, Any]:
+async def quality_page(request: Request, db: Db) -> dict[str, Any]:
     """At the top, what last night left; below, how well the Focus topics are doing."""
+    async with db.read("quality") as unit:
+        return await _quality(request, unit)
+
+
+async def _quality(request: Request, c: ReadUnit) -> dict[str, Any]:
     night = await quality.last_night(c)
     since = quality.splits_window(night)
     return {
@@ -209,7 +218,7 @@ class Acknowledgement(BaseModel):
 
 
 @router.post("/acknowledge")
-async def acknowledge(body: Acknowledgement, c: Conn) -> Acknowledgement:
+async def acknowledge(body: Acknowledgement, db: Db) -> Acknowledgement:
     """Acknowledge on Needs you: the owner has seen these items, and the failures stop counting
     in the run status (Deep notes count in none). An item is marked only while it still waits on
     the owner as shown (the same failure, not a later one; the same card, not one written
@@ -220,7 +229,7 @@ async def acknowledge(body: Acknowledgement, c: Conn) -> Acknowledgement:
     steps = [(x.step, x.paper_id, x.topic or "", x.revision, x.failed_at) for x in body.steps]
     passes = [(x.id, x.since) for x in body.passes]
     cards = [(x.paper_id, x.written_at) for x in body.cards]
-    async with c.transaction():
+    async with db.write("acknowledge") as c:
         return Acknowledgement(
             steps=await failures.acknowledge(c, steps, FAILED_RUNS),
             passes=await fulltext_store.acknowledge(c, passes, FAILED_RUNS),
@@ -275,12 +284,14 @@ class Miss(BaseModel):
 
 
 @router.get("/misses")
-async def misses(request: Request, c: Conn) -> list[Miss]:
+async def misses(request: Request, db: Db) -> list[Miss]:
     """Reported misses, newest first, each with its trace."""
-    tree = await taxonomy_store.load(c)
+    async with db.read("misses") as unit:
+        tree = await taxonomy_store.load(unit)
+        reported = await quality.misses(unit, tree)
     at = _thresholds(request, tree)
     found = []
-    for r in await quality.misses(c, tree):
+    for r in reported:
         opinions = r["opinions"] or {}
         topic = tree.topic(r["topic"]) if tree else None
         asked = GRADERS[topic.depth] if topic else ()
@@ -356,7 +367,7 @@ async def _waiting(
 
 @asynccontextmanager
 async def _awaiting(
-    c: Any,
+    db: DatabaseGate,
     rules: Rules,
     paper_id: str,
     revision: int,
@@ -367,15 +378,15 @@ async def _awaiting(
     owner on it (`_waiting`): its unit, which the action writes in, and the paper. Eligibility
     is read after the locks, in the unit that acts, and the paper is settled at its end."""
     async with word.change(
-        DatabaseGate.over(c), paper_id, cause=Cause.OWNER, rules=rules, name=f"owner on {step}"
+        db, paper_id, cause=Cause.OWNER, rules=rules, name=f"owner on {step}"
     ) as done:
         yield done.unit, await _waiting(done.unit, paper_id, revision, step, topic)
 
 
 @router.post("/classification/{paper_id:path}/dismiss", status_code=204, responses=WAITING)
-async def dismiss(paper_id: str, body: Awaiting, c: Conn, rules: Rules) -> None:
+async def dismiss(paper_id: str, body: Awaiting, db: Db, rules: Rules) -> None:
     """Litwatch drops the paper from processing; it stays searchable in the archive."""
-    async with _awaiting(c, rules, paper_id, body.revision) as (unit, _):
+    async with _awaiting(db, rules, paper_id, body.revision) as (unit, _):
         await papers_store.dismiss(unit, paper_id)
 
 
@@ -385,11 +396,11 @@ class ClassesIn(Awaiting):
 
 
 @router.put("/classification/{paper_id:path}", responses=WAITING)
-async def classify_by_hand(paper_id: str, body: ClassesIn, c: Conn, rules: Rules) -> dict[str, Any]:
+async def classify_by_hand(paper_id: str, body: ClassesIn, db: Db, rules: Rules) -> dict[str, Any]:
     """The owner names the paper's classes, which go on as usual with source `owner`."""
     # The change's shared taxonomy lock holds the tree still until the classification is
     # recorded, and the paper is classified and settled together.
-    async with _awaiting(c, rules, paper_id, body.revision) as (unit, paper):
+    async with _awaiting(db, rules, paper_id, body.revision) as (unit, paper):
         tree = await taxonomy_store.load(unit)
         if tree is None:
             raise HTTPException(status_code=409, detail="no taxonomy")
@@ -409,7 +420,7 @@ class CorrectionIn(Awaiting):
 
 
 @router.post("/classification/{paper_id:path}/correction", status_code=204, responses=WAITING)
-async def correct(paper_id: str, body: CorrectionIn, c: Conn, rules: Rules) -> None:
+async def correct(paper_id: str, body: CorrectionIn, db: Db, rules: Rules) -> None:
     """Fix the text classification choked on. It counts as a rewrite: the next run classifies
     the corrected paper."""
     title = (body.title or "").strip() or None
@@ -417,14 +428,14 @@ async def correct(paper_id: str, body: CorrectionIn, c: Conn, rules: Rules) -> N
     if not (title or abstract):
         raise HTTPException(status_code=422, detail="give a title or an abstract")
     # The new text and the grades without its old Weight, together.
-    async with _awaiting(c, rules, paper_id, body.revision) as (unit, _):
+    async with _awaiting(db, rules, paper_id, body.revision) as (unit, _):
         await papers_store.correct(unit, paper_id, title, abstract)
 
 
 @router.post("/analysis/{paper_id:path}/retry", status_code=204, responses=WAITING)
-async def retry_analysis(paper_id: str, body: Awaiting, c: Conn, rules: Rules) -> None:
+async def retry_analysis(paper_id: str, body: Awaiting, db: Db, rules: Rules) -> None:
     """Analysis failed three runs in a row on this text: give it three more, from the next run."""
-    async with _awaiting(c, rules, paper_id, body.revision, "analysis") as (unit, _):
+    async with _awaiting(db, rules, paper_id, body.revision, "analysis") as (unit, _):
         await failures.succeeded(unit, paper_id, "analysis")  # forgets the count
 
 
@@ -438,13 +449,12 @@ class GradedOut(BaseModel):
 
 @router.post("/grading/{topic}/{paper_id:path}/now", responses=WAITING)
 async def grade_now(
-    topic: str, paper_id: str, body: Awaiting, request: Request, c: Conn, rules: Rules
+    topic: str, paper_id: str, body: Awaiting, request: Request, db: Db, rules: Rules
 ) -> GradedOut:
     """A grading failed three runs in a row on this text: grade it now, as a run of its own.
     It counts as the first of three more runs. Until it is recorded the grading stays a pending
     failure, so a request cut short leaves it to the next nightly run; 409 when the paper's text
     changed, it was dismissed or the topic was paused while it was graded."""
-    db = DatabaseGate.over(c)
     # The topic is read under the taxonomy lock, shared, in the change that resets the count.
     async with word.change(
         db, paper_id, cause=Cause.OWNER, rules=rules, name="grade now: reset"
@@ -460,8 +470,10 @@ async def grade_now(
     config = request.app.state.config
     due = [grading.Due(paper, followed, tree.get(topic).name)]
     recorded = False
+    # The run record on a lent connection, outside any unit (transitional: it moves in P4).
     async with (
-        model_run(c, config, "grading", gateway=request.app.state.gateway) as run,
+        db.lend("grade now: run") as conn,
+        model_run(conn, config, "grading", gateway=request.app.state.gateway) as run,
         grading.grade(due, run.gateway, config.grading) as found,
     ):
         async for g in found:
@@ -487,27 +499,30 @@ PASS_WAITING = {
 
 
 @router.post("/fulltext/{pass_id}/now", status_code=204, responses=PASS_WAITING)
-async def run_pass_now(pass_id: int, request: Request, c: Conn, rules: Rules) -> None:
+async def run_pass_now(pass_id: int, request: Request, db: Db, rules: Rules) -> None:
     """A full-text pass (a Deep card's included) failed three runs in a row, or awaits its text
     over a week: run it now. It is first in line for its worker, with three more runs; its text
     is asked for again at urgent priority. 409 when it no longer waits for the owner (it ran,
     the paper's text changed, it was dropped)."""
-    await _run_now(pass_id, request, c, rules, pdf=False)
+    await _run_now(pass_id, request, db, rules, pdf=False)
 
 
 @router.post("/fulltext/{pass_id}/pdf", status_code=204, responses=PASS_WAITING)
-async def use_pdf(pass_id: int, request: Request, c: Conn, rules: Rules) -> None:
+async def use_pdf(pass_id: int, request: Request, db: Db, rules: Rules) -> None:
     """ "Use the PDF", for a paper whose LaTeX reads badly: run the pass now, as above, reading
     the paper's PDF from then on instead of its LaTeX."""
-    await _run_now(pass_id, request, c, rules, pdf=True)
+    await _run_now(pass_id, request, db, rules, pdf=True)
 
 
-async def _run_now(pass_id: int, request: Request, c: Any, rules: Rules, *, pdf: bool) -> None:
-    paper_id = await fulltext_store.paper_of(c, pass_id)  # a pass never changes paper
+async def _run_now(
+    pass_id: int, request: Request, db: DatabaseGate, rules: Rules, *, pdf: bool
+) -> None:
+    async with db.read("run pass now: paper") as unit:
+        paper_id = await fulltext_store.paper_of(unit, pass_id)  # a pass never changes paper
     if paper_id is None:
         raise HTTPException(status_code=404, detail="no such full-text pass")
     async with word.change(  # as every write to a paper's passes
-        DatabaseGate.over(c), paper_id, cause=Cause.OWNER, rules=rules, name="run pass now"
+        db, paper_id, cause=Cause.OWNER, rules=rules, name="run pass now"
     ) as done:
         if not await fulltext_store.run_now(done.unit, pass_id, FAILED_RUNS, pdf=pdf):
             raise HTTPException(status_code=409, detail="the pass is not waiting for the owner")
@@ -523,15 +538,17 @@ class DrawIn(BaseModel):
 
 
 @router.post("/calibrate")
-async def draw(body: DrawIn, c: Conn) -> dict[str, int]:
+async def draw(body: DrawIn, db: Db) -> dict[str, int]:
     """Draw a session of about twenty papers. The seed is recorded with it."""
     seed = body.seed if body.seed is not None else secrets.randbelow(2**31)
-    return {"id": await calibrate.draw(c, seed)}
+    async with db.lend("calibrate draw") as conn:  # transitional: Calibrate moves in P5
+        return {"id": await calibrate.draw(conn, seed)}
 
 
 @router.get("/calibrate")
-async def sessions(c: Conn) -> list[dict[str, Any]]:
-    return await calibrate.sessions(c)
+async def sessions(db: Db) -> list[dict[str, Any]]:
+    async with db.read("calibrate sessions") as unit:
+        return await calibrate.sessions(unit)
 
 
 # What the session endpoints answer besides success, for the API schema.
@@ -540,27 +557,31 @@ NO_ITEM = {404: {"description": "No such session, or no paper at that position i
 
 
 @router.get("/calibrate/{session_id}", responses=NO_SESSION)
-async def session(session_id: int, c: Conn) -> dict[str, Any]:
-    found = await calibrate.session(c, session_id)
+async def session(session_id: int, db: Db) -> dict[str, Any]:
+    async with db.read("calibrate session") as unit:
+        found = await calibrate.session(unit, session_id)
     if found is None:
         raise HTTPException(status_code=404, detail="no such session")
     return found
 
 
 @router.post("/calibrate/{session_id}/more", responses=NO_SESSION)
-async def more(session_id: int, c: Conn) -> dict[str, int]:
+async def more(session_id: int, db: Db) -> dict[str, int]:
     """Continue with the papers waiting for a word: splits, misses and thumbed papers."""
-    if await calibrate.session(c, session_id) is None:
+    async with db.read("calibrate more: session") as unit:
+        found = await calibrate.session(unit, session_id)
+    if found is None:
         raise HTTPException(status_code=404, detail="no such session")
-    return {"added": await calibrate.more(c, session_id)}
+    async with db.lend("calibrate more") as conn:  # transitional: Calibrate moves in P5
+        return {"added": await calibrate.more(conn, session_id)}
 
 
 @router.put("/calibrate/{session_id}/items/{position}", status_code=204, responses=NO_ITEM)
 async def answer(
-    session_id: int, position: int, body: calibrate.Answer, c: Conn, rules: Rules
+    session_id: int, position: int, body: calibrate.Answer, db: Db, rules: Rules
 ) -> None:
     try:
-        await calibrate.answer(DatabaseGate.over(c), session_id, position, body, rules=rules)
+        await calibrate.answer(db, session_id, position, body, rules=rules)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -571,8 +592,9 @@ async def answer(
 
 
 @router.get("/runs")
-async def runs(c: Conn) -> list[dict[str, Any]]:
-    return await quality.runs(c)
+async def runs(db: Db) -> list[dict[str, Any]]:
+    async with db.read("runs") as unit:
+        return await quality.runs(unit)
 
 
 class NextFire(BaseModel):

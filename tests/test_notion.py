@@ -6,7 +6,6 @@ import re
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote
 
-import httpx
 import pytest
 
 from litwatch import events, store
@@ -40,7 +39,17 @@ from litwatch.store import publications as publications_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 from tests import settling
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, deliver, fixture_read, paper, settled
+from tests.conftest import (
+    AGENTS,
+    FAITH,
+    INTERP,
+    TREE,
+    AppClient,
+    deliver,
+    fixture_read,
+    paper,
+    settled,
+)
 from tests.fakes_http import FakeNotion, mock
 
 PARENT = "11111111-1111-1111-1111-111111111111"
@@ -701,8 +710,8 @@ async def test_a_failing_setup_is_retried_after_backoff_and_shown(world):
     n = notion(fake)
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, "t", Config(), integrations=[n])
-    api = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
+    api = AppClient(
+        app,
         base_url="http://test",
         headers={"authorization": "Bearer t"},
     )

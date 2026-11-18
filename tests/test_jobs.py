@@ -8,7 +8,6 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
-import httpx
 import pytest
 
 from litwatch import store
@@ -28,7 +27,7 @@ from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
-from tests.conftest import AGENTS, TREE, answering, paper
+from tests.conftest import AGENTS, TREE, AppClient, answering, paper
 from tests.fakes import BatchingProvider, ScriptedProvider
 from tests.test_batches import FAST
 from tests.test_steps import CONFIG, Scripted, decision
@@ -547,9 +546,8 @@ async def test_a_job_with_tonights_run_waits_for_a_nightly_to_finish(conn, model
 async def api(conn, config=SCHEDULED):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, config)
-    transport = httpx.ASGITransport(app=app)
     headers = {"authorization": f"Bearer {TOKEN}"}
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+    async with AppClient(app, base_url="http://t", headers=headers) as c:
         c.app = app
         yield c
 

@@ -10,7 +10,6 @@ import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-import httpx
 import pytest
 
 from litwatch import fulltext
@@ -31,7 +30,7 @@ from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests import settling
-from tests.conftest import AGENTS, FAITH, TREE, paper
+from tests.conftest import AGENTS, FAITH, TREE, AppClient, paper
 from tests.fakes import ScriptedProvider, SdkClient, openrouter_completion
 from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.test_deep import DONE, make
@@ -724,9 +723,8 @@ async def test_a_worker_holding_its_most_runs_open_starts_only_process_jobs(
 async def api(conn, config=CONFIG):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, config)
-    transport = httpx.ASGITransport(app=app)
     headers = {"authorization": f"Bearer {TOKEN}"}
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+    async with AppClient(app, base_url="http://t", headers=headers) as c:
         yield c
 
 

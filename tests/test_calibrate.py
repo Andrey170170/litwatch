@@ -22,7 +22,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
 from tests import settling
-from tests.conftest import AGENTS, FAITH, TREE, paper
+from tests.conftest import AGENTS, FAITH, TREE, AppClient, paper
 
 ABOVE = [paper(f"2610.0010{i}") for i in range(3)]
 BELOW = [paper(f"2610.0020{i}") for i in range(3)]
@@ -291,7 +291,6 @@ async def test_an_appraisal_can_be_cleared(db):
 async def test_the_sessions_list_counts_answers_that_differ_from_the_verdict(db):
     """The past-session rows say how many answers differ from the pipeline's Fit: another Fit
     than the verdict's, as the review marks them. Unsure never differs."""
-    import httpx
 
     from litwatch.api import create_app
     from litwatch.config import Config
@@ -307,9 +306,7 @@ async def test_the_sessions_list_counts_answers_that_differ_from_the_verdict(db)
     ):
         await answer(db, session_id, item["position"], Answer(fit={FAITH.slug: fit}))
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
-    transport = httpx.ASGITransport(app=create_app(dsn, "t", Config()))
-    async with httpx.AsyncClient(
-        transport=transport, base_url="http://t", headers={"authorization": "Bearer t"}
-    ) as c:
+    app = create_app(dsn, "t", Config())
+    async with AppClient(app, base_url="http://t", headers={"authorization": "Bearer t"}) as c:
         (row,) = (await c.get("/api/settings/calibrate")).json()
     assert (row["papers"], row["answered"], row["differ"]) == (4, 4, 3)

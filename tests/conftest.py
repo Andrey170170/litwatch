@@ -8,10 +8,11 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from uuid import uuid4
 
 import arxiv
+import httpx
 import pytest
 
 from litwatch import store
@@ -152,6 +153,42 @@ async def db(conn):
     """The Database gate on `conn`'s schema, with a pool of its own."""
     async with DatabaseGate(conn.test_dsn, conn.test_schema) as gate:
         yield gate
+
+
+class AppClient(httpx.AsyncClient):
+    """An HTTP client on an app from `create_app`, which holds the app's Database gate open
+    while the client is open, as the app's lifespan does, without the loops the lifespan
+    starts: from entering it, or its first request, to leaving it or `aclose`. For the app's
+    monitor, `app` is the monitor and `of` the app it reads."""
+
+    def __init__(self, app: Any, *, of: Any = None, **kwargs: Any) -> None:
+        super().__init__(transport=httpx.ASGITransport(app=app), **kwargs)
+        self.gate, self._opened = (of or app).state.db, False
+
+    async def _open(self) -> None:
+        if not self._opened:
+            await self.gate.open()
+            self._opened = True
+
+    async def __aenter__(self) -> Self:
+        await self._open()
+        return await super().__aenter__()
+
+    async def send(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        await self._open()
+        return await super().send(*args, **kwargs)
+
+    async def __aexit__(self, *exc: Any) -> None:
+        try:
+            await super().__aexit__(*exc)
+        finally:
+            await self.gate.close()
+
+    async def aclose(self) -> None:
+        try:
+            await super().aclose()
+        finally:
+            await self.gate.close()
 
 
 async def settled(conn, timeout: float = 20.0) -> None:

@@ -29,12 +29,6 @@ LOCKS_BEFORE_THE_RULE = {
 # Modules outside `gates/` and `store/` that name `AsyncConnection`, before the rule; each is to
 # take `db` or a unit instead.
 CONNECTIONS_BEFORE_THE_RULE = {
-    "api/deps.py",
-    "api/digests.py",
-    "api/mcp.py",
-    "api/monitor.py",
-    "api/reading.py",
-    "cli.py",
     "digests/__init__.py",
     "events/__init__.py",
     "events/dispatch.py",

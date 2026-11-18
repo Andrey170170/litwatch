@@ -4,11 +4,11 @@ Deep read section by section, and a paper itself, outline first, and its PDF's p
 adapter over the reading code /api calls (docs/plans/mcp-server.md, D2), `mcp_reading` and
 `mcp_deep`, that shapes its own answers, compact Markdown for an agent to read.
 
-It writes nothing: its connections are read-only, and its one effect outside the process is a
-request to the archive. Streamable HTTP, stateless with plain JSON answers, behind its own bearer
-token (`LITWATCH_MCP_TOKEN`); without the token `/mcp` is not served. PDF reads and renders run
-in an executor of its own, off the web app's requests. Each call is counted for the monitor
-(`monitor.McpCalls`) and logged as one line."""
+It writes nothing: it reads in the app's read units, which are read-only, and its one effect
+outside the process is a request to the archive. Streamable HTTP, stateless with plain JSON
+answers, behind its own bearer token (`LITWATCH_MCP_TOKEN`); without the token `/mcp` is not
+served. PDF reads and renders run in an executor of its own, off the web app's requests. Each
+call is counted for the monitor (`monitor.McpCalls`) and logged as one line."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
-import psycopg
 from fastapi import FastAPI
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -36,7 +35,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from litwatch import store
 from litwatch.api import digests as digests_api
 from litwatch.api import integrations as integrations_api
 from litwatch.api import mcp_deep, mcp_reading
@@ -140,11 +138,6 @@ class Partial(str):
     call's outcome is `partial`, neither a failure nor proof the server works."""
 
     __slots__ = ()
-
-
-async def connect(dsn: str) -> psycopg.AsyncConnection:
-    """The MCP's connection: read-only, so a write through it fails rather than lands."""
-    return await store.connect(dsn, read_only=True)
 
 
 # -- the endpoint ----------------------------------------------------------------------------------
@@ -319,24 +312,24 @@ def build(state: State) -> MCPServer:
             offset=offset,
         )
         wanted = replace(reading_api._query(params), reaction=reaction, processed=processed)
-        async with await connect(state.dsn) as c:
+        async with state.db.read("mcp search_papers") as c:
             tree = await taxonomy_store.load(c)
             _shown(tree, topic)
             listed = await reading.papers(c, tree, wanted, limit=limit, offset=offset)
-            looks = reading_api._looks(tree)
-            rows = [reading_api._row(tree, looks, r, s.Row) for r in listed.rows]
-            outside: list[s.OutsideRow] = []
-            left_out: list[str] = []
-            if params.q and offset == 0 and not wanted.collection_only:
-                outside, left_out = await integrations_api.search_outside(
-                    c,
-                    params.q,
-                    reading_api.outside_filters(params),
-                    state.integrations,
-                    state.search_pool,
-                    state.search_timeout,
-                    state.search_stats,
-                )
+        looks = reading_api._looks(tree)
+        rows = [reading_api._row(tree, looks, r, s.Row) for r in listed.rows]
+        outside: list[s.OutsideRow] = []
+        left_out: list[str] = []
+        if params.q and offset == 0 and not wanted.collection_only:
+            outside, left_out = await integrations_api.search_outside(
+                state.db,
+                params.q,
+                reading_api.outside_filters(params),
+                state.integrations,
+                state.search_pool,
+                state.search_timeout,
+                state.search_stats,
+            )
         answer = _papers_answer(rows, listed.total, offset, outside, left_out)
         return Partial(answer) if left_out else answer
 
@@ -353,17 +346,17 @@ def build(state: State) -> MCPServer:
             pid = id_from_url(paper_id)
         except ValueError as exc:
             raise NotFoundError(f"No arXiv id in {paper_id!r}.") from exc
-        async with await connect(state.dsn) as c:
-            try:
-                page = await reading_api.paper_page(c, pid, state.archive, state.integrations)
-            except reading_api.ArchiveDownError as exc:
-                raise ToolError(
-                    f"The archive did not answer, so whether it holds {pid} is unknown; "
-                    "try again in a minute."
-                ) from exc
-            if page is None:
-                raise NotFoundError(f"Neither litwatch nor the archive has a paper {pid}.")
-            # From the records stored, never the copy path's lookup, which writes.
+        try:
+            page = await reading_api.paper_page(state.db, pid, state.archive, state.integrations)
+        except reading_api.ArchiveDownError as exc:
+            raise ToolError(
+                f"The archive did not answer, so whether it holds {pid} is unknown; "
+                "try again in a minute."
+            ) from exc
+        if page is None:
+            raise NotFoundError(f"Neither litwatch nor the archive has a paper {pid}.")
+        # From the records stored, never the copy path's lookup, which writes.
+        async with state.db.read("mcp get_paper: citation") as c:
             if page.stored:
                 citation = await reading_api._bibtex(c, [pid])
             else:
@@ -387,7 +380,7 @@ def build(state: State) -> MCPServer:
             pid = id_from_url(paper_id)
         except ValueError as exc:
             raise NotFoundError(f"No arXiv id in {paper_id!r}.") from exc
-        async with await connect(state.dsn) as c:
+        async with state.db.read("mcp read_deep") as c:
             paper = await papers_store.get(c, pid)
             stored = await integrations_store.card(c, pid)
         if paper is None:
@@ -422,7 +415,7 @@ def build(state: State) -> MCPServer:
         first = since or last - timedelta(days=DIGEST_DAYS - 1)
         clipped = last - first > DIGEST_SPAN
         first = last - DIGEST_SPAN if clipped else first
-        async with await connect(state.dsn) as c:
+        async with state.db.read("mcp list_digests") as c:
             _shown(await taxonomy_store.load(c), topic)
             daily = await digests_api.marks(c, DigestPeriod.DAY, first, last, topic)
             weekly = await digests_api.marks(c, DigestPeriod.WEEK, week_of(first), last, topic)
@@ -434,7 +427,7 @@ def build(state: State) -> MCPServer:
         """One digest in full: its Gist, its text (which links each paper it names to its arXiv
         id), and its papers by role: the picks it puts forward with why, those it lists, those
         its text mentions, and old papers back with a new version."""
-        async with await connect(state.dsn) as c:
+        async with state.db.read("mcp read_digest") as c:
             found = await digests_api.in_full(c, digest_id)
         if found is None:
             raise NotFoundError(f"No digest {digest_id} of a followed topic.")
@@ -443,14 +436,14 @@ def build(state: State) -> MCPServer:
     async def _paper(paper_id: str) -> tuple[Paper, bool]:
         """The paper, as litwatch holds it or else as the archive does, and whether the owner
         chose "Use the PDF" for its current text. The database is read before any wait, which
-        holds no connection."""
+        holds no unit."""
         try:
             pid = id_from_url(paper_id)
         except ValueError as exc:
             raise NotFoundError(f"No arXiv id in {paper_id!r}.") from exc
         if state.archive is None:
             raise ToolError("litwatch has no archive configured, so it cannot read papers.")
-        async with await connect(state.dsn) as c:
+        async with state.db.read("mcp paper") as c:
             held = await papers_store.get(c, pid)
             use_pdf = await fulltext_store.uses_pdf(c, pid)
         if held is None:

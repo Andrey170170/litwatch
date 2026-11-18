@@ -13,18 +13,18 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import psycopg
 from croniter import croniter
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
-from litwatch import events, store
+from litwatch import events
 from litwatch.api.deps import budget_lines
 from litwatch.archive import ArchiveClient
 from litwatch.config import ROLES, Config, secret
 from litwatch.core import FAILED_RUNS
 from litwatch.core.budget import Spend
 from litwatch.events import Integration
+from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.integrations.deep import Deep
 from litwatch.llm.gateway import KEYS
 from litwatch.store import calls, failures, fulltext, outbox, reading, runs
@@ -140,18 +140,37 @@ class Facts:
 
 
 async def facts(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     integrations: list[Integration],
     archive: ArchiveClient | None,
 ) -> Facts:
+    """What the monitor reports: the database's facts in one read unit, then the archive's and
+    the Deep service's answers to their probes, asked with no unit open."""
     now = datetime.now(UTC)
+    async with db.read("monitor") as conn:
+        found = await _read(conn, now, config, integrations)
+    probes = {}
+    if archive is not None:
+        probes["archive"] = archive.indexed()
+    for deep in (i for i in integrations if isinstance(i, Deep)):
+        probes["deep"] = deep.client.health()
+    answers = dict(zip(probes, await asyncio.gather(*map(_probe, probes.values())), strict=True))
+    found.probes = {name: error for name, (error, _) in answers.items()}
+    if "deep" in answers and answers["deep"][0] is None:
+        found.signin = (answers["deep"][1] or {}).get("auth") or {}
+    return found
+
+
+async def _read(
+    conn: ReadUnit, now: datetime, config: Config, integrations: list[Integration]
+) -> Facts:
     jobs = {}
     for k in JOBS:
         latest = await runs.latest(conn, k)
         running = bool(latest and latest["finished_at"] is None and latest["alive"])
         jobs[k] = Job(latest, await runs.last_success(conn, k), running)
-    found = Facts(
+    return Facts(
         now=now,
         jobs=jobs,
         status=await reading.status(conn) | await reading.stopped(conn, unacknowledged=False),
@@ -163,16 +182,6 @@ async def facts(
         deep_failure=await integrations_store.service_failure(conn),
         unkeyed=_unkeyed(),
     )
-    probes = {}
-    if archive is not None:
-        probes["archive"] = archive.indexed()
-    for deep in (i for i in integrations if isinstance(i, Deep)):
-        probes["deep"] = deep.client.health()
-    answers = dict(zip(probes, await asyncio.gather(*map(_probe, probes.values())), strict=True))
-    found.probes = {name: error for name, (error, _) in answers.items()}
-    if "deep" in answers and answers["deep"][0] is None:
-        found.signin = (answers["deep"][1] or {}).get("auth") or {}
-    return found
 
 
 def _unkeyed() -> dict[str, str]:
@@ -188,7 +197,7 @@ def _unkeyed() -> dict[str, str]:
     return out
 
 
-async def _night(conn: psycopg.AsyncConnection) -> Night | None:
+async def _night(conn: ReadUnit) -> Night | None:
     """The latest finished nightly: from its start to its end, its digest wait included. One
     whose process died reads failed on `nightly`, and has no known end."""
     run = await runs.latest_finished(conn, "nightly")
@@ -529,14 +538,14 @@ def status_document(f: Facts, config: Config) -> dict[str, Any]:
 
 
 def create_monitor(app: FastAPI) -> FastAPI:
-    """The monitoring app beside `app`, reading its database, configuration, integrations and
-    archive."""
+    """The monitoring app beside `app`, reading its database (through the app's gate, which
+    the app's lifespan opens: the monitor runs without one of its own), configuration,
+    integrations and archive."""
     monitor = FastAPI(title="litwatch monitoring", docs_url=None, redoc_url=None, openapi_url=None)
 
     async def read() -> Facts:
         st = app.state
-        async with await store.connect(st.dsn) as conn:
-            found = await facts(conn, st.config, st.integrations, st.archive)
+        found = await facts(st.db, st.config, st.integrations, st.archive)
         found.mcp = st.mcp_calls
         return found
 
