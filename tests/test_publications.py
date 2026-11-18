@@ -18,7 +18,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
 from litwatch.store import sibling as store_sibling
 from tests import settling
-from tests.conftest import paper
+from tests.conftest import AppClient, paper
 
 TOKEN = "s3cret"
 NIPS = Publication(
@@ -220,8 +220,7 @@ async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db):
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     app = create_app(dsn, TOKEN, Config(), publications=source)
     headers = {"authorization": f"Bearer {TOKEN}"}
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+    async with AppClient(app, base_url="http://t", headers=headers) as c:
         # An export of several papers never waits on DBLP.
         text = (await c.post("/api/bibtex", json={"ids": [P.id, Q.id]})).text
         assert source.asked == [] and text.count("@misc{") == 2

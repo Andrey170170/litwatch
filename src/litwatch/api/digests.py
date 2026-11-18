@@ -6,15 +6,15 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any
 
-import psycopg
 from fastapi import HTTPException, Query, Request
 
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, protected
+from litwatch.api.deps import Db, protected
 from litwatch.api.reading import _looks
 from litwatch.config import Schedule
 from litwatch.core import Status
 from litwatch.core.digests import DigestPeriod, DigestState, week_of
+from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.jobs import scheduler
 from litwatch.store import digests as store_
 from litwatch.store import jobs as jobs_store
@@ -33,13 +33,13 @@ def _paper(row: dict[str, Any]) -> s.DigestPaper:
     return s.DigestPaper(id=row["paper_id"], revision=row["paper_revision"], **row)
 
 
-async def _shown(c: psycopg.AsyncConnection) -> list[str]:
+async def _shown(c: ReadUnit) -> list[str]:
     """The shown topics, whose digests the tab shows and steps through."""
     return list(_looks(await taxonomy_store.load(c)))
 
 
 async def marks(
-    c: psycopg.AsyncConnection,
+    c: ReadUnit,
     period: DigestPeriod,
     first: date,
     last: date,
@@ -68,7 +68,7 @@ def _mark(row: dict[str, Any], badge: s.Badge) -> dict[str, Any]:
     }
 
 
-async def _cards(c: psycopg.AsyncConnection, period: DigestPeriod, day: date) -> list[s.DigestCard]:
+async def _cards(c: ReadUnit, period: DigestPeriod, day: date) -> list[s.DigestCard]:
     found = await marks(c, period, day, day)
     shown: dict[int, list[s.DigestPaper]] = {r["id"]: [] for r, _ in found}
     for p in await store_.card_papers(c, list(shown)):
@@ -120,49 +120,56 @@ def today_run(
 
 
 @router.get("/days/{day}")
-async def day(day: date, request: Request, c: Conn) -> s.Day:
+async def day(day: date, request: Request, db: Db) -> s.Day:
     """A day's daily digests, every topic's at Gist level, and where ‹ › step; today, where
     its nightly run stands."""
     weekly = None
-    shown = await _shown(c)
     schedule = request.app.state.config.schedule
     now = datetime.now(UTC)
     today = schedule.enabled and now.astimezone(schedule.zone).date() == day
     monday = day - timedelta(days=7)
-    if day.weekday() == 0 and await marks(c, DigestPeriod.WEEK, monday, monday):
-        weekly = monday
-    # The run before the cards: it is closed only once its digests are written, so a run read as
-    # done never comes with the cards from before its last digest (the reads are not one snapshot).
-    run = today_run(day, now, schedule, await reading.status(c)) if today else None
-    return s.Day(
-        day=day,
-        released=await store_.released(c, day),
-        digests=await _cards(c, DigestPeriod.DAY, day),
-        previous=await store_.step(c, DigestPeriod.DAY, day, False, shown),
-        next=await store_.step(c, DigestPeriod.DAY, day, True, shown),
-        weekly=weekly,
-        run=run,
-    )
+    async with db.read("digest day") as c:
+        shown = await _shown(c)
+        if day.weekday() == 0 and await marks(c, DigestPeriod.WEEK, monday, monday):
+            weekly = monday
+        # The run and the cards in one snapshot: a run is closed only once its digests are
+        # written, so a run read as done comes with the cards of its last digest.
+        run = today_run(day, now, schedule, await reading.status(c)) if today else None
+        return s.Day(
+            day=day,
+            released=await store_.released(c, day),
+            digests=await _cards(c, DigestPeriod.DAY, day),
+            previous=await store_.step(c, DigestPeriod.DAY, day, False, shown),
+            next=await store_.step(c, DigestPeriod.DAY, day, True, shown),
+            weekly=weekly,
+            run=run,
+        )
 
 
 @router.get("/weeks/{day}")
-async def week(day: date, c: Conn) -> s.Week:
+async def week(day: date, db: Db) -> s.Week:
     """The weekly digests of the week holding `day`, and where ‹ › step."""
     monday = week_of(day)
-    shown = await _shown(c)
-    return s.Week(
-        monday=monday,
-        digests=await _cards(c, DigestPeriod.WEEK, monday),
-        previous=await store_.step(c, DigestPeriod.WEEK, monday, False, shown),
-        next=await store_.step(c, DigestPeriod.WEEK, monday, True, shown),
-    )
+    async with db.read("digest week") as c:
+        shown = await _shown(c)
+        return s.Week(
+            monday=monday,
+            digests=await _cards(c, DigestPeriod.WEEK, monday),
+            previous=await store_.step(c, DigestPeriod.WEEK, monday, False, shown),
+            next=await store_.step(c, DigestPeriod.WEEK, monday, True, shown),
+        )
 
 
 @router.get("")
-async def history(params: Annotated[s.HistoryIn, Query()], c: Conn) -> s.History:
+async def history(params: Annotated[s.HistoryIn, Query()], db: Db) -> s.History:
     """History from `until` back to `since` (at most `HISTORY_SPAN`): every day with its daily
     Marks and whether arXiv listed papers on it, and the weeks those days fall in with their
     weekly Marks."""
+    async with db.read("digest history") as c:
+        return await _history(params, c)
+
+
+async def _history(params: s.HistoryIn, c: ReadUnit) -> s.History:
     first, last = params.since, params.until
     days: dict[date, list[s.DigestMark]] = {}
     for r, badge in await marks(c, DigestPeriod.DAY, first, last):
@@ -180,14 +187,14 @@ async def history(params: Annotated[s.HistoryIn, Query()], c: Conn) -> s.History
     )
 
 
-async def _digest(c: psycopg.AsyncConnection, digest_id: int) -> s.Digest:
+async def _digest(c: ReadUnit, digest_id: int) -> s.Digest:
     found = await in_full(c, digest_id)
     if found is None:
         raise HTTPException(status_code=404, detail="no such digest")
     return found
 
 
-async def in_full(c: psycopg.AsyncConnection, digest_id: int) -> s.Digest | None:
+async def in_full(c: ReadUnit, digest_id: int) -> s.Digest | None:
     """A digest in full, as /api and /mcp both show it; None when there is none or its topic is
     no longer shown."""
     row = await store_.get(c, digest_id)
@@ -204,25 +211,26 @@ async def in_full(c: psycopg.AsyncConnection, digest_id: int) -> s.Digest | None
     )
 
 
-async def _with_job(c: psycopg.AsyncConnection, digest_id: int) -> s.Digest:
-    """The digest in full with its newest job writing it again, read after it: a job read done
-    comes with the digest it wrote."""
-    job = await jobs_store.digest_job(c, digest_id)
-    found = await _digest(c, digest_id)
+async def _with_job(db: DatabaseGate, digest_id: int) -> s.Digest:
+    """The digest in full with its newest job writing it again, in one snapshot: a job read
+    done comes with the digest it wrote."""
+    async with db.read("digest") as c:
+        job = await jobs_store.digest_job(c, digest_id)
+        found = await _digest(c, digest_id)
     if job is not None:
         found.job = s.JobRef.model_validate(job)
     return found
 
 
 @router.get("/{digest_id}", responses=NO_DIGEST)
-async def digest(digest_id: int, c: Conn) -> s.Digest:
+async def digest(digest_id: int, db: Db) -> s.Digest:
     """A digest in full: its text and its papers by role, each as it was shown, and its newest
     job writing it again."""
-    return await _with_job(c, digest_id)
+    return await _with_job(db, digest_id)
 
 
 @router.post("/{digest_id}/write", status_code=202, responses=WRITE_AGAIN)
-async def write_again(digest_id: int, request: Request, c: Conn) -> s.Digest:
+async def write_again(digest_id: int, request: Request, db: Db) -> s.Digest:
     """Write a failed digest again, as a job (DESIGN.md, Jobs): queued now, and written by the
     jobs worker as soon as the run lock is free (a nightly run or another job's chunk may hold
     it), over the papers due for it then; it may fail again. Asked again while its job is
@@ -230,10 +238,12 @@ async def write_again(digest_id: int, request: Request, c: Conn) -> s.Digest:
     it is not failed (written meanwhile) or its topic is not active, checked under the digest's
     row lock, or when the schedule is off (no worker runs jobs). Answers with the digest and its
     job."""
-    await _digest(c, digest_id)
+    async with db.read("digest to write again") as c:
+        await _digest(c, digest_id)
     if not request.app.state.config.schedule.enabled:
         raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
-    async with c.transaction():
+    # The taxonomy lock, shared, holds the topic's status still until the job is queued.
+    async with db.write("write digest again", taxonomy="shared") as c:
         row = await store_.get(c, digest_id, lock=True)
         tree = await taxonomy_store.load(c)
         topic = tree.topic(row["topic"]) if tree and row else None
@@ -246,4 +256,4 @@ async def write_again(digest_id: int, request: Request, c: Conn) -> s.Digest:
             raise HTTPException(status_code=409, detail="the digest is not one to write again")
         await jobs_store.write_digest(c, digest_id)
     request.app.state.jobs_wake.set()
-    return await _with_job(c, digest_id)
+    return await _with_job(db, digest_id)

@@ -9,14 +9,20 @@ from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from typing import Annotated, Any
 
-import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse, RedirectResponse
 
-from litwatch import store
 from litwatch.api import integrations as integrations_api
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, Rules, budget_lines, protected, set_token_cookie, token_ok
+from litwatch.api.deps import (
+    Db,
+    Rules,
+    budget_lines,
+    protected,
+    resolve_paper,
+    set_token_cookie,
+    token_ok,
+)
 from litwatch.archive import ArchiveClient, ArchiveError
 from litwatch.core import (
     Cause,
@@ -74,14 +80,14 @@ def _config(request: Request) -> Any:
     return request.app.state.config
 
 
-async def _shown(c: psycopg.AsyncConnection | ReadUnit, slug: str) -> tuple[str, Topic] | None:
+async def _shown(c: ReadUnit, slug: str) -> tuple[str, Topic] | None:
     """The shown topic on class `slug`, with its class's name."""
     tree = await taxonomy_store.load(c)
     topic = next((t for t in tree.shown() if t.slug == slug), None) if tree else None
     return (tree.get(slug).name, topic) if topic else None
 
 
-async def _topic(c: psycopg.AsyncConnection | ReadUnit, slug: str) -> tuple[str, Topic]:
+async def _topic(c: ReadUnit, slug: str) -> tuple[str, Topic]:
     """The shown topic on class `slug`, with its class's name; 404 for any other."""
     found = await _shown(c, slug)
     if found is None:
@@ -89,7 +95,7 @@ async def _topic(c: psycopg.AsyncConnection | ReadUnit, slug: str) -> tuple[str,
     return found
 
 
-async def _known(c: psycopg.AsyncConnection | ReadUnit, paper_id: str) -> None:
+async def _known(c: ReadUnit, paper_id: str) -> None:
     if await papers_store.get(c, paper_id) is None:
         raise HTTPException(status_code=404, detail="no such paper")
 
@@ -190,7 +196,7 @@ def _topics_known(tree: Taxonomy | None, slugs: list[str]) -> None:
 # -- the status line -------------------------------------------------------------------------------
 
 
-async def run_status(request: Request, c: psycopg.AsyncConnection) -> s.RunStatus:
+async def run_status(request: Request, c: ReadUnit) -> s.RunStatus:
     spend = await budget_lines(c, _config(request).budget)
     over = [line.provider for line in spend if line.over]
     return s.RunStatus(**await reading.status(c), over_budget=over)
@@ -218,26 +224,27 @@ def outside_filters(params: s.PapersIn) -> SearchFilters:
 
 
 @router.get("/papers", responses=NOT_FOUND)
-async def papers(request: Request, c: Conn, params: Annotated[s.PapersIn, Query()]) -> s.Papers:
+async def papers(request: Request, db: Db, params: Annotated[s.PapersIn, Query()]) -> s.Papers:
     """Papers: the whole collection, rarest first. A search also asks the search providers, on
     its first page, for papers the collection lacks: the `outside` band. A filter only the
     collection has (topic, depth, a level, saved, code, Weight) leaves the band out; `source`
     keeps one band only."""
-    tree = await taxonomy_store.load(c)
-    _topics_known(tree, params.topic)
-    looks = _looks(tree)
     answer = s.Papers(rows=[], total=0, counts=s.RarityCounts())
-    if params.source != "outside":
-        listed = await reading.papers(
-            c, tree, _query(params), limit=params.limit, offset=params.offset
-        )
-        answer.rows = [_row(tree, looks, r, s.Row) for r in listed.rows]
-        answer.total, answer.counts = listed.total, s.RarityCounts(**listed.rarities)
+    async with db.read("papers") as unit:
+        tree = await taxonomy_store.load(unit)
+        _topics_known(tree, params.topic)
+        looks = _looks(tree)
+        if params.source != "outside":
+            listed = await reading.papers(
+                unit, tree, _query(params), limit=params.limit, offset=params.offset
+            )
+            answer.rows = [_row(tree, looks, r, s.Row) for r in listed.rows]
+            answer.total, answer.counts = listed.total, s.RarityCounts(**listed.rarities)
     if params.q and params.offset == 0 and _shows_outside(params):
         filters = outside_filters(params)
         st = request.app.state
         answer.outside, answer.left_out = await integrations_api.search_outside(
-            c,
+            db,
             params.q,
             filters,
             st.integrations,
@@ -266,7 +273,7 @@ FIGURE_KEPT = "private, max-age=31536000, immutable"
         },
     },
 )
-async def deep_figure(paper_id: str, name: str, c: Conn, v: str | None = None) -> Response:
+async def deep_figure(paper_id: str, name: str, db: Db, v: str | None = None) -> Response:
     """One of the paper's figures its Deep read shows, by the name the read's `fig` block
     cites. With `v` (when the read was written, as the paper page asks) it is that read's figure
     or none, and the answer may be kept; without it, the current read's, fetched again each
@@ -277,7 +284,8 @@ async def deep_figure(paper_id: str, name: str, c: Conn, v: str | None = None) -
             written = datetime.fromisoformat(v)
         except ValueError:
             raise HTTPException(status_code=404, detail="no such figure") from None
-    found = await integrations_store.figure(c, paper_id, name, written)
+    async with db.read("deep figure") as unit:
+        found = await integrations_store.figure(unit, paper_id, name, written)
     if found is None:
         raise HTTPException(status_code=404, detail="no such figure")
     return Response(
@@ -302,6 +310,7 @@ async def deep_figure(paper_id: str, name: str, c: Conn, v: str | None = None) -
 async def pdf(
     paper_id: str,
     request: Request,
+    db: Db,
     version: Annotated[int | None, Query(ge=1, description="This arXiv version's PDF")] = None,
 ) -> Response:
     """The paper's PDF as the owner opens it: from the archive, which is asked for it urgently
@@ -312,8 +321,8 @@ async def pdf(
     `version` asks for that version's PDF, as the deep service does for the version its text
     is of; without it, the version litwatch knows of."""
     archive = request.app.state.archive
-    async with await store.connect(request.app.state.dsn) as c:
-        held = await papers_store.get(c, paper_id)
+    async with db.read("pdf") as unit:
+        held = await papers_store.get(unit, paper_id)
     body = None
     if archive is not None:
         try:
@@ -343,12 +352,12 @@ async def pdf(
         503: {"description": "The archive, asked for a paper litwatch lacks, did not answer"},
     },
 )
-async def paper(paper_id: str, request: Request, c: Conn) -> s.Paper:
+async def paper(paper_id: str, request: Request, db: Db) -> s.Paper:
     """The paper's page; for a paper litwatch has not fetched, the archive's record of it."""
     st = request.app.state
     try:
         found = await paper_page(
-            c, paper_id, st.archive, st.integrations, jobs_run=st.config.schedule.enabled
+            db, paper_id, st.archive, st.integrations, jobs_run=st.config.schedule.enabled
         )
     except ArchiveDownError as exc:
         raise HTTPException(status_code=503, detail=ARCHIVE_DOWN) from exc
@@ -363,7 +372,7 @@ class ArchiveDownError(Exception):
 
 
 async def paper_page(
-    c: psycopg.AsyncConnection,
+    db: DatabaseGate,
     paper_id: str,
     archive: ArchiveClient | None,
     integrations: list[Integration],
@@ -371,15 +380,23 @@ async def paper_page(
     jobs_run: bool = False,
 ) -> s.Paper | None:
     """The paper's page, as /api and /mcp both show it; for a paper litwatch has not fetched,
-    the archive's record of it (`unfetched`); None when neither has it. `jobs_run`: a jobs
-    worker runs (`[schedule] enabled`), so Process can queue a job. Raises
-    `ArchiveDownError`."""
-    # The Process job before the paper: one read done after what it wrote, never before it,
-    # so the page polls until it shows the job's results.
+    the archive's record of it (`unfetched`), asked once the unit has closed; None when neither
+    has it. `jobs_run`: a jobs worker runs (`[schedule] enabled`), so Process can queue a job.
+    Raises `ArchiveDownError`."""
+    async with db.read("paper page") as unit:
+        found = await _stored_page(unit, paper_id, integrations, jobs_run)
+    return found if found is not None else await unfetched(archive, paper_id, integrations)
+
+
+async def _stored_page(
+    c: ReadUnit, paper_id: str, integrations: list[Integration], jobs_run: bool
+) -> s.Paper | None:
+    """The page of a paper litwatch holds, read in one snapshot, so the Process job and the
+    paper agree and the page polls until it shows the job's results; None when it holds none."""
     job = await jobs_store.process_of(c, paper_id)
     found = await reading.paper(c, paper_id)
     if found is None:
-        return await unfetched(archive, paper_id, integrations)
+        return None
     tree = await taxonomy_store.load(c)
     looks = _looks(tree)
     weight = Weight(found["weight"]) if found["weight"] else None
@@ -630,7 +647,7 @@ def _classification(tree: Taxonomy | None, found: dict[str, Any]) -> s.Classific
 
 
 async def _history(
-    c: psycopg.AsyncConnection, looks: dict[str, s.Badge], rows: list[dict[str, Any]]
+    c: ReadUnit, looks: dict[str, s.Badge], rows: list[dict[str, Any]]
 ) -> list[s.HistoryItem]:
     names = await reading.class_names(c, list({r["topic"] for r in rows if r["topic"]}))
     return [
@@ -651,11 +668,12 @@ async def _history(
     },
 )
 async def set_publication(
-    paper_id: str, body: s.PublicationIn, request: Request, c: Conn
+    paper_id: str, body: s.PublicationIn, request: Request, db: Db
 ) -> Publication | None:
     """The owner names the published version by DBLP key or DOI, or says there is none.
     A lookup never overwrites it. A DOI DBLP does not know is kept with the arXiv entry."""
-    await _known(c, paper_id)
+    async with db.read("publication: paper") as unit:
+        await _known(unit, paper_id)
     source = request.app.state.publications
     record = None
     try:
@@ -669,7 +687,8 @@ async def set_publication(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SourceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    await lookups.store_record(c, paper_id, record, by_owner=True)
+    async with db.lend("set publication") as conn:  # transitional: publications move in P4
+        await lookups.store_record(conn, paper_id, record, by_owner=True)
     return record
 
 
@@ -684,9 +703,7 @@ def _cited(row: Any) -> Cited:
     )
 
 
-async def _bibtex(
-    c: psycopg.AsyncConnection, ids: list[str], outside: list[Cited] | None = None
-) -> str:
+async def _bibtex(c: ReadUnit, ids: list[str], outside: list[Cited] | None = None) -> str:
     """Entries from the stored published records, arXiv ones for the rest, then `outside`
     hits as they are, all keyed in one namespace so no two entries share a key. Never
     waits on a lookup (decision 25)."""
@@ -701,7 +718,7 @@ async def _bibtex(
     return entries([*held, *(outside or [])], await publications_store.found(c, ids))
 
 
-async def _matching(c: psycopg.AsyncConnection, query: s.PaperQuery) -> list[str]:
+async def _matching(c: ReadUnit, query: s.PaperQuery) -> list[str]:
     """Every collection paper a Papers filter matches, in its order; none when it asks for
     the papers outside the collection."""
     if query.source == "outside":
@@ -713,29 +730,29 @@ async def _matching(c: psycopg.AsyncConnection, query: s.PaperQuery) -> list[str
 
 
 @router.post("/bibtex", response_class=PlainTextResponse, responses=NOT_FOUND)
-async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
+async def bibtex_selection(body: s.BibtexIn, request: Request, db: Db) -> str:
     """BibTeX for chosen papers. One paper is looked up first, so a copied entry cites the
     published version as soon as DBLP has it; several use what is stored. `cited` are
     papers a search provider found outside the collection: they get arXiv entries from
     what the hit carries, with no fetch, no lookup and nothing written."""
-    if (
-        len(body.ids) == 1
-        and not body.cited
-        and body.filter is None
-        and await papers_store.get(c, body.ids[0])
-    ):
-        await lookups.for_copy(c, request.app.state.publications, body.ids[0])
-    ids = list(body.ids)
-    if body.filter is not None:
-        ids += [i for i in await _matching(c, body.filter) if i not in ids]
-    # The band's hits as the list showed them: none under a filter that leaves the band out.
-    cited = body.cited if body.filter is None or _shows_outside(body.filter) else []
-    outside = [
-        Cited(id=h.id, title=h.title, authors=list(h.authors), year=h.year)
-        for h in cited
-        if h.id not in ids
-    ]
-    return await _bibtex(c, ids, outside)
+    if len(body.ids) == 1 and not body.cited and body.filter is None:
+        async with db.read("bibtex: paper") as unit:
+            held = await papers_store.get(unit, body.ids[0])
+        if held:
+            async with db.lend("bibtex lookup") as conn:  # transitional: publications move in P4
+                await lookups.for_copy(conn, request.app.state.publications, body.ids[0])
+    async with db.read("bibtex") as unit:
+        ids = list(body.ids)
+        if body.filter is not None:
+            ids += [i for i in await _matching(unit, body.filter) if i not in ids]
+        # The band's hits as the list showed them: none under a filter that leaves the band out.
+        cited = body.cited if body.filter is None or _shows_outside(body.filter) else []
+        outside = [
+            Cited(id=h.id, title=h.title, authors=list(h.authors), year=h.year)
+            for h in cited
+            if h.id not in ids
+        ]
+        return await _bibtex(unit, ids, outside)
 
 
 # -- topics ----------------------------------------------------------------------------------------
@@ -745,7 +762,7 @@ async def bibtex_selection(body: s.BibtexIn, request: Request, c: Conn) -> str:
 STRIP = {DigestPeriod.DAY: 15, DigestPeriod.WEEK: 8}
 
 
-async def _strips(c: psycopg.AsyncConnection, topics: list[Topic]) -> dict[str, list[Any]]:
+async def _strips(c: ReadUnit, topics: list[Topic]) -> dict[str, list[Any]]:
     """Each topic's digest strip, oldest first."""
     found: dict[str, list[Any]] = {t.slug: [] for t in topics}
     for period, limit in STRIP.items():
@@ -764,12 +781,13 @@ def _head(tree: Taxonomy, topic: Topic, strip: list[Any]) -> dict[str, Any]:
 
 
 @router.get("/topics")
-async def topics(c: Conn) -> list[s.TopicGroup]:
+async def topics(db: Db) -> list[s.TopicGroup]:
     """The Topics tab: the shown topics grouped Focus, Area, Field, each in the owner's order."""
-    tree = await taxonomy_store.load(c)
-    cards = await reading.topic_cards(c, tree) if tree else {}
-    shown = tree.shown() if tree else []
-    strips = await _strips(c, shown)
+    async with db.read("topics") as unit:
+        tree = await taxonomy_store.load(unit)
+        cards = await reading.topic_cards(unit, tree) if tree else {}
+        shown = tree.shown() if tree else []
+        strips = await _strips(unit, shown)
     return [
         s.TopicGroup(
             depth=depth,
@@ -790,16 +808,18 @@ async def topics(c: Conn) -> list[s.TopicGroup]:
 
 
 @router.get("/topics/{slug}", responses=NOT_FOUND)
-async def topic(slug: str, c: Conn, params: Annotated[s.TopicPapersIn, Query()]) -> s.TopicPage:
+async def topic(slug: str, db: Db, params: Annotated[s.TopicPapersIn, Query()]) -> s.TopicPage:
     """A topic's page: its papers (its subtree's), each as the topic shows it, rarest first."""
-    _, found = await _topic(c, slug)
-    tree = await taxonomy_store.load(c)
-    listed = await reading.topic_papers(
-        c, tree, slug, _query(params), limit=params.limit, offset=params.offset
-    )
+    async with db.read("topic page") as unit:
+        _, found = await _topic(unit, slug)
+        tree = await taxonomy_store.load(unit)
+        listed = await reading.topic_papers(
+            unit, tree, slug, _query(params), limit=params.limit, offset=params.offset
+        )
+        strip = (await _strips(unit, [found]))[found.slug]
     looks = _looks(tree)
     return s.TopicPage(
-        topic=s.TopicHead(**_head(tree, found, (await _strips(c, [found]))[found.slug])),
+        topic=s.TopicHead(**_head(tree, found, strip)),
         rows=[_row(tree, looks, r, s.TopicRow) for r in listed.rows],
         total=listed.total,
         counts=s.RarityCounts(**listed.rarities),
@@ -835,14 +855,14 @@ def _speaks(topic: Topic | None, reason: ReactionReason | None) -> bool:
 
 
 def _owners(
-    c: psycopg.AsyncConnection, rules: Rules, paper_id: str, name: str
+    db: DatabaseGate, rules: Rules, paper_id: str, name: str
 ) -> AbstractAsyncContextManager[word.Change]:
-    """The owner's change of the paper, in a unit `name`'s on the request's connection."""
-    return word.change(DatabaseGate.over(c), paper_id, cause=Cause.OWNER, rules=rules, name=name)
+    """The owner's change of the paper, in a unit named `name`."""
+    return word.change(db, paper_id, cause=Cause.OWNER, rules=rules, name=name)
 
 
 @router.put("/reactions/{paper_id:path}", responses=NOT_FOUND)
-async def react(paper_id: str, body: s.ReactionIn, c: Conn, rules: Rules) -> s.Ack:
+async def react(paper_id: str, body: s.ReactionIn, db: Db, rules: Rules) -> s.Ack:
     """A thumb for the topic of the surface it was given on, replacing the one there. Wrong
     topic and great find on a Focus topic are the owner's word, and say so."""
     try:
@@ -851,7 +871,7 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn, rules: Rules) -> s.A
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    async with _owners(c, rules, paper_id, "react") as change:
+    async with _owners(db, rules, paper_id, "react") as change:
         await _known(change.unit, paper_id)
         name, topic = await _topic(change.unit, body.topic) if body.topic else (None, None)
         await word.react(change.unit, reaction)
@@ -864,10 +884,10 @@ async def react(paper_id: str, body: s.ReactionIn, c: Conn, rules: Rules) -> s.A
 
 
 @router.delete("/reactions/{paper_id:path}")
-async def unreact(paper_id: str, c: Conn, rules: Rules, topic: str | None = None) -> s.Ack:
+async def unreact(paper_id: str, db: Db, rules: Rules, topic: str | None = None) -> s.Ack:
     """Clear a thumb: it takes back its own word and nothing else. A thumb on a topic no longer
     shown can be cleared too; it carried no word, so nothing is said."""
-    async with _owners(c, rules, paper_id, "clear reaction") as change:
+    async with _owners(db, rules, paper_id, "clear reaction") as change:
         thumbs = await word_store.reactions_for(change.unit, paper_id)
         thumb = next((r for r in thumbs if r.topic == topic), None)
         shown = await _shown(change.unit, topic) if thumb and topic else None
@@ -879,20 +899,20 @@ async def unreact(paper_id: str, c: Conn, rules: Rules, topic: str | None = None
 
 
 @router.put("/library/{paper_id:path}", responses=NOT_FOUND)
-async def save(paper_id: str, body: s.SaveIn, c: Conn, rules: Rules) -> s.Ack:
+async def save(paper_id: str, body: s.SaveIn, db: Db, rules: Rules) -> s.Ack:
     """Save or unsave by hand; the newest use outranks every other reason."""
-    async with _owners(c, rules, paper_id, "save") as change:
+    async with _owners(db, rules, paper_id, "save") as change:
         await _known(change.unit, paper_id)
         await word.toggle(change.unit, paper_id, Hand.SAVE if body.saved else Hand.UNSAVE)
     return _ack(change.settled[paper_id])
 
 
 @router.put("/labels/{topic}/{paper_id:path}", responses=NOT_FOUND)
-async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn, rules: Rules) -> s.Ack:
+async def label(topic: str, paper_id: str, body: s.LabelIn, db: Db, rules: Rules) -> s.Ack:
     """The Fit control on a paper's page: the owner's own word on any shown topic (origin
     `reader`). Unsure is stored and counts nowhere."""
     given = Label(paper_id=paper_id, topic=topic, value=body.value, origin=LabelOrigin.READER)
-    async with _owners(c, rules, paper_id, "label") as change:
+    async with _owners(db, rules, paper_id, "label") as change:
         await _topic(change.unit, topic)
         await _known(change.unit, paper_id)
         await word.label(change.unit, given)
@@ -900,9 +920,9 @@ async def label(topic: str, paper_id: str, body: s.LabelIn, c: Conn, rules: Rule
 
 
 @router.delete("/labels/{topic}/{paper_id:path}")
-async def unlabel(topic: str, paper_id: str, c: Conn, rules: Rules) -> s.Ack:
+async def unlabel(topic: str, paper_id: str, db: Db, rules: Rules) -> s.Ack:
     """Tapping the filled segment: the label goes, and the verdict's Fit stands again."""
-    async with _owners(c, rules, paper_id, "clear label") as change:
+    async with _owners(db, rules, paper_id, "clear label") as change:
         await word.unlabel(change.unit, paper_id, topic)
     return _ack(change.settled[paper_id])
 
@@ -910,17 +930,17 @@ async def unlabel(topic: str, paper_id: str, c: Conn, rules: Rules) -> s.Ack:
 @router.post(
     "/misses", responses={**NOT_FOUND, 409: {"description": "Not a Focus topic"}, **ARXIV_SILENT}
 )
-async def report_miss(body: s.MissIn, c: Conn, rules: Rules) -> s.Ack:
+async def report_miss(body: s.MissIn, db: Db, rules: Rules) -> s.Ack:
     """File a miss for a Focus topic: the owner's word, at once, and the paper saved. A paper
     litwatch lacks is fetched first, as Process fetches it, with no transaction open, and
     stored in the report's own, so a refused report stores nothing."""
     try:
-        paper_id, fetched = await misses.resolve(c, body.paper_id)
+        paper_id, fetched = await resolve_paper(db, body.paper_id)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
-    async with _owners(c, rules, paper_id, "report miss") as change:
+    async with _owners(db, rules, paper_id, "report miss") as change:
         name, topic = await _topic(change.unit, body.topic)
         if topic.depth != Depth.FOCUS:
             raise HTTPException(status_code=409, detail="not a Focus topic")

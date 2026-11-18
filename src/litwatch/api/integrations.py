@@ -17,14 +17,14 @@ from fastapi import HTTPException, Query, Request
 
 from litwatch import events
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, Rules, protected
+from litwatch.api.deps import Db, Rules, protected, resolve_paper
 from litwatch.api.jobs import DROPPED
 from litwatch.archive import ArchiveError
 from litwatch.core import FAILED_RUNS, Cause, SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.intake.search import NoAnswerError
 from litwatch.integrations.archive import Archive
 from litwatch.integrations.deep import Deep
@@ -66,11 +66,17 @@ def answers_card_requests(integrations: list[events.Integration]) -> bool:
 
 
 @router.get("/settings/integrations")
-async def status(request: Request, c: Conn) -> list[s.IntegrationCard]:
+async def status(request: Request, db: Db) -> list[s.IntegrationCard]:
     """One card per loaded integration, then one per configured section that is turned off
     (its cursor kept, so its lag shows what turning it on again would hand it). A card shows
     the event it is stuck on, or its failing setup; one that reacts to no event has neither,
     whatever cursor it kept from before."""
+    async with db.read("integrations") as unit:
+        return await cards(request, unit)
+
+
+async def cards(request: Request, c: ReadUnit) -> list[s.IntegrationCard]:
+    """The integrations' cards (`status`), read in `c`: for Settings and the summary."""
     found = {i.name: i for i in loaded(request)}
     reacting = [i.name for i in events.reacting(loaded(request))]
     off = [
@@ -80,7 +86,7 @@ async def status(request: Request, c: Conn) -> list[s.IntegrationCard]:
     ]
     cursors = await outbox.cursors(c, [*reacting, *off])
     stats = request.app.state.search_stats
-    cards = []
+    shown = []
     for name in [*found, *off]:
         integration, cursor = found.get(name), cursors.get(name)
         failing = None
@@ -102,7 +108,7 @@ async def status(request: Request, c: Conn) -> list[s.IntegrationCard]:
                 error=cursor.setup_error,
                 failed_at=cursor.setup_failed_at,
             )
-        cards.append(
+        shown.append(
             s.IntegrationCard(
                 name=name,
                 description=integration.description if integration else None,
@@ -119,7 +125,7 @@ async def status(request: Request, c: Conn) -> list[s.IntegrationCard]:
                 else None,
             )
         )
-    return cards
+    return shown
 
 
 def _known(request: Request, name: str) -> None:
@@ -136,27 +142,30 @@ SKIP_REFUSED = NOT_LOADED | {
 
 
 @router.post("/settings/integrations/{name}/retry", status_code=204, responses=RETRY_REFUSED)
-async def retry(name: str, request: Request, c: Conn) -> None:
+async def retry(name: str, request: Request, db: Db) -> None:
     """Try the failing event, or the failing setup, again now, without waiting out its
     backoff."""
     _known(request, name)
-    if not await outbox.retry(c, name):
+    async with db.write("retry integration") as unit:
+        retried = await outbox.retry(unit, name)
+    if not retried:
         raise HTTPException(status_code=409, detail="nothing is failing")
 
 
 @router.post("/settings/integrations/{name}/skip", responses=SKIP_REFUSED)
-async def skip(name: str, request: Request, c: Conn, event_id: int | None = None) -> s.Failing:
+async def skip(name: str, request: Request, db: Db, event_id: int | None = None) -> s.Failing:
     """Give up on the failing event; the integration goes on with the next. Returns the
     event skipped. `event_id` names the event the owner confirmed: when another one is
     failing by then, nothing is skipped (409)."""
     _known(request, name)
-    cursor = (await outbox.cursors(c, [name])).get(name)
-    skipped = await outbox.skip(c, name, event_id)
+    async with db.write("skip integration event") as unit:
+        cursor = (await outbox.cursors(unit, [name])).get(name)
+        skipped = await outbox.skip(unit, name, event_id)
+        event = await outbox.event(unit, skipped) if skipped is not None else None
     if skipped is None or cursor is None:
         if cursor is not None and cursor.failing is not None and event_id is not None:
             raise HTTPException(status_code=409, detail="another event is failing now")
         raise HTTPException(status_code=409, detail="nothing is failing")
-    event = await outbox.event(c, skipped)
     return s.Failing(
         event_id=skipped,
         type=event.type if event else None,
@@ -171,7 +180,7 @@ async def skip(name: str, request: Request, c: Conn, event_id: int | None = None
 
 @router.get("/events")
 async def changes(
-    c: Conn, after: str = outbox.START.token, limit: int = Query(100, ge=1, le=1000)
+    db: Db, after: str = outbox.START.token, limit: int = Query(100, ge=1, le=1000)
 ) -> s.Changes:
     """The outbox in order, from after a position: for a client that polls instead of taking
     webhooks. Start without `after`, then pass the `next` of each answer to read on. Only
@@ -181,7 +190,8 @@ async def changes(
         position = outbox.Position.parse(after)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    found = await outbox.after(c, position, limit)
+    async with db.read("changes feed") as unit:
+        found = await outbox.after(unit, position, limit)
     following = outbox.Position.of(found[-1]) if found else position
     return s.Changes(events=found, next=following.token)
 
@@ -198,7 +208,7 @@ CARD_REFUSED = {
 
 
 @router.post("/papers/{paper_id:path}/card", status_code=202, responses=CARD_REFUSED)
-async def request_card(paper_id: str, request: Request, c: Conn, rules: Rules) -> s.CardRequested:
+async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) -> s.CardRequested:
     """Ask for a Deep card on this paper, whatever its grade, or for a new one ("Write again")
     when it has one: the request goes through the full-text queue, first in line, and the card
     shows on the paper once it is written. Asking again while one is queued or being written
@@ -208,7 +218,7 @@ async def request_card(paper_id: str, request: Request, c: Conn, rules: Rules) -
     if not answers_card_requests(loaded(request)):
         raise HTTPException(status_code=409, detail="no card provider is configured")
     try:
-        paper_id, fetched = await misses.resolve(c, paper_id)
+        paper_id, fetched = await resolve_paper(db, paper_id)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
@@ -218,7 +228,6 @@ async def request_card(paper_id: str, request: Request, c: Conn, rules: Rules) -
     # stands, before any change, whose settle would ask a running job again (`settle_process`)
     # and run it once more for nothing. Under the paper's locks, so a request in flight has
     # either committed or not started.
-    db = DatabaseGate.over(c)
     async with db.write("request card", taxonomy="shared", papers=[paper_id]) as unit:
         open_pass = await fulltext_store.open_deep(unit, paper_id)
         if (
@@ -252,7 +261,7 @@ async def request_card(paper_id: str, request: Request, c: Conn, rules: Rules) -
 
 
 async def card(
-    c: Any, paper_id: str, integrations: list[events.Integration]
+    c: ReadUnit, paper_id: str, integrations: list[events.Integration]
 ) -> tuple[s.DeepCard | None, s.CardPass | None, bool]:
     """The paper page's Deep card rung: the stored card, shown whatever is loaded; with a card
     provider among the loaded `integrations`, its open pass and whether "Deep read" (or "Write
@@ -325,7 +334,7 @@ async def search_scope(request: Request) -> s.SearchScope:
 
 
 async def search_outside(
-    c: Any,
+    db: DatabaseGate,
     query: str,
     filters: SearchFilters,
     integrations: list[events.Integration],
@@ -336,7 +345,8 @@ async def search_outside(
     """Ask every search provider among `integrations` at once on `pool`, each within
     `timeout`, and count each answer in `stats` (Settings shows them). Returns the hits the
     collection lacks, merged by arXiv id (the first provider to name a paper keeps it), and
-    the names of the providers left out because they failed or were too slow.
+    the names of the providers left out because they failed or were too slow. The providers
+    are asked with no unit open; one read unit then leaves out what the collection holds.
 
     The band keeps each provider's order, the providers in turn (archive.md, Search: the
     archive ranks); asked for the newest (`filters.sort`), it is newest first across them."""
@@ -364,8 +374,11 @@ async def search_outside(
             continue
         for hit in answer:
             hits.setdefault(hit.id, (provider.name, hit))
-    held = await c.execute("SELECT id FROM papers WHERE id = ANY(%s)", (list(hits),))
-    for row in await held.fetchall():
+    async with db.read("search outside: held") as unit:
+        held = await (
+            await unit.execute("SELECT id FROM papers WHERE id = ANY(%s)", (list(hits),))
+        ).fetchall()
+    for row in held:
         hits.pop(row["id"])
     rows = [
         s.OutsideRow(

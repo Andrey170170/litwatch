@@ -20,7 +20,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, answering, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, answering, paper
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -35,8 +35,7 @@ async def client(conn):
     await papers_store.upsert(conn, [P, Q])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, Config())
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test", headers=AUTH) as c:
+    async with AppClient(app, base_url="http://test", headers=AUTH) as c:
         yield c
 
 
@@ -895,9 +894,7 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
     )
     archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
     app = create_app(dsn, TOKEN, Config(), archive=archive)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTH
-    ) as c:
+    async with AppClient(app, base_url="http://t", headers=AUTH) as c:
         page = (await c.get(f"/api/papers/{pid}")).json()
         assert (page["title"], page["authors"], page["abstract"]) == (
             "Unfetched",
@@ -926,8 +923,7 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
         assert (page["stored"], page["next_run"]) == (True, False)
     for given in (None, down):
         app = create_app(dsn, TOKEN, Config(), archive=given)
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=AUTH) as c:
+        async with AppClient(app, base_url="http://t", headers=AUTH) as c:
             # No archive: the paper is unknown. An archive that cannot answer says nothing of
             # the paper: a 503, never the missing paper's 404 (L5-8).
             unknown = await c.get("/api/papers/2610.07777")
@@ -962,9 +958,7 @@ async def test_an_archive_paper_page_ends_at_its_deadline_however_the_archive_tr
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     archive = ArchiveClient(f"http://127.0.0.1:{slow_arxiv.server_port}", "archive-token")
     app = create_app(dsn, TOKEN, Config(), archive=archive)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://t", headers=AUTH
-    ) as c:
+    async with AppClient(app, base_url="http://t", headers=AUTH) as c:
         answer = await asyncio.wait_for(c.get("/api/papers/2610.09999"), 3)
     assert answer.status_code == 503
 
@@ -987,8 +981,7 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
     archive.wait_seconds = 0
     for given in (archive, None):
         app = create_app(dsn, TOKEN, Config(), archive=given)
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=AUTH) as c:
+        async with AppClient(app, base_url="http://t", headers=AUTH) as c:
             page = (await c.get(f"/api/papers/{P.id}")).json()
             assert page["pdf_url"] == f"/api/papers/{P.id}/pdf"
             opened = await c.get(page["pdf_url"])
@@ -1017,9 +1010,8 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
         "http://archive.test", "archive-token", http=mock(hang), wait_seconds=0.2
     )
     app = create_app(dsn, TOKEN, Config(), archive=hung_archive)
-    transport = httpx.ASGITransport(app=app)
     monkeypatch.setattr("litwatch.api.reading.PDF_READ_SLACK", 0.3)
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=AUTH) as c:
+    async with AppClient(app, base_url="http://t", headers=AUTH) as c:
         for pid in (P.id, "2610.05555"):  # held, then known only by the archive's record
             hung = await asyncio.wait_for(c.get(f"/api/papers/{pid}/pdf"), 3)
             assert hung.status_code == 307, pid

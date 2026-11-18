@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-import httpx
 import pytest
 
 from litwatch import grading, store
@@ -26,7 +25,7 @@ from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
-from tests.conftest import FAITH, TREE, paper
+from tests.conftest import FAITH, TREE, AppClient, paper
 from tests.fakes import BatchingProvider
 from tests.test_reruns import COST, Costed, Priced, charged, work_out
 from tests.test_steps import CONFIG, Scripted, decision, rows
@@ -376,8 +375,8 @@ async def test_quality_shows_recall_from_the_latest_replay_and_the_report_names_
     r = await start(conn, models)
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, "t", Config())
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
+    async with AppClient(
+        app,
         base_url="http://t",
         headers={"authorization": "Bearer t"},
     ) as client:
@@ -436,9 +435,8 @@ async def priced(conn, monkeypatch, labels):
 async def api(conn, config=SCHEDULED):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, "t", config)
-    transport = httpx.ASGITransport(app=app)
     headers = {"authorization": "Bearer t"}
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+    async with AppClient(app, base_url="http://t", headers=headers) as c:
         yield c
 
 

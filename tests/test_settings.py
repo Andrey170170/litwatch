@@ -11,7 +11,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
 from tests import settling
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, paper
 
 TOKEN = "s3cret"
 P = paper("2610.00001", title="Faithful traces", abstract="Chain-of-thought omits steps.")
@@ -24,9 +24,8 @@ async def client(conn):
     await papers_store.upsert(conn, [P, Q])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, Config())
-    transport = httpx.ASGITransport(app=app)
     headers = {"authorization": f"Bearer {TOKEN}"}
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+    async with AppClient(app, base_url="http://t", headers=headers) as c:
         yield c
 
 

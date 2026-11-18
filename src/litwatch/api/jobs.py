@@ -14,11 +14,11 @@ from typing import Annotated, Any
 from fastapi import HTTPException, Query, Request
 
 from litwatch.api import schemas as s
-from litwatch.api.deps import Conn, Rules, protected
+from litwatch.api.deps import Db, Rules, protected, resolve_paper
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Cause, Topic
 from litwatch.feedback import misses, word
-from litwatch.gates.database import DatabaseGate, ReadUnit
+from litwatch.gates.database import Connection, DatabaseGate, ReadUnit
 from litwatch.intake.search import NoAnswerError
 from litwatch.jobs import replays, reruns
 from litwatch.store import failures, quality
@@ -109,8 +109,9 @@ def _job(row: dict[str, Any]) -> s.Job:
     )
 
 
-async def _listing(c: Conn) -> s.Jobs:
-    rows = await jobs_store.listing(c, DONE_SHOWN, FAILED_RUNS)
+async def _listing(db: DatabaseGate) -> s.Jobs:
+    async with db.read("jobs") as unit:
+        rows = await jobs_store.listing(unit, DONE_SHOWN, FAILED_RUNS)
     groups: dict[str, list[dict[str, Any]]] = {
         name: [r for r in rows if r["state"] in states] for name, states in _GROUPS.items()
     }
@@ -121,9 +122,9 @@ async def _listing(c: Conn) -> s.Jobs:
 
 
 @router.get("")
-async def jobs(c: Conn) -> s.Jobs:
+async def jobs(db: Db) -> s.Jobs:
     """The jobs and the Deep cards asked for, in the Jobs page's groups."""
-    return await _listing(c)
+    return await _listing(db)
 
 
 PROCESS_REFUSED = {
@@ -137,9 +138,7 @@ PROCESS_REFUSED = {
 
 
 @router.post("/process", status_code=202, responses=PROCESS_REFUSED)
-async def process(
-    body: s.ProcessIn, request: Request, c: Conn, rules: Rules
-) -> s.ProcessJob | None:
+async def process(body: s.ProcessIn, request: Request, db: Db, rules: Rules) -> s.ProcessJob | None:
     """Process a paper outside the collection now (D1): fetch it from arXiv when litwatch lacks
     it, with no transaction open, then store it and queue its Process job in one. Asked again,
     it answers with the job already queued or running, changing nothing (its paper classified
@@ -149,7 +148,7 @@ async def process(
     kept. With the schedule off no worker runs jobs: the paper is fetched only, for the next run,
     and the answer is null."""
     try:
-        paper_id, fetched = await misses.resolve(c, body.paper_id)
+        paper_id, fetched = await resolve_paper(db, body.paper_id)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
@@ -159,7 +158,6 @@ async def process(
     # running one again (`settle_process`), and it would run once more for nothing. Under the
     # paper's locks, so a Process in flight (a double click) has either committed its job or
     # not started.
-    db = DatabaseGate.over(c)
     async with db.write("process paper", taxonomy="shared", papers=[paper_id]) as unit:
         found = await jobs_store.process_of(unit, paper_id, lock=True)
         if (
@@ -209,7 +207,7 @@ WHERE = {"offered": "under Not run", "tonight": "on tonight's run"}
 
 
 async def _offered(
-    c: Conn,
+    c: ReadUnit,
     config: Config,
     slug: str,
     scopes: list[s.RerunScope],
@@ -259,19 +257,20 @@ async def _offered(
 async def rerun_offer(
     topic: str,
     request: Request,
-    c: Conn,
+    db: Db,
     scopes: Annotated[list[s.RerunScope], Query()] = [],  # noqa: B006 (FastAPI copies it)
     since: date | None = None,
     until: date | None = None,
 ) -> s.RerunOffer:
     """The re-run offer after an edit of the topic: each scope with its papers and estimate, and
     the chosen `scopes` together (a date range from `since` to `until`, both included)."""
-    _, offer, _ = await _offered(c, request.app.state.config, topic, scopes, since, until)
+    async with db.read("re-run offer") as unit:
+        _, offer, _ = await _offered(unit, request.app.state.config, topic, scopes, since, until)
     return offer
 
 
 @router.post("/reruns", status_code=201, responses=RERUN_REFUSED)
-async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
+async def rerun(body: s.RerunIn, request: Request, db: Db) -> s.Jobs:
     """Run the offer's re-run now (`run`), or keep it under Not run (Not now). Its papers are
     those of its scopes as they stand now; it grades them under the topic's version now (D3),
     and fails should the topic be edited before its grading is done. The same re-run not ended
@@ -282,9 +281,10 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
     config = request.app.state.config
     if body.run and not config.schedule.enabled:
         raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
-    topic, offer, chosen = await _offered(
-        c, config, body.topic, body.scopes, body.since, body.until
-    )
+    async with db.read("re-run: offer") as unit:
+        topic, offer, chosen = await _offered(
+            unit, config, body.topic, body.scopes, body.since, body.until
+        )
     if not chosen:
         raise HTTPException(status_code=409, detail="the scopes name no paper")
     scope = {
@@ -297,7 +297,7 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
         "papers": chosen,
     }
     state = "queued" if body.run else "offered"
-    async with c.transaction():
+    async with db.write("re-run") as c:
         # Asked again after a lost reply, the same re-run is found, not made twice; Run puts
         # one under Not run in the queue, under the ceiling given, as Run now on Jobs does.
         # Else the one found is adopted only when it already is what was asked, so the answer's
@@ -322,7 +322,7 @@ async def rerun(body: s.RerunIn, request: Request, c: Conn) -> s.Jobs:
                 )
     if body.run:
         request.app.state.jobs_wake.set()
-    return await _listing(c)
+    return await _listing(db)
 
 
 # -- Overview's Run replay -----------------------------------------------------------------------
@@ -349,7 +349,7 @@ def _replay_offer(o: replays.Offer) -> s.ReplayOffer:
     )
 
 
-async def _offer(c: Conn, config: Config) -> replays.Offer:
+async def _offer(c: Connection, config: Config) -> replays.Offer:
     try:
         return await replays.offer(c, config)
     except ValueError as exc:
@@ -357,17 +357,18 @@ async def _offer(c: Conn, config: Config) -> replays.Offer:
 
 
 @router.get("/replays/offer", responses=REPLAY_REFUSED)
-async def replay_offer(request: Request, c: Conn) -> s.ReplayOffer:
+async def replay_offer(request: Request, db: Db) -> s.ReplayOffer:
     """What Overview's Run replay would do: answer with the replay already running, go on with
     one its ceiling stopped, or start a new one of every cohort's labels, with what it would
     cost."""
-    async with c.transaction():
+    # Transitional: the replays move onto the gate in P4, and their transaction with them.
+    async with db.lend("replay offer") as c, c.transaction():
         o = await _offer(c, request.app.state.config)
     return _replay_offer(o)
 
 
 @router.post("/replays", status_code=201, responses=REPLAY_REFUSED)
-async def run_replay(body: s.ReplayIn, request: Request, c: Conn) -> s.Jobs:
+async def run_replay(body: s.ReplayIn, request: Request, db: Db) -> s.Jobs:
     """Run replay under the ceiling given: a dry run that writes the evaluation tables only.
     Asked again while a replay is queued or running, it answers with it, changing nothing; a
     replay its ceiling stopped goes on, under a ceiling above what it spent; else a new replay
@@ -377,7 +378,8 @@ async def run_replay(body: s.ReplayIn, request: Request, c: Conn) -> s.Jobs:
     config = request.app.state.config
     if not config.schedule.enabled:
         raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
-    async with c.transaction():
+    # Transitional, as in `replay_offer`.
+    async with db.lend("run replay") as c, c.transaction():
         o = await _offer(c, config)
         if o.running is None:
             if o.job is not None and body.ceiling <= o.spent:
@@ -390,7 +392,7 @@ async def run_replay(body: s.ReplayIn, request: Request, c: Conn) -> s.Jobs:
                 raise HTTPException(status_code=409, detail="no labelled paper in the database")
             await replays.make(c, config, o, body.ceiling)
     request.app.state.jobs_wake.set()
-    return await _listing(c)
+    return await _listing(db)
 
 
 async def _above_spent(c: ReadUnit, job: dict[str, Any], ceiling: float | None) -> None:
@@ -406,7 +408,7 @@ async def _above_spent(c: ReadUnit, job: dict[str, Any], ceiling: float | None) 
 
 @router.post("/{job_id}/{action}", responses=JOB_REFUSED)
 async def act(
-    job_id: int, action: s.JobAction, request: Request, c: Conn, body: s.JobRun | None = None
+    job_id: int, action: s.JobAction, request: Request, db: Db, body: s.JobRun | None = None
 ) -> s.Jobs:
     """Run now, With tonight's run or Discard a job not run; Try again (`again`) a failed one,
     a Process job only while no step of its paper waits on the owner, checked under the paper's
@@ -419,10 +421,10 @@ async def act(
     ceiling = body.ceiling if body else None
     schedule_on = request.app.state.config.schedule.enabled
     # Read first for the locks its unit names: a job's kind and papers never change.
-    job = await jobs_store.get(c, job_id)
+    async with db.read(f"job {action}: kind") as unit:
+        job = await jobs_store.get(unit, job_id)
     again = job is not None and action == "again" and job["kind"] == "process"
     papers = job["scope"]["papers"] if again else []
-    db = DatabaseGate.over(c)
     async with db.write(f"job {action}", taxonomy="shared", papers=papers) as unit:
         if again and await failures.waits_on_owner(unit, papers, FAILED_RUNS):
             raise HTTPException(status_code=409, detail=WAITS)
@@ -447,4 +449,4 @@ async def act(
             await fulltext_store.release_job(unit, job_id)
     if to == "queued":
         request.app.state.jobs_wake.set()
-    return await _listing(c)
+    return await _listing(db)

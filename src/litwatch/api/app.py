@@ -24,6 +24,7 @@ from litwatch.core import (
 from litwatch.events import Integration, dispatch
 from litwatch.feedback import word
 from litwatch.fulltext import deep as deep_passes
+from litwatch.gates.database import DatabaseGate
 from litwatch.jobs import scheduler, worker
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.publications import Dblp, PublicationSource
@@ -34,6 +35,14 @@ WEB = Path(str(resources.files("litwatch.api").joinpath("web")))
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """The app's Database gate, open while it serves: opened before anything starts, closed
+    after everything has stopped."""
+    async with app.state.db, _running(app):
+        yield
+
+
+@asynccontextmanager
+async def _running(app: FastAPI) -> AsyncIterator[None]:
     """Start the scheduler and the jobs worker with the service when the configuration enables
     them, with the full-text worker when an archive is configured too (it calls models and has
     the archive fetch, so, like the schedule, it waits for cutover) and the Deep card worker
@@ -124,7 +133,8 @@ def create_app(
     archive: ArchiveClient | None = None,
     mcp_token: str | None = None,
 ) -> FastAPI:
-    """The app over one database. Every request but the health check and signing in needs
+    """The app over one database, through one Database gate (`app.state.db`), which its
+    lifespan opens and closes. Every request but the health check and signing in needs
     the shared token, as a bearer header or the cookie set by `/api/session`; `read_token`,
     when given, may only read papers (`deps.READABLE`). `integrations` are the loaded ones:
     the dispatcher delivers to those that react to events, search asks those that are search
@@ -138,6 +148,8 @@ def create_app(
         title="litwatch", docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lifespan
     )
     app.state.dsn, app.state.token, app.state.read_token = dsn, token, read_token
+    # The routes, MCP and the monitor use the gate; the loops still take `dsn` until A1's P4.
+    app.state.db = DatabaseGate(dsn)
     app.state.config, app.state.gateway = config or Config(), gateway
     app.state.publications = publications or Dblp()
     app.state.integrations = integrations or []

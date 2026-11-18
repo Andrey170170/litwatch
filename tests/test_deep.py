@@ -9,7 +9,6 @@ import contextlib
 import json
 from datetime import UTC, datetime, timedelta
 
-import httpx
 import pytest
 
 from litwatch import events, store
@@ -41,6 +40,7 @@ from litwatch.core.fulltext import (
 )
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
+from litwatch.gates.database import DatabaseGate
 from litwatch.intake import search
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
@@ -60,6 +60,7 @@ from tests.conftest import (
     INTERP,
     RUST,
     TREE,
+    AppClient,
     answering,
     fixture_read,
     paper,
@@ -737,9 +738,7 @@ async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(d
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     app = create_app(dsn, TOKEN, Config(), integrations=[d], read_token="r3ad")
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as http:
+    async with AppClient(app, base_url="http://test") as http:
         base = f"/api/papers/{P.id}/deep/figures"
         assert (await http.get(f"{base}/methodology_by_step")).status_code == 401
         read_token = {"Authorization": "Bearer r3ad"}
@@ -795,9 +794,7 @@ async def test_the_read_token_fetches_a_papers_pdf(db):
     fake = FakeArchive(records={P.id: 2})
     fake.pdfs[P.id] = b"%PDF-1.7 the paper"
     app = create_app(dsn, TOKEN, Config(), read_token="r3ad", archive=archive(fake))
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as http:
+    async with AppClient(app, base_url="http://test") as http:
         got = await http.get(f"/api/papers/{P.id}/pdf", headers={"Authorization": "Bearer r3ad"})
         assert got.status_code == 200 and got.content == b"%PDF-1.7 the paper"
         assert got.headers["content-type"] == "application/pdf"
@@ -923,7 +920,7 @@ async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_que
 
 
 async def deep_status(conn, d: Deep) -> dict:
-    found = await monitor.facts(conn, Config(), [d], None)
+    found = await monitor.facts(DatabaseGate.over(conn), Config(), [d], None)
     return next(c for c in monitor.components(found, Config()) if c["id"] == "deep")
 
 
@@ -1466,8 +1463,8 @@ async def test_a_pick_whose_settle_was_missed_is_swept_up_whatever_the_limit(db)
 def client(conn, integrations, config: Config | None = None) -> tuple:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, config or Config(), integrations=integrations)
-    http = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
+    http = AppClient(
+        app,
         base_url="http://test",
         headers={"Authorization": f"Bearer {TOKEN}"},
     )

@@ -1,21 +1,20 @@
-"""What every route needs: a connection, and the shared token (or the read token); what a
-route that changes papers settles them by; and the month's spend against budget, which the
-status line and Quality both show."""
+"""What every route needs: the app's Database gate, and the shared token (or the read token);
+what a route that changes papers settles them by; and the month's spend against budget, which
+the status line and Quality both show."""
 
 from __future__ import annotations
 
 import hmac
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated
 
-import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
-from litwatch import store
 from litwatch.config import Budget
+from litwatch.core import Paper
 from litwatch.core.budget import Spend, month_start, spend
-from litwatch.feedback import word
+from litwatch.feedback import misses, word
+from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.store import calls
 
 COOKIE = "litwatch_token"
@@ -23,11 +22,6 @@ COOKIE = "litwatch_token"
 # What the read token may do: search and read papers and fetch a paper's PDF, as the deep
 # service's agent does (its figures for a PDF-only paper are cut from the PDF's pages).
 READABLE = {"/api/papers", "/api/papers/{paper_id:path}", "/api/papers/{paper_id:path}/pdf"}
-
-
-async def _conn(request: Request) -> AsyncIterator[psycopg.AsyncConnection]:
-    async with await store.connect(request.app.state.dsn) as conn:
-        yield conn
 
 
 def _same(given: str | None, token: str | None) -> bool:
@@ -54,7 +48,13 @@ def authorised(request: Request) -> None:
     raise HTTPException(status_code=401, detail="missing or wrong token")
 
 
-Conn = Annotated[psycopg.AsyncConnection, Depends(_conn)]
+def _db(request: Request) -> DatabaseGate:
+    return request.app.state.db
+
+
+# The app's Database gate, which the app opens and closes in its lifespan: a route opens its
+# units on it, or passes it to a Service that takes `db`.
+Db = Annotated[DatabaseGate, Depends(_db)]
 
 
 def _rules(request: Request) -> word.Rules:
@@ -86,8 +86,16 @@ def set_token_cookie(request: Request, response: Response, token: str) -> None:
     )
 
 
-async def budget_lines(conn: psycopg.AsyncConnection, budget: Budget) -> list[Spend]:
+async def resolve_paper(db: DatabaseGate, text: str) -> tuple[str, Paper | None]:
+    """`misses.resolve`, for an owner action on a paper litwatch may lack (Process, a Deep read,
+    a miss): on a connection the gate lends outside any unit, since it may wait on arXiv.
+    Transitional: the lend goes when misses moves onto the gate (A1's P5)."""
+    async with db.lend("resolve paper") as conn:
+        return await misses.resolve(conn, text)
+
+
+async def budget_lines(unit: ReadUnit, budget: Budget) -> list[Spend]:
     """Month-to-date spend per provider from the call journal, projected to the month's end,
     against `[budget]`."""
     now = datetime.now(UTC)
-    return spend(await calls.spent_since(conn, month_start(now)), budget.by_provider, now)
+    return spend(await calls.spent_since(unit, month_start(now)), budget.by_provider, now)

@@ -8,7 +8,7 @@ from litwatch.api import create_app
 from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import FAITH, TREE, paper
+from tests.conftest import FAITH, TREE, AppClient, paper
 
 TOKEN = "s3cret"
 
@@ -20,10 +20,10 @@ READ_TOKEN = "r3ad"
 async def client(conn):
     await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, [paper("2609.1"), paper("2609.2"), paper("2609.3")])
-    # The app opens its own connections; point them at the test schema.
+    # The app's gate opens its own connections; point them at the test schema.
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    transport = httpx.ASGITransport(app=create_app(dsn, TOKEN, read_token=READ_TOKEN))
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    app = create_app(dsn, TOKEN, read_token=READ_TOKEN)
+    async with AppClient(app, base_url="http://test") as c:
         yield c
 
 
@@ -77,7 +77,7 @@ async def test_a_good_bearer_header_works_beside_a_stale_cookie(client):
     assert (await client.get("/api/summary", headers=wrong_scheme)).status_code == 401
 
 
-def _web(app) -> httpx.AsyncClient:
+def _web(app) -> httpx.AsyncClient:  # the web app's files: no database
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 

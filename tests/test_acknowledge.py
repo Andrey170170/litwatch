@@ -5,7 +5,6 @@ acknowledged. Deep notes (decision 82) are acknowledged for the card shown, and 
 
 from datetime import date, datetime, timedelta
 
-import httpx
 import pytest
 
 from litwatch.api import create_app
@@ -19,7 +18,7 @@ from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
-from tests.conftest import FAITH, TREE, paper
+from tests.conftest import FAITH, TREE, AppClient, paper
 
 TOKEN = "s3cret"
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation in CoT.")
@@ -38,9 +37,8 @@ async def client(conn):
     )
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, Config())
-    transport = httpx.ASGITransport(app=app)
     headers = {"authorization": f"Bearer {TOKEN}"}
-    async with httpx.AsyncClient(transport=transport, base_url="http://t", headers=headers) as c:
+    async with AppClient(app, base_url="http://t", headers=headers) as c:
         yield c
 
 

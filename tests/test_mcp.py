@@ -22,13 +22,14 @@ from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import Publication, Taxonomy
 from litwatch.core.digests import DigestPeriod, DigestRole, DigestState
+from litwatch.gates.database import DatabaseGate
 from litwatch.integrations.archive import Archive
 from litwatch.jobs import publications as lookups
 from litwatch.store import digests as digests_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, fixture_read, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, fixture_read, paper
 from tests.fakes_http import FakeArchive, mock
 from tests.test_archive_text import a_pdf
 from tests.test_reading import P, Q, analyse, classify, grade
@@ -322,7 +323,8 @@ async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, s
     digest = await _digest(
         conn, FAITH, DigestPeriod.DAY, date(2026, 10, 14), [_shown(P, DigestRole.PICK)]
     )
-    async with await mcp_api.connect(_dsn(conn)) as c:
+    # Every tool reads in the app's read units, where a write fails rather than lands.
+    async with DatabaseGate(conn.test_dsn, conn.test_schema) as db, db.read("mcp") as c:
         assert (await papers_store.get(c, P.id)).id == P.id
         with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
             await papers_store.upsert(c, [paper("2610.09998")])
@@ -777,8 +779,7 @@ async def test_arguments_no_query_can_take_are_refused_and_not_counted_as_failur
 
 async def test_an_mcp_without_its_token_has_no_component_or_metrics(conn):
     app = create_app(_dsn(conn), TOKEN)
-    transport = httpx.ASGITransport(create_monitor(app))
-    async with httpx.AsyncClient(transport=transport, base_url="http://m") as monitor:
+    async with AppClient(create_monitor(app), of=app, base_url="http://m") as monitor:
         components = (await monitor.get("/status")).json()["components"]
         assert "mcp" not in {c["id"] for c in components}
         assert "litwatch_mcp" not in (await monitor.get("/metrics")).text

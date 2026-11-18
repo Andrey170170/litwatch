@@ -1,6 +1,7 @@
 """The scheduler: when a job is due, and that a restart neither repeats nor forgets a run."""
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -111,6 +112,7 @@ async def test_shutdown_waits_for_the_job_in_progress_to_finish_its_record(monke
 
     monkeypatch.setattr(scheduler, "run_forever", forever)
     app = create_app("postgresql://unused", "t", Config(schedule=Schedule(enabled=True)))
+    app.state.db = contextlib.nullcontext()  # no database: the gate the lifespan opens
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0)
     assert recorded == ["finished"]

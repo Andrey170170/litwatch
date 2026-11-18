@@ -5,7 +5,6 @@ provider failed for its account or for the night; one stuck paper is the app's a
 
 from datetime import UTC, datetime, time, timedelta
 
-import httpx
 import pytest
 from prometheus_client.parser import text_string_to_metric_families
 from pydantic import BaseModel
@@ -21,7 +20,7 @@ from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
-from tests.conftest import FAITH, INTERP, TREE, paper
+from tests.conftest import FAITH, INTERP, TREE, AppClient, paper
 from tests.fakes import ScriptedProvider
 
 STOPPED = {
@@ -44,8 +43,8 @@ def keys(monkeypatch):
 @pytest.fixture
 async def monitor(conn):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_monitor(create_app(dsn, "t0ken"))
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://m") as c:
+    app = create_app(dsn, "t0ken")
+    async with AppClient(create_monitor(app), of=app, base_url="http://m") as c:
         yield c
 
 
