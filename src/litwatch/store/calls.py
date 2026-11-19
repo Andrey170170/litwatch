@@ -3,17 +3,16 @@ last said, its latest account error and reply (`provider_observations`)."""
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
 
+from litwatch.gates.database import DatabaseGate, Query
 from litwatch.llm.types import Usage
 
 RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and accounted for
-RETALLY_LOCK = 7213912  # advisory lock namespace, beside jobs.lock.RUN_LOCK
 EVAL = "eval"  # an evaluation run's kind: its calls say nothing to the status document
 
 # What a provider said, kept in `provider_observations` by the same statement as the call row it
@@ -36,48 +35,60 @@ _ACCOUNT_ERROR = (
 
 
 class CallJournal:
-    """One run's calls. Give it a connection of its own: concurrent calls write here while
-    the job's connection is inside a transaction. Without `observes` (an evaluation run, which
-    writes its own tables only) it keeps no provider observations."""
+    """One run's calls, each read and write a short unit of its own on `db`: calls finish while
+    the job works, and no model call runs inside a unit. Without `observes` (an evaluation run,
+    which writes its own tables only) it keeps no provider observations."""
 
-    def __init__(
-        self, conn: psycopg.AsyncConnection, run_id: int, *, observes: bool = True
-    ) -> None:
-        self.conn, self.run_id, self.observes = conn, run_id, observes
-        self._retallying = asyncio.Lock()  # the connection holds one retally's lock at a time
+    def __init__(self, db: DatabaseGate, run_id: int, *, observes: bool = True) -> None:
+        self.db, self.run_id, self.observes = db, run_id, observes
+
+    async def _one(self, name: str, query: Query, params: Any = None) -> dict[str, Any] | None:
+        """The first row of a read, in a read unit of its own."""
+        async with self.db.read(f"journal: {name}") as unit:
+            return await (await unit.execute(query, params)).fetchone()
+
+    async def _all(self, name: str, query: Query, params: Any = None) -> list[dict[str, Any]]:
+        async with self.db.read(f"journal: {name}") as unit:
+            return await (await unit.execute(query, params)).fetchall()
+
+    async def _write(self, name: str, query: Query, params: Any = None) -> dict[str, Any] | None:
+        """A write, in a write unit of its own; the first row it returns, if any."""
+        async with self.db.write(f"journal: {name}") as unit:
+            cur = await unit.execute(query, params)
+            return await cur.fetchone() if cur.description else None
 
     async def cached(self, key: str) -> dict[str, Any] | None:
-        return await (
-            await self.conn.execute(
-                "SELECT id, output, usage FROM inference_calls "
-                "WHERE request_key = %s AND output IS NOT NULL AND invalidated_at IS NULL "
-                "ORDER BY id LIMIT 1",
-                (key,),
-            )
-        ).fetchone()
+        return await self._one(
+            "cached",
+            "SELECT id, output, usage FROM inference_calls "
+            "WHERE request_key = %s AND output IS NOT NULL AND invalidated_at IS NULL "
+            "ORDER BY id LIMIT 1",
+            (key,),
+        )
 
     async def start(
         self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
     ) -> int:
         """A call about to be sent, to `model` by provider `via`: its row, before any reply."""
-        row = await (
-            await self.conn.execute(
-                "INSERT INTO inference_calls (run_id, operation, request_key, usage, paper_id) "
-                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                (
-                    self.run_id,
-                    role,
-                    key,
-                    Jsonb(Usage(model=model, via=via).model_dump(mode="json")),
-                    paper_id,
-                ),
-            )
-        ).fetchone()
+        row = await self._write(
+            "start",
+            "INSERT INTO inference_calls (run_id, operation, request_key, usage, paper_id) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (
+                self.run_id,
+                role,
+                key,
+                Jsonb(Usage(model=model, via=via).model_dump(mode="json")),
+                paper_id,
+            ),
+        )
+        assert row is not None
         return row["id"]
 
     async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None:
         """The calls went out in `provider`'s batch `batch_id`."""
-        await self.conn.execute(
+        await self._write(
+            "batched",
             "UPDATE inference_calls SET batch_id = %s, "
             "usage = usage || jsonb_build_object('via', %s::text) WHERE id = ANY(%s)",
             (batch_id, provider, call_ids),
@@ -87,33 +98,32 @@ class CallJournal:
         """The newest call sent in a batch with this request and not yet settled (no output, no
         error): a run started again waits on its batch instead of paying again. Anthropic keeps
         a batch's results for 29 days; `RESULTS_KEPT` stays inside that."""
-        return await (
-            await self.conn.execute(
-                "SELECT id, batch_id FROM inference_calls WHERE request_key = %s "
-                "AND batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
-                "AND started_at > now() - %s ORDER BY id DESC LIMIT 1",
-                (key, RESULTS_KEPT),
-            )
-        ).fetchone()
+        return await self._one(
+            "in batch",
+            "SELECT id, batch_id FROM inference_calls WHERE request_key = %s "
+            "AND batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
+            "AND started_at > now() - %s ORDER BY id DESC LIMIT 1",
+            (key, RESULTS_KEPT),
+        )
 
     async def open_batches(self) -> list[dict[str, Any]]:
         """The batches with calls not yet answered or charged, with the provider each went to:
         a dead run's, or one given up on after a deadline, whose charges are read when they
         end."""
-        return await (
-            await self.conn.execute(
-                "SELECT batch_id, min(usage->>'via') AS provider FROM inference_calls "
-                "WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
-                "AND usage->>'cost' IS NULL AND started_at > now() - %s "
-                "GROUP BY batch_id ORDER BY batch_id",
-                (RESULTS_KEPT,),
-            )
-        ).fetchall()
+        return await self._all(
+            "open batches",
+            "SELECT batch_id, min(usage->>'via') AS provider FROM inference_calls "
+            "WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
+            "AND usage->>'cost' IS NULL AND started_at > now() - %s "
+            "GROUP BY batch_id ORDER BY batch_id",
+            (RESULTS_KEPT,),
+        )
 
     async def gone(self, batch_id: str) -> None:
         """Batch `batch_id` is gone from its provider (deleted, or the key is another
         workspace's): it never answers, so its calls not yet settled are settled with that."""
-        await self.conn.execute(
+        await self._write(
+            "batch gone",
             "UPDATE inference_calls SET error = 'provider: the batch is gone' "
             "WHERE batch_id = %s AND output IS NULL AND error IS NULL "
             "AND usage->>'cost' IS NULL",
@@ -128,14 +138,16 @@ class CallJournal:
         did not answer it, and its call is settled with that, or with `error` (an account
         error)."""
         if usage is None:
-            await self.conn.execute(
+            await self._write(
+                "batch answered nothing",
                 "UPDATE inference_calls SET error = %s "
                 "WHERE batch_id = %s AND request_key = %s AND output IS NULL AND error IS NULL "
                 "AND usage->>'cost' IS NULL",
                 (error or "provider: the batch did not answer it", batch_id, key),
             )
             return
-        cur = await self.conn.execute(
+        row = await self._write(
+            "batch answered",
             "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
             "responded_at = clock_timestamp() WHERE id = (SELECT min(id) FROM inference_calls "
             "WHERE batch_id = %(batch)s AND request_key = %(key)s AND usage->>'cost' IS NULL) "
@@ -143,18 +155,19 @@ class CallJournal:
             {"usage": Jsonb(usage.model_dump(mode="json")), "batch": batch_id, "key": key}
             | self._reply(usage),
         )
-        await self._retally(await cur.fetchone())
+        await self._retally(row)
 
     async def record(self, call_id: int, usage: Usage) -> None:
         """A reply came for the call: its accounting, whether or not the answer is usable, and
         that the provider replied."""
-        cur = await self.conn.execute(
+        row = await self._write(
+            "record",
             "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
             "responded_at = clock_timestamp() WHERE id = %(id)s RETURNING run_id, responded_at), "
             f"{_REPLIED} SELECT run_id FROM c",
             {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id} | self._reply(usage),
         )
-        await self._retally(await cur.fetchone())
+        await self._retally(row)
 
     def _reply(self, usage: Usage) -> dict[str, Any]:
         """`_REPLIED`'s parameters: a reply shared from another call is not the provider's."""
@@ -167,40 +180,36 @@ class CallJournal:
         `reject`."""
         if not self.observes:
             return
-        await self.conn.execute(
-            _ACCOUNT_ERROR.format(source=""), {"provider": provider, "error": error[:2000]}
+        await self._write(
+            "account error",
+            _ACCOUNT_ERROR.format(source=""),
+            {"provider": provider, "error": error[:2000]},
         )
 
     async def _retally(self, row: dict[str, Any] | None) -> None:
         """A charge on another run's call (a dead run's batch, read later) is in that run's cost
-        and calls by role, as its own run's close would have put it."""
+        and calls by role, as its own run's close would have put it. One retally of a run at a
+        time, its unit holding the run's retally lock and reading the calls under it, so a
+        concurrent one cannot write a total older than its own."""
         if row is None or row["run_id"] == self.run_id:
             return
-        # One retally of a run at a time, each reading the calls once it holds the lock, so a
-        # concurrent one cannot write a total older than its own. The calls on this connection
-        # retally in turn: one waiting for a lock would hold up another's release.
-        lock = (RETALLY_LOCK, row["run_id"])
-        async with self._retallying:
-            await self.conn.execute("SELECT pg_advisory_lock(%s, %s)", lock)
-            try:
-                await self._retally_now(row["run_id"])
-            finally:
-                await self.conn.execute("SELECT pg_advisory_unlock(%s, %s)", lock)
-
-    async def _retally_now(self, run_id: int) -> None:
-        await self.conn.execute(
-            "UPDATE runs SET cost = t.cost, counts = jsonb_set(counts, '{calls}', t.calls) "
-            "FROM (SELECT round(coalesce(sum(cost), 0)::numeric, 4) AS cost, "
-            "coalesce(jsonb_object_agg(operation, jsonb_build_object('calls', calls, "
-            "'cost', cost)), '{}') AS calls FROM (SELECT operation, count(*) AS calls, "
-            "coalesce(sum((usage->>'cost')::numeric), 0)::float AS cost FROM inference_calls "
-            "WHERE run_id = %(run)s GROUP BY operation) roles) t WHERE runs.id = %(run)s",
-            {"run": run_id},
-        )
+        run_id = row["run_id"]
+        async with self.db.write("journal: retally", locks=[("retally", run_id)]) as unit:
+            await unit.execute(
+                "UPDATE runs SET cost = t.cost, counts = jsonb_set(counts, '{calls}', t.calls) "
+                "FROM (SELECT round(coalesce(sum(cost), 0)::numeric, 4) AS cost, "
+                "coalesce(jsonb_object_agg(operation, jsonb_build_object('calls', calls, "
+                "'cost', cost)), '{}') AS calls FROM (SELECT operation, count(*) AS calls, "
+                "coalesce(sum((usage->>'cost')::numeric), 0)::float AS cost FROM inference_calls "
+                "WHERE run_id = %(run)s GROUP BY operation) roles) t WHERE runs.id = %(run)s",
+                {"run": run_id},
+            )
 
     async def accept(self, call_id: int, output: dict[str, Any]) -> None:
-        await self.conn.execute(
-            "UPDATE inference_calls SET output = %s WHERE id = %s", (Jsonb(output), call_id)
+        await self._write(
+            "accept",
+            "UPDATE inference_calls SET output = %s WHERE id = %s",
+            (Jsonb(output), call_id),
         )
 
     async def reject(
@@ -211,42 +220,41 @@ class CallJournal:
         account = account if self.observes else None
         update = "UPDATE inference_calls SET error = %(error)s, reply = %(reply)s WHERE id = %(id)s"
         observed = _ACCOUNT_ERROR.format(source="FROM c")
-        await self.conn.execute(
+        await self._write(
+            "reject",
             f"WITH c AS ({update} RETURNING id), o AS ({observed}) SELECT 1" if account else update,
             {"error": error, "reply": reply, "id": call_id, "provider": account},
         )
 
     async def refused(self, key: str, paper_id: str | None) -> bool:
         """Whether a call of this identical request about the paper was refused, in any run."""
-        row = await (
-            await self.conn.execute(
-                "SELECT 1 FROM inference_calls WHERE paper_id IS NOT DISTINCT FROM %s "
-                "AND request_key = %s AND error LIKE 'refused%%' LIMIT 1",
-                (paper_id, key),
-            )
-        ).fetchone()
+        row = await self._one(
+            "refused",
+            "SELECT 1 FROM inference_calls WHERE paper_id IS NOT DISTINCT FROM %s "
+            "AND request_key = %s AND error LIKE 'refused%%' LIMIT 1",
+            (paper_id, key),
+        )
         return row is not None
 
     async def total(self) -> float:
-        row = await (
-            await self.conn.execute(
-                "SELECT coalesce(sum((usage->>'cost')::numeric), 0) AS cost "
-                "FROM inference_calls WHERE run_id = %s",
-                (self.run_id,),
-            )
-        ).fetchone()
+        row = await self._one(
+            "total",
+            "SELECT coalesce(sum((usage->>'cost')::numeric), 0) AS cost "
+            "FROM inference_calls WHERE run_id = %s",
+            (self.run_id,),
+        )
+        assert row is not None
         return float(row["cost"])
 
     async def by_role(self) -> dict[str, dict[str, float]]:
         """Calls and cost per role in this run."""
-        rows = await (
-            await self.conn.execute(
-                "SELECT operation, count(*) AS calls, "
-                "coalesce(sum((usage->>'cost')::numeric), 0) AS cost "
-                "FROM inference_calls WHERE run_id = %s GROUP BY operation",
-                (self.run_id,),
-            )
-        ).fetchall()
+        rows = await self._all(
+            "by role",
+            "SELECT operation, count(*) AS calls, "
+            "coalesce(sum((usage->>'cost')::numeric), 0) AS cost "
+            "FROM inference_calls WHERE run_id = %s GROUP BY operation",
+            (self.run_id,),
+        )
         return {r["operation"]: {"calls": r["calls"], "cost": float(r["cost"])} for r in rows}
 
 

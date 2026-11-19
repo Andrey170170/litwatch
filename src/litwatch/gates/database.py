@@ -16,16 +16,23 @@ without it.
 A write unit names its locks when it opens and the gate takes them in one order: the taxonomy,
 then papers by id, then the other locks as `REGISTRY` lists them. The session locks held across
 network calls (`HELD_ACROSS_CALLS`) are not units: `db.held` keeps each on a connection of its
-own, outside the pool.
+own, outside the pool; so does `db.startup` the migration lock.
+
+Transitional, until A2's Work gate replaces it with leases and heartbeats (docs/backlog.md, A2,
+"Leases replace the presence session"): the gate holds a presence session, a connection of its
+own for the process's life, whose `Identity` (`db.identity()`) stands for the process in run
+records and job claims, as a job's connection did before the pool (docs/plans/a1-database-gate.md,
+"Choices made without asking", decided 2026-11-18).
 
 While code moves onto the gate (A1's P3 to P6), two things serve what has not moved yet:
-`DatabaseGate.over(conn)`, a gate on one given connection, and `db.lend(name)`, a pool
-connection of its own, outside the pool, lent outside any unit to an entry calling a Service
-that still takes one.
+`DatabaseGate.over(conn)`, a gate on one given connection, and `db.lend(name)`, a connection of
+its own, outside the pool, lent outside any unit to a caller of a Service that still takes one.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -33,6 +40,7 @@ from collections.abc import AsyncIterator, Iterable, Sequence
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal, LiteralString, Self
 
 import psycopg
@@ -40,7 +48,7 @@ from psycopg import sql
 from psycopg.abc import Params
 from psycopg.conninfo import make_conninfo
 from psycopg.pq import TransactionStatus
-from psycopg.rows import dict_row
+from psycopg.rows import dict_row, tuple_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 log = logging.getLogger(__name__)
@@ -80,10 +88,33 @@ class BusyError(RuntimeError):
 
 @dataclass(frozen=True)
 class Hold:
-    """A session lock `DatabaseGate.held` took: its name and the backend that holds it."""
+    """A session lock `DatabaseGate.held` took: its name, what it is taken for (a keyed one's
+    `key_arg`), and the backend that holds it."""
 
     name: str
     pid: int
+    key_arg: str | int | None = None
+
+
+@dataclass(frozen=True)
+class Identity:
+    """A session that stands for a process: its backend's pid and start, as `pg_stat_activity`
+    shows them. A run record or a job claim made in its name is alive while it lasts
+    (`store.runs.ALIVE`)."""
+
+    pid: int
+    started: datetime
+
+
+async def identity_of(conn: psycopg.AsyncConnection[Any]) -> Identity:
+    """The identity of `conn`'s own session."""
+    async with conn.cursor(row_factory=tuple_row) as cur:
+        await cur.execute(
+            "SELECT pid, backend_start FROM pg_stat_activity WHERE pid = pg_backend_pid()"
+        )
+        row = await cur.fetchone()
+    assert row is not None  # every session has its row
+    return Identity(row[0], row[1])
 
 
 class BridgeError(RuntimeError):
@@ -109,8 +140,8 @@ class Lock:
 
 
 # Every advisory lock litwatch takes, in the order a write unit takes those it names. The keys
-# are the ones the code used before the gate, which still takes them itself until it has moved
-# onto the gate: both must exclude each other.
+# are the ones the code took before the gate did, so a process from before it and one after
+# still exclude each other while a deploy replaces one with the other.
 REGISTRY: tuple[Lock, ...] = (
     # Held shared by a unit that locks papers and exclusively by a taxonomy edit, so a settle
     # never reads a tree an edit in flight is changing.
@@ -352,6 +383,10 @@ class DatabaseGate:
         self._dsn, self._schema, self.timeout = dsn, schema, timeout
         self._bridged = _bridged
         self._pool: AsyncConnectionPool[Connection] | None = None
+        # The presence session (`identity`): its connection, and its identity once known.
+        self._presence: psycopg.AsyncConnection[Any] | None = None
+        self._identity: Identity | None = None
+        self._presence_lock = asyncio.Lock()
         if _bridged is None:
             self._pool = AsyncConnectionPool(
                 dsn,
@@ -380,8 +415,9 @@ class DatabaseGate:
         await conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(self._schema)))
 
     async def open(self) -> None:
-        """Open the pool, waiting until its first connections are made; `PoolTimeoutError`
-        when none is made within the timeout (the database down or unreachable)."""
+        """Open the pool, waiting until its first connections are made, and the presence
+        session; `PoolTimeoutError` when the pool makes none within the timeout (the database
+        down or unreachable)."""
         if self._pool is not None:
             try:
                 await self._pool.open(wait=True, timeout=self.timeout)
@@ -389,10 +425,17 @@ class DatabaseGate:
                 raise PoolTimeoutError(
                     f"the pool made no connection to the database in {self.timeout:g}s"
                 ) from exc
+            await self.identity()
 
     async def close(self) -> None:
+        """Close the pool and the presence session: the runs and job claims made in the
+        process's name are no longer alive."""
         if self._pool is not None:
             await self._pool.close()
+        async with self._presence_lock:
+            if self._presence is not None:
+                await self._presence.close()
+                self._presence = self._identity = None
 
     async def __aenter__(self) -> Self:
         await self.open()
@@ -400,6 +443,39 @@ class DatabaseGate:
 
     async def __aexit__(self, *exc: object) -> None:
         await self.close()
+
+    async def identity(self) -> Identity:
+        """The process's identity: its presence session's, the session a run record or a job
+        claim names (`store.runs.start`, `store.jobs.claim`). Transitional, until A2's leases.
+
+        The presence session is a connection of its own, outside the pool, opened with the gate
+        and closed with it. Asked for, it is checked first: one that dropped (the database
+        restarted, the connection was cut) is opened again, with a new identity, and what was
+        claimed in the old one's name is no longer alive, so `store.jobs.take_back` puts it
+        back. A bridged gate's presence is its one connection. Asked for outside units, as a
+        unit is opened."""
+        outside_unit("asking for the presence session's identity")
+        if self._bridged is not None:
+            if self._identity is None:
+                self._identity = await identity_of(self._bridged)
+            return self._identity
+        async with self._presence_lock:
+            conn = self._presence
+            if conn is not None and self._identity is not None:
+                try:
+                    await conn.execute("SELECT 1")
+                    return self._identity
+                except psycopg.Error:
+                    log.warning(
+                        "the presence session (backend %s) ended; opening another",
+                        self._identity.pid,
+                    )
+                    with contextlib.suppress(psycopg.Error):
+                        await conn.close()
+            self._presence = None
+            fresh = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
+            self._presence, self._identity = fresh, await identity_of(fresh)
+            return self._identity
 
     @asynccontextmanager
     async def _connection(self, name: str) -> AsyncIterator[Connection]:
@@ -467,9 +543,9 @@ class DatabaseGate:
 
     @asynccontextmanager
     async def lend(self, name: str) -> AsyncIterator[Connection]:
-        """Transitional, going in A1's P6: a connection lent outside any unit to an entry
-        (`name`) calling a Service that still takes a raw connection until P4 or P5 moves it
-        (the plan's notes list each). Like `held`'s, it is a connection of its own, opened for
+        """Transitional, going in A1's P6: a connection lent outside any unit to a caller
+        (`name`) of a Service that still takes a raw connection until P5 or P6 moves it (the
+        plan's notes list each). Like `held`'s, it is a connection of its own, opened for
         the loan and closed at its end, outside the pool: a loan held across a network call, or
         one whose Service opens units of its own, takes no pool slot. It is autocommit, as
         `store.connect`'s are. It refuses while a unit is open on the task, as opening a unit
@@ -494,21 +570,52 @@ class DatabaseGate:
         `held_elsewhere` takes to leave the holder's own hold out."""
         if name not in HELD_ACROSS_CALLS:
             raise ValueError(f"{name!r} is not a session lock held across calls")
-        lock = LOCKS[name]
+        async with self._session_lock(LOCKS[name], key_arg, wait=False) as (hold, _):
+            yield hold
+
+    @asynccontextmanager
+    async def startup(self, name: str) -> AsyncIterator[Connection]:
+        """Hold the startup lock `name` (the migration lock) for the block, on a connection of
+        its own outside the pool, waiting while another process holds it. Yields that
+        connection, autocommit with dict rows on the gate's schema, for the work the lock
+        guards (`store.migrate`): on the lock's own session, that work cannot outlive the lock
+        when the session drops."""
+        lock = LOCKS.get(name)
+        if lock is None or lock.scope != "startup":
+            raise ValueError(f"{name!r} is not a startup lock")
+        async with self._session_lock(lock, None, wait=True) as (_, conn):
+            yield conn
+
+    @asynccontextmanager
+    async def _session_lock(
+        self, lock: Lock, key_arg: str | int | None, *, wait: bool
+    ) -> AsyncIterator[tuple[Hold, Connection]]:
+        """A session lock on a connection of its own, autocommit with dict rows on the gate's
+        schema: waited for, or tried once (`BusyError` when another session holds it). Yields
+        the hold and its connection. Its loss with its connection is logged. Refused while a
+        unit is open on the task, as opening a unit is."""
         params = _params(lock, key_arg)
-        label = name if key_arg is None else f"{name} ({key_arg})"
-        conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
+        label = lock.name if key_arg is None else f"{lock.name} ({key_arg})"
+        outside_unit(f"taking the {label} lock")
+        conn = await psycopg.AsyncConnection.connect(
+            self._dsn, row_factory=dict_row, autocommit=True
+        )
         try:
-            taken = await conn.execute(_statement("pg_try_advisory_lock", lock), params)
-            if not (await taken.fetchone())[0]:
-                raise BusyError(f"the {label} lock is held by another session")
+            if self._schema:
+                await self._configure(conn)
+            if wait:
+                await conn.execute(_statement("pg_advisory_lock", lock), params)
+            else:
+                taken = await conn.execute(_statement("pg_try_advisory_lock", lock), params)
+                if not (await taken.fetchone())["ok"]:
+                    raise BusyError(f"the {label} lock is held by another session")
             try:
-                yield Hold(name, conn.info.backend_pid)
+                yield Hold(lock.name, conn.info.backend_pid, key_arg), conn
             finally:
                 # A connection that ended let the lock go while the block still ran under it.
                 try:
                     freed = await conn.execute(_statement("pg_advisory_unlock", lock), params)
-                    lost = not (await freed.fetchone())[0]
+                    lost = not (await freed.fetchone())["ok"]
                 except psycopg.Error:
                     lost = True
                 if lost:

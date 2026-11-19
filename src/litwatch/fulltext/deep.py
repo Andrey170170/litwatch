@@ -40,16 +40,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import httpx
-import psycopg
 
-from litwatch import events, store
+from litwatch import events
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import Cause
 from litwatch.core.fulltext import REQUESTED, TextRead
 from litwatch.feedback import word
 from litwatch.fulltext import TICK_SECONDS, judged, read, record_in_change, still_wanted
-from litwatch.gates.database import DatabaseGate, WriteUnit
+from litwatch.gates.database import BusyError, DatabaseGate, WriteUnit
 from litwatch.integrations.deep import Deep, RejectedError
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
@@ -80,7 +79,7 @@ async def request(unit: WriteUnit, paper_id: str) -> int | None:
 
 
 async def work(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     archive: ArchiveClient,
     deep: Deep,
     *,
@@ -88,19 +87,22 @@ async def work(
     limit: int | None = None,
     config: Config | None = None,
 ) -> Counter[str]:
-    """Work the Deep passes that are due, one at a time, up to `limit` claimed, unless another
-    worker is working them; their papers are settled by `rules`. With the `config`'s schedule,
-    a re-run's (background) passes wait while a nightly run is running or due (pipeline.md,
-    section 10). Returns how the tries ended."""
-    async with store_.deep_worker(conn) as mine:
-        if not mine:
-            log.info("another worker is working the Deep passes")
-            return Counter()
-        return await _work(conn, archive, deep, rules, limit, config)
+    """Work the Deep passes that are due, one at a time, up to `limit` claimed, under the Deep
+    worker's lock, unless another worker holds it; their papers are settled by `rules`. With
+    the `config`'s schedule, a re-run's (background) passes wait while a nightly run is running
+    or due (pipeline.md, section 10). Returns how the tries ended."""
+    held = contextlib.AsyncExitStack()
+    try:
+        await held.enter_async_context(db.held("deep-worker"))
+    except BusyError:
+        log.info("another worker is working the Deep passes")
+        return Counter()
+    async with held:
+        return await _work(db, archive, deep, rules, limit, config)
 
 
 async def _work(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     archive: ArchiveClient,
     deep: Deep,
     rules: word.Rules,
@@ -111,32 +113,36 @@ async def _work(
 
     counts: Counter[str] = Counter()
     tried: set[int] = set()
-    db = DatabaseGate.over(conn)
     while limit is None or len(tried) < limit:
-        if until := await cards.paused_until(conn, PAUSE):
+        async with db.read("deep queue: paused") as unit:
+            until = await cards.paused_until(unit, PAUSE)
+        if until:
             log.debug("the deep queue waits after a service failure, until %s", until)
             break
         # Asked at each claim: a nightly may have come due meanwhile.
         background = config is None or not await nightly_waits(
-            conn, config, datetime.now(config.schedule.zone)
+            db, config, datetime.now(config.schedule.zone)
         )
-        claimed = await store_.claim(conn, deep.lease, 1, tried, deep=True, background=background)
+        async with db.write("claim a deep pass") as unit:
+            claimed = await store_.claim(
+                unit, deep.lease, 1, tried, deep=True, background=background
+            )
+            # A pass with an attempt open has started: its job is followed whatever the paper
+            # wants.
+            attempt = await cards.open_attempt(unit, claimed[0].id) if claimed else None
         if not claimed:
             break
         (c,) = claimed
         tried.add(c.id)
-        # A pass with an attempt open has started: its job is followed whatever the paper wants.
-        attempt = await cards.open_attempt(conn, c.id)
         why = None if attempt else await still_wanted(db, c, rules)
         if why is None:
-            why = await _work_one(conn, db, archive, deep, c, attempt, rules)
+            why = await _work_one(db, archive, deep, c, attempt, rules)
         if why != "lost":
             counts[why] += 1
     return counts
 
 
 async def _work_one(
-    conn: psycopg.AsyncConnection,
     db: DatabaseGate,
     archive: ArchiveClient,
     deep: Deep,
@@ -147,20 +153,23 @@ async def _work_one(
     """Follow the pass's job, one left running by a failed poll or a dead worker, or one a
     submission whose answer never came started, found by its key; else read the paper's text
     and submit it. Then record how the job ended. What it writes about the paper goes in
-    changes of it, on `db`, the gate over `conn`."""
+    changes of it; the attempt's own bookkeeping in units of its own."""
     if attempt is not None and attempt["job_id"] is None:
         try:
             job_id = await deep.client.job_for(_key(attempt["id"], c))
         except httpx.HTTPError as exc:
-            return await _service_failed(conn, c, attempt["id"], f"finding the deep job: {exc}")
+            return await _service_failed(db, c, attempt["id"], f"finding the deep job: {exc}")
         if job_id is not None:
-            await cards.job_started(conn, attempt["id"], job_id)
+            await _job_started(db, attempt["id"], job_id)
             attempt = {**attempt, "job_id": job_id}  # followed from when it was submitted
         else:
             # Its submission started no job the service has: nothing runs, so the attempt ends
             # (its usage unknown, should a restarted service have lost one) and the pass is
             # tried as a first try is.
-            await cards.attempt_ended(conn, attempt["id"], None, "its submission started no job")
+            async with db.write("deep attempt: no job") as unit:
+                await cards.attempt_ended(
+                    unit, attempt["id"], None, "its submission started no job"
+                )
             attempt = None
             if why := await still_wanted(db, c, rules):
                 return why
@@ -197,18 +206,18 @@ async def _work_one(
             )
         except httpx.HTTPError as exc:
             # The service may have taken it all the same: found by its key after the pause.
-            return await _service_failed(conn, c, attempt_id, f"submitting failed: {exc}")
-        await cards.job_started(conn, attempt_id, job_id)
+            return await _service_failed(db, c, attempt_id, f"submitting failed: {exc}")
+        await _job_started(db, attempt_id, job_id)
         attempt = {"id": attempt_id, "job_id": job_id, "at": datetime.now(UTC)}
     try:
         outcome = await deep.client.follow(attempt["job_id"], attempt["at"], label=c.paper.id)
     except httpx.HTTPError as exc:
         # The job goes on: followed again by the pass's next claim, after the pause.
-        return await _service_failed(conn, c, attempt["id"], f"following the deep job: {exc}")
+        return await _service_failed(db, c, attempt["id"], f"following the deep job: {exc}")
     if outcome.still_running:
         # Past its deadline the job may still run: kept, and followed again after the pause,
         # never submitted again while it may.
-        return await _service_failed(conn, c, attempt["id"], outcome.error or "")
+        return await _service_failed(db, c, attempt["id"], outcome.error or "")
     if outcome.error or outcome.result is None:
         return await _ended(
             db,
@@ -256,6 +265,11 @@ async def _work_one(
     return "cards_written"
 
 
+async def _job_started(db: DatabaseGate, attempt_id: int, job_id: str) -> None:
+    async with db.write("deep attempt: job started") as unit:
+        await cards.job_started(unit, attempt_id, job_id)
+
+
 def _key(attempt_id: int, c: Claimed) -> str:
     """A submission's idempotency key: its attempt, and the paper, which no other database's
     attempt of the same id is likely to share."""
@@ -296,20 +310,18 @@ async def _ended(
     return "card_failed"
 
 
-async def _service_failed(
-    conn: psycopg.AsyncConnection, c: Claimed, attempt_id: int, error: str
-) -> str:
+async def _service_failed(db: DatabaseGate, c: Claimed, attempt_id: int, error: str) -> str:
     """Submitting or following the attempt's job failed: the attempt goes on, and the pass,
     let go still running, is taken by its next claim once the queue's pause is over."""
     log.warning("%s: the deep service failed: %s; the queue waits %s", c.paper.id, error, PAUSE)
-    async with conn.transaction():
-        await cards.service_failed(conn, attempt_id, error)
-        await store_.let_go(conn, c, error)
+    async with db.write("deep service failed") as unit:
+        await cards.service_failed(unit, attempt_id, error)
+        await store_.let_go(unit, c, error)
     return "card_service_failed"
 
 
 async def run_forever(
-    dsn: str,
+    db: DatabaseGate,
     archive: ArchiveClient,
     deep: Deep,
     wake: asyncio.Event | None = None,
@@ -318,15 +330,14 @@ async def run_forever(
     rules: word.Rules,
 ) -> None:
     """The service's Deep worker: work the Deep passes every `TICK_SECONDS`, or as soon as
-    `wake` is set (the owner asked for a card), until cancelled. Each tick opens its own
-    connection, so a lost database is retried rather than fatal."""
+    `wake` is set (the owner asked for a card), until cancelled. A tick that fails (a lost
+    database) is retried on the next."""
     wake = wake or asyncio.Event()
     log.info("deep card worker on")
     while True:
         try:
-            async with await store.connect(dsn) as conn:
-                if done := await work(conn, archive, deep, rules=rules, config=config):
-                    log.info("deep cards: %s", dict(done))
+            if done := await work(db, archive, deep, rules=rules, config=config):
+                log.info("deep cards: %s", dict(done))
         except asyncio.CancelledError:
             raise
         except Exception:

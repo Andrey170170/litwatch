@@ -8,12 +8,11 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
-import psycopg
-
 from litwatch import intake
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.intake import archive as archive_intake
 from litwatch.intake import catalog
 from litwatch.intake.http import XmlClient
@@ -33,14 +32,16 @@ def _record(run: RunRecord, result: intake.IntakeResult) -> None:
     run.counts["rewritten"] = len(result.rewritten)
 
 
-async def run(
-    conn: psycopg.AsyncConnection, config: Config, days: int | None = None
-) -> intake.IntakeResult:
-    """Harvest the window ending now and record the run. An incomplete harvest is not an
-    error: the gap stays open in the checkpoints and the next run retries it."""
+async def run(db: DatabaseGate, config: Config, days: int | None = None) -> intake.IntakeResult:
+    """Harvest the window ending now and record the run, under the run lock. An incomplete
+    harvest is not an error: the gap stays open in the checkpoints and the next run retries it."""
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
-    async with run_record(conn, "intake", window=(since, until)) as record:
+    async with (
+        db.held("run"),
+        run_record(db, "intake", window=(since, until)) as record,
+        db.lend("intake") as conn,  # transitional: intake moves onto the gate in P5
+    ):
         result = await intake.collect(
             conn,
             config.intake.categories,
@@ -62,18 +63,22 @@ async def run(
 
 
 async def catalog_from(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     since: date,
     report: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run only the catalog pass (`intake.catalog`), from `since` at the latest, and record the
-    run; its outcome is under `catalog` in the run's intake details."""
+    run, under the run lock; its outcome is under `catalog` in the run's intake details."""
     archive = archive_integration.harvester(config)
     if archive is None:
         raise ValueError("the catalog pass is off: set harvest = true under [integrations.archive]")
     window = (datetime.combine(since, time.min, UTC), datetime.now(UTC))
-    async with run_record(conn, "intake", window=window) as record:
+    async with (
+        db.held("run"),
+        run_record(db, "intake", window=window) as record,
+        db.lend("catalog pass") as conn,  # transitional: intake moves onto the gate in P5
+    ):
         await catalog.lower(conn, since)
         with XmlClient() as client:
             done = await catalog.run(
@@ -84,19 +89,23 @@ async def catalog_from(
 
 
 async def from_archive(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     client: ArchiveClient,
     since: date,
     until: date,
 ) -> intake.IntakeResult:
     """Read the papers first submitted from `since` to `until` (both inclusive) in the
-    configured categories from the archive, and record the run."""
+    configured categories from the archive, and record the run, under the run lock."""
     window = (
         datetime.combine(since, time.min, UTC),
         datetime.combine(until + timedelta(days=1), time.min, UTC),
     )
-    async with run_record(conn, "intake", window=window) as record:
+    async with (
+        db.held("run"),
+        run_record(db, "intake", window=window) as record,
+        db.lend("intake from the archive") as conn,  # transitional: intake moves in P5
+    ):
         result = await archive_intake.collect(
             conn, client, config.intake.categories, since, until, rules=word.rules(config)
         )

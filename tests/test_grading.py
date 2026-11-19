@@ -25,7 +25,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests import settling
-from tests.conftest import FAITH, INTERP, TREE, AppClient
+from tests.conftest import FAITH, INTERP, TREE, AppClient, started
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
 from tests.test_intake import unavailable
@@ -362,11 +362,11 @@ async def test_grading_now_checks_the_topic_under_the_taxonomy_lock(conn, models
     assert landed == [False]
 
 
-async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(conn, models):
+async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(conn, db, models):
     paper = await papers_store.get(conn, B.id)
     due = grading.Due(paper, FAITH, "Chain-of-thought faithfulness")
     async with (
-        model_run(conn, CONFIG, "grading", gateway=models.gateway) as run,
+        model_run(db, CONFIG, "grading", gateway=models.gateway) as run,
         grading.grade([due], run.gateway) as results,
     ):
         (graded,) = [g async for g in results]
@@ -413,13 +413,13 @@ async def assert_settled_on_solid(conn) -> None:
     assert saved["saved"] is True
 
 
-async def test_a_rewrite_read_in_settles_the_paper_on_solid(conn, models):
+async def test_a_rewrite_read_in_settles_the_paper_on_solid(conn, db, models):
     models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
     await night(conn, models)  # related and incremental: adjacent, not saved
     fake = FakeArchive()
     fake.listing = [B_REWRITTEN]
     client = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
-    result = await intake_job.from_archive(conn, CONFIG, client, *WINDOW)
+    result = await intake_job.from_archive(db, CONFIG, client, *WINDOW)
     assert result.rewritten == [B.id]
     await assert_settled_on_solid(conn)
 
@@ -432,16 +432,16 @@ class FailingLater:
         raise ArchiveError("the archive went away")
 
 
-async def test_a_rewrite_settles_with_its_page_when_a_later_page_fails(conn, models):
+async def test_a_rewrite_settles_with_its_page_when_a_later_page_fails(conn, db, models):
     models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
     await night(conn, models)
     with pytest.raises(ArchiveError):
-        await intake_job.from_archive(conn, CONFIG, FailingLater(), *WINDOW)
+        await intake_job.from_archive(db, CONFIG, FailingLater(), *WINDOW)
     assert (await papers_store.get(conn, B.id)).version == 2  # the first page is stored
     await assert_settled_on_solid(conn)
 
 
-async def test_a_rewrite_whose_settle_fails_is_not_stored(conn, models, monkeypatch):
+async def test_a_rewrite_whose_settle_fails_is_not_stored(conn, db, models, monkeypatch):
     async def failing(unit, paper_ids, **kwargs):
         raise RuntimeError("settle failed")
 
@@ -450,7 +450,7 @@ async def test_a_rewrite_whose_settle_fails_is_not_stored(conn, models, monkeypa
     fake.listing = [B_REWRITTEN]
     client = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
     with pytest.raises(RuntimeError, match="settle failed"):
-        await intake_job.from_archive(conn, CONFIG, client, *WINDOW)
+        await intake_job.from_archive(db, CONFIG, client, *WINDOW)
     stored = await papers_store.get(conn, B.id)
     assert (stored.version, stored.revision, stored.abstract) == (B.version, 1, B.abstract)
     assert await rows(conn, "SELECT * FROM outbox WHERE type = 'paper.revised'") == []
@@ -463,7 +463,7 @@ async def test_a_rewrite_harvested_from_arxiv_settles_as_it_is_stored(conn, mode
     rewrite = B.model_copy(update={"abstract": B_REWRITTEN["abstract"], "updated": now.isoformat()})
     monkeypatch.setattr(atom, "fetch_category", unavailable)
     monkeypatch.setattr(oai, "fetch_category", lambda *a, **k: oai.OaiBatch([rewrite], now))
-    run_id = await runs.start(conn, "intake")
+    run_id = await started(conn, "intake")
     result = await intake.collect(
         conn, ("cs.CL",), now - timedelta(days=3), run_id, rules=settling.RULES
     )
@@ -544,7 +544,7 @@ async def test_a_refused_side_is_asked_again_once_the_question_changed(conn, mod
     assert (v["one_lab"], sorted(v["opinions"])) == (False, ["check", "judge"])
 
 
-async def test_a_remembered_refusal_with_its_provider_gone_waits_without_counting(conn, models):
+async def test_a_remembered_refusal_with_its_provider_gone_waits_without_counting(conn, db, models):
     refused_by(models, JUDGES, B.title)
     models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models, LISTED)
@@ -554,14 +554,14 @@ async def test_a_remembered_refusal_with_its_provider_gone_waits_without_countin
         return Gateway(config.models, providers, journal, retry_delays=(0.0,))
 
     models.fits[("check", B.title)] = fit("related")
-    run_id = await nightly.run(conn, LISTED, fetch=False, gateway=openrouter_only)
+    run_id = await nightly.run(db, LISTED, fetch=False, gateway=openrouter_only)
     assert (await runs.get(conn, run_id))["counts"]["grading_failed"] == 1
     (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
     assert failure["failed_runs"] == 0 and "no credentials" in failure["last_error"]
     assert await verdicts(conn, B.id) == []  # no grade from one lab on a side not asked
 
 
-async def test_a_remembered_refusal_gives_way_to_an_answer_journalled_since(conn, models):
+async def test_a_remembered_refusal_gives_way_to_an_answer_journalled_since(conn, db, models):
     refused_by(models, JUDGES, B.title)
     models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models, LISTED)
@@ -570,7 +570,7 @@ async def test_a_remembered_refusal_gives_way_to_an_answer_journalled_since(conn
     tree = await taxonomy_store.load(conn)
     paper = await papers_store.get(conn, B.id)
     asked = grading.request(paper, tree.topic(FAITH.slug), tree.get(FAITH.slug).name)
-    async with model_run(conn, LISTED, "eval", gateway=models.gateway) as run:
+    async with model_run(db, LISTED, "eval", gateway=models.gateway) as run:
         await run.gateway.ask("judge", asked, paper_id=B.id)
     models.fits[("check", B.title)] = fit("adjacent")
     assert (await night(conn, models, LISTED))["graded"] == 1

@@ -8,8 +8,9 @@ from litwatch import intake
 from litwatch.core import Paper
 from litwatch.intake import atom, oai
 from litwatch.intake.http import SourceError
-from litwatch.store import papers, runs
+from litwatch.store import papers
 from tests import settling
+from tests.conftest import started
 from tests.test_intake_atom import entry, feed
 
 NOW = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=1)
@@ -42,7 +43,7 @@ def canonical(id="2609.11934"):
 
 
 async def collect(conn, categories=("cs.CL",)):
-    run_id = await runs.start(conn, "intake", SINCE, NOW)
+    run_id = await started(conn, "intake", SINCE, NOW)
     return run_id, await intake.collect(conn, categories, SINCE, run_id, rules=settling.RULES)
 
 

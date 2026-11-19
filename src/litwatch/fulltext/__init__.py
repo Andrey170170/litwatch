@@ -23,9 +23,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-import psycopg
-
-from litwatch import events, store
+from litwatch import events
 from litwatch.archive import (
     URGENT,
     ArchiveClient,
@@ -45,7 +43,6 @@ from litwatch.gates.database import DatabaseGate, WriteUnit
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
-from litwatch.jobs.lock import held_elsewhere
 from litwatch.llm import CallError, Gateway
 from litwatch.llm.batches import DRAIN
 from litwatch.store import fulltext as store_
@@ -273,7 +270,7 @@ def worked(counts: Counter[str]) -> int:
 
 
 async def work(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     archive: ArchiveClient,
     *,
@@ -294,7 +291,7 @@ async def work(
     passes are worked only by its `job`, on its run, until its ceiling is reached."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
-    db, rules = DatabaseGate.over(conn), word.rules(config)
+    rules = word.rules(config)
     lease, wide, owners = LEASE, False, False if run and job is None else None
     if run and (until := run.gateway.batching_until()):
         lease, wide = until - datetime.now(UTC) + DRAIN + LEASE, True
@@ -310,15 +307,13 @@ async def work(
         and not (run and run.gateway.ceiling and run.gateway.ceiling.reached)
     ):
         if run is None:  # asked at each claim: a nightly may have started meanwhile
-            owners = True if await held_elsewhere(conn) else None
+            owners = True if await db.held_elsewhere("run") else None
         size = BATCH if limit is None else min(BATCH, limit - len(tried))
         if wide:
             size = None if limit is None else limit - len(tried)
-        claimed = [
-            c
-            for c in await store_.claim(conn, lease, size, tried, owners=owners, job=job)
-            if c.id not in tried
-        ]
+        async with db.write("claim text passes") as unit:
+            found = await store_.claim(unit, lease, size, tried, owners=owners, job=job)
+        claimed = [c for c in found if c.id not in tried]
         if not claimed:
             break
         tried.update(c.id for c in claimed)
@@ -344,7 +339,7 @@ async def work(
         opened = (
             contextlib.nullcontext(run)
             if run
-            else model_run(conn, config, "fulltext", gateway=factory)
+            else model_run(db, config, "fulltext", gateway=factory)
         )
         async with opened as r:
             try:
@@ -360,7 +355,7 @@ async def work(
 
 
 async def work_waiting(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     archive: ArchiveClient,
     *,
@@ -378,7 +373,7 @@ async def work_waiting(
         allowance = None if limit is None else limit - worked(total)
         if allowance is not None and allowance <= 0:
             return total
-        done = await work(conn, config, archive, gateway=gateway, limit=allowance)
+        done = await work(db, config, archive, gateway=gateway, limit=allowance)
         total.update(done)
         if report:
             report(done)
@@ -389,22 +384,21 @@ async def work_waiting(
 
 
 async def run_forever(
-    dsn: str,
+    db: DatabaseGate,
     config: Config,
     archive: ArchiveClient,
     gateway: GatewayFactory = default_gateway,
     wake: asyncio.Event | None = None,
 ) -> None:
     """The service's worker: work the queue every `TICK_SECONDS`, or as soon as `wake` is set
-    (the owner ran a pass now), until cancelled. Each tick opens its own connection, so a lost
-    database is retried rather than fatal."""
+    (the owner ran a pass now), until cancelled. A tick that fails (a lost database) is retried
+    on the next."""
     wake = wake or asyncio.Event()
     log.info("full-text worker on")
     while True:
         try:
-            async with await store.connect(dsn) as conn:
-                if done := await work(conn, config, archive, gateway=gateway):
-                    log.info("full-text queue: %s", dict(done))
+            if done := await work(db, config, archive, gateway=gateway):
+                log.info("full-text queue: %s", dict(done))
         except asyncio.CancelledError:
             raise
         except Exception:

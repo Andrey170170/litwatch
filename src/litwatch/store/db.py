@@ -18,7 +18,6 @@ from litwatch.gates.database import ReadUnit
 
 log = logging.getLogger(__name__)
 
-MIGRATION_LOCK = 7213910
 _NAME = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 
 
@@ -73,36 +72,33 @@ def _migrations() -> list[tuple[int, str, str]]:
 
 
 async def migrate(conn: psycopg.AsyncConnection) -> list[str]:
-    """Apply every migration not yet applied, in order. Returns the names applied.
+    """Apply every migration not yet applied, in order. Returns the names applied. A process
+    runs it on the migration lock's own session (`DatabaseGate.startup("migration")`), so two
+    never apply one twice, and it cannot go on after the lock went with its session.
 
     A 0.x database is refused, so pointing v1 at the wrong database by accident changes
     nothing.
     """
-    await conn.execute("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK,))
-    try:
-        if not await _exists(conn, "schema_migrations"):
-            if await _exists(conn, "selections"):
-                raise LegacyDatabaseError(
-                    "this is a litwatch 0.x database; v1 starts from an empty one"
-                )
-            await conn.execute(
-                "CREATE TABLE schema_migrations (version integer PRIMARY KEY, "
-                "name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())"
+    if not await _exists(conn, "schema_migrations"):
+        if await _exists(conn, "selections"):
+            raise LegacyDatabaseError(
+                "this is a litwatch 0.x database; v1 starts from an empty one"
             )
-        rows = await (await conn.execute("SELECT version FROM schema_migrations")).fetchall()
-        done = {r["version"] for r in rows}
-        applied = []
-        for version, name, body in _migrations():
-            if version in done:
-                continue
-            async with conn.transaction():
-                await conn.execute(body)
-                await conn.execute(
-                    "INSERT INTO schema_migrations (version, name) VALUES (%s, %s)",
-                    (version, name),
-                )
-            log.info("applied migration %s", name)
-            applied.append(name)
-        return applied
-    finally:
-        await conn.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK,))
+        await conn.execute(
+            "CREATE TABLE schema_migrations (version integer PRIMARY KEY, "
+            "name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())"
+        )
+    rows = await (await conn.execute("SELECT version FROM schema_migrations")).fetchall()
+    done = {r["version"] for r in rows}
+    applied = []
+    for version, name, body in _migrations():
+        if version in done:
+            continue
+        async with conn.transaction():
+            await conn.execute(body)
+            await conn.execute(
+                "INSERT INTO schema_migrations (version, name) VALUES (%s, %s)", (version, name)
+            )
+        log.info("applied migration %s", name)
+        applied.append(name)
+    return applied

@@ -1,8 +1,11 @@
 """The dispatcher: hands outbox events to each loaded integration that reacts to them
 (`events.Reacting`), in id order, from that integration's own cursor.
 
-Each integration is delivered to on its own connection and its own loop, so one that fails
-or takes long (a WebDAV upload of a large PDF) delays nobody else. When `handle`
+Each integration is delivered to in its own loop, under its own dispatch lock, so one that
+fails or takes long (a WebDAV upload of a large PDF) delays nobody else. The dispatcher's
+bookkeeping (the cursor, a failure) is in units of its own; an integration's `handle`, `setup`
+and `idle` are lent a connection of their own, outside any unit (transitional, until they take
+`db`). When `handle`
 raises, the cursor stays before that event, the failure is recorded for the API, and the
 event is tried again after a backoff that doubles up to an hour; the integration's later
 events wait behind it, since they may depend on it. The owner can retry the event at once
@@ -23,12 +26,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 
-import psycopg
-
-from litwatch import store
+from litwatch.core import Event
 from litwatch.events import Reacting
+from litwatch.gates.database import BusyError, DatabaseGate
 from litwatch.store import outbox
 
 log = logging.getLogger(__name__)
@@ -47,40 +50,67 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"[:500]
 
 
-async def deliver(
-    conn: psycopg.AsyncConnection, integration: Reacting, now: datetime | None = None
-) -> int:
+def _clock(now: datetime | None) -> Callable[[], datetime]:
+    return (lambda: now) if now else (lambda: datetime.now(UTC))
+
+
+async def _next(
+    db: DatabaseGate, name: str, clock: Callable[[], datetime]
+) -> tuple[outbox.Cursor, list[Event]] | None:
+    """The integration's cursor and the settled events after it, up to a batch; None while a
+    failure waits out its backoff."""
+    async with db.write(f"dispatch {name}: next") as unit:
+        cursor = await outbox.cursor(unit, name)
+        if cursor.retry_at and cursor.retry_at > clock():
+            return None
+        return cursor, await outbox.after(unit, cursor.position, BATCH)
+
+
+@contextlib.asynccontextmanager
+async def _dispatching(db: DatabaseGate, name: str) -> AsyncIterator[bool]:
+    """Hold the integration's dispatch lock for the block, if no other session holds it; yields
+    whether it is held."""
+    held = contextlib.AsyncExitStack()
+    try:
+        await held.enter_async_context(db.held("dispatch", name))
+    except BusyError:
+        yield False
+        return
+    async with held:
+        yield True
+
+
+async def deliver(db: DatabaseGate, integration: Reacting, now: datetime | None = None) -> int:
     """One pass: hand over the settled events after the cursor, up to a batch, stopping at the
     first failure. Returns how many events the cursor moved past, wanted or not. `now` fixes
-    the clock, for tests; otherwise a failure's backoff runs from the moment it failed."""
-    clock = (lambda: now) if now else (lambda: datetime.now(UTC))
-    async with outbox.dispatching(conn, integration.name) as locked:
-        if not locked:
+    the clock, for tests; otherwise a failure's backoff runs from the moment it failed. With
+    nothing to hand over it takes no lock."""
+    clock, name = _clock(now), integration.name
+    if not (found := await _next(db, name, clock)) or not found[1]:
+        return 0
+    async with _dispatching(db, name) as locked, contextlib.AsyncExitStack() as lent:
+        if not locked or not (found := await _next(db, name, clock)):
             return 0
-        cursor = await outbox.cursor(conn, integration.name)
-        if cursor.retry_at and cursor.retry_at > clock():
-            return 0
+        cursor, todo = found
         position, passed = cursor.position, 0
-        for event in await outbox.after(conn, cursor.position, BATCH):
+        conn = None
+        for event in todo:
             if integration.wants(event):
+                if conn is None:
+                    conn = await lent.enter_async_context(db.lend(f"dispatch {name}"))
                 try:
                     await integration.handle(conn, event)
                 except Exception as exc:
-                    await outbox.advance(conn, integration.name, position)
                     failures = cursor.failures + 1 if cursor.failing == event.id else 1
                     at = clock()
-                    recorded = await outbox.failed(
-                        conn,
-                        integration.name,
-                        event,
-                        failures,
-                        _describe(exc),
-                        at,
-                        at + backoff(failures),
-                    )
+                    async with db.write(f"dispatch {name}: failed") as unit:
+                        await outbox.advance(unit, name, position)
+                        recorded = await outbox.failed(
+                            unit, name, event, failures, _describe(exc), at, at + backoff(failures)
+                        )
                     log.warning(
                         "%s: event %s (%s) failed %d time(s)%s: %s",
-                        integration.name,
+                        name,
                         event.id,
                         event.type,
                         failures,
@@ -89,77 +119,79 @@ async def deliver(
                     )
                     return passed
             position, passed = outbox.Position.of(event), passed + 1
-        await outbox.advance(conn, integration.name, position)
+        async with db.write(f"dispatch {name}: advance") as unit:
+            await outbox.advance(unit, name, position)
         return passed
 
 
-async def start(
-    conn: psycopg.AsyncConnection, integration: Reacting, now: datetime | None = None
-) -> bool:
+async def start(db: DatabaseGate, integration: Reacting, now: datetime | None = None) -> bool:
     """Make the integration's cursor (at the last settled event, the first time) and run its
     setup under the dispatch lock. Returns whether the integration is set up: False while
     another session holds the lock, while a failed setup waits out its backoff, and after a
     setup that failed, which is recorded. `now` fixes the clock, for tests."""
-    clock = (lambda: now) if now else (lambda: datetime.now(UTC))
-    await outbox.cursor(conn, integration.name)
+    clock, name = _clock(now), integration.name
     setup = getattr(integration, "setup", None)
-    if setup is None:
-        # The section may have had another implementation, one whose setup failed.
-        await outbox.setup_done(conn, integration.name)
-        return True
-    async with outbox.dispatching(conn, integration.name) as locked:
+    async with db.write(f"dispatch {name}: cursor") as unit:
+        await outbox.cursor(unit, name)
+        if setup is None:
+            # The section may have had another implementation, one whose setup failed.
+            await outbox.setup_done(unit, name)
+            return True
+    async with _dispatching(db, name) as locked:
         if not locked:
             return False
-        cursor = await outbox.cursor(conn, integration.name)
+        async with db.write(f"dispatch {name}: setup due") as unit:
+            cursor = await outbox.cursor(unit, name)
         if cursor.setup_failures and cursor.setup_retry_at and cursor.setup_retry_at > clock():
             return False
         try:
-            await setup(conn)
+            async with db.lend(f"dispatch {name}: setup") as conn:
+                await setup(conn)
         except Exception as exc:
             failures, at = cursor.setup_failures + 1, clock()
-            await outbox.setup_failed(
-                conn, integration.name, failures, _describe(exc), at, at + backoff(failures)
-            )
-            log.warning(
-                "%s: setup failed %d time(s): %s", integration.name, failures, _describe(exc)
-            )
+            async with db.write(f"dispatch {name}: setup failed") as unit:
+                await outbox.setup_failed(
+                    unit, name, failures, _describe(exc), at, at + backoff(failures)
+                )
+            log.warning("%s: setup failed %d time(s): %s", name, failures, _describe(exc))
             return False
-        await outbox.setup_done(conn, integration.name)
+        async with db.write(f"dispatch {name}: set up") as unit:
+            await outbox.setup_done(unit, name)
         return True
 
 
-async def idle(conn: psycopg.AsyncConnection, integration: Reacting) -> bool:
+async def idle(db: DatabaseGate, integration: Reacting) -> bool:
     """Call the integration's `idle` hook, if it has one, under its delivery lock. A failure is
     logged and goes no further. Returns whether the hook ran."""
     hook = getattr(integration, "idle", None)
     if hook is None:
         return False
-    async with outbox.dispatching(conn, integration.name) as locked:
+    async with _dispatching(db, integration.name) as locked:
         if not locked:
             return False
         try:
-            await hook(conn)
+            async with db.lend(f"dispatch {integration.name}: idle") as conn:
+                await hook(conn)
         except Exception:
             log.exception("%s: idle work failed", integration.name)
     return True
 
 
-async def _loop(dsn: str, integration: Reacting) -> None:
+async def _loop(db: DatabaseGate, integration: Reacting) -> None:
     started = False
     clock = asyncio.get_running_loop().time
     idled = clock() - IDLE_HOOK_SECONDS
     while True:
         try:
-            async with await store.connect(dsn) as conn:
-                while not started:
-                    if not (started := await start(conn, integration)):
-                        await asyncio.sleep(IDLE_SECONDS)
-                while True:
-                    if not await deliver(conn, integration):
-                        if clock() - idled >= IDLE_HOOK_SECONDS:
-                            idled = clock()
-                            await idle(conn, integration)
-                        await asyncio.sleep(IDLE_SECONDS)
+            while not started:
+                if not (started := await start(db, integration)):
+                    await asyncio.sleep(IDLE_SECONDS)
+            while True:
+                if not await deliver(db, integration):
+                    if clock() - idled >= IDLE_HOOK_SECONDS:
+                        idled = clock()
+                        await idle(db, integration)
+                    await asyncio.sleep(IDLE_SECONDS)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -168,11 +200,11 @@ async def _loop(dsn: str, integration: Reacting) -> None:
             await asyncio.sleep(IDLE_SECONDS)
 
 
-async def run_forever(dsn: str, integrations: list[Reacting]) -> None:
+async def run_forever(db: DatabaseGate, integrations: list[Reacting]) -> None:
     """Deliver to every integration until cancelled, each in a loop of its own. Closing them is
     their owner's (the app's), once everything that uses them has stopped."""
     log.info("dispatcher on: %s", ", ".join(i.name for i in integrations))
-    tasks = [asyncio.create_task(_loop(dsn, i), name=f"dispatch:{i.name}") for i in integrations]
+    tasks = [asyncio.create_task(_loop(db, i), name=f"dispatch:{i.name}") for i in integrations]
     try:
         await asyncio.gather(*tasks)
     finally:

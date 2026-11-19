@@ -15,12 +15,12 @@ from litwatch.core.classification import Membership, Source
 from litwatch.feedback import word
 from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
-from litwatch.store import failures, runs, verdicts
+from litwatch.store import failures, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, answering, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, answering, paper, started
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -546,7 +546,7 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
         "over_budget": [],
     }
     # A run its process holds open (this test's own session).
-    await runs.start(conn, "nightly")
+    await started(conn, "nightly")
     await conn.execute("UPDATE runs SET started_at = now() - '1m'::interval")
     await classify(conn, P, FAITH.slug)
     running = (await client.get("/api/summary")).json()["status"]

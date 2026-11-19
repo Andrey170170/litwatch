@@ -9,6 +9,8 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from litwatch.gates.database import Identity
+
 _JSON = {"counts", "intake"}
 _FIELDS = {"fetched", "inserted", "updated", "cost", "error", *_JSON}
 
@@ -19,15 +21,17 @@ async def start(
     window_from: datetime | None = None,
     window_to: datetime | None = None,
     job_id: int | None = None,
+    *,
+    me: Identity,
 ) -> int:
-    """Open a run on `conn`, the connection its job keeps for as long as it runs: the run records
-    that session, and is alive while it lasts (`ALIVE`). A run of kind `job` names its job."""
+    """Open a run in the name of `me`, the session that stands for its process
+    (`DatabaseGate.identity`): the run is alive while that session lasts (`ALIVE`). A run of
+    kind `job` names its job."""
     row = await (
         await conn.execute(
             "INSERT INTO runs (kind, window_from, window_to, job_id, backend_pid, backend_start) "
-            "SELECT %s, %s, %s, %s, pid, backend_start FROM pg_stat_activity "
-            "WHERE pid = pg_backend_pid() RETURNING id",
-            (kind, window_from, window_to, job_id),
+            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (kind, window_from, window_to, job_id, me.pid, me.started),
         )
     ).fetchone()
     return row["id"]

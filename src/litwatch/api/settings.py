@@ -470,10 +470,8 @@ async def grade_now(
     config = request.app.state.config
     due = [grading.Due(paper, followed, tree.get(topic).name)]
     recorded = False
-    # The run record on a lent connection, outside any unit (transitional: it moves in P4).
     async with (
-        db.lend("grade now: run") as conn,
-        model_run(conn, config, "grading", gateway=request.app.state.gateway) as run,
+        model_run(db, config, "grading", gateway=request.app.state.gateway) as run,
         grading.grade(due, run.gateway, config.grading) as found,
     ):
         async for g in found:

@@ -13,7 +13,6 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
-import psycopg
 from pydantic import BaseModel, Field
 
 from litwatch import events
@@ -22,7 +21,7 @@ from litwatch.config import Grading
 from litwatch.core import Depth, Fit, Opinion, Paper, Status, Taxonomy, Topic, Verdict
 from litwatch.core.grading import FIT_DEFINITIONS, grading_topics
 from litwatch.core.grading import grade as derived
-from litwatch.gates.database import WriteUnit
+from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.llm import CallError, Gateway, Request
 from litwatch.llm.types import DecisionRequest, Predicate
 from litwatch.store import analyses as analyses_store
@@ -225,7 +224,7 @@ def grade(
 
 
 async def due(
-    conn: psycopg.AsyncConnection,
+    conn: ReadUnit,
     tree: Taxonomy,
     runs: int,
     limit: int | None = None,

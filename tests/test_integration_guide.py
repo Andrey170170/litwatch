@@ -50,7 +50,7 @@ async def grade(conn, g: str) -> None:
     await settling.settle(conn, P.id, cause=Cause.VERDICT)
 
 
-async def test_the_guides_example_loads_by_dotted_path_and_works(conn, example):
+async def test_the_guides_example_loads_by_dotted_path_and_works(conn, db, example):
     await taxonomy_store.save(conn, TREE)
     await papers_store.upsert(conn, [P])
     config = Config(
@@ -66,14 +66,14 @@ async def test_the_guides_example_loads_by_dotted_path_and_works(conn, example):
 
     await phone.http.aclose()
     phone.http = httpx.AsyncClient(transport=httpx.MockTransport(ntfy))
-    await start(conn, phone)
+    await start(db, phone)
 
     await grade(conn, "relevant")  # saved, but not must read: nothing
-    await deliver(conn, phone)
+    await deliver(db, phone)
     assert sent == []
 
     await grade(conn, "must_read")
-    await deliver(conn, phone)
+    await deliver(db, phone)
     assert sent == [
         (
             "https://ntfy.sh/litwatch-must-read",
@@ -84,9 +84,9 @@ async def test_the_guides_example_loads_by_dotted_path_and_works(conn, example):
 
     # Unsaved by the owner, then saved again: told again, as the guide says.
     await settling.toggle(conn, P.id, Hand.UNSAVE)
-    await deliver(conn, phone)
+    await deliver(db, phone)
     assert len(sent) == 1
     await settling.toggle(conn, P.id, Hand.SAVE)
-    await deliver(conn, phone)
+    await deliver(db, phone)
     assert len(sent) == 2
     await phone.aclose()

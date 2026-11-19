@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from litwatch import digests, fulltext, store
+from litwatch import digests, fulltext
 from litwatch.api import create_app
 from litwatch.api.digests import today_run
 from litwatch.config import Config, Schedule
@@ -23,7 +23,6 @@ from litwatch.digests import writer
 from litwatch.jobs import digests as digests_job
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
-from litwatch.jobs.lock import run_lock
 from litwatch.llm import Gateway, ProviderError, Reply, Stop, Usage
 from litwatch.store import classifications as classifications_store
 from litwatch.store import digests as store_
@@ -31,7 +30,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import reading, runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, paper
+from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, gate_on, paper, started
 from tests.fakes import ScriptedProvider
 from tests.test_reading import analyse, classify, grade
 
@@ -104,13 +103,19 @@ async def area(conn, p, fit: str, weight: str = "solid") -> None:
 
 async def day(conn, w: Writer, on: date, config: Config | None = None) -> bool:
     tree = await taxonomy_store.load(conn)
-    async with model_run(conn, config or Config(), "digests", gateway=w.gateway) as run:
+    async with (
+        gate_on(conn) as db,
+        model_run(db, config or Config(), "digests", gateway=w.gateway) as run,
+    ):
         return await digests.write_day(conn, run, tree, on, rules=settling.RULES)
 
 
 async def week(conn, w: Writer, monday: date) -> None:
     tree = await taxonomy_store.load(conn)
-    async with model_run(conn, Config(), "digests", gateway=w.gateway) as run:
+    async with (
+        gate_on(conn) as db,
+        model_run(db, Config(), "digests", gateway=w.gateway) as run,
+    ):
         await digests.write_week(conn, run, tree, monday, rules=settling.RULES)
 
 
@@ -523,7 +528,7 @@ async def test_a_version_history_corrects_a_guessed_first_day_either_way(db):
     assert (await day_of(db, early), await day_of(db, late)) == (WED, date(2026, 5, 5))
 
 
-async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
+async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db, gate):
     """P's re-check finishes on Saturday, after Friday's digest: Monday's daily covers it,
     and the weekly of P's week, written after it, has it; the next weekly does not list it,
     and the weekly before does not take Monday's own paper."""
@@ -537,7 +542,7 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
     await area(db, R, "related")
     await listed(db, mon2, R)
     tree = await taxonomy_store.load(db)
-    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+    async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.nightly(db, run, tree, mon2, rules=settling.RULES)
     assert {p for p, _ in (await shown(db, INTERP.slug, "day", mon2))[1]} == {P.id, R.id}
     assert {p for p, _ in (await shown(db, INTERP.slug, "week", MON))[1]} == {P.id, Q.id}
@@ -549,7 +554,7 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db):
     assert asked.index("Also in the week's daily digests") < asked.index(P.id)
 
 
-async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_own(db):
+async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_own(db, gate):
     """P is listed late, in Monday's daily; the weekly before takes it. The next weekly reads
     that daily, so its writer is given P as one of the week's, not as an earlier paper: its
     text may name P and still bring back one earlier paper, R."""
@@ -577,7 +582,7 @@ async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_
     await focus(db, Q, "central")
     await listed(db, mon2, Q)
     tree = await taxonomy_store.load(db)
-    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+    async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.nightly(db, run, tree, mon2, rules=settling.RULES)
     assert (P.id, "listed") in (await shown(db, FAITH.slug, "week", MON))[1]
     await week(db, w, mon2)
@@ -1135,7 +1140,7 @@ async def test_a_day_stays_released_when_its_papers_are_dismissed(db):
 # -- failed digests --------------------------------------------------------------------------------
 
 
-async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(db):
+async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(db, gate):
     w = Writer()
     w.failures = [ProviderError("down")]
     await focus(db, P, "central")
@@ -1147,14 +1152,14 @@ async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(d
     await focus(db, Q, "central")
     await listed(db, WED, Q)
     tree = await taxonomy_store.load(db)
-    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+    async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.nightly(db, run, tree, WED, rules=settling.RULES)
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
     assert await shown(db, FAITH.slug, "day", WED) == ("written", [(Q.id, "listed")])
     assert await store_.count_failed(db) == 0
 
 
-async def test_a_window_writes_a_failed_digest_again_before_its_days(db):
+async def test_a_window_writes_a_failed_digest_again_before_its_days(db, gate):
     """A failed Tuesday digest is written again before a recovery window's Wednesday, so
     Wednesday's does not take its paper."""
     w = Writer()
@@ -1165,18 +1170,18 @@ async def test_a_window_writes_a_failed_digest_again_before_its_days(db):
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"
     await focus(db, Q, "central")
     await listed(db, WED, Q)
-    await digests_job.window(db, Config(), WED, WED, gateway=w.gateway)
+    await digests_job.window(gate, Config(), WED, WED, gateway=w.gateway)
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
     assert await shown(db, FAITH.slug, "day", WED) == ("written", [(Q.id, "listed")])
 
 
-async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db):
+async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db, gate):
     w = Writer()
     w.failures = [ProviderError("down")]
     await focus(db, P, "central")
     await listed(db, TUE, P)
     await day(db, w, TUE)
-    await runs.finish(db, await runs.start(db, "nightly"))
+    await runs.finish(db, await started(db, "nightly"))
     status = await reading.status(db)
     assert (status["state"], status["digests_failed"]) == ("attention", 1)
     await taxonomy_store.save(
@@ -1185,12 +1190,12 @@ async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db):
     status = await reading.status(db)
     assert (status["state"], status["digests_failed"]) == ("quiet", 0)
     tree = await taxonomy_store.load(db)
-    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+    async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.retry_failed(db, run, tree, rules=settling.RULES)
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"  # not written while paused
 
 
-async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each(db):
+async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each(db, gate):
     # models.md, roles: an unusable answer moves the next attempt one model down, per failed
     # digest of the topic; no answer moves nothing; the last model is kept. An invalid answer is
     # asked again once, of the model that gave it, before the digest fails.
@@ -1217,7 +1222,7 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
     await day(db, w, TUE)
     tree = await taxonomy_store.load(db)
     for _ in range(4):
-        async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+        async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
             await digests.retry_failed(db, run, tree, rules=settling.RULES)
     assert w.models == [opus, opus, sonnet, sonnet, sonnet, kimi, opus, opus, kimi]
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "written"
@@ -1252,7 +1257,7 @@ async def test_a_rejected_answer_is_asked_again_once_saying_what_was_wrong(db):
     assert [r["error"] is None for r in await errors.fetchall()] == [False, True]
 
 
-async def test_a_second_ask_with_no_answer_still_moves_the_next_attempt_down(db):
+async def test_a_second_ask_with_no_answer_still_moves_the_next_attempt_down(db, gate):
     class Scripted(Writer):
         def __init__(self, script: list) -> None:
             super().__init__()
@@ -1273,7 +1278,7 @@ async def test_a_second_ask_with_no_answer_still_moves_the_next_attempt_down(db)
     row = await digest_row(db, FAITH.slug, "day", TUE)
     assert (row["state"], row["error"]) == ("failed", "invalid: not JSON")
     tree = await taxonomy_store.load(db)
-    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+    async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.retry_failed(db, run, tree, rules=settling.RULES)
     assert w.models == [opus, opus, sonnet]
 
@@ -1300,38 +1305,39 @@ class Archive:
         pass
 
 
-async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db, monkeypatch):
+async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db, gate, monkeypatch):
     await focus(db, P, "central")  # queues P's Brief
     since = datetime.now(UTC) - timedelta(minutes=1)
     worked = []
 
-    async def work(conn, config, archive, run=None, limit=None, deadline=None):
+    async def work(db, config, archive, run=None, limit=None, deadline=None):
         worked.append(deadline)
         if len(worked) == 2:
-            await conn.execute("UPDATE fulltext_passes SET state = 'done'")
+            async with db.write("passes done") as unit:
+                await unit.execute("UPDATE fulltext_passes SET state = 'done'")
         return {}
 
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
     monkeypatch.setattr(fulltext, "work", work)
     deadline = nightly.time.monotonic() + 60
-    async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
+    async with model_run(gate, Config(), "nightly", gateway=Writer().gateway) as run:
         assert await store_.waiting_passes(db, since) == 1
-        await nightly.wait_for_texts(db, Config(), run, since, deadline, 0.01)
+        await nightly.wait_for_texts(gate, Config(), run, since, deadline, 0.01)
     assert worked == [deadline, deadline] and "digest_wait_ended" not in run.counts
 
 
-async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db, monkeypatch):
+async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db, gate, monkeypatch):
     await focus(db, P, "central")
     since = datetime.now(UTC) - timedelta(minutes=1)
 
-    async def work(conn, config, archive, run=None, limit=None, deadline=None):
+    async def work(db, config, archive, run=None, limit=None, deadline=None):
         return {}
 
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
     monkeypatch.setattr(fulltext, "work", work)
-    async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
+    async with model_run(gate, Config(), "nightly", gateway=Writer().gateway) as run:
         deadline = nightly.time.monotonic() + 0.06
-        wait = nightly.wait_for_texts(db, Config(), run, since, deadline, 0.01)
+        wait = nightly.wait_for_texts(gate, Config(), run, since, deadline, 0.01)
         await asyncio.wait_for(wait, 5)  # the pass never finishes: only the bound ends it
     assert run.counts["digest_wait_ended"] == 1
     # A pass that failed in this run is not waited for: it is tried on the next one.
@@ -1339,26 +1345,26 @@ async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db, monkeypatch):
     assert await store_.waiting_passes(db, since) == 0
 
 
-async def test_the_wait_works_no_more_passes_than_the_runs_limit_leaves(db, monkeypatch):
+async def test_the_wait_works_no_more_passes_than_the_runs_limit_leaves(db, gate, monkeypatch):
     """`nightly --limit`: the passes worked before the wait count against it too."""
     await focus(db, P, "central")
     since = datetime.now(UTC) - timedelta(minutes=1)
     limits = []
 
-    async def work(conn, config, archive, run=None, limit=None, deadline=None):
+    async def work(db, config, archive, run=None, limit=None, deadline=None):
         limits.append(limit)
         return Counter(briefs_written=1)
 
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
     monkeypatch.setattr(fulltext, "work", work)
-    async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
+    async with model_run(gate, Config(), "nightly", gateway=Writer().gateway) as run:
         deadline = nightly.time.monotonic() + 0.1
-        await nightly.wait_for_texts(db, Config(), run, since, deadline, 0.01, limit=2)
+        await nightly.wait_for_texts(gate, Config(), run, since, deadline, 0.01, limit=2)
     assert limits == [2, 1]  # then the allowance is spent and the wait only waits
 
 
 async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_started(
-    db, monkeypatch
+    db, gate, monkeypatch
 ):
     """Started Monday 23:59 in the schedule's zone and ending after midnight, the run writes
     Monday's dailies and the week before's weeklies."""
@@ -1376,12 +1382,12 @@ async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_star
     await db.execute("UPDATE papers SET dismissed_at = now() WHERE id <> %s", (P.id,))  # no calls
     await listed(db, MON, P)
     config = Config.model_validate({"schedule": {"timezone": "America/New_York"}})
-    await nightly.run(db, config, fetch=False, gateway=Writer().gateway)
+    await nightly.run(gate, config, fetch=False, gateway=Writer().gateway)
     assert await shown(db, FAITH.slug, "day", MON) == ("written", [(P.id, "listed")])
     assert (await shown(db, FAITH.slug, "week", MON - timedelta(days=7)))[0] == "nothing_new"
 
 
-async def test_a_nightly_run_without_digests_writes_none(db):
+async def test_a_nightly_run_without_digests_writes_none(db, gate):
     """`nightly --no-digests` (the restart, whose digests `digests write` makes for its window):
     on a Monday with a paper listed, neither the day's dailies nor last week's weeklies."""
     await focus(db, P, "central")
@@ -1389,7 +1395,7 @@ async def test_a_nightly_run_without_digests_writes_none(db):
     await db.execute("UPDATE papers SET dismissed_at = now() WHERE id <> %s", (P.id,))  # no calls
     await listed(db, MON, P)
     await nightly.run(
-        db, Config(), fetch=False, gateway=Writer().gateway, today=MON, with_digests=False
+        gate, Config(), fetch=False, gateway=Writer().gateway, today=MON, with_digests=False
     )
     assert (await (await db.execute("SELECT count(*) AS n FROM digests")).fetchone())["n"] == 0
 
@@ -1554,11 +1560,11 @@ async def test_the_tab_counts_updated_papers_apart_and_gives_each_its_version(db
     )
 
 
-async def test_the_tab_steps_only_through_the_digests_it_shows(db):
+async def test_the_tab_steps_only_through_the_digests_it_shows(db, gate):
     """An unfollowed topic keeps its digests, but the tab neither shows nor steps to them."""
     w = Writer()
     tree = await taxonomy_store.load(db)
-    async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+    async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.write(
             db, run, tree, tree.topic(FAITH.slug), DigestPeriod.DAY, TUE, rules=settling.RULES
         )
@@ -1586,7 +1592,7 @@ async def failed_day(db, w: Writer) -> int:
     return row["id"]
 
 
-async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_written(db):
+async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_written(db, gate):
     """Write again queues a job instead of answering 409 while another job holds the run lock;
     the worker writes the digest once the lock is free, and its Needs you item and its job
     settle together."""
@@ -1595,7 +1601,7 @@ async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_w
     async with client(db, w, SCHEDULED) as http:
         quality = (await http.get("/api/settings/quality")).json()
         assert [d["id"] for d in quality["night"]["digests"]] == [digest_id]
-        async with await store.sibling(db) as other, run_lock(other):
+        async with gate_on(db) as other, other.held("run"):
             asked = await http.post(f"/api/digests/{digest_id}/write")
             assert asked.status_code == 202
             body = asked.json()
@@ -1604,13 +1610,13 @@ async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_w
             again = (await http.post(f"/api/digests/{digest_id}/write")).json()
             assert again["job"]["id"] == body["job"]["id"]
             # The lock is held: no chunk starts, and the job waits in the queue.
-            assert not await worker.Worker(db, SCHEDULED, w.gateway).step(AFTERNOON)
+            assert not await worker.Worker(gate, SCHEDULED, w.gateway).step(AFTERNOON)
             jobs = (await http.get("/api/jobs")).json()
             [row] = jobs["running"]
             assert (row["kind"], row["state"]) == ("digest", "queued")
             assert row["digest"]["id"] == digest_id
             assert (row["topic"]["slug"], row["digest"]["period"]) == (FAITH.slug, "day")
-        assert await worker.Worker(db, SCHEDULED, w.gateway).step(AFTERNOON)
+        assert await worker.Worker(gate, SCHEDULED, w.gateway).step(AFTERNOON)
         written = (await http.get(f"/api/digests/{digest_id}")).json()
         assert (written["state"], written["job"]["state"]) == ("written", "done")
         assert [p["id"] for p in written["papers"]] == [P.id]
@@ -1624,13 +1630,15 @@ async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_w
     assert [r["kind"] for r in job_runs] == ["job"]  # its cost reaches the month's spend
 
 
-async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_run_writes_it(db):
+async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_run_writes_it(
+    db, gate
+):
     w = Writer()
     digest_id = await failed_day(db, w)
     async with client(db, w, SCHEDULED) as http:
         w.failures = [ProviderError("still down")] * 4  # every writer of the list
         assert (await http.post(f"/api/digests/{digest_id}/write")).status_code == 202
-        assert await worker.Worker(db, SCHEDULED, w.gateway).step(AFTERNOON)
+        assert await worker.Worker(gate, SCHEDULED, w.gateway).step(AFTERNOON)
         failed = (await http.get(f"/api/digests/{digest_id}")).json()
         assert (failed["state"], failed["job"]["state"]) == ("failed", "failed")
         assert failed["job"]["error"].startswith("the writer failed again")
@@ -1639,7 +1647,7 @@ async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_ru
         # The next run writes it: the failed job settles with it, done.
         w.failures = []
         tree = await taxonomy_store.load(db)
-        async with model_run(db, Config(), "digests", gateway=w.gateway) as run:
+        async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
             await digests.retry_failed(db, run, tree, rules=settling.RULES)
         settled = (await http.get(f"/api/digests/{digest_id}")).json()
         assert (settled["state"], settled["job"]["state"]) == ("written", "done")

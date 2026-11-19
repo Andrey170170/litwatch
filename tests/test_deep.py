@@ -40,7 +40,7 @@ from litwatch.core.fulltext import (
 )
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import DatabaseGate, identity_of
 from litwatch.intake import search
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
@@ -63,6 +63,7 @@ from tests.conftest import (
     AppClient,
     answering,
     fixture_read,
+    gate_on,
     paper,
     sent_figure,
 )
@@ -141,7 +142,14 @@ async def attempts(conn) -> list[dict]:
 
 
 async def work(conn, fake: FakeArchive, d: Deep, **kw):
-    return await deep_passes.work(conn, archive(fake), d, rules=settling.RULES, **kw)
+    async with gate_on(conn) as db:
+        return await deep_passes.work(db, archive(fake), d, rules=settling.RULES, **kw)
+
+
+async def retry_failed(conn) -> int:
+    """`store.fulltext.retry_failed` in a unit of its own, as the nightly calls it."""
+    async with DatabaseGate.over(conn).write("retry failed", taxonomy="shared") as unit:
+        return await fulltext_store.retry_failed(unit, FAILED_RUNS)
 
 
 async def ask(conn, paper_id: str) -> int | None:
@@ -412,9 +420,9 @@ async def test_a_failed_job_records_its_usage_and_waits_for_the_owner_after_thre
     fake = FakeDeep(failed)
     d = make(fake)
     for run in range(FAILED_RUNS):
-        assert await fulltext_store.retry_failed(db, FAILED_RUNS) == (1 if run else 0)
+        assert await retry_failed(db) == (1 if run else 0)
         assert await work(db, with_text(P), d) == {"card_failed": 1}
-    assert await fulltext_store.retry_failed(db, FAILED_RUNS) == 0  # no longer tried
+    assert await retry_failed(db) == 0  # no longer tried
     assert [(a["usage"], a["error"], a["failure"]) for a in await attempts(db)] == [
         (USAGE, "cell budget exhausted", "paper")
     ] * FAILED_RUNS
@@ -433,7 +441,7 @@ async def test_the_owners_request_tries_a_failed_pass_again(db):
     fake = FakeDeep({"error": "cell budget exhausted", "stats": USAGE, "trace": []})
     d = make(fake)
     for _ in range(FAILED_RUNS):
-        await fulltext_store.retry_failed(db, FAILED_RUNS)
+        await retry_failed(db)
         assert await work(db, with_text(P), d) == {"card_failed": 1}
     (failed,) = await deep_rows(db)
     fake.outcome = DONE
@@ -1257,9 +1265,7 @@ async def test_a_job_queued_past_its_deadline_is_kept_however_often_it_is_follow
 async def test_one_worker_at_a_time_works_the_deep_passes(db):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
-    other = await store.connect(db.test_dsn, db.test_schema)
-    async with other, fulltext_store.deep_worker(other) as mine:
-        assert mine
+    async with gate_on(db) as other, other.held("deep-worker"):  # another process's worker
         assert await work(db, with_text(P), make(fake)) == {}
     assert fake.requests == [] and [r["state"] for r in await deep_rows(db)] == ["awaiting_text"]
     assert await work(db, with_text(P), make(fake)) == {"cards_written": 1}
@@ -1445,12 +1451,12 @@ async def test_a_pick_pass_once_for_a_focus_must_read_says_it_is_for_the_pick(db
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 
 
-async def test_a_pick_whose_settle_was_missed_is_swept_up_whatever_the_limit(db):
+async def test_a_pick_whose_settle_was_missed_is_swept_up_whatever_the_limit(db, gate):
     await picked(db)
     await db.execute("DELETE FROM fulltext_passes WHERE kind = 'deep'")  # its settle missed
     assert P.id in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)
-    async with model_run(db, Config(), "nightly", gateway=Writer().gateway) as run:
-        await nightly.text_passes(db, Config(), run, limit=0)  # no archive: it only reconciles
+    async with model_run(gate, Config(), "nightly", gateway=Writer().gateway) as run:
+        await nightly.text_passes(gate, Config(), run, limit=0)  # no archive: it only reconciles
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 
     await work(db, with_text(P), make(FakeDeep(DONE)))
@@ -1524,10 +1530,10 @@ async def test_deep_read_asked_again_while_its_process_job_runs_changes_nothing(
     _, http = client(db, [make(FakeDeep(DONE))], scheduled)
     async with http:
         asked = await http.post(f"/api/papers/{P.id}/card")
-        job = (await jobs_store.claim(db))["id"]
+        job = (await jobs_store.claim(db, me=await identity_of(db)))["id"]
         again = await http.post(f"/api/papers/{P.id}/card")
     assert again.status_code == 202 and again.json() == asked.json()
-    await jobs_store.finish(db, job, "done")
+    await jobs_store.finish(db, job, "done", me=await identity_of(db))
     assert (await jobs_store.get(db, job))["state"] == "done"
 
 
@@ -1583,13 +1589,12 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
     assert quality["deep"] == {"attempts": 1, "list_cost": USAGE["list_cost"], "unknown": 0}
 
 
-async def test_the_deep_worker_runs_a_requested_card_as_soon_as_it_is_woken(db):
+async def test_the_deep_worker_runs_a_requested_card_as_soon_as_it_is_woken(db, gate):
     fake = FakeDeep(DONE)
     d = make(fake)
     wake = asyncio.Event()
-    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     worker = asyncio.create_task(
-        deep_passes.run_forever(dsn, archive(with_text(P)), d, wake, rules=settling.RULES)
+        deep_passes.run_forever(gate, archive(with_text(P)), d, wake, rules=settling.RULES)
     )
     try:
         await ask(db, P.id)

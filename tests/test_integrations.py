@@ -171,13 +171,13 @@ def archive(fake: FakeArchive) -> Archive:
     )
 
 
-async def test_every_new_paper_is_registered_with_its_pdf_and_source(world):
+async def test_every_new_paper_is_registered_with_its_pdf_and_source(world, db):
     conn, fake = world, FakeArchive()
     a = archive(fake)
-    await start(conn, a)
+    await start(db, a)
     unknown = paper("2610.00002")  # no arXiv version, and none the archive knows
     await papers_store.upsert(conn, [P, unknown])
-    await deliver(conn, a)
+    await deliver(db, a)
 
     assert fake.records[P.id]["latest_version"] == 3
     assert "revision" not in fake.records[P.id]["metadata"]
@@ -197,12 +197,12 @@ async def _graded(conn, paper_id: str, topic: str, grade: Grade) -> None:
     await events.emit(conn, events.GRADE_CHANGED, paper_id, topic=topic, after=grade.value)
 
 
-async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_papers(world):
+async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_papers(world, db):
     conn, fake = world, FakeArchive()
     a = archive(fake)
     others = [paper(f"2610.0001{i}", version=1) for i in range(5)]
     await papers_store.upsert(conn, [P, *others])
-    await start(conn, a)
+    await start(db, a)
     relevant, adjacent, saved, gone, paused = others
     await _graded(conn, P.id, "cot-faithfulness", Grade.MUST_READ)
     await _graded(conn, relevant.id, "agents", Grade.RELEVANT)
@@ -225,7 +225,7 @@ async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_paper
         ),
     )
     await _graded(conn, paused.id, "interpretability", Grade.MUST_READ)
-    await deliver(conn, a)
+    await deliver(db, a)
 
     asked = [(j["paper_id"], j["version"], j["kind"], j["priority"]) for j in fake.jobs]
     assert asked == [
@@ -237,17 +237,17 @@ async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_paper
     assert WANTED < BACKGROUND  # an archive under `pdfs wanted` holds background PDFs only
 
 
-async def test_a_kept_paper_s_revision_asks_for_its_new_pdf_above_background(world):
+async def test_a_kept_paper_s_revision_asks_for_its_new_pdf_above_background(world, db):
     conn, fake = world, FakeArchive()
     a = archive(fake)
-    await start(conn, a)
+    await start(db, a)
     await papers_store.upsert(conn, [paper(P.id, version=2)])
     await word_store.set_saved(conn, P.id, True)
-    await deliver(conn, a)
+    await deliver(db, a)
     fake.jobs.clear()
     # Still saved, so no event says so again: the revision itself asks.
     await papers_store.upsert(conn, [P])
-    await deliver(conn, a)
+    await deliver(db, a)
 
     assert [(j["paper_id"], j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [
         (P.id, 3, "pdf", WANTED),
@@ -256,17 +256,17 @@ async def test_a_kept_paper_s_revision_asks_for_its_new_pdf_above_background(wor
     # A revision read from the archive is not registered again, but its PDF is still asked for.
     fake.jobs.clear()
     await papers_store.upsert(conn, [paper(P.id, version=4)], source=papers_store.ARCHIVE)
-    await deliver(conn, a)
+    await deliver(db, a)
     assert [(j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [(4, "pdf", WANTED)]
 
 
-async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world):
+async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world, db):
     conn, fake = world, FakeArchive()
     a = archive(fake)
-    await start(conn, a)
+    await start(db, a)
     await papers_store.upsert(conn, [paper(P.id, version=2)])
     await _graded(conn, P.id, INTERP.slug, Grade.RELEVANT)
-    await deliver(conn, a)
+    await deliver(db, a)
     fake.jobs.clear()
     paused = [
         t.model_copy(update={"status": Status.PAUSED}) if t == INTERP else t for t in TREE.topics
@@ -274,7 +274,7 @@ async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world):
     await taxonomy_store.save(conn, TREE.model_copy(update={"topics": paused}))
     # Revised while paused: resuming emits nothing, so the revision asks for the PDF now.
     await papers_store.upsert(conn, [P])
-    await deliver(conn, a)
+    await deliver(db, a)
 
     assert [(j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [
         (3, "pdf", WANTED),
@@ -282,7 +282,7 @@ async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world):
     ]
 
 
-async def test_an_archive_that_does_not_register_only_answers_searches(world, secrets):
+async def test_an_archive_that_does_not_register_only_answers_searches(world, db, secrets):
     with pytest.raises(IntegrationError, match="register must be true or false"):
         integrations.load(
             Config(integrations={"archive": {"url": "http://a.test", "register": "no"}})
@@ -295,11 +295,11 @@ async def test_an_archive_that_does_not_register_only_answers_searches(world, se
     conn, fake = world, FakeArchive()
     a = archive(fake)
     a.register = False
-    await start(conn, a)
+    await start(db, a)
     await papers_store.upsert(conn, [P])
     await word_store.set_saved(conn, P.id, True)
     await events.emit(conn, events.PAPER_SAVED, P.id)
-    await deliver(conn, a)
+    await deliver(db, a)
     assert fake.records == {} and fake.jobs == []
     fake.search_items = [{"id": "2401.00001", "title": "First", "authors": "", "published": ""}]
     assert [h.id for h in a.search("q", SearchFilters(limit=5))] == ["2401.00001"]
@@ -331,7 +331,7 @@ async def test_the_archive_answers_searches_by_arxiv_id_in_its_order():
 # -- webhook ---------------------------------------------------------------------------------------
 
 
-async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(conn):
+async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(conn, db):
     received, status = [], [500]
 
     def receive(req: httpx.Request) -> httpx.Response:
@@ -341,15 +341,15 @@ async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(con
     hook = Webhook(
         "http://n8n.test/hook", patterns=("paper.*",), secret="s3cret", http=mock(receive)
     )
-    await start(conn, hook)
+    await start(db, hook)
     await papers_store.upsert(conn, [P])
     saved = await events.emit(conn, events.PAPER_SAVED, P.id)
-    await deliver(conn, hook)
+    await deliver(db, hook)
     assert (await outbox.cursor(conn, hook.name)).failing is not None  # the 500
 
     status[0] = 204
     await outbox.retry(conn, hook.name)
-    await deliver(conn, hook)
+    await deliver(db, hook)
     assert [json.loads(r.content)["type"] for r in received] == ["paper.added"] * 2 + [
         "paper.saved"
     ]

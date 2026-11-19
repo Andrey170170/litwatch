@@ -11,10 +11,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import psycopg
-
-from litwatch import llm, store
+from litwatch import llm
 from litwatch.config import Config
+from litwatch.gates.database import DatabaseGate
 from litwatch.store import runs
 from litwatch.store.calls import EVAL, CallJournal
 
@@ -58,15 +57,19 @@ class RunRecord:
 
 @asynccontextmanager
 async def run_record(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     kind: str,
     *,
     window: tuple[datetime, datetime] | None = None,
     job_id: int | None = None,
 ) -> AsyncIterator[RunRecord]:
-    """Open a run and close it with what the job recorded on it and the error that ended it,
-    whatever happens inside, a cancelled job included."""
-    record = RunRecord(await runs.start(conn, kind, *(window or (None, None)), job_id=job_id))
+    """Open a run, in the process's name (`DatabaseGate.identity`), and close it with what the
+    job recorded on it and the error that ended it, whatever happens inside, a cancelled job
+    included. Each is a unit of its own."""
+    me = await db.identity()
+    async with db.write(f"open {kind} run") as unit:
+        run_id = await runs.start(unit, kind, *(window or (None, None)), job_id=job_id, me=me)
+    record = RunRecord(run_id)
     failed = True
     try:
         yield record
@@ -75,8 +78,12 @@ async def run_record(
         record.fields["error"] = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        finish = runs.finish(conn, record.run_id, counts=record.counts, **record.fields)
-        await _closing(finish, failed, record.run_id, "closing it")
+        await _closing(_finish(db, record), failed, record.run_id, "closing it")
+
+
+async def _finish(db: DatabaseGate, record: RunRecord) -> None:
+    async with db.write("close run") as unit:
+        await runs.finish(unit, record.run_id, counts=record.counts, **record.fields)
 
 
 async def _closing(step: Awaitable[None], failed: bool, run_id: int, what: str) -> None:
@@ -116,7 +123,7 @@ class ModelRun:
 
 @asynccontextmanager
 async def model_run(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     kind: str,
     *,
@@ -125,16 +132,10 @@ async def model_run(
     job_id: int | None = None,
 ) -> AsyncIterator[ModelRun]:
     """A run record (`run_record`) that also closes with the calls' cost and counts by role.
-
-    The journal writes on a connection of its own, since calls finish while the job's
-    connection is inside a transaction.
-    """
-    async with (
-        run_record(conn, kind, window=window, job_id=job_id) as record,
-        await store.sibling(conn) as side,
-    ):
+    Its journal writes each call in units of its own on `db`."""
+    async with run_record(db, kind, window=window, job_id=job_id) as record:
         # An evaluation run writes its own tables only (AGENTS.md): no provider observations.
-        journal = CallJournal(side, record.run_id, observes=kind != EVAL)
+        journal = CallJournal(db, record.run_id, observes=kind != EVAL)
         failed = True
         try:
             yield ModelRun(record, gateway(config, journal), journal)

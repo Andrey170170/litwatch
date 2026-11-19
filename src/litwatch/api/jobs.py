@@ -18,7 +18,7 @@ from litwatch.api.deps import Db, Rules, protected, resolve_paper
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Cause, Topic
 from litwatch.feedback import misses, word
-from litwatch.gates.database import Connection, DatabaseGate, ReadUnit
+from litwatch.gates.database import DatabaseGate, ReadUnit, WriteUnit
 from litwatch.intake.search import NoAnswerError
 from litwatch.jobs import replays, reruns
 from litwatch.store import failures, quality
@@ -297,7 +297,7 @@ async def rerun(body: s.RerunIn, request: Request, db: Db) -> s.Jobs:
         "papers": chosen,
     }
     state = "queued" if body.run else "offered"
-    async with db.write("re-run") as c:
+    async with db.write("re-run", locks=[("rerun", topic.slug)]) as c:
         # Asked again after a lost reply, the same re-run is found, not made twice; Run puts
         # one under Not run in the queue, under the ceiling given, as Run now on Jobs does.
         # Else the one found is adopted only when it already is what was asked, so the answer's
@@ -349,7 +349,7 @@ def _replay_offer(o: replays.Offer) -> s.ReplayOffer:
     )
 
 
-async def _offer(c: Connection, config: Config) -> replays.Offer:
+async def _offer(c: WriteUnit, config: Config) -> replays.Offer:
     try:
         return await replays.offer(c, config)
     except ValueError as exc:
@@ -361,9 +361,9 @@ async def replay_offer(request: Request, db: Db) -> s.ReplayOffer:
     """What Overview's Run replay would do: answer with the replay already running, go on with
     one its ceiling stopped, or start a new one of every cohort's labels, with what it would
     cost."""
-    # Transitional: the replays move onto the gate in P4, and their transaction with them.
-    async with db.lend("replay offer") as c, c.transaction():
-        o = await _offer(c, request.app.state.config)
+    # Read under the replay lock, as Run replay acts on what it reads.
+    async with db.write("replay offer", taxonomy="shared", locks=["replay"]) as unit:
+        o = await _offer(unit, request.app.state.config)
     return _replay_offer(o)
 
 
@@ -378,8 +378,7 @@ async def run_replay(body: s.ReplayIn, request: Request, db: Db) -> s.Jobs:
     config = request.app.state.config
     if not config.schedule.enabled:
         raise HTTPException(status_code=409, detail="the schedule is off: no worker runs jobs")
-    # Transitional, as in `replay_offer`.
-    async with db.lend("run replay") as c, c.transaction():
+    async with db.write("run replay", taxonomy="shared", locks=["replay"]) as c:
         o = await _offer(c, config)
         if o.running is None:
             if o.job is not None and body.ceiling <= o.spent:
@@ -425,11 +424,13 @@ async def act(
         job = await jobs_store.get(unit, job_id)
     again = job is not None and action == "again" and job["kind"] == "process"
     papers = job["scope"]["papers"] if again else []
-    async with db.write(f"job {action}", taxonomy="shared", papers=papers) as unit:
+    # One replay under way at a time: the replay lock before the row, as Run replay.
+    replaying = job is not None and job["kind"] == "replay" and to in ("queued", "tonight")
+    locks = ["replay"] if replaying else []
+    async with db.write(f"job {action}", taxonomy="shared", papers=papers, locks=locks) as unit:
         if again and await failures.waits_on_owner(unit, papers, FAILED_RUNS):
             raise HTTPException(status_code=409, detail=WAITS)
-        if job is not None and job["kind"] == "replay" and to in ("queued", "tonight"):
-            # One replay under way at a time: the replay lock before the row, as Run replay.
+        if replaying:
             found = await jobs_store.open_replay(unit)
             if found is not None and found["id"] != job_id:
                 raise HTTPException(status_code=409, detail="another replay is under way")

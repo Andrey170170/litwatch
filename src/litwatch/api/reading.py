@@ -687,8 +687,7 @@ async def set_publication(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SourceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    async with db.lend("set publication") as conn:  # transitional: publications move in P4
-        await lookups.store_record(conn, paper_id, record, by_owner=True)
+    await lookups.store_record(db, paper_id, record, by_owner=True)
     return record
 
 
@@ -739,8 +738,7 @@ async def bibtex_selection(body: s.BibtexIn, request: Request, db: Db) -> str:
         async with db.read("bibtex: paper") as unit:
             held = await papers_store.get(unit, body.ids[0])
         if held:
-            async with db.lend("bibtex lookup") as conn:  # transitional: publications move in P4
-                await lookups.for_copy(conn, request.app.state.publications, body.ids[0])
+            await lookups.for_copy(db, request.app.state.publications, body.ids[0])
     async with db.read("bibtex") as unit:
         ids = list(body.ids)
         if body.filter is not None:

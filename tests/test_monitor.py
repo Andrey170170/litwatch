@@ -20,7 +20,7 @@ from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
-from tests.conftest import FAITH, INTERP, TREE, AppClient, paper
+from tests.conftest import FAITH, INTERP, TREE, AppClient, paper, started
 from tests.fakes import ScriptedProvider
 
 STOPPED = {
@@ -66,7 +66,7 @@ def component(document: dict, id_: str) -> dict:
 
 
 async def test_a_finished_nightly_is_measured_from_its_record(conn, monitor):
-    run_id = await runs.start(conn, "nightly")
+    run_id = await started(conn, "nightly")
     await runs.finish(conn, run_id, counts={"classified": 42})
 
     text = (await monitor.get("/metrics")).text
@@ -79,10 +79,8 @@ async def test_a_finished_nightly_is_measured_from_its_record(conn, monitor):
         text, "homelab_job_last_run_timestamp_seconds"
     )
     assert sample(text, "homelab_job_last_run_timestamp_seconds", "litwatch/publications") is None
-    started = (await runs.latest(conn, "nightly"))["started_at"].timestamp()
-    assert sample(text, "homelab_job_last_run_timestamp_seconds") == pytest.approx(
-        started, abs=1e-3
-    )
+    began = (await runs.latest(conn, "nightly"))["started_at"].timestamp()
+    assert sample(text, "homelab_job_last_run_timestamp_seconds") == pytest.approx(began, abs=1e-3)
     status = (await monitor.get("/status")).json()
     assert status["schema"] == "homelab.status/v1"
     assert component(status, "nightly")["status"] == "healthy"
@@ -91,7 +89,7 @@ async def test_a_finished_nightly_is_measured_from_its_record(conn, monitor):
 async def test_a_nightly_whose_process_died_reads_failed_not_running(conn, monitor):
     # A process that opens its run and is killed: its session ends, the record stays open.
     other = await db.sibling(conn)
-    await runs.start(other, "nightly")
+    await started(other, "nightly")
     text = (await monitor.get("/metrics")).text
     assert sample(text, "homelab_job_running") == 1
     assert component((await monitor.get("/status")).json(), "nightly")["status"] == "healthy"
@@ -107,7 +105,7 @@ async def test_a_nightly_whose_process_died_reads_failed_not_running(conn, monit
 
 
 async def test_a_run_that_raised_reads_failed_with_its_error(conn, monitor):
-    run_id = await runs.start(conn, "nightly")
+    run_id = await started(conn, "nightly")
     await runs.finish(conn, run_id, error="RuntimeError: boom")
     # Before the first success, last success is 0, so a first failure alerts as one.
     text = (await monitor.get("/metrics")).text
@@ -345,17 +343,17 @@ def answer(role: RoleConfig, request: Request) -> str | Reply | ProviderError:
     return '{"yes": true}'
 
 
-def gateway(conn, run: int) -> Gateway:
+def gateway(gate, run: int) -> Gateway:
     models = Models(
         analyse=RoleConfig(provider="anthropic", model="a"),
         brief=RoleConfig(provider="openrouter", model="lab/b"),
     )
     providers = {n: ScriptedProvider(n, answer) for n in ("anthropic", "openrouter")}
-    return Gateway(models, providers, CallJournal(conn, run), retry_delays=(0.0,))
+    return Gateway(models, providers, CallJournal(gate, run), retry_delays=(0.0,))
 
 
-async def test_an_account_error_fails_its_provider_until_its_next_reply(conn, monitor):
-    gw = gateway(conn, await runs.start(conn, "nightly"))
+async def test_an_account_error_fails_its_provider_until_its_next_reply(conn, gate, monitor):
+    gw = gateway(gate, await started(conn, "nightly"))
 
     async def anthropic() -> dict:
         return component((await monitor.get("/status")).json(), "provider-anthropic")
@@ -378,11 +376,11 @@ async def test_an_account_error_fails_its_provider_until_its_next_reply(conn, mo
     assert (await anthropic())["status"] == "healthy"
 
 
-async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(conn, monitor):
-    run = await runs.start(conn, "nightly")
-    gw = gateway(conn, run)
+async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(conn, gate, monitor):
+    run = await started(conn, "nightly")
+    gw = gateway(gate, run)
     await gw.ask("brief", question("fine"))  # before the night: reused in it
-    gw.journal = CallJournal(conn, run := await runs.start(conn, "nightly"))
+    gw.journal = CallJournal(gate, run := await started(conn, "nightly"))
     for about in ("down", "slow"):
         with pytest.raises(CallError):
             await gw.ask("brief", question(about))
@@ -405,7 +403,7 @@ async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(c
         f"2 calls in nightly {run} failed and none had a reply; expected a reply"
     )
     # An evaluation's reply in the night is not the provider's to the night.
-    evaluation = await runs.start(conn, "eval")
+    evaluation = await started(conn, "eval")
     await conn.execute(
         "INSERT INTO inference_calls (run_id, operation, request_key, usage, responded_at) "
         "SELECT %s, 'brief', 'eval', %s, finished_at FROM runs WHERE id = %s",

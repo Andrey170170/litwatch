@@ -13,8 +13,8 @@ from litwatch.intake import atom, catalog, oai
 from litwatch.intake.http import SourceError, XmlClient
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
-from litwatch.store import runs
 from tests import settling
+from tests.conftest import started
 from tests.fakes_http import FakeArchive, mock
 
 NOW = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=1)
@@ -78,14 +78,14 @@ async def checkpoint(conn) -> date | None:
 
 
 async def collect(conn, fake: FakeArchive, categories=("cs.CL",)):
-    run_id = await runs.start(conn, "intake", SINCE, NOW)
+    run_id = await started(conn, "intake", SINCE, NOW)
     return await intake.collect(
         conn, categories, SINCE, run_id, archive=lambda: archive(fake), rules=settling.RULES
     )
 
 
 async def walk(conn, arxiv: Arxiv, fake: FakeArchive, since: date):
-    run_id = await runs.start(conn, "intake", SINCE, NOW)
+    run_id = await started(conn, "intake", SINCE, NOW)
     with XmlClient() as client:
         return await catalog.run(
             conn, lambda: archive(fake), ("cs.CL",), since, run_id, client, source=arxiv
@@ -253,7 +253,7 @@ async def test_an_archive_client_that_cannot_be_made_fails_only_the_pass(conn, m
     monkeypatch.setenv("LITWATCH_ARCHIVE_TOKEN_FILE", "/nonexistent/archive-token")
     monkeypatch.delenv("LITWATCH_ARCHIVE_TOKEN", raising=False)
     opener = archive_integration.harvester(Config(integrations={"archive": {"harvest": True}}))
-    run_id = await runs.start(conn, "intake", SINCE, NOW)
+    run_id = await started(conn, "intake", SINCE, NOW)
 
     result = await intake.collect(
         conn, ("cs.CL",), SINCE, run_id, archive=opener, rules=settling.RULES

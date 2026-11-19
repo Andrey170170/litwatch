@@ -61,6 +61,26 @@ Shape, blueprint, drive.
 - **A first Deep read while the paper's Process job runs** marks the job as asked again by the owner, so it runs
   once more over what is due when it ends: harmless but the paper shows Processing longer. Narrow the trigger to
   owner changes that affect the job's steps (Codex on #127).
+- **Leases replace the presence session.** A1's P4 made each process's Database gate hold a presence connection
+  outside its pool, whose `(pid, backend_start)` (`DatabaseGate.identity`) stands for the process in run records and
+  job claims (`runs.start`, `ALIVE`, the job SQL, `take_back`); a presence that drops is opened again under a new
+  identity, and the worker closes its runs and claims afresh. The Work gate's work records replace it with leases
+  and heartbeats, and the presence connection goes (decided 2026-11-18, `docs/plans/a1-database-gate.md`, "Choices
+  made without asking").
+- **Work fenced when its ownership is lost.** Since A1's P4, what owns a piece of work lives on side sessions (the
+  session locks' connections, the presence session) that the pooled work never watches (the plan's notes, "A2: work
+  is not fenced when its ownership is lost"). Until A2:
+  - if only a lock's or the presence's session drops, or Postgres restarts while litwatch keeps running, the work
+    goes on to the end of its block, and a peer may take the lock or the job and run the same work beside it;
+  - a nightly can look dead while it still works, so background Deep work may start beside it;
+  - a run whose last close fails (its pool backend terminated, or no pool connection within the timeout) stays
+    alive and keeps queued jobs waiting until the process restarts;
+  - a pooled connection lost in the middle of a job's chunk, or a Postgres restart that recovers within the pool's
+    wait, ends the job `failed`, for the owner to retry: before P4, ending it failed on the same dead connection and
+    the worker took the job back. A2's worker recovery leaves such a job to be tried again.
+
+  A2 fences work once its lease is lost; its acceptance includes a worker that exits while its last bookkeeping
+  write fails. The run lock's case stays open through A3, which removes that lock.
 
 ### A3. Lanes and the Orchestrator
 

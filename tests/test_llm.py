@@ -9,13 +9,12 @@ import openai
 import pytest
 from pydantic import BaseModel
 
-from litwatch import store
 from litwatch.config import ROLES, Models, RoleConfig
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.openrouter import OpenRouterProvider
-from litwatch.store import runs
 from litwatch.store.calls import CallJournal
+from tests.conftest import started
 from tests.fakes import ScriptedProvider, SdkClient, anthropic_message, openrouter_completion
 
 
@@ -264,10 +263,8 @@ async def test_a_role_without_credentials_fails_as_a_call_error():
 
 
 @pytest.fixture
-async def journal(conn):
-    run_id = await runs.start(conn, "test")
-    async with await store.connect(conn.test_dsn, conn.test_schema) as own:
-        yield CallJournal(own, run_id)
+async def journal(conn, db):
+    return CallJournal(db, await started(conn, "test"))
 
 
 async def calls(conn):

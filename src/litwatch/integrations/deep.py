@@ -33,11 +33,11 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
-import psycopg
 
 from litwatch.archive import PaperText
 from litwatch.config import Config
 from litwatch.core import Grade, Paper, Status, Topic, deepread
+from litwatch.gates.database import ReadUnit
 from litwatch.integrations import IntegrationError, enabled_using, required, required_secret
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
@@ -238,9 +238,7 @@ class Deep:
     async def aclose(self) -> None:
         await self.client.http.aclose()
 
-    async def submission(
-        self, conn: psycopg.AsyncConnection, paper: Paper, text: PaperText
-    ) -> dict[str, Any]:
+    async def submission(self, conn: ReadUnit, paper: Paper, text: PaperText) -> dict[str, Any]:
         """What the service is sent for the paper: its text and the arXiv version it is of (null
         when the archive cannot say), which the service fetches the paper's figures at; the
         topics the card is for with the grade each gave it, and the extensions they ask for."""
@@ -272,9 +270,7 @@ class Deep:
             ],
         }
 
-    async def _topics(
-        self, conn: psycopg.AsyncConnection, paper_id: str
-    ) -> list[tuple[str, Topic, Grade]]:
+    async def _topics(self, conn: ReadUnit, paper_id: str) -> list[tuple[str, Topic, Grade]]:
         """The topics the card is for: the active topics, at any depth, that grade the paper
         above none, each with its class's name and its grade (docs/specs/deep-read.md,
         "Lenses"). An Area pick asks for a card but is a topic of it only through its grade; a

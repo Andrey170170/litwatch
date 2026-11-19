@@ -2,6 +2,7 @@
 correction, and Copy BibTeX looking up only a single paper."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -10,15 +11,15 @@ import pytest
 from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Hand, Publication
+from litwatch.gates.database import BusyError
 from litwatch.jobs import publications as lookups
-from litwatch.jobs.lock import BusyError, job_lock
+from litwatch.jobs import scheduler
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
-from litwatch.store import sibling as store_sibling
 from tests import settling
-from tests.conftest import AppClient, paper
+from tests.conftest import AppClient, gate_on, paper
 
 TOKEN = "s3cret"
 NIPS = Publication(
@@ -161,6 +162,12 @@ async def db(conn):
     return conn
 
 
+async def run(gate, source, limit: int = lookups.LIMIT) -> dict[str, int]:
+    """A publications run as the CLI starts one, holding the job's schedule lock."""
+    async with gate.held("schedule", "publications"):
+        return await lookups.run(gate, source, limit)
+
+
 async def events(conn):
     rows = await (
         await conn.execute("SELECT paper_id FROM outbox WHERE type = 'publication.found'")
@@ -168,9 +175,9 @@ async def events(conn):
     return [r["paper_id"] for r in rows]
 
 
-async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db):
+async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db, gate):
     source = Source({P.id: NIPS})
-    counts = await lookups.run(db, source)
+    counts = await run(gate, source)
     assert counts == {"looked_up": 2, "found": 1, "failed": 0}
     assert await events(db) == [P.id]
     # Nothing is due until a month has passed, and a found record is never looked up again.
@@ -185,36 +192,37 @@ async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db
     await db.execute("UPDATE library SET saved_at = now() WHERE paper_id = %s", (Q.id,))
     assert await store.due(db, 10) == [Q.id]
     # The same record found again is no new event.
-    await lookups.look_up(db, source, P.id)
+    await lookups.look_up(gate, source, P.id)
     assert await events(db) == [P.id]
 
 
-async def test_runs_never_overlap(db):
+async def test_runs_never_overlap(db, gate):
     # Each run takes its due papers once: one beside another could die unseen (monitoring).
-    other = await store_sibling(db)
-    try:
-        async with job_lock(other, "publications"):
-            with pytest.raises(BusyError):
-                await lookups.run(db, Source())
-        # The scheduler holds the same lock while it runs the job: its session may.
-        async with job_lock(db, "publications"):
-            assert (await lookups.run(db, Source()))["looked_up"] == 2
-    finally:
-        await other.close()
+    source = Source()
+    (job,) = [j for j in scheduler.jobs(Config(), source=source) if j.kind == "publications"]
+    now = scheduler.last_fire(job.cron, datetime.now(UTC)) + timedelta(minutes=1)  # it is due
+    async with gate_on(db) as other, other.held("schedule", "publications"):  # the CLI's run
+        with pytest.raises(BusyError):
+            await run(gate, source)
+        assert await scheduler.tick(gate, [job], now) == []  # left to the run in progress
+    assert source.asked == []
+    # The scheduler runs it under the lock it decided under, which the run takes no more.
+    assert await scheduler.tick(gate, [job], now) == ["publications"]
+    assert len(source.asked) == 2
 
 
-async def test_a_run_stops_when_dblp_keeps_failing(db, monkeypatch):
+async def test_a_run_stops_when_dblp_keeps_failing(db, gate, monkeypatch):
     monkeypatch.setattr(lookups, "GIVE_UP_AFTER", 2)
     source = Source()
     source.down = True
-    counts = await lookups.run(db, source)
+    counts = await run(gate, source)
     assert counts["failed"] == 2
-    run = await (await db.execute("SELECT error FROM runs WHERE kind = 'publications'")).fetchone()
-    assert "stopped after 2 failures" in run["error"]
+    rec = await (await db.execute("SELECT error FROM runs WHERE kind = 'publications'")).fetchone()
+    assert "stopped after 2 failures" in rec["error"]
     assert set(await store.due(db, 10)) == {P.id, Q.id}  # still due: nothing was stored
 
 
-async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db):
+async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db, gate):
     other = NIPS.model_copy(update={"dblp_key": "conf/iclr/Other18", "venue": "ICLR"})
     source = Source({P.id: NIPS, Q.id: other})
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
@@ -233,7 +241,7 @@ async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db):
         # The owner says Q's published version is P's record; a lookup does not replace it.
         r = await c.put(f"/api/papers/{Q.id}/publication", json={"dblp_key": NIPS.dblp_key})
         assert r.status_code == 200 and r.json()["venue"] == "NIPS"
-        await lookups.look_up(db, source, Q.id)
+        await lookups.look_up(gate, source, Q.id)
         page = (await c.get(f"/api/papers/{Q.id}")).json()
         assert page["publication"]["venue"] == "NIPS" and page["publication_by_owner"]
         assert await store.due(db, 10) == []
@@ -249,15 +257,15 @@ async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db):
     assert (await events(db)).count(Q.id) == 1
 
 
-async def test_two_first_lookups_at_once_announce_the_record_once(db):
-    async with await store_sibling(db) as other:
+async def test_two_first_lookups_at_once_announce_the_record_once(db, gate):
+    async with gate_on(db) as other:  # another process's
         await asyncio.gather(
-            lookups.store_record(db, P.id, NIPS), lookups.store_record(other, P.id, NIPS)
+            lookups.store_record(gate, P.id, NIPS), lookups.store_record(other, P.id, NIPS)
         )
     assert await events(db) == [P.id]
 
 
-async def test_copy_gives_what_is_stored_when_dblp_is_slow(db, monkeypatch):
+async def test_copy_gives_what_is_stored_when_dblp_is_slow(db, gate, monkeypatch):
     monkeypatch.setattr(lookups, "COPY_DEADLINE", 0.05)
 
     class Stalled(Source):
@@ -265,5 +273,5 @@ async def test_copy_gives_what_is_stored_when_dblp_is_slow(db, monkeypatch):
             await asyncio.sleep(5)
 
     async with asyncio.timeout(1):  # far short of the stalled lookup
-        assert await lookups.for_copy(db, Stalled(), P.id) is None  # nothing stored: arXiv
+        assert await lookups.for_copy(gate, Stalled(), P.id) is None  # nothing stored: arXiv
     assert await store.get(db, P.id) is None  # an unanswered lookup stores nothing
