@@ -104,7 +104,7 @@ async def last_harvest_end(conn: psycopg.AsyncConnection, before: int) -> dateti
     row = await (
         await conn.execute(
             "SELECT window_to FROM runs WHERE id<%s AND finished_at IS NOT NULL "
-            "AND error IS NULL AND fetched>0 AND (intake IS NULL OR "
+            "AND window_to IS NOT NULL AND error IS NULL AND fetched>0 AND (intake IS NULL OR "
             "(intake->>'status'='complete' AND intake->>'source' IS DISTINCT FROM 'archive')) "
             "ORDER BY id DESC LIMIT 1",
             (before,),
