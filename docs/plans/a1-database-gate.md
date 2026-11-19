@@ -250,3 +250,10 @@ Filled in as stages land.
   production's taxonomy, no integrations but the archive, `LITWATCH_STRICT_GATES=1`, `litwatch nightly --no-fetch
   --limit 25`: exit 0 in 54 s, $0.08; 25 classified, 25 analysed, 23 graded, 4 full-text passes reconciled, 1 digest
   written and 4 with nothing new. The log has no warning, error, `gate nesting`, slow unit or pool timeout.
+- **P3, V7:** deployed 2026-11-18 10:55 MST as `litwatch:1.0.0-dev-028edc42`. The night of 2026-11-19 (run 115)
+  finished in 42 min with no error: 614 classified, 662 graded, 38 Briefs, 5 digests, $2.93, in line with run 113.
+  Its events per type kept run 113's proportions (660 `grade.changed` for 662 verdicts, 7 saved, 2 unsaved). One
+  analysis and one Brief failed on the model's output (a Gist of 52 words, a Brief of 28), to be retried. From the
+  deploy to 08:30 the log has only info lines: no error, traceback, `gate nesting:`, slow unit or pool timeout. The
+  `pg_locks` sampler, every 2 s from 01:55 to 04:30, saw no backend waiting on a lock. Every `/status` component
+  is healthy.

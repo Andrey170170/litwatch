@@ -74,7 +74,10 @@ Shape, blueprint, drive.
     goes on to the end of its block, and a peer may take the lock or the job and run the same work beside it;
   - a nightly can look dead while it still works, so background Deep work may start beside it;
   - a run whose last close fails (its pool backend terminated, or no pool connection within the timeout) stays
-    alive and keeps queued jobs waiting until the process restarts.
+    alive and keeps queued jobs waiting until the process restarts;
+  - a pooled connection lost in the middle of a job's chunk, or a Postgres restart that recovers within the pool's
+    wait, ends the job `failed`, for the owner to retry: before P4, ending it failed on the same dead connection and
+    the worker took the job back. A2's worker recovery leaves such a job to be tried again.
 
   A2 fences work once its lease is lost; its acceptance includes a worker that exits while its last bookkeeping
   write fails. The run lock's case stays open through A3, which removes that lock.
