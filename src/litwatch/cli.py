@@ -505,7 +505,7 @@ def eval_replay(
         raise typer.BadParameter(f"no cohort {', '.join(sorted(unknown))}")
 
     async def prepare(db: DatabaseGate) -> tuple[Any, dict[str, float]]:
-        # The label files are read before the unit opens: no file I/O inside one.
+        # The owner's label files are read before the unit opens, not while it holds a snapshot.
         given = replay.load(labels or replay.LABELS) if resume is None else []
         async with db.read("replay: prepare") as unit:
             if resume is not None:

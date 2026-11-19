@@ -176,6 +176,9 @@ Built between milestones, on whatever structure exists then.
   makes the length check lax, since the rest stays readable in the session. Idea (2026-11-10): the writer may move a
   part's border when the parsing is wrong, and the length check stays measured on code's cuts, or on the reviewer's,
   so the writer does not set its own bar. Wait for a PDF-only read whose parts came out wrong. *Needs shaping.*
+- **A cleared publication record reaches the exports.** Clearing a paper's record emits no event, so Notion's Venue
+  and Zotero's "Published" line keep the old record until the paper's next event or Notion's reconcile. A write that
+  lands while an export reads the paper is missed the same way (A1 P5's review). An event on clearing closes both.
 - **A0's small fixes left three follow-ups:**
   - `mcp_types`, `starlette` and `pymupdf` are imported but not declared; they arrive through other packages;
   - two more tests in `tests/test_batches.py` share the race #154 fixed (the batched night, the digest batch count):
