@@ -20,6 +20,7 @@ from regression.csv (positive: tier 1 or 2), and `miss`, the misses reported in 
 from __future__ import annotations
 
 import csv
+import functools
 import hashlib
 import importlib
 import json
@@ -162,7 +163,10 @@ def _served(role: RoleConfig) -> dict[str, Any]:
 _CODE = ("classification", "grading", "core.classification", "core.grading", "core.evaluation")
 
 
+@functools.cache
 def _code() -> str:
+    """The digest of the code a replay's answers depend on, as this process loaded it: read
+    once, so the fingerprint inside a unit does no file I/O after the first."""
     digest = hashlib.sha256()
     for name in _CODE:
         digest.update(Path(importlib.import_module(f"litwatch.{name}").__file__).read_bytes())
