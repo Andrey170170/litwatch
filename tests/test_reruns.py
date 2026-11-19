@@ -598,7 +598,9 @@ async def test_a_text_pass_that_does_not_fit_stops_the_rerun_and_waits_for_run_n
     judge = ceilings.Ceiling.most(
         ceilings.anthropic_bound(ROLES["judge"], tokens_in), tokens_in, 16000
     )
-    job = await focus_rerun(conn, models, ceiling=judge + 0.01)
+    # The judge and the check ($0.01) are sent concurrently, in either order: with the check
+    # first, `judge + 0.01 - 0.01` can round below the judge's reservation, hence the margin.
+    job = await focus_rerun(conn, models, ceiling=judge + 0.01 + 1e-6)
     w = worker.Worker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
     await work_out(w)
     stopped = await jobs_store.get(conn, job)
