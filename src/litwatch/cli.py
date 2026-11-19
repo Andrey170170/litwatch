@@ -505,6 +505,8 @@ def eval_replay(
         raise typer.BadParameter(f"no cohort {', '.join(sorted(unknown))}")
 
     async def prepare(db: DatabaseGate) -> tuple[Any, dict[str, float]]:
+        # The label files are read before the unit opens: no file I/O inside one.
+        given = replay.load(labels or replay.LABELS) if resume is None else []
         async with db.read("replay: prepare") as unit:
             if resume is not None:
                 r = await replay.resume(unit, cfg, resume)
@@ -512,7 +514,7 @@ def eval_replay(
                 tree = await taxonomy_store.load(unit)
                 if tree is None:
                     raise ValueError("no taxonomy yet: `litwatch taxonomy import` the seed first")
-                every = replay.load(labels or replay.LABELS) + await replay.misses(unit)
+                every = given + await replay.misses(unit)
                 chosen = replay.select(every, replay.focus(tree), cohorts=cohort, negatives=sample)
                 r = await replay.prepare(unit, chosen, limit=limit)
             return r, await replay.estimate(unit, cfg, r)

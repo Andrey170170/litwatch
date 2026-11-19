@@ -276,6 +276,30 @@ async def test_a_card_written_again_as_a_read_leaves_its_note_and_tags_on_the_it
     assert (sorted(fake.notes(key)), fake.tags(key)) == before  # what is on the item stays
 
 
+async def test_a_card_replaced_while_the_screen_note_is_written_is_not_exported(world, db):
+    """The card is read after the screen note's call: a Deep read that replaces a card meanwhile
+    leaves no card note, which no later `card.ready` would take off again."""
+    conn, fake = world, FakeZotero()
+    z = zotero(fake)
+    await start(db, z)
+    await grade(conn, "must_read")
+    await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, **LABEL)
+    await outbox.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    upsert = z.zotero.upsert_note
+
+    async def replaced_meanwhile(key, note, find, tag, attempt):
+        if tag == "litwatch:screen":
+            await state.put_card(conn, P.id, fixture_read("scarce"), "deep-model", {}, **LABEL)
+        return await upsert(key, note, find, tag, attempt)
+
+    z.zotero.upsert_note = replaced_meanwhile
+    await run(db, z)
+    (item,) = fake.tops()
+    assert (await outbox.cursor(conn, z.name)).failing is None
+    assert "litwatch:enrichment" not in json.dumps(fake.items)
+    assert "litwatch:kind:method" not in fake.tags(item["key"])
+
+
 async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(world, db):
     conn, fake = world, FakeZotero()
     z = zotero(fake, inbox_collection="INBOX", inbox_topics=("cot-faithfulness",))

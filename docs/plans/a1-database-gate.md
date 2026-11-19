@@ -169,7 +169,7 @@ never commits.
 
 Found while building, owned by the stage named.
 
-- **P6: what P5 left, all of it reached from the tests only.** P5 moved the last Services onto the gate: nothing in
+- **P6: what P5 left, all of it reached from the tests and old eval scripts only.** P5 moved the last Services onto the gate: nothing in
   `src` outside `gates/` and `store/` names a connection (the connection list is empty), no SQL is left outside
   `store` (`tests/test_sql_home.py`'s list is empty), `store` imports neither `events` nor `llm` (no contract keeps
   an `ignore_imports`), and `db.lend` went with its last caller. No block inside a unit uses a raw connection: there
@@ -189,6 +189,10 @@ Found while building, owned by the stage named.
     typed for units (`outbox.emit`; `feedback.calibrate`'s `session`, `sessions`, `precision` and
     `matters_no_topic`; `quality.replay`'s `prepare`, `resume`, `estimate`, `misses` and `start`), which `ty` flags
     once it runs on `tests`.
+  - Three eval scripts of 2026-10-19 still pass a connection where P5's Services take `db`
+    (`evals/2026-10-19-fallback-ladders/baseline.py` and `writer_pairs.py` to `ladders.requests`,
+    `evals/2026-10-19-clear-prose/replay.py` to `digests.compose`). They reproduce their reports under the code of
+    that day and run from a checkout of it: nothing to port.
 - **P4 found no need for `held_elsewhere(mine=…)` in the code.** The nightly passes its run to its full-text step,
   and `fulltext.work` with a run never asks whether the run lock is held elsewhere. The parameter stays for a caller
   that holds the lock without a run.

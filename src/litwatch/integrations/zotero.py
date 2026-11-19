@@ -452,8 +452,6 @@ class Zotero:
             key = await state.zotero_item(unit, paper_id)
             seen = await reading.in_library(unit, paper_id)
             paper = await papers_store.get(unit, paper_id)
-            record = (await publications_store.found(unit, [paper_id])).get(paper_id)
-            card = await state.card(unit, paper_id)
         if seen is None:
             return
         if not seen["saved"]:
@@ -472,9 +470,15 @@ class Zotero:
         except GoneError:
             # The owner removed the item; a library paper gets one again, as in 0.x.
             key = await self.zotero.ensure_item(paper, None, best, tags, attempt)
-        await self._keep(db, paper_id, key)
+        # The record and card are read where they are used, after the calls before them: one that
+        # changes during those calls must not be exported as it was.
+        async with db.write(f"{self.name}: {paper_id} item") as unit:
+            await state.set_zotero_item(unit, paper_id, key)
+            record = (await publications_store.found(unit, [paper_id])).get(paper_id)
         note = screen_note(paper, focus, record)
         await self.zotero.upsert_note(key, note, NOTE_FIND, NOTE_TAG, attempt)
+        async with db.read(f"{self.name}: {paper_id} card") as unit:
+            card = await state.card(unit, paper_id)
         # A Deep card's note and tags only: a read has none of the fields they are built from,
         # and what a card left on the item before stays.
         if card and card["card"] and not deepread.is_read(card["card"]):

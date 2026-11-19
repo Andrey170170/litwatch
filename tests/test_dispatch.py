@@ -235,13 +235,15 @@ async def test_an_integration_is_given_the_gate_and_writes_in_units_of_its_own(c
 
 
 class Idler(Recorder):
-    """Has idle work of its own; the first try of it fails."""
+    """Has idle work of its own, done in a unit of the gate it is given; the first try fails."""
 
     def __init__(self):
         super().__init__("idler")
         self.idled = 0
 
     async def idle(self, db):
+        async with db.read("idler: idle") as unit:
+            await unit.execute("SELECT 1")
         self.idled += 1
         if self.idled == 1:
             raise RuntimeError("idle work failed once")
