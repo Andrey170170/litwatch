@@ -97,6 +97,22 @@ async def first_since(conn: psycopg.AsyncConnection, kind: str, since: datetime)
     return row["at"]
 
 
+async def last_harvest_end(conn: psycopg.AsyncConnection, before: int) -> datetime | None:
+    """The end of the window of the newest run before run `before` that harvested arXiv in
+    full: it finished without an error, fetched papers, and its intake was complete. A read
+    from the archive covers new papers only, not every change, so it is no harvest."""
+    row = await (
+        await conn.execute(
+            "SELECT window_to FROM runs WHERE id<%s AND finished_at IS NOT NULL "
+            "AND error IS NULL AND fetched>0 AND (intake IS NULL OR "
+            "(intake->>'status'='complete' AND intake->>'source' IS DISTINCT FROM 'archive')) "
+            "ORDER BY id DESC LIMIT 1",
+            (before,),
+        )
+    ).fetchone()
+    return row["window_to"] if row else None
+
+
 async def update(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
     """Set any of fetched, inserted, updated, cost, error, counts, intake on a run that is
     still going."""

@@ -44,14 +44,14 @@ class Offer:
     stale: dict[str, Any] | None = None
 
 
-async def new(conn: ReadUnit) -> replay.Replay:
+async def new(unit: ReadUnit) -> replay.Replay:
     """A new replay of every cohort's labels on the active Focus topics, on the papers the
     database holds."""
-    tree = await taxonomy_store.load(conn)
+    tree = await taxonomy_store.load(unit)
     if tree is None:
         raise ValueError("no taxonomy yet")
-    every = replay.load(replay.LABELS) + await replay.misses(conn)
-    return await replay.prepare(conn, replay.select(every, replay.focus(tree)))
+    every = replay.load(replay.LABELS) + await replay.misses(unit)
+    return await replay.prepare(unit, replay.select(every, replay.focus(tree)))
 
 
 async def offer(unit: WriteUnit, config: Config) -> Offer:
@@ -130,9 +130,7 @@ async def work(
     tried.difference_update(r.stale)  # a paper whose text changed since is to do again
     ids = [p for p in r.left if p not in tried][:size]
     before = run.tally()
-    # Transitional: the replay's own steps take a connection until P5 moves them.
-    async with db.lend("replay chunk") as conn:
-        await replay.work(conn, config, r, run, ids)
+    await replay.work(db, config, r, run, ids)
     cut = run.gateway.ceiling is not None and run.gateway.ceiling.reached
     if not cut:
         tried.update(ids)

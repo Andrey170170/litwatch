@@ -16,11 +16,10 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-import psycopg
-
 from litwatch.config import Config, secret
 from litwatch.core import Grade
 from litwatch.events import Integration
+from litwatch.gates.database import ReadUnit
 from litwatch.store import word as word_store
 
 BUILT_IN = ("zotero", "webdav", "archive", "deep", "notion", "webhook")
@@ -111,10 +110,10 @@ def required_secret(env: str) -> str:
     return value
 
 
-async def must_read_and_saved(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+async def must_read_and_saved(unit: ReadUnit, paper_id: str) -> bool:
     """What an integration acting on `must_read` checks when it handles the event, rather than
     trusting what the event said: the owner's word or a later verdict may have moved the
     paper since, and the owner may have unsaved it."""
-    row = await word_store.library_row(conn, paper_id)
-    grades = await word_store.focus_grades(conn, paper_id)
+    row = await word_store.library_row(unit, paper_id)
+    grades = await word_store.focus_grades(unit, paper_id)
     return bool(row and row["saved"]) and Grade.MUST_READ in grades.values()

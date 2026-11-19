@@ -52,6 +52,7 @@ from litwatch.gates.database import BusyError, DatabaseGate, WriteUnit
 from litwatch.integrations.deep import Deep, RejectedError
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
+from litwatch.store import outbox
 from litwatch.store.fulltext import Claimed
 
 log = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ async def request(unit: WriteUnit, paper_id: str) -> int | None:
     if found is None or found.dropped:
         return None
     pass_id = await store_.request_card(unit, paper_id, found.revision)
-    await events.emit(unit, events.CARD_REQUESTED, paper_id, pass_id=pass_id)
+    await outbox.emit(unit, events.CARD_REQUESTED, paper_id, pass_id=pass_id)
     return pass_id
 
 
@@ -254,7 +255,7 @@ async def _work_one(
             figures=outcome.figures,
         )
         await store_.done(unit, c, text)
-        await events.emit(unit, events.CARD_READY, c.paper.id, model=outcome.model, pass_id=c.id)
+        await outbox.emit(unit, events.CARD_READY, c.paper.id, model=outcome.model, pass_id=c.id)
     usage = outcome.usage or {}
     log.info(
         "%s: deep card in %s turns, list cost $%.2f",

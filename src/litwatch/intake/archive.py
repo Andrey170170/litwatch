@@ -13,8 +13,6 @@ import logging
 from collections.abc import Iterable
 from datetime import date
 
-import psycopg
-
 from litwatch.archive import ArchiveClient
 from litwatch.feedback import word
 from litwatch.gates.database import DatabaseGate
@@ -26,7 +24,7 @@ log = logging.getLogger(__name__)
 
 
 async def collect(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     client: ArchiveClient,
     categories: Iterable[str],
     since: date,
@@ -50,7 +48,6 @@ async def collect(
         }
     )
     seen: set[str] = set()
-    db = DatabaseGate.over(conn)
     async for page in client.papers(since, until, categories):
         usable = [p for p in page if p.title and p.abstract]
         result.details["skipped"] += [p.id for p in page if not (p.title and p.abstract)]

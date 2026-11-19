@@ -21,9 +21,6 @@ import logging
 from collections.abc import Sequence
 from datetime import date, timedelta
 
-import psycopg
-
-from litwatch import store
 from litwatch.core import FAILED_RUNS, Cause, Depth, Rarity, Status, Taxonomy, Topic
 from litwatch.core.digests import DAILY, PUBLISHED, DigestPeriod, DigestRole, DigestState, marked
 from litwatch.digests import writer
@@ -129,7 +126,7 @@ class _Writer:
 
 
 async def compose(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     run: ModelRun,
     tree: Taxonomy,
     topic: Topic,
@@ -139,22 +136,35 @@ async def compose(
     """The topic's digest of `period` on `day` (a week's Monday) over the papers due now, not
     stored. With nothing due it is nothing new, without a call; a failed call, or an answer
     that does not parse, makes it failed. Its updated papers are listed after the rest, and
-    the writer is not given them: alone, they make a nothing new digest."""
+    the writer is not given them: alone, they make a nothing new digest. What it is written
+    from is read in one read unit, before the writer is called."""
     name = tree.get(topic.slug).name
     weekly = period == DigestPeriod.WEEK
     last = day + timedelta(days=6) if weekly else day
     recap = weekly and topic.depth in DAILY
-    if recap:  # its week's daily digests' papers
-        found = await store_.of_week(conn, tree, topic, day)
-    else:
-        found = await store_.due(conn, tree, topic, period, last, FAILED_RUNS)
-    back = await store_.due_updated(
-        conn, tree, topic, period, last, FAILED_RUNS, week=day if recap else None
-    )
+    dailies: list[dict] = []
+    carried: list[Due] = []
+    earlier: list[Due] = []
+    async with db.read(f"digest {topic.slug}: papers") as unit:
+        if recap:  # its week's daily digests' papers
+            found = await store_.of_week(unit, tree, topic, day)
+        else:
+            found = await store_.due(unit, tree, topic, period, last, FAILED_RUNS)
+        back = await store_.due_updated(
+            unit, tree, topic, period, last, FAILED_RUNS, week=day if recap else None
+        )
+        if found:
+            failed = await store_.failed_writer(unit, topic.slug)
+            if weekly:
+                dailies = await store_.daily_texts(unit, topic.slug, day)
+                if recap:
+                    carried = await store_.carried(unit, topic.slug, day)
+                if topic.depth == Depth.FOCUS:
+                    earlier = await store_.earlier_central(unit, topic.slug, day)
     updated = [Shown(d, DigestRole.UPDATED) for d in back]
     if not found:
         return _outcome(topic.slug, period, day, [], updated=updated)
-    w = _Writer(run, await store_.failed_writer(conn, topic.slug))
+    w = _Writer(run, failed)
     try:
         if not weekly and topic.depth == Depth.FOCUS:
             out = await w.ask(writer.focus_day(topic, name, day, found))
@@ -168,21 +178,12 @@ async def compose(
                 updated=updated,
                 model=w.model,
             )
-        carried: list[Due] = []
         if not weekly:
             out = await w.ask(writer.area_day(topic, name, day, found))
         else:
-            dailies = await store_.daily_texts(conn, topic.slug, day)
-            ids = {d.paper_id for d in found}
-            if recap:
-                carried = await store_.carried(conn, topic.slug, day)
-                ids |= {c.paper_id for c in carried}
+            ids = {d.paper_id for d in found} | {c.paper_id for c in carried}
             if topic.depth == Depth.FOCUS:
-                earlier = [
-                    e
-                    for e in await store_.earlier_central(conn, topic.slug, day)
-                    if e.paper_id not in ids
-                ]
+                earlier = [e for e in earlier if e.paper_id not in ids]
                 request = writer.focus_week(topic, name, day, found, dailies, earlier, carried)
                 out = await w.ask(request)
                 named = set(marked(out.text))
@@ -222,7 +223,7 @@ async def compose(
 
 
 async def write(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     run: ModelRun,
     tree: Taxonomy,
     topic: Topic,
@@ -234,12 +235,13 @@ async def write(
     """Write and store the digest, unless it is published already (None: a re-run of the same
     day rewrites nothing), as one change of its picks (`word.change`): an Area pick's Deep pass
     is queued with it, as `rules` say. Returns the state stored."""
-    if await store_.state_of(conn, topic.slug, period, day) in PUBLISHED:
-        return None
-    o = await compose(conn, run, tree, topic, period, day)
+    async with db.read(f"digest {topic.slug}: state") as unit:
+        if await store_.state_of(unit, topic.slug, period, day) in PUBLISHED:
+            return None
+    o = await compose(db, run, tree, topic, period, day)
     picks = {s.due.paper_id for s in o.papers if s.role == DigestRole.PICK}
     async with word.change(  # its picks locked together, in id order
-        DatabaseGate.over(conn), *picks, cause=Cause.VERDICT, rules=rules, name="record digest"
+        db, *picks, cause=Cause.VERDICT, rules=rules, name="record digest"
     ) as done:
         if await store_.record(done.unit, o, run.run_id) is None:
             return None
@@ -255,19 +257,20 @@ def _active(tree: Taxonomy, depths: Sequence[Depth] = tuple(Depth)) -> list[Topi
 
 
 async def write_day(
-    conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, day: date, *, rules: word.Rules
+    db: DatabaseGate, run: ModelRun, tree: Taxonomy, day: date, *, rules: word.Rules
 ) -> bool:
     """The daily digests of `day`, every active Focus and Area topic's in the fixed order, when
     arXiv listed papers on it; a day it listed none has no digests. Returns whether it did."""
-    if not await store_.released(conn, day):
-        return False
+    async with db.read("digests: released") as unit:
+        if not await store_.released(unit, day):
+            return False
     for topic in _active(tree, DAILY):
-        await write(conn, run, tree, topic, DigestPeriod.DAY, day, rules=rules)
+        await write(db, run, tree, topic, DigestPeriod.DAY, day, rules=rules)
     return True
 
 
 async def write_week(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     run: ModelRun,
     tree: Taxonomy,
     monday: date,
@@ -276,41 +279,43 @@ async def write_week(
 ) -> None:
     """The weekly digests of the week from `monday`, every active topic's in the fixed order."""
     for topic in _active(tree):
-        await write(conn, run, tree, topic, DigestPeriod.WEEK, monday, rules=rules)
+        await write(db, run, tree, topic, DigestPeriod.WEEK, monday, rules=rules)
 
 
 async def retry_failed(
-    conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, *, rules: word.Rules
+    db: DatabaseGate, run: ModelRun, tree: Taxonomy, *, rules: word.Rules
 ) -> None:
     """Write every failed digest of an active topic again, oldest first, each over the papers
     due for it now, so a later digest does not take its papers first."""
     active = {t.slug: t for t in _active(tree)}
-    for row in await store_.failed(conn):
+    async with db.read("digests: failed") as unit:
+        failed = await store_.failed(unit)
+    for row in failed:
         period = DigestPeriod(row["period"])
-        await write(conn, run, tree, active[row["topic"]], period, row["day"], rules=rules)
+        await write(db, run, tree, active[row["topic"]], period, row["day"], rules=rules)
 
 
 async def nightly(
-    conn: psycopg.AsyncConnection, run: ModelRun, tree: Taxonomy, today: date, *, rules: word.Rules
+    db: DatabaseGate, run: ModelRun, tree: Taxonomy, today: date, *, rules: word.Rules
 ) -> None:
     """The night's digests: the failed ones again, today's daily digests, and on a Monday the
     weekly digests of the week before. Each topic's are written in that order, the topics
-    concurrently, each on a connection of its own, so a batching run's writer calls go out
-    together (digests.md, writing)."""
-    failed = await store_.failed(conn)
-    released = await store_.released(conn, today)
+    concurrently, each in units of its own, so a batching run's writer calls go out together
+    (digests.md, writing)."""
+    async with db.read("digests: the night") as unit:
+        failed = await store_.failed(unit)
+        released = await store_.released(unit, today)
 
     async def topic_night(topic: Topic) -> None:
-        async with await store.sibling(conn) as c:
-            for row in failed:
-                if row["topic"] == topic.slug:
-                    period = DigestPeriod(row["period"])
-                    await write(c, run, tree, topic, period, row["day"], rules=rules)
-            if released and topic.depth in DAILY:
-                await write(c, run, tree, topic, DigestPeriod.DAY, today, rules=rules)
-            if today.weekday() == 0:
-                monday = today - timedelta(days=7)
-                await write(c, run, tree, topic, DigestPeriod.WEEK, monday, rules=rules)
+        for row in failed:
+            if row["topic"] == topic.slug:
+                period = DigestPeriod(row["period"])
+                await write(db, run, tree, topic, period, row["day"], rules=rules)
+        if released and topic.depth in DAILY:
+            await write(db, run, tree, topic, DigestPeriod.DAY, today, rules=rules)
+        if today.weekday() == 0:
+            monday = today - timedelta(days=7)
+            await write(db, run, tree, topic, DigestPeriod.WEEK, monday, rules=rules)
 
     async with asyncio.TaskGroup() as group:
         for topic in _active(tree):

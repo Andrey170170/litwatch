@@ -42,7 +42,7 @@ class Carder:
     def wants(self, event):
         return event.type == events.CARD_REQUESTED
 
-    async def handle(self, conn, event):
+    async def handle(self, db, event):
         if event.id in self.fail:
             raise RuntimeError("the card service is down")
 
@@ -60,7 +60,7 @@ class Shelf:
     def wants(self, event):
         return False
 
-    async def handle(self, conn, event):
+    async def handle(self, db, event):
         pass
 
     def search(self, query, filters):
@@ -106,8 +106,8 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
     config = Config(integrations={"carder": {"use": "x.y"}, "old": {"enabled": False}})
     client = await make([carder, Shelf("shelf")], config)
     await start(db, carder)
-    first = await events.emit(conn, events.CARD_REQUESTED, P.id)
-    await events.emit(conn, events.PAPER_SAVED, P.id)
+    first = await outbox.emit(conn, events.CARD_REQUESTED, P.id)
+    await outbox.emit(conn, events.PAPER_SAVED, P.id)
     carder.fail = {first}
     await deliver(db, carder)
 
@@ -150,7 +150,7 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
 async def test_an_integration_that_reacts_to_no_event_is_never_shown_behind(conn, make):
     # A cursor deep kept from when the dispatcher ran it, with events written since.
     await outbox.cursor(conn, "deep")
-    await events.emit(conn, events.PAPER_SAVED, P.id)
+    await outbox.emit(conn, events.PAPER_SAVED, P.id)
     await settled(conn)
     healthy = httpx.MockTransport(lambda r: httpx.Response(200, json={"auth": {"state": "ok"}}))
     deep = Deep(DeepClient("http://deep.test", http=httpx.AsyncClient(transport=healthy)))
@@ -262,8 +262,8 @@ async def test_the_changes_feed_reads_on_from_a_position_and_misses_no_late_comm
     other = await store.sibling(conn)
     try:
         async with other.transaction():
-            early = await events.emit(other, events.PAPER_SAVED, P.id)  # not yet committed
-            late = await events.emit(conn, events.PAPER_UNSAVED, P.id)
+            early = await outbox.emit(other, events.PAPER_SAVED, P.id)  # not yet committed
+            late = await outbox.emit(conn, events.PAPER_UNSAVED, P.id)
             held = (await client.get("/api/events", params={"after": first["next"]})).json()
             assert held == {"events": [], "next": first["next"]}
     finally:

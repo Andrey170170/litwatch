@@ -11,6 +11,7 @@ from litwatch import events
 from litwatch.archive import ArchiveClient, ArchiveError
 from litwatch.config import Config, Intake
 from litwatch.core import Event
+from litwatch.gates.database import DatabaseGate
 from litwatch.intake import archive as archive_intake
 from litwatch.intake.collect import _state
 from litwatch.integrations.archive import Archive
@@ -86,7 +87,7 @@ async def test_the_source_stores_new_papers_and_applies_revisions(conn):
     fake = FakeArchive()
     fake.listing = [item(1), item(2, abstract=None)]
     result = await archive_intake.collect(
-        conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+        DatabaseGate.over(conn), client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
     )
     assert (result.fetched, result.inserted, result.details["skipped"]) == (1, 1, ["2610.00002"])
     stored = await papers.get(conn, "2610.00001")
@@ -96,11 +97,11 @@ async def test_the_source_stores_new_papers_and_applies_revisions(conn):
 
     fake.listing = [item(1, version=2, abstract="Rewritten entirely.", updated="2026-10-09")]
     revised = await archive_intake.collect(
-        conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+        DatabaseGate.over(conn), client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
     )
     assert (revised.updated, revised.rewritten) == (1, ["2610.00001"])
     again = await archive_intake.collect(
-        conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+        DatabaseGate.over(conn), client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
     )
     assert (again.inserted, again.updated, again.rewritten) == (0, 0, [])
     assert await outbox(conn) == [
@@ -126,7 +127,7 @@ async def test_the_archive_never_rolls_back_what_arxiv_sent(conn):
     for listed in unproven:
         fake.listing = [listed]
         result = await archive_intake.collect(
-            conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+            DatabaseGate.over(conn), client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
         )
         assert result.updated == 0, listed
     stored = await papers.get(conn, oai.id)
@@ -134,7 +135,7 @@ async def test_the_archive_never_rolls_back_what_arxiv_sent(conn):
 
     fake.listing = [item(1, version=2, title=oai.title, abstract="Fixed.", updated="2026-10-10")]
     later = await archive_intake.collect(
-        conn, client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
+        DatabaseGate.over(conn), client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
     )
     assert later.updated == 1
     stored = await papers.get(conn, oai.id)
@@ -160,7 +161,7 @@ async def test_the_job_records_its_run_and_arxiv_intake_does_not_go_on_from_it(c
     # The next arXiv harvest starts from its own window, not the archive read's.
     since = datetime.now(UTC).date() - timedelta(days=3)
     run_id = await started(conn, "intake")
-    assert (await _state(conn, "cs.CL", since, run_id))["discovery_from"] == since
+    assert (await _state(db, "cs.CL", since, run_id))["discovery_from"] == since
 
 
 class Stalling:

@@ -20,24 +20,7 @@ LOCKS_BEFORE_THE_RULE = {
 
 # Modules outside `gates/` and `store/` that name `AsyncConnection`, before the rule; each is to
 # take `db` or a unit instead.
-CONNECTIONS_BEFORE_THE_RULE = {
-    "digests/__init__.py",
-    "events/__init__.py",
-    "feedback/calibrate.py",
-    "feedback/misses.py",
-    "intake/archive.py",
-    "intake/catalog.py",
-    "intake/collect.py",
-    "integrations/__init__.py",
-    "integrations/archive.py",
-    "integrations/notion.py",
-    "integrations/webdav.py",
-    "integrations/webhook.py",
-    "integrations/zotero.py",
-    "jobs/digests.py",
-    "quality/ladders.py",
-    "quality/replay.py",
-}
+CONNECTIONS_BEFORE_THE_RULE: set[str] = set()
 
 
 def _sources():

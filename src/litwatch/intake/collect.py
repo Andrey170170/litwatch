@@ -9,9 +9,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-import psycopg
-from psycopg.types.json import Jsonb
-
 from litwatch.archive import ArchiveClient
 from litwatch.core import Paper
 from litwatch.feedback import word
@@ -19,6 +16,7 @@ from litwatch.gates.database import DatabaseGate
 from litwatch.intake import atom, batch, catalog, oai
 from litwatch.intake.http import SourceError, XmlClient
 from litwatch.intake.source import PaperSource
+from litwatch.store import checkpoints, runs
 
 log = logging.getLogger(__name__)
 
@@ -33,45 +31,24 @@ class IntakeResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
-async def _state(conn, category: str, since: date, run_id: int) -> dict[str, Any]:
-    # Persist the initial lower bound even if every source fails on the first attempt.
-    # A rolling three-day window must never erase an older unresolved gap. A read from the
-    # archive covers new papers only, not every change, so it is no harvest to go on from.
-    previous = await (
-        await conn.execute(
-            "SELECT window_to FROM runs WHERE id<%s AND finished_at IS NOT NULL "
-            "AND error IS NULL AND fetched>0 AND (intake IS NULL OR "
-            "(intake->>'status'='complete' AND intake->>'source' IS DISTINCT FROM 'archive')) "
-            "ORDER BY id DESC LIMIT 1",
-            (run_id,),
-        )
-    ).fetchone()
-    initial = min(since, previous["window_to"].date() - timedelta(days=1)) if previous else since
-    await conn.execute(
-        "INSERT INTO intake_checkpoints(category,discovery_from) VALUES (%s,%s) "
-        "ON CONFLICT(category) DO UPDATE SET "
-        "discovery_from=least(intake_checkpoints.discovery_from,%s)",
-        (category, initial, since),
-    )
-    return await (
-        await conn.execute("SELECT * FROM intake_checkpoints WHERE category=%s", (category,))
-    ).fetchone()
+async def _state(db: DatabaseGate, category: str, since: date, run_id: int) -> dict[str, Any]:
+    """The category's checkpoint row, its first day persisted even if every source fails on
+    the first attempt. A rolling three-day window must never erase an older unresolved gap."""
+    async with db.write(f"intake: {category} checkpoint") as unit:
+        previous = await runs.last_harvest_end(unit, run_id)
+        initial = min(since, previous.date() - timedelta(days=1)) if previous else since
+        return await checkpoints.opened(unit, category, initial, since)
 
 
-async def _snapshots(conn, category: str, since: date) -> list[atom.AtomBatch]:
-    rows = await (
-        await conn.execute(
-            "SELECT body FROM intake_snapshots WHERE category=%s AND generated_at >= %s "
-            "ORDER BY generated_at",
-            (category, datetime.combine(since, datetime.min.time(), UTC)),
-        )
-    ).fetchall()
+async def _snapshots(db: DatabaseGate, category: str, since: date) -> list[atom.AtomBatch]:
+    async with db.read(f"intake: {category} feeds") as unit:
+        bodies = await checkpoints.feeds(unit, category, since)
     # Revalidate saved bytes. A corrupt archive cannot count as a healthy fallback.
-    return [atom.parse_feed(bytes(row["body"])) for row in rows]
+    return [atom.parse_feed(body) for body in bodies]
 
 
 async def collect(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     categories: tuple[str, ...],
     since: datetime,
     run_id: int,
@@ -97,10 +74,9 @@ async def collect(
     states, feeds = {}, {}
     seen: set[str] = set()
     seen_oai: set[str] = set()
-    db = DatabaseGate.over(conn)
     with XmlClient() as client:
         for category in dict.fromkeys(categories):
-            state = await _state(conn, category, since.date(), run_id)
+            state = await _state(db, category, since.date(), run_id)
             states[category] = state
             start = min(state["checkpoint"] or state["discovery_from"], since.date())
             info = {"from": start.isoformat(), "complete": False, "errors": []}
@@ -109,11 +85,14 @@ async def collect(
                 feed = await asyncio.to_thread(atom.fetch_category, category, client)
                 if feed.generated_at > datetime.now(UTC) + timedelta(minutes=5):
                     raise SourceError("Atom feed generation timestamp is in the future")
-                await conn.execute(
-                    "INSERT INTO intake_snapshots(category,sha256,body,generated_at) "
-                    "VALUES(%s,%s,%s,%s) ON CONFLICT(category,sha256) DO NOTHING",
-                    (category, hashlib.sha256(feed.raw).hexdigest(), feed.raw, feed.generated_at),
-                )
+                async with db.write(f"intake: {category} feed") as unit:
+                    await checkpoints.archive_feed(
+                        unit,
+                        category,
+                        hashlib.sha256(feed.raw).hexdigest(),
+                        feed.raw,
+                        feed.generated_at,
+                    )
                 info["feed_dates"] = [d.isoformat() for d in feed.announcement_dates]
                 info["feed_archived"] = True
             except SourceError as exc:
@@ -121,7 +100,7 @@ async def collect(
                 info["feed_archived"] = False
                 log.warning("%s Atom unavailable: %s", category, exc)
             try:
-                feeds[category] = await _snapshots(conn, category, start)
+                feeds[category] = await _snapshots(db, category, start)
             except SourceError as exc:
                 info["errors"].append(f"Atom archive: {exc}")
                 feeds[category] = []
@@ -148,11 +127,8 @@ async def collect(
             papers = harvest.papers
             unique = [p for p in papers if p.id not in seen_oai]
             stored = await batch.store(db, unique, source="oai", rules=rules)
-            await conn.execute(
-                "UPDATE intake_checkpoints SET checkpoint=greatest(checkpoint,%s), "
-                "checked_at=now(),run_id=%s WHERE category=%s",
-                (harvest.checkpoint.date(), run_id, category),
-            )
+            async with db.write(f"intake: {category} checkpoint") as unit:
+                await checkpoints.advance(unit, category, harvest.checkpoint.date(), run_id)
             if harvest.versions_error:
                 info["versions_error"] = harvest.versions_error
             result.inserted += stored.inserted
@@ -195,10 +171,11 @@ async def collect(
         seen.update(fallback)
         if archive is not None:
             result.details["catalog"] = await catalog.run(
-                conn, archive, categories, since.date(), run_id, client, source=source
+                db, archive, categories, since.date(), run_id, client, source=source
             )
     result.fetched = len(seen)
     if not all(info["complete"] for info in result.details["categories"].values()):
         result.details["status"] = "partial"
-    await conn.execute("UPDATE runs SET intake=%s WHERE id=%s", (Jsonb(result.details), run_id))
+    async with db.write("intake: details") as unit:
+        await runs.update(unit, run_id, intake=result.details)
     return result

@@ -24,9 +24,8 @@ own for the process's life, whose `Identity` (`db.identity()`) stands for the pr
 records and job claims, as a job's connection did before the pool (docs/plans/a1-database-gate.md,
 "Choices made without asking", decided 2026-11-18).
 
-While code moves onto the gate (A1's P3 to P6), two things serve what has not moved yet:
-`DatabaseGate.over(conn)`, a gate on one given connection, and `db.lend(name)`, a connection of
-its own, outside the pool, lent outside any unit to a caller of a Service that still takes one.
+While code moves onto the gate (A1's P3 to P6), `DatabaseGate.over(conn)`, a gate on one given
+connection, serves the tests that still hold a connection.
 """
 
 from __future__ import annotations
@@ -540,26 +539,6 @@ class DatabaseGate:
             async with _entered(unit), conn.transaction():
                 await unit._take(paper_ids, others)
                 yield unit
-
-    @asynccontextmanager
-    async def lend(self, name: str) -> AsyncIterator[Connection]:
-        """Transitional, going in A1's P6: a connection lent outside any unit to a caller
-        (`name`) of a Service that still takes a raw connection until P5 or P6 moves it (the
-        plan's notes list each). Like `held`'s, it is a connection of its own, opened for
-        the loan and closed at its end, outside the pool: a loan held across a network call, or
-        one whose Service opens units of its own, takes no pool slot. It is autocommit, as
-        `store.connect`'s are. It refuses while a unit is open on the task, as opening a unit
-        does: work on it would run beside the unit, not in it."""
-        outside_unit(f"lending a connection for {name!r}")
-        conn = await psycopg.AsyncConnection.connect(
-            self._dsn, row_factory=dict_row, autocommit=True
-        )
-        try:
-            if self._schema:
-                await self._configure(conn)
-            yield conn
-        finally:
-            await conn.close()
 
     @asynccontextmanager
     async def held(self, name: str, key_arg: str | int | None = None) -> AsyncIterator[Hold]:

@@ -10,11 +10,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from litwatch.core import Event
+from litwatch.gates.database import WriteUnit
 
 _EVENT = "xid::text::bigint AS xid, id, type, paper_id, payload, created_at"
 # Every transaction below the snapshot's xmin has finished: its events are all there is.
@@ -73,6 +75,18 @@ def _cursor(row: dict) -> Cursor:
     row = dict(row)
     row["position"] = Position(row.pop("position_xid"), row["position"])
     return Cursor(**row)
+
+
+async def emit(unit: WriteUnit, type: str, paper_id: str | None = None, **payload: Any) -> int:
+    """Record an event of `type` (`core.events`), in the unit that writes what it describes.
+    Returns the event's id."""
+    row = await (
+        await unit.execute(
+            "INSERT INTO outbox (type, paper_id, payload) VALUES (%s, %s, %s) RETURNING id",
+            (type, paper_id, Jsonb(payload)),
+        )
+    ).fetchone()
+    return row["id"]
 
 
 async def after(conn: psycopg.AsyncConnection, position: Position, limit: int) -> list[Event]:

@@ -14,7 +14,7 @@ from typing import Annotated, Any
 from fastapi import HTTPException, Query, Request
 
 from litwatch.api import schemas as s
-from litwatch.api.deps import Db, Rules, protected, resolve_paper
+from litwatch.api.deps import Db, Rules, protected
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Cause, Topic
 from litwatch.feedback import misses, word
@@ -148,7 +148,7 @@ async def process(body: s.ProcessIn, request: Request, db: Db, rules: Rules) -> 
     kept. With the schedule off no worker runs jobs: the paper is fetched only, for the next run,
     and the answer is null."""
     try:
-        paper_id, fetched = await resolve_paper(db, body.paper_id)
+        paper_id, fetched = await misses.resolve(db, body.paper_id)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:

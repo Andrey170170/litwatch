@@ -10,9 +10,9 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from litwatch import events
-from litwatch.core import Paper, rewritten, withdrawn_at
+from litwatch.core import Paper, events, rewritten, withdrawn_at
 from litwatch.core.digests import announced, first_listing
+from litwatch.store import outbox
 from litwatch.store.db import transaction
 
 # What `row_to_paper` reads; the stored body of every match would be megabytes nobody looks at.
@@ -212,7 +212,7 @@ async def upsert(
                     continue
                 if row["inserted"]:
                     result.inserted += 1
-                    await events.emit(
+                    await outbox.emit(
                         conn, events.PAPER_ADDED, p.id, version=row["version"], source=source
                     )
                     continue
@@ -230,7 +230,7 @@ async def upsert(
                 if (row["withdrawn_at"] is None) != (old["withdrawn_at"] is None):
                     result.withdrawn.append(p.id)
                 if changed or row["version"] != old["version"]:
-                    await events.emit(
+                    await outbox.emit(
                         conn,
                         events.PAPER_REVISED,
                         p.id,
@@ -270,6 +270,24 @@ async def get_many(conn: psycopg.AsyncConnection, ids: list[str]) -> list[Paper]
     ).fetchall()
     by_id = {r["id"]: row_to_paper(r) for r in rows}
     return [by_id[i] for i in ids if i in by_id]
+
+
+async def held(conn: psycopg.AsyncConnection, ids: list[str]) -> set[str]:
+    """Those of `ids` the database holds."""
+    rows = await (await conn.execute("SELECT id FROM papers WHERE id = ANY(%s)", (ids,))).fetchall()
+    return {r["id"] for r in rows}
+
+
+async def cited(conn: psycopg.AsyncConnection, ids: list[str]) -> list[dict[str, Any]]:
+    """What a citation of each stored paper among `ids` needs, in the order given: its id,
+    title, authors, publication date and primary category."""
+    return await (
+        await conn.execute(
+            "SELECT id, title, authors, published, primary_category FROM papers "
+            "WHERE id = ANY(%s) ORDER BY array_position(%s, id)",
+            (ids, ids),
+        )
+    ).fetchall()
 
 
 async def count(conn: psycopg.AsyncConnection) -> int:
@@ -359,5 +377,5 @@ async def correct(
         )
         if cur.rowcount == 0:
             return False
-        await events.emit(conn, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
+        await outbox.emit(conn, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
     return True

@@ -29,7 +29,7 @@ from litwatch.llm import CallError, Gateway, Usage
 from litwatch.llm.decisions import Decision
 from litwatch.llm.types import Choice, DecisionRequest, Predicate, Question
 from litwatch.store import classifications as store
-from litwatch.store import failures
+from litwatch.store import failures, outbox
 from litwatch.store import papers as papers_store
 
 ROLE = "classify"
@@ -126,7 +126,7 @@ async def _announce(unit: WriteUnit, paper: Paper, primary: str, by_owner: bool)
     """`paper.classified`, with the classes the paper is a direct member of now that it is
     recorded, the owner's labels applied."""
     classes = sorted({m.slug for m in standing(await store.memberships(unit, paper.id))})
-    await events.emit(
+    await outbox.emit(
         unit,
         events.PAPER_CLASSIFIED,
         paper.id,

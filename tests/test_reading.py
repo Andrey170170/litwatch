@@ -13,6 +13,7 @@ from litwatch.config import Config
 from litwatch.core import Analysis, Cause, Facets, Fit, Opinion, Status, Verdict, Weight
 from litwatch.core.classification import Membership, Source
 from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, verdicts
@@ -700,7 +701,7 @@ async def test_an_owners_delayed_fetch_never_overwrites_newer_metadata(conn, mon
     pid = "2610.04444"
     older = paper(pid, title="As first submitted", version=1, updated="2026-10-01T10:00:00Z")
     monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: [older]))
-    _, fetched = await misses.resolve(conn, pid)
+    _, fetched = await misses.resolve(DatabaseGate.over(conn), pid)
     newer = paper(pid, title="As revised since", updated="2026-10-05T00:00:00Z")
     await settling.store(conn, [newer], source="oai")
     stored, inserted = await settling.keep(conn, pid, fetched)
@@ -913,7 +914,7 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
         assert (await c.get("/api/papers/2610.08888")).status_code == 404
         assert fetched == [] and await papers_store.get(conn, pid) is None
 
-        assert (await settling.keep(conn, *await misses.resolve(conn, pid)))[1]
+        assert (await settling.keep(conn, *await misses.resolve(DatabaseGate.over(conn), pid)))[1]
         page = (await c.get(f"/api/papers/{pid}")).json()
         assert (page["stored"], page["in_collection"], page["next_run"]) == (True, False, True)
         assert fetched == [[pid]]

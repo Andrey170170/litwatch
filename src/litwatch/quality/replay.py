@@ -29,15 +29,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import psycopg
-
 import litwatch
 from litwatch import classification, grading
 from litwatch.config import Config, RoleConfig
 from litwatch.core import Depth, Fit, Paper, Status, Taxonomy
 from litwatch.core.classification import Source, keyword, with_ancestors
 from litwatch.core.evaluation import Outcome, Recall, Share
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import DatabaseGate, ReadUnit, WriteUnit
 from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
 from litwatch.llm.decisions import chat_request
 from litwatch.llm.gateway import VALIDATION_VERSION
@@ -46,7 +44,6 @@ from litwatch.store import calls
 from litwatch.store import evaluation as store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from litwatch.store.db import transaction
 
 KIND = "replay"
 # The evaluation labels: in the checkout, and where the image puts them.
@@ -83,9 +80,9 @@ def load(root: Path) -> list[Labelled]:
     return found
 
 
-async def misses(conn: psycopg.AsyncConnection) -> list[Labelled]:
+async def misses(unit: ReadUnit) -> list[Labelled]:
     """The misses reported in the database, each positive in cohort `miss`."""
-    return [Labelled(p, t, "miss", True) for p, t in await store.misses(conn)]
+    return [Labelled(p, t, "miss", True) for p, t in await store.misses(unit)]
 
 
 def focus(tree: Taxonomy) -> list[str]:
@@ -210,21 +207,19 @@ class Replay:
         return [p for p in ids if p not in self.classified or p in grade]
 
 
-async def _tree(conn: psycopg.AsyncConnection) -> Taxonomy:
-    tree = await taxonomy_store.load(conn)
+async def _tree(unit: ReadUnit) -> Taxonomy:
+    tree = await taxonomy_store.load(unit)
     if tree is None:
         raise ValueError("no taxonomy yet: `litwatch taxonomy import` the seed first")
     return tree
 
 
-async def prepare(
-    conn: psycopg.AsyncConnection, labels: list[Labelled], *, limit: int | None = None
-) -> Replay:
+async def prepare(unit: ReadUnit, labels: list[Labelled], *, limit: int | None = None) -> Replay:
     """A new replay of `labels` (already `select`ed), on the papers the database holds; with
     `limit`, only the first that many of them."""
-    tree = await _tree(conn)
+    tree = await _tree(unit)
     ids = list(dict.fromkeys(x.paper_id for x in labels))
-    papers = {p.id: p for p in await papers_store.get_many(conn, ids)}
+    papers = {p.id: p for p in await papers_store.get_many(unit, ids)}
     left_out = [p for p in ids if p not in papers]
     kept = [p for p in ids if p in papers][:limit]
     chosen = set(kept)
@@ -232,23 +227,23 @@ async def prepare(
     return Replay(tree, [x for x in labels if x.paper_id in chosen], held, left_out)
 
 
-async def resume(conn: psycopg.AsyncConnection, config: Config, eval_run_id: int) -> Replay:
+async def resume(unit: ReadUnit, config: Config, eval_run_id: int) -> Replay:
     """The replay `eval_run_id` as far as it got. Refuses a run made under another
     `fingerprint`. A paper whose text changed since the run concluded on it is done again."""
-    run = await store.get(conn, eval_run_id)
+    run = await store.get(unit, eval_run_id)
     if run is None or run["kind"] != KIND:
         raise ValueError(f"no replay {eval_run_id}")
-    tree = await _tree(conn)
+    tree = await _tree(unit)
     if (asked := run["params"].get("request")) != fingerprint(config, tree):
         raise ValueError(
             f"replay {eval_run_id} was asked under another configuration or taxonomy "
             f"({asked}); start a new one"
         )
-    outcomes = await store.outcomes(conn, eval_run_id)
+    outcomes = await store.outcomes(unit, eval_run_id)
     labels = [Labelled(o.paper_id, o.topic, o.cohort, o.positive) for o in outcomes]
     ids = list(dict.fromkeys(x.paper_id for x in labels))
-    papers = {p.id: p for p in await papers_store.get_many(conn, ids)}
-    done = await store.pairs(conn, eval_run_id)
+    papers = {p.id: p for p in await papers_store.get_many(unit, ids)}
+    done = await store.pairs(unit, eval_run_id)
     # A stage concluded on other text than the paper's current one: what the run said about the
     # paper is dropped and both stages run again, so classification and grading read one text.
     stale = {
@@ -274,14 +269,14 @@ async def resume(conn: psycopg.AsyncConnection, config: Config, eval_run_id: int
     )
 
 
-async def estimate(conn: psycopg.AsyncConnection, config: Config, r: Replay) -> dict[str, float]:
+async def estimate(unit: ReadUnit, config: Config, r: Replay) -> dict[str, float]:
     """What what is left would cost, by step: the latest calls of each role under its current
     configuration (provider, model, effort) in the journal, or `FALLBACK_COST` where it has
     none. Reused replies would cost less."""
     per_call = {}
     for role in ROLES:
         served = config.models.role(role)
-        mean = await calls.mean_cost(conn, role, served.provider, served.model, served.effort)
+        mean = await calls.mean_cost(unit, role, served.provider, served.model, served.effort)
         per_call[role] = FALLBACK_COST[role] if mean is None else mean
     return {
         "classification": len(r.to_classify) * per_call[classification.ROLE],
@@ -290,13 +285,13 @@ async def estimate(conn: psycopg.AsyncConnection, config: Config, r: Replay) -> 
 
 
 async def start(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     config: Config,
     r: Replay,
     params: dict[str, Any],
     note: str | None = None,
 ) -> int:
-    """Record the run and freeze its labels."""
+    """Record the run and freeze its labels, in the caller's unit."""
     models = {role: config.models.role(role).model_dump(mode="json") for role in ROLES}
     topics = {t.slug: t.version for t in r.tree.topics if t.slug in focus(r.tree)}
     params = params | {
@@ -305,11 +300,10 @@ async def start(
         "thresholds": config.classification.model_dump(mode="json"),
         "left_out": r.left_out,
     }
-    async with transaction(conn):
-        r.eval_run_id = await store.start(conn, KIND, models, topics, params, note)
-        await store.put_labels(
-            conn, r.eval_run_id, [(x.paper_id, x.topic, x.cohort, x.positive) for x in r.labels]
-        )
+    r.eval_run_id = await store.start(unit, KIND, models, topics, params, note)
+    await store.put_labels(
+        unit, r.eval_run_id, [(x.paper_id, x.topic, x.cohort, x.positive) for x in r.labels]
+    )
     return r.eval_run_id
 
 
@@ -344,15 +338,14 @@ async def run(
     run of its own. Returns the run record's counts."""
     assert r.eval_run_id is not None, "start the replay first"
     async with model_run(db, config, calls.EVAL, gateway=gateway) as mr:
-        # Transitional: the replay's steps take a connection until P5 moves them.
-        async with db.lend("replay") as conn:
-            await work(conn, config, r, mr)
-            await store.finish(conn, r.eval_run_id)
+        await work(db, config, r, mr)
+        async with db.write("replay: finish") as unit:
+            await store.finish(unit, r.eval_run_id)
         return mr.counts
 
 
 async def work(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     config: Config,
     r: Replay,
     mr: ModelRun,
@@ -361,7 +354,8 @@ async def work(
     """Classify and grade what is left of the papers `ids` (all by default) on the run `mr`,
     which the evaluation then carries, recording each stage as it concludes; what a paper whose
     text changed concluded is forgotten first. Under a ceiling, an attempt it cut short is not
-    recorded: it is left to do."""
+    recorded: it is left to do. Each stage's record is a write unit of its own, written as it
+    concludes, between the model calls."""
     assert r.eval_run_id is not None, "start the replay first"
     tree, eval_run_id = r.tree, r.eval_run_id
     chosen = set(r.papers) if ids is None else set(ids)
@@ -373,10 +367,11 @@ async def work(
     def cut() -> bool:
         return mr.gateway.ceiling is not None and mr.gateway.ceiling.reached
 
-    await store.ran_under(conn, eval_run_id, mr.run_id)
-    if stale := sorted(r.stale & chosen):
-        await store.forget(conn, eval_run_id, stale)
-        r.stale -= set(stale)
+    async with db.write("replay: begin") as unit:
+        await store.ran_under(unit, eval_run_id, mr.run_id)
+        if stale := sorted(r.stale & chosen):
+            await store.forget(unit, eval_run_id, stale)
+    r.stale -= set(stale)
     thresholds = config.classification.thresholds
     papers = [p for p in r.to_classify if p.id in chosen]
     async with classification.classify(papers, tree, mr.gateway, thresholds) as found:
@@ -384,10 +379,11 @@ async def work(
             if c.error is not None and cut():
                 continue
             mr.add("classified" if c.error is None else "classification_failed")
-            for topic in topics_of[c.paper.id]:
-                await store.put_classified(
-                    conn, eval_run_id, c.paper, topic, **_concluded(tree, c, topic)
-                )
+            async with db.write("replay: classified") as unit:
+                for topic in topics_of[c.paper.id]:
+                    await store.put_classified(
+                        unit, eval_run_id, c.paper, topic, **_concluded(tree, c, topic)
+                    )
             if c.error is None:
                 r.classified.add(c.paper.id)
     due = [
@@ -401,17 +397,18 @@ async def work(
             if v is None and cut():
                 continue
             mr.add("graded" if v is not None else "grading_failed")
-            await store.put_graded(
-                conn,
-                eval_run_id,
-                g.due.paper.id,
-                g.due.paper.revision,
-                g.due.topic.slug,
-                fit=v.fit.value if v else None,
-                opinions=v.opinions if v else {},
-                split=v.split if v else None,
-                error=None if v else (g.error or "no answer"),
-            )
+            async with db.write("replay: graded") as unit:
+                await store.put_graded(
+                    unit,
+                    eval_run_id,
+                    g.due.paper.id,
+                    g.due.paper.revision,
+                    g.due.topic.slug,
+                    fit=v.fit.value if v else None,
+                    opinions=v.opinions if v else {},
+                    split=v.split if v else None,
+                    error=None if v else (g.error or "no answer"),
+                )
             if v is not None:
                 r.graded.add((g.due.paper.id, g.due.topic.slug))
 

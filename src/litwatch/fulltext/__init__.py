@@ -46,6 +46,7 @@ from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_g
 from litwatch.llm import CallError, Gateway
 from litwatch.llm.batches import DRAIN
 from litwatch.store import fulltext as store_
+from litwatch.store import outbox
 from litwatch.store import papers as papers_store
 from litwatch.store.fulltext import Claimed
 
@@ -199,7 +200,7 @@ async def _add(unit: WriteUnit, c: Claimed, a: Attempt, read: TextRead) -> None:
         weight_reason=out.weight_reason,
         model=a.model,
     )
-    await events.emit(
+    await outbox.emit(
         unit,
         events.BRIEF_WRITTEN,
         c.paper.id,
@@ -209,7 +210,7 @@ async def _add(unit: WriteUnit, c: Claimed, a: Attempt, read: TextRead) -> None:
     )
     # A Gist from an older revision's full text is never current (section 8).
     if current:
-        await events.emit(
+        await outbox.emit(
             unit,
             events.GIST_WRITTEN,
             c.paper.id,

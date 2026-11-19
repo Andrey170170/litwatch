@@ -195,9 +195,7 @@ async def write_digests(db: DatabaseGate, config: Config, run: ModelRun, today: 
         tree = await taxonomy_store.load(unit)
     if tree is None:
         return
-    # Transitional: the digests take a connection until P5 moves them.
-    async with db.lend("nightly digests") as conn:
-        await digests.nightly(conn, run, tree, today, rules=word.rules(config))
+    await digests.nightly(db, run, tree, today, rules=word.rules(config))
 
 
 async def run(
@@ -237,16 +235,14 @@ async def run(
         model_run(db, config, "nightly", window=(since, until), gateway=gateway) as run,
     ):
         if fetch:
-            # Transitional: intake takes a connection until P5 moves it.
-            async with db.lend("nightly intake") as conn:
-                result = await intake.collect(
-                    conn,
-                    config.intake.categories,
-                    since,
-                    run.run_id,
-                    archive=archive_integration.harvester(config),
-                    rules=word.rules(config),
-                )
+            result = await intake.collect(
+                db,
+                config.intake.categories,
+                since,
+                run.run_id,
+                archive=archive_integration.harvester(config),
+                rules=word.rules(config),
+            )
             async with db.write("nightly: intake") as unit:
                 await runs.update(
                     unit,

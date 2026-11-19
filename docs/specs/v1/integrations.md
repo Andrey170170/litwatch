@@ -5,13 +5,14 @@ Mostly carried from the first v1 (built in M6, PRs #26 and #28). Changes are mar
 ## The outbox
 
 A transactional outbox: a pipeline step writes its event in the same transaction as its data. The `Integration`
-protocol is `name`, `wants(event)`, `handle(conn, event)`, idempotent; the connection lets it read through the
-repositories and emit events of its own. A dispatcher delivers per integration with its own cursor, retries with
+protocol is `name`, `wants(event)`, `handle(db, event)`, idempotent; **Changed** (A1, P5): it is given the Database
+gate, on which it opens units of its own to read through the repositories and emit events of its own, with no network
+call inside a unit. A dispatcher delivers per integration with its own cursor, retries with
 backoff and exposes failures to the API, a failing setup's as well as a failing event's. Integrations deliver only events below the cluster's oldest open
 transaction, so litwatch's Postgres should not be shared with services that hold transactions open.
 
 Integrations are the extension system and the built-in ones get no private access: each is one module using only
-`events`, `store` and `core`, keeps its own state in its own table, and may emit events. The config names which to
+`events`, `store`, `core` and the Database gate, keeps its own state in its own table, and may emit events. The config names which to
 load, by short name or dotted Python path. An integration enabled for the first time starts reading the outbox from
 its current end. `docs/integrations.md` documents the contract, the payloads and a worked example.
 

@@ -4,8 +4,7 @@
 Each integration is delivered to in its own loop, under its own dispatch lock, so one that
 fails or takes long (a WebDAV upload of a large PDF) delays nobody else. The dispatcher's
 bookkeeping (the cursor, a failure) is in units of its own; an integration's `handle`, `setup`
-and `idle` are lent a connection of their own, outside any unit (transitional, until they take
-`db`). When `handle`
+and `idle` are given the gate and open their own, outside the dispatcher's. When `handle`
 raises, the cursor stays before that event, the failure is recorded for the API, and the
 event is tried again after a backoff that doubles up to an hour; the integration's later
 events wait behind it, since they may depend on it. The owner can retry the event at once
@@ -17,7 +16,7 @@ handed over. A failing setup is recorded for the API like a failing event, with 
 attached, and tried again after the same backoff; the integration's events wait meanwhile.
 
 An integration with work of its own that no event brings (a delivery waiting on something
-outside litwatch) gets an `idle(conn)` call when it has nothing to be handed, at most once a minute,
+outside litwatch) gets an `idle(db)` call when it has nothing to be handed, at most once a minute,
 under the same lock. A failing `idle` is logged and changes nothing else.
 """
 
@@ -88,18 +87,15 @@ async def deliver(db: DatabaseGate, integration: Reacting, now: datetime | None 
     clock, name = _clock(now), integration.name
     if not (found := await _next(db, name, clock)) or not found[1]:
         return 0
-    async with _dispatching(db, name) as locked, contextlib.AsyncExitStack() as lent:
+    async with _dispatching(db, name) as locked:
         if not locked or not (found := await _next(db, name, clock)):
             return 0
         cursor, todo = found
         position, passed = cursor.position, 0
-        conn = None
         for event in todo:
             if integration.wants(event):
-                if conn is None:
-                    conn = await lent.enter_async_context(db.lend(f"dispatch {name}"))
                 try:
-                    await integration.handle(conn, event)
+                    await integration.handle(db, event)
                 except Exception as exc:
                     failures = cursor.failures + 1 if cursor.failing == event.id else 1
                     at = clock()
@@ -145,8 +141,7 @@ async def start(db: DatabaseGate, integration: Reacting, now: datetime | None = 
         if cursor.setup_failures and cursor.setup_retry_at and cursor.setup_retry_at > clock():
             return False
         try:
-            async with db.lend(f"dispatch {name}: setup") as conn:
-                await setup(conn)
+            await setup(db)
         except Exception as exc:
             failures, at = cursor.setup_failures + 1, clock()
             async with db.write(f"dispatch {name}: setup failed") as unit:
@@ -170,8 +165,7 @@ async def idle(db: DatabaseGate, integration: Reacting) -> bool:
         if not locked:
             return False
         try:
-            async with db.lend(f"dispatch {integration.name}: idle") as conn:
-                await hook(conn)
+            await hook(db)
         except Exception:
             log.exception("%s: idle work failed", integration.name)
     return True

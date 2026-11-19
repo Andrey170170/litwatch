@@ -9,21 +9,7 @@ from pathlib import Path
 SRC = Path(__file__).parent.parent / "src" / "litwatch"
 
 # Calls that predate this check, per module-level function or method; to move into `store`.
-BEFORE_THE_RULE = {
-    "api/integrations.py:search_outside": 1,
-    "api/reading.py:_bibtex": 1,
-    "events/__init__.py:emit": 1,
-    "feedback/calibrate.py:_add": 1,
-    "feedback/calibrate.py:_all": 1,
-    "feedback/calibrate.py:answer": 4,
-    "feedback/calibrate.py:draw": 1,
-    "feedback/calibrate.py:more": 2,
-    "feedback/calibrate.py:session": 1,
-    "feedback/misses.py:report": 3,
-    "intake/collect.py:_snapshots": 1,
-    "intake/collect.py:_state": 3,
-    "intake/collect.py:collect": 3,
-}
+BEFORE_THE_RULE: dict[str, int] = {}
 
 DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 

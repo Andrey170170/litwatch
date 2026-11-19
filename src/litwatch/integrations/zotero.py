@@ -39,11 +39,11 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
-import psycopg
 
 from litwatch import events
 from litwatch.config import Config
 from litwatch.core import Event, Grade, Paper, Publication, deepread
+from litwatch.gates.database import DatabaseGate
 from litwatch.integrations import required, required_secret
 from litwatch.store import integrations as state
 from litwatch.store import papers as papers_store
@@ -446,10 +446,14 @@ class Zotero:
     async def aclose(self) -> None:
         await self.zotero.aclose()
 
-    async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
+    async def handle(self, db: DatabaseGate, event: Event) -> None:
         paper_id = event.paper_id
-        key = await state.zotero_item(conn, paper_id)
-        seen = await reading.in_library(conn, paper_id)
+        async with db.read(f"{self.name}: {paper_id}") as unit:
+            key = await state.zotero_item(unit, paper_id)
+            seen = await reading.in_library(unit, paper_id)
+            paper = await papers_store.get(unit, paper_id)
+            record = (await publications_store.found(unit, [paper_id])).get(paper_id)
+            card = await state.card(unit, paper_id)
         if seen is None:
             return
         if not seen["saved"]:
@@ -457,9 +461,8 @@ class Zotero:
                 try:
                     await self.zotero.drop_item(key, also=self._inbox)
                 except GoneError:
-                    await state.set_zotero_item(conn, paper_id, None)
+                    await self._keep(db, paper_id, None)
             return
-        paper = await papers_store.get(conn, paper_id)
         focus = [t for t in seen["focus"] if _shown(t["grade"])]
         best = min((Grade(t["grade"]) for t in focus), key=lambda g: g.rank, default=None)
         tags = [f"{WATCH_TAG_PREFIX}{t['slug']}:{t['grade']}" for t in focus]
@@ -469,11 +472,9 @@ class Zotero:
         except GoneError:
             # The owner removed the item; a library paper gets one again, as in 0.x.
             key = await self.zotero.ensure_item(paper, None, best, tags, attempt)
-        await state.set_zotero_item(conn, paper_id, key)
-        record = (await publications_store.found(conn, [paper_id])).get(paper_id)
+        await self._keep(db, paper_id, key)
         note = screen_note(paper, focus, record)
         await self.zotero.upsert_note(key, note, NOTE_FIND, NOTE_TAG, attempt)
-        card = await state.card(conn, paper_id)
         # A Deep card's note and tags only: a read has none of the fields they are built from,
         # and what a card left on the item before stays.
         if card and card["card"] and not deepread.is_read(card["card"]):
@@ -492,6 +493,11 @@ class Zotero:
                 t["grade"] == Grade.MUST_READ and t["slug"] in self.inbox_topics for t in focus
             )
             await self.zotero.set_in_collection(key, self.inbox_collection, inbox)
+
+    async def _keep(self, db: DatabaseGate, paper_id: str, key: str | None) -> None:
+        """The paper's Zotero item, None once it is gone."""
+        async with db.write(f"{self.name}: {paper_id} item") as unit:
+            await state.set_zotero_item(unit, paper_id, key)
 
     @property
     def _inbox(self) -> tuple[str, ...]:

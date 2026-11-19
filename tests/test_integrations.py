@@ -194,7 +194,7 @@ async def _graded(conn, paper_id: str, topic: str, grade: Grade) -> None:
     await word_store.set_effective(
         conn, paper_id, topic, Effective(fit=fit, grade=grade, rarity=Rarity.RARE)
     )
-    await events.emit(conn, events.GRADE_CHANGED, paper_id, topic=topic, after=grade.value)
+    await outbox.emit(conn, events.GRADE_CHANGED, paper_id, topic=topic, after=grade.value)
 
 
 async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_papers(world, db):
@@ -208,7 +208,7 @@ async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_paper
     await _graded(conn, relevant.id, "agents", Grade.RELEVANT)
     await _graded(conn, adjacent.id, "interpretability", Grade.ADJACENT)
     await word_store.set_saved(conn, saved.id, True)
-    await events.emit(conn, events.PAPER_SAVED, saved.id)
+    await outbox.emit(conn, events.PAPER_SAVED, saved.id)
     # Graded relevant, then down again before the event is handled: nothing is asked for.
     await _graded(conn, gone.id, "agents", Grade.RELEVANT)
     await word_store.set_effective(conn, gone.id, "agents", None)
@@ -298,7 +298,7 @@ async def test_an_archive_that_does_not_register_only_answers_searches(world, db
     await start(db, a)
     await papers_store.upsert(conn, [P])
     await word_store.set_saved(conn, P.id, True)
-    await events.emit(conn, events.PAPER_SAVED, P.id)
+    await outbox.emit(conn, events.PAPER_SAVED, P.id)
     await deliver(db, a)
     assert fake.records == {} and fake.jobs == []
     fake.search_items = [{"id": "2401.00001", "title": "First", "authors": "", "published": ""}]
@@ -343,7 +343,7 @@ async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(con
     )
     await start(db, hook)
     await papers_store.upsert(conn, [P])
-    saved = await events.emit(conn, events.PAPER_SAVED, P.id)
+    saved = await outbox.emit(conn, events.PAPER_SAVED, P.id)
     await deliver(db, hook)
     assert (await outbox.cursor(conn, hook.name)).failing is not None  # the 500
 

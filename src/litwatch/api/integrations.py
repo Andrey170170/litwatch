@@ -17,7 +17,7 @@ from fastapi import HTTPException, Query, Request
 
 from litwatch import events
 from litwatch.api import schemas as s
-from litwatch.api.deps import Db, Rules, protected, resolve_paper
+from litwatch.api.deps import Db, Rules, protected
 from litwatch.api.jobs import DROPPED
 from litwatch.archive import ArchiveError
 from litwatch.core import FAILED_RUNS, Cause, SearchFilters, SearchHit, SearchProvider
@@ -218,7 +218,7 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
     if not answers_card_requests(loaded(request)):
         raise HTTPException(status_code=409, detail="no card provider is configured")
     try:
-        paper_id, fetched = await resolve_paper(db, paper_id)
+        paper_id, fetched = await misses.resolve(db, paper_id)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:
@@ -375,11 +375,9 @@ async def search_outside(
         for hit in answer:
             hits.setdefault(hit.id, (provider.name, hit))
     async with db.read("search outside: held") as unit:
-        held = await (
-            await unit.execute("SELECT id FROM papers WHERE id = ANY(%s)", (list(hits),))
-        ).fetchall()
-    for row in held:
-        hits.pop(row["id"])
+        held = await papers_store.held(unit, list(hits))
+    for paper_id in held:
+        hits.pop(paper_id)
     rows = [
         s.OutsideRow(
             id=hit.id,
