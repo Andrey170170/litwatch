@@ -39,6 +39,8 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
+    # Pinned: its baseline is in preview, and an upgrade regenerates it in a PR of its own.
+    "ty==0.0.107",
 ]
 pdf = [
     "pymupdf4llm>=1.28.2",
@@ -53,6 +55,14 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+
+[tool.ty]
+# Today's diagnostics: new code adds none (docs/plans/a1-database-gate.md, D2). A change that
+# clears one regenerates it with `uv run ty check --update-baseline`, so it only shrinks.
+baseline = "ty-baseline.json"
+
+[tool.ty.src]
+include = ["src", "tests"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

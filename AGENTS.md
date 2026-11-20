@@ -49,6 +49,9 @@ production since 2026-10-17, in place of release 0.14.
 CI (`.github/workflows/ci.yaml`) runs all of these; run the ones your change touches before committing.
 
 - `uv run ruff check src tests`, `uv run ruff format --check src tests`
+- `uv run ty check`, on `src` and `tests` against `ty-baseline.json` (`[tool.ty]` in `pyproject.toml`): new code adds
+  no diagnostic. When a change clears a baselined one, run `uv run ty check --update-baseline` and commit the smaller
+  baseline.
 - `uv run lint-imports` (contracts in `pyproject.toml`) and `uv run pytest tests/test_roles.py`
 - `uv run pytest --strict-markers`. Tests that need PostgreSQL create and drop their own schema in
   `TEST_DATABASE_URL`, which must be a disposable database, and skip without it. Run one suite at a time per database
