@@ -9,18 +9,17 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Self
-from uuid import uuid4
 
 import arxiv
 import httpx
 import pytest
 
-from litwatch import store
 from litwatch.core import Depth, Paper, Taxonomy, TaxonomyClass, Topic
 from litwatch.events import dispatch
 from litwatch.feedback import word
 from litwatch.gates.database import STRICT_ENV, DatabaseGate, identity_of
 from litwatch.store import runs
+from tests import sessions
 from tests.settling import RULES
 
 
@@ -137,16 +136,8 @@ async def conn():
     dsn = os.environ.get("TEST_DATABASE_URL")
     if not dsn:
         pytest.skip("needs a disposable TEST_DATABASE_URL")
-    schema = "test_" + uuid4().hex
-    async with await store.connect(dsn) as admin:
-        await admin.execute(f'CREATE SCHEMA "{schema}"')
-        try:
-            async with await store.connect(dsn, schema) as c:
-                await store.migrate(c)
-                c.test_dsn, c.test_schema = dsn, schema
-                yield c
-        finally:
-            await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+    async with sessions.schema(dsn) as c:
+        yield c
 
 
 @pytest.fixture

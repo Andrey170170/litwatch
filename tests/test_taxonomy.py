@@ -7,6 +7,7 @@ from litwatch import seeds
 from litwatch.core import Status
 from litwatch.core.taxonomy import Depth, Taxonomy
 from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE
 
 
@@ -132,7 +133,7 @@ async def _revision(conn, table: str, slug: str) -> int:
 async def test_the_seed_round_trips_through_the_database_and_its_yaml(conn):
     assert await taxonomy_store.load(conn) is None
     tree = seeds.taxonomy()
-    saved = await taxonomy_store.save(conn, tree)
+    saved = await settling.save_tree(conn, tree)
     assert saved.revised_classes == [c.slug for c in tree.classes]
     assert saved.revised_topics == [t.slug for t in tree.topics]
     assert saved.changed_topics == sorted(t.slug for t in tree.topics)
@@ -144,15 +145,15 @@ async def test_the_seed_round_trips_through_the_database_and_its_yaml(conn):
 
 
 async def test_a_revision_moves_only_when_its_hash_changes(conn):
-    await taxonomy_store.save(conn, TREE)
-    again = await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
+    again = await settling.save_tree(conn, TREE)
     assert again == taxonomy_store.Saved()
 
     # Badge, status and order are not part of a topic's version; a new status settles the
     # topic's papers (a paused topic queues no full-text pass).
     restyled = FAITH.model_copy(update={"colour": "#000000", "status": Status.PAUSED})
     tree = TREE.following(restyled).model_copy(update={"topics": [INTERP, restyled, AGENTS]})
-    assert await taxonomy_store.save(conn, tree) == taxonomy_store.Saved(
+    assert await settling.save_tree(conn, tree) == taxonomy_store.Saved(
         reordered=True, changed_topics=[FAITH.slug]
     )
     assert [t.slug for t in await taxonomy_store.topics(conn)] == [
@@ -163,14 +164,14 @@ async def test_a_revision_moves_only_when_its_hash_changes(conn):
     assert [t.slug for t in await taxonomy_store.topics(conn, Status.PAUSED)] == [FAITH.slug]
 
     # A new rubric revises the topic; a new subject revises the topic and its class.
-    saved = await taxonomy_store.save(
+    saved = await settling.save_tree(
         conn, TREE.following(FAITH.model_copy(update={"rubric": "- Central: another rubric."}))
     )
     assert (saved.revised_topics, saved.revised_classes) == ([FAITH.slug], [])
     reworded = FAITH.model_copy(
         update={"subject": "Whether a trace leaves out what the model did."}
     )
-    saved = await taxonomy_store.save(conn, TREE.following(reworded))
+    saved = await settling.save_tree(conn, TREE.following(reworded))
     assert (saved.revised_topics, saved.revised_classes) == ([FAITH.slug], [FAITH.slug])
     assert await _revision(conn, "topics", FAITH.slug) == 3
     assert await _revision(conn, "classes", FAITH.slug) == 2
@@ -181,7 +182,7 @@ async def test_a_revision_moves_only_when_its_hash_changes(conn):
         c.model_copy(update={"threshold": 0.7}) if c.slug == "agents" else c
         for c in current.classes
     ]
-    saved = await taxonomy_store.save(conn, current.model_copy(update={"classes": classes}))
+    saved = await settling.save_tree(conn, current.model_copy(update={"classes": classes}))
     assert saved.revised_classes == ["agents"] and await _revision(conn, "classes", "agents") == 2
     content = await (
         await conn.execute(
@@ -192,12 +193,12 @@ async def test_a_revision_moves_only_when_its_hash_changes(conn):
 
 
 async def test_a_class_left_out_is_retired_and_a_topic_left_out_unfollowed(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     smaller = Taxonomy(
         classes=[c for c in TREE.classes if c.slug != FAITH.slug],
         topics=[INTERP, AGENTS],
     )
-    saved = await taxonomy_store.save(conn, smaller)
+    saved = await settling.save_tree(conn, smaller)
     assert (saved.retired_classes, saved.unfollowed_topics) == ([FAITH.slug], [FAITH.slug])
     assert saved.changed_topics == [FAITH.slug]
     assert await taxonomy_store.load(conn) == smaller
@@ -209,23 +210,23 @@ async def test_a_class_left_out_is_retired_and_a_topic_left_out_unfollowed(conn)
     assert (FAITH.slug, 1) in await _versions(conn, "topic_versions")
 
     # Saved again unchanged, both come back at the revision they had.
-    saved = await taxonomy_store.save(conn, TREE)
+    saved = await settling.save_tree(conn, TREE)
     assert (saved.revised_classes, saved.revised_topics) == ([], [])
     assert saved.changed_topics == [FAITH.slug]
     assert await taxonomy_store.load(conn) == TREE
     assert await _revision(conn, "topics", FAITH.slug) == 1
 
     # Unfollowed and followed again with another rubric, it goes on from its last revision.
-    await taxonomy_store.save(conn, smaller.following(INTERP))
-    await taxonomy_store.save(
+    await settling.save_tree(conn, smaller.following(INTERP))
+    await settling.save_tree(
         conn, TREE.following(FAITH.model_copy(update={"rubric": "- Central: another rubric."}))
     )
     assert await _revision(conn, "topics", FAITH.slug) == 2
 
 
 async def test_the_owners_order_names_every_topic_once(conn):
-    await taxonomy_store.save(conn, TREE)
-    await taxonomy_store.set_order(conn, ["agents", FAITH.slug, INTERP.slug])
+    await settling.save_tree(conn, TREE)
+    await settling.set_order(conn, ["agents", FAITH.slug, INTERP.slug])
     assert [t.slug for t in (await taxonomy_store.load(conn)).topics] == [
         "agents",
         FAITH.slug,
@@ -233,7 +234,7 @@ async def test_the_owners_order_names_every_topic_once(conn):
     ]
     for wrong in (["agents", FAITH.slug], ["agents", "agents", FAITH.slug, INTERP.slug]):
         with pytest.raises(ValueError, match="every topic exactly once"):
-            await taxonomy_store.set_order(conn, wrong)
+            await settling.set_order(conn, wrong)
 
 
 def test_following_a_class_describes_it_by_the_topic_and_keeps_the_owners_order():

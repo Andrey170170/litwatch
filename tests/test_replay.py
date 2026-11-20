@@ -23,8 +23,8 @@ from litwatch.store import classifications as classifications_store
 from litwatch.store import evaluation, quality, runs
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
+from tests import settling
 from tests.conftest import FAITH, TREE, AppClient, gate_on, paper, started
 from tests.fakes import BatchingProvider
 from tests.test_reruns import COST, Costed, Priced, charged, work_out
@@ -143,7 +143,7 @@ LABELLED = [
 
 @pytest.fixture
 async def models(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [A, B, C])
     return Scripted()
 
@@ -270,12 +270,10 @@ async def test_a_routing_change_refuses_a_resume(conn, models):
     child = TaxonomyClass(slug="cot-probes", name="Probes of reasoning traces",
                           description=subject, parent=TOPIC)  # fmt: skip
     drafted = Taxonomy(classes=[*TREE.classes, child], topics=[*TREE.topics, probes])
-    await taxonomy_store.save(conn, drafted)
+    await settling.save_tree(conn, drafted)
     r = await start(conn, models)
     active = probes.model_copy(update={"status": Status.ACTIVE})
-    await taxonomy_store.save(
-        conn, Taxonomy(classes=drafted.classes, topics=[*TREE.topics, active])
-    )
+    await settling.save_tree(conn, Taxonomy(classes=drafted.classes, topics=[*TREE.topics, active]))
     with pytest.raises(ValueError, match="another configuration"):
         await replay.resume(conn, CONFIG, r.eval_run_id)
 
@@ -288,7 +286,7 @@ async def test_a_classifier_member_through_a_followed_class_below_is_the_classif
                    subject=subject)  # fmt: skip
     child = TaxonomyClass(slug="cot-probes", name="Probes of reasoning traces",
                           description=subject, parent=TOPIC)  # fmt: skip
-    await taxonomy_store.save(
+    await settling.save_tree(
         conn, Taxonomy(classes=[*TREE.classes, child], topics=[*TREE.topics, probes])
     )
     # The classifier puts A in the class below only (no probability on the Focus class itself).
@@ -426,7 +424,7 @@ async def priced(conn, monkeypatch, labels):
     """The taxonomy, the three papers, and every replay role with a price bound: the Anthropic
     judge at a listed price, the OpenRouter classifier and check by their charged history. Each
     call costs `test_reruns.COST`."""
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [A, B, C])
     monkeypatch.setitem(prices.ANTHROPIC, "test-judge", (1.0, 2.0, 0.1))
     for model in ("test/decider", "test/check"):

@@ -20,7 +20,6 @@ from litwatch.core import Label, LabelValue, Status
 from litwatch.core.classification import Source
 from litwatch.core.digests import DigestPeriod, listing_day, plain, voice_problems
 from litwatch.digests import writer
-from litwatch.gates.database import DatabaseGate
 from litwatch.jobs import digests as digests_job
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
@@ -33,6 +32,7 @@ from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, gate_on, paper, started
 from tests.fakes import ScriptedProvider
+from tests.sessions import Bridge
 from tests.test_reading import analyse, classify, grade
 
 TUE, WED, THU, SAT = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8), date(2026, 10, 10)
@@ -76,7 +76,7 @@ class Writer:
 
 @pytest.fixture
 async def db(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P, Q, R, S])
     return conn
 
@@ -108,7 +108,7 @@ async def day(conn, w: Writer, on: date, config: Config | None = None) -> bool:
         gate_on(conn) as db,
         model_run(db, config or Config(), "digests", gateway=w.gateway) as run,
     ):
-        return await digests.write_day(DatabaseGate.over(conn), run, tree, on, rules=settling.RULES)
+        return await digests.write_day(Bridge(conn), run, tree, on, rules=settling.RULES)
 
 
 async def week(conn, w: Writer, monday: date) -> None:
@@ -117,7 +117,7 @@ async def week(conn, w: Writer, monday: date) -> None:
         gate_on(conn) as db,
         model_run(db, Config(), "digests", gateway=w.gateway) as run,
     ):
-        await digests.write_week(DatabaseGate.over(conn), run, tree, monday, rules=settling.RULES)
+        await digests.write_week(Bridge(conn), run, tree, monday, rules=settling.RULES)
 
 
 async def shown(conn, topic: str, period: str, on: date) -> tuple[str, list[tuple[str, str]]]:
@@ -417,9 +417,7 @@ async def test_a_grading_failed_on_a_paused_topic_does_not_hold_back_its_area(db
         (Q.id, FAITH.slug),
     )
     await listed(db, TUE, Q)
-    await taxonomy_store.save(
-        db, TREE.following(FAITH.model_copy(update={"status": Status.PAUSED}))
-    )
+    await settling.save_tree(db, TREE.following(FAITH.model_copy(update={"status": Status.PAUSED})))
     await day(db, Writer(), TUE)
     assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(Q.id, "listed")])
 
@@ -1065,7 +1063,7 @@ async def test_a_day_without_a_listing_has_no_digests_and_a_quiet_topic_says_not
 
 async def test_a_paused_topic_gets_no_digest(db):
     paused = TREE.following(FAITH.model_copy(update={"status": Status.PAUSED}))
-    await taxonomy_store.save(db, paused)
+    await settling.save_tree(db, paused)
     await focus(db, P, "central")
     await listed(db, TUE, P)
     await day(db, Writer(), TUE)
@@ -1185,9 +1183,7 @@ async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db, 
     await runs.finish(db, await started(db, "nightly"))
     status = await reading.status(db)
     assert (status["state"], status["digests_failed"]) == ("attention", 1)
-    await taxonomy_store.save(
-        db, TREE.following(FAITH.model_copy(update={"status": Status.PAUSED}))
-    )
+    await settling.save_tree(db, TREE.following(FAITH.model_copy(update={"status": Status.PAUSED})))
     status = await reading.status(db)
     assert (status["state"], status["digests_failed"]) == ("quiet", 0)
     tree = await taxonomy_store.load(db)
@@ -1572,7 +1568,7 @@ async def test_the_tab_steps_only_through_the_digests_it_shows(db, gate):
         await digests.write(
             gate, run, tree, tree.topic(INTERP.slug), DigestPeriod.DAY, WED, rules=settling.RULES
         )
-    await taxonomy_store.save(db, TREE.model_copy(update={"topics": [INTERP, AGENTS]}))
+    await settling.save_tree(db, TREE.model_copy(update={"topics": [INTERP, AGENTS]}))
     async with client(db, w) as http:
         wed = (await http.get(f"/api/digests/days/{WED}")).json()
         history = (await http.get("/api/digests", params={"since": MON, "until": SAT})).json()
@@ -1662,7 +1658,7 @@ async def test_a_digest_is_written_again_only_through_a_worker_and_while_its_top
         off = await http.post(f"/api/digests/{digest_id}/write")
         assert off.status_code == 409 and "schedule is off" in off.json()["detail"]
     paused = FAITH.model_copy(update={"status": Status.PAUSED})
-    await taxonomy_store.save(db, TREE.model_copy(update={"topics": [paused, INTERP, AGENTS]}))
+    await settling.save_tree(db, TREE.model_copy(update={"topics": [paused, INTERP, AGENTS]}))
     async with client(db, w, SCHEDULED) as http:
         refused = await http.post(f"/api/digests/{digest_id}/write")
         assert refused.status_code == 409 and "not one to write again" in refused.json()["detail"]

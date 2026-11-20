@@ -5,27 +5,26 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Publication
-from litwatch.gates.database import WriteUnit
+from litwatch.gates.database import ReadUnit, WriteUnit
 
 # A library paper with no published record is looked up again monthly for two years.
 RECHECK = timedelta(days=30)
 GIVE_UP = timedelta(days=730)
 
 
-async def get(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+async def get(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
     return await (
-        await conn.execute("SELECT * FROM publications WHERE paper_id = %s", (paper_id,))
+        await unit.execute("SELECT * FROM publications WHERE paper_id = %s", (paper_id,))
     ).fetchone()
 
 
-async def found(conn: psycopg.AsyncConnection, ids: list[str]) -> dict[str, Publication]:
+async def found(unit: ReadUnit, ids: list[str]) -> dict[str, Publication]:
     """The stored published records of these papers, by paper id."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT paper_id, record FROM publications "
             "WHERE paper_id = ANY(%s) AND record IS NOT NULL",
             (ids,),
@@ -63,12 +62,12 @@ async def put(
     return stored.rowcount == 1, Publication.model_validate(previous) if previous else None
 
 
-async def due(conn: psycopg.AsyncConnection, limit: int) -> list[str]:
+async def due(unit: ReadUnit, limit: int) -> list[str]:
     """Library papers to look up: those never looked up or saved again since the last look,
     newest saves first, then those still without a published record a month after the
     last look, within two years of the first look or the latest save."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT l.paper_id FROM library l
             LEFT JOIN publications p ON p.paper_id = l.paper_id

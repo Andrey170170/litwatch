@@ -15,11 +15,11 @@ from litwatch.config import Config, Models, RoleConfig, Schedule
 from litwatch.core import FAILED_RUNS
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.gateway import KEYS
-from litwatch.store import db, failures, reading, runs
+from litwatch.store import failures, reading, runs
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
+from tests import sessions, settling
 from tests.conftest import FAITH, INTERP, TREE, AppClient, paper, started
 from tests.fakes import ScriptedProvider
 
@@ -88,7 +88,7 @@ async def test_a_finished_nightly_is_measured_from_its_record(conn, monitor):
 
 async def test_a_nightly_whose_process_died_reads_failed_not_running(conn, monitor):
     # A process that opens its run and is killed: its session ends, the record stays open.
-    other = await db.sibling(conn)
+    other = await sessions.sibling(conn)
     await started(other, "nightly")
     text = (await monitor.get("/metrics")).text
     assert sample(text, "homelab_job_running") == 1
@@ -117,7 +117,7 @@ async def test_a_run_that_raised_reads_failed_with_its_error(conn, monitor):
 
 async def test_what_the_owner_acknowledged_still_reaches_the_status_document(conn, monitor):
     # Acknowledge on Needs you clears the app's run status only (DESIGN.md, Needs you).
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await conn.execute(
         "INSERT INTO digests (topic, period, day, state, acknowledged_at) "
         "VALUES (%s, 'day', '2026-10-18', 'failed', now())",
@@ -259,7 +259,7 @@ async def night(conn, classified: int = 100) -> int:
 
 
 async def test_a_single_stuck_paper_leaves_pipeline_healthy(conn, monitor):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, PAPERS)
     await stop(conn, PAPERS[0])
     await night(conn)
@@ -270,7 +270,7 @@ async def test_a_single_stuck_paper_leaves_pipeline_healthy(conn, monitor):
 
 
 async def test_many_papers_stopped_at_one_step_in_the_night_turn_pipeline_degraded(conn, monitor):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, PAPERS)
     for p in PAPERS[:5]:  # five papers, each on two topics: five
         await stop(conn, p)

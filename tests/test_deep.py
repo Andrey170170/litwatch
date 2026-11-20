@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from litwatch import events, store
+from litwatch import events
 from litwatch.api import create_app, monitor
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config, Schedule
@@ -40,7 +40,7 @@ from litwatch.core.fulltext import (
 )
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
-from litwatch.gates.database import DatabaseGate, identity_of
+from litwatch.gates.database import identity_of
 from litwatch.intake import search
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
@@ -52,7 +52,7 @@ from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests import settling
+from tests import sessions, settling
 from tests.conftest import (
     AGENTS,
     BLUE,
@@ -68,6 +68,7 @@ from tests.conftest import (
     sent_figure,
 )
 from tests.fakes_http import FakeArchive, FakeDeep, mock
+from tests.sessions import Bridge
 from tests.test_digests import MON, TUE, Writer, area, day, listed, week
 from tests.test_reading import analyse, classify
 from tests.test_reading import grade as verdict
@@ -107,7 +108,7 @@ def with_text(*papers) -> FakeArchive:
 
 @pytest.fixture
 async def db(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P, Q])
     return conn
 
@@ -148,7 +149,7 @@ async def work(conn, fake: FakeArchive, d: Deep, **kw):
 
 async def retry_failed(conn) -> int:
     """`store.fulltext.retry_failed` in a unit of its own, as the nightly calls it."""
-    async with DatabaseGate.over(conn).write("retry failed", taxonomy="shared") as unit:
+    async with Bridge(conn).write("retry failed", taxonomy="shared") as unit:
         return await fulltext_store.retry_failed(unit, FAILED_RUNS)
 
 
@@ -928,7 +929,7 @@ async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_que
 
 
 async def deep_status(conn, d: Deep) -> dict:
-    found = await monitor.facts(DatabaseGate.over(conn), Config(), [d], None)
+    found = await monitor.facts(Bridge(conn), Config(), [d], None)
     return next(c for c in monitor.components(found, Config()) if c["id"] == "deep")
 
 
@@ -1611,5 +1612,5 @@ async def test_the_deep_worker_runs_a_requested_card_as_soon_as_it_is_woken(db, 
 
 
 async def test_connect_reaches_the_test_schema(db):
-    async with await store.connect(f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"):
+    async with await sessions.connect(f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"):
         pass

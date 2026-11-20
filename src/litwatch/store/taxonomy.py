@@ -12,16 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Status, Taxonomy, TaxonomyClass, Topic
 from litwatch.gates.database import ReadUnit, WriteUnit
-from litwatch.store.db import transaction
-
-# Advisory lock key on the taxonomy: edits hold it exclusively, readers that need one consistent
-# view (`load`, settles) hold it shared.
-TAXONOMY_LOCK = 7213913
 
 
 @dataclass
@@ -40,30 +34,21 @@ class Saved:
     reordered: bool = False
 
 
-async def lock(conn: psycopg.AsyncConnection) -> None:
-    """Hold the taxonomy edit lock to the end of the transaction. It waits for settles in
-    flight, which hold the lock shared (a change's unit, `feedback.word.change`). Every write to
-    classes or topics takes it first. A unit took it from the gate when it opened, or may not
-    edit."""
-    if isinstance(conn, ReadUnit):
-        if getattr(conn, "taxonomy", None) != "exclusive":
-            raise RuntimeError(f"unit {conn.name!r} edits the taxonomy without its lock")
-        return
-    await conn.execute("SELECT pg_advisory_xact_lock(%s)", (TAXONOMY_LOCK,))
+def require_exclusive(unit: WriteUnit) -> None:
+    """Refuse an edit of classes or topics in a unit that does not hold the taxonomy lock
+    exclusively, which the gate took when the unit opened (`taxonomy="exclusive"`). Holding it,
+    the edit waited for the settles in flight, which hold it shared (a change's unit,
+    `feedback.word.change`)."""
+    if unit.taxonomy != "exclusive":
+        raise RuntimeError(f"unit {unit.name!r} edits the taxonomy without its lock")
 
 
-async def lock_shared(conn: psycopg.AsyncConnection) -> None:
-    """Hold the taxonomy lock shared to the end of the transaction: no edit commits until
-    then, so every read sees one version of the tree. A write unit took it from the gate when
-    it opened, shared or exclusively, or may not read the tree; a read unit needs none, since
-    it reads one snapshot."""
-    if isinstance(conn, WriteUnit):
-        if conn.taxonomy is None:
-            raise RuntimeError(f"unit {conn.name!r} reads the taxonomy without its lock")
-        return
-    if isinstance(conn, ReadUnit):
-        return
-    await conn.execute("SELECT pg_advisory_xact_lock_shared(%s)", (TAXONOMY_LOCK,))
+def require_lock(unit: ReadUnit) -> None:
+    """Refuse a read of the tree in a write unit that does not hold the taxonomy lock, shared
+    or exclusively: holding it, no edit commits before the unit does, so every read in it sees
+    one version of the tree. A read unit needs none, since it reads one snapshot."""
+    if isinstance(unit, WriteUnit) and unit.taxonomy is None:
+        raise RuntimeError(f"unit {unit.name!r} reads the taxonomy without its lock")
 
 
 def row_to_class(row: dict[str, Any]) -> TaxonomyClass:
@@ -90,10 +75,10 @@ def _topic(row: dict[str, Any]) -> Topic:
     )
 
 
-async def topics(conn: psycopg.AsyncConnection, status: Status | None = None) -> list[Topic]:
+async def topics(unit: ReadUnit, status: Status | None = None) -> list[Topic]:
     """The followed topics with the given status (all for None), in the owner's order."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM topics WHERE %(s)s::text IS NULL OR status = %(s)s "
             "ORDER BY position, class",
             {"s": status.value if status else None},
@@ -102,22 +87,21 @@ async def topics(conn: psycopg.AsyncConnection, status: Status | None = None) ->
     return [_topic(r) for r in rows]
 
 
-async def load(conn: psycopg.AsyncConnection) -> Taxonomy | None:
+async def load(unit: ReadUnit) -> Taxonomy | None:
     """The current taxonomy, None before one is saved."""
-    async with transaction(conn):
-        await lock_shared(conn)
-        rows = await (
-            await conn.execute("SELECT * FROM classes WHERE retired_at IS NULL ORDER BY position")
-        ).fetchall()
-        if not rows:
-            return None
-        return Taxonomy(classes=[row_to_class(r) for r in rows], topics=await topics(conn))
+    require_lock(unit)
+    rows = await (
+        await unit.execute("SELECT * FROM classes WHERE retired_at IS NULL ORDER BY position")
+    ).fetchall()
+    if not rows:
+        return None
+    return Taxonomy(classes=[row_to_class(r) for r in rows], topics=await topics(unit))
 
 
-async def _latest(conn: psycopg.AsyncConnection, table: str) -> dict[str, dict[str, Any]]:
+async def _latest(unit: ReadUnit, table: str) -> dict[str, dict[str, Any]]:
     """The last version row of every class or topic ever saved: its revision and hash."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT DISTINCT ON (class) class, revision, hash FROM {table} "
             "ORDER BY class, revision DESC"
         )
@@ -134,131 +118,127 @@ def _revision(latest: dict[str, dict[str, Any]], slug: str, version: str) -> tup
 
 
 async def _add_version(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     table: str,
     slug: str,
     revision: int,
     version: str,
     content: dict[str, Any],
 ) -> None:
-    await conn.execute(
+    await unit.execute(
         f"INSERT INTO {table} (class, revision, hash, content) VALUES (%s, %s, %s, %s)",
         (slug, revision, version, Jsonb(content)),
     )
 
 
-async def save(conn: psycopg.AsyncConnection, tree: Taxonomy) -> Saved:
+async def save(unit: WriteUnit, tree: Taxonomy) -> Saved:
     """Store `tree` as the whole taxonomy: classes in its order, topics in its order."""
     saved = Saved()
-    async with transaction(conn):
-        await lock(conn)
-        before = {
-            r["class"]: (r["depth"], r["status"], r["revision"])
-            for r in await (
-                await conn.execute(
-                    "SELECT class, depth, status, revision FROM topics ORDER BY position, class"
-                )
-            ).fetchall()
-        }
-
-        latest = await _latest(conn, "class_versions")
-        for position, c in enumerate(tree.classes, 1):
-            revision, new = _revision(latest, c.slug, c.version)
-            await conn.execute(
-                """
-                INSERT INTO classes (slug, parent, name, description, threshold, position,
-                                     version, revision)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (slug) DO UPDATE SET
-                    parent = EXCLUDED.parent, name = EXCLUDED.name,
-                    description = EXCLUDED.description, threshold = EXCLUDED.threshold,
-                    position = EXCLUDED.position, version = EXCLUDED.version,
-                    revision = EXCLUDED.revision, retired_at = NULL, updated_at = now()
-                """,
-                (
-                    c.slug,
-                    c.parent,
-                    c.name,
-                    c.description,
-                    c.threshold,
-                    position,
-                    c.version,
-                    revision,
-                ),
+    require_exclusive(unit)
+    before = {
+        r["class"]: (r["depth"], r["status"], r["revision"])
+        for r in await (
+            await unit.execute(
+                "SELECT class, depth, status, revision FROM topics ORDER BY position, class"
             )
-            if new:
-                content = c.model_dump(mode="json", exclude={"slug"})
-                await _add_version(conn, "class_versions", c.slug, revision, c.version, content)
-                saved.revised_classes.append(c.slug)
+        ).fetchall()
+    }
 
-        latest = await _latest(conn, "topic_versions")
-        after: dict[str, tuple[str, bool, int]] = {}
-        for position, t in enumerate(tree.topics, 1):
-            revision, new = _revision(latest, t.slug, t.version)
-            after[t.slug] = (t.depth.value, t.status.value, revision)
-            await conn.execute(
-                """
-                INSERT INTO topics (class, depth, subject, rubric, interests, keywords, monogram,
-                                    colour, position, status, version, revision)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (class) DO UPDATE SET
-                    depth = EXCLUDED.depth, subject = EXCLUDED.subject,
-                    rubric = EXCLUDED.rubric, interests = EXCLUDED.interests,
-                    keywords = EXCLUDED.keywords, monogram = EXCLUDED.monogram,
-                    colour = EXCLUDED.colour, position = EXCLUDED.position,
-                    status = EXCLUDED.status, version = EXCLUDED.version,
-                    revision = EXCLUDED.revision, updated_at = now()
-                """,
-                (
-                    t.slug,
-                    t.depth.value,
-                    t.subject,
-                    t.rubric,
-                    t.interests,
-                    t.keywords,
-                    t.monogram,
-                    t.colour,
-                    position,
-                    t.status.value,
-                    t.version,
-                    revision,
-                ),
+    latest = await _latest(unit, "class_versions")
+    for position, c in enumerate(tree.classes, 1):
+        revision, new = _revision(latest, c.slug, c.version)
+        await unit.execute(
+            """
+            INSERT INTO classes (slug, parent, name, description, threshold, position,
+                                 version, revision)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (slug) DO UPDATE SET
+                parent = EXCLUDED.parent, name = EXCLUDED.name,
+                description = EXCLUDED.description, threshold = EXCLUDED.threshold,
+                position = EXCLUDED.position, version = EXCLUDED.version,
+                revision = EXCLUDED.revision, retired_at = NULL, updated_at = now()
+            """,
+            (
+                c.slug,
+                c.parent,
+                c.name,
+                c.description,
+                c.threshold,
+                position,
+                c.version,
+                revision,
+            ),
+        )
+        if new:
+            content = c.model_dump(mode="json", exclude={"slug"})
+            await _add_version(unit, "class_versions", c.slug, revision, c.version, content)
+            saved.revised_classes.append(c.slug)
+
+    latest = await _latest(unit, "topic_versions")
+    after: dict[str, tuple[str, bool, int]] = {}
+    for position, t in enumerate(tree.topics, 1):
+        revision, new = _revision(latest, t.slug, t.version)
+        after[t.slug] = (t.depth.value, t.status.value, revision)
+        await unit.execute(
+            """
+            INSERT INTO topics (class, depth, subject, rubric, interests, keywords, monogram,
+                                colour, position, status, version, revision)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (class) DO UPDATE SET
+                depth = EXCLUDED.depth, subject = EXCLUDED.subject,
+                rubric = EXCLUDED.rubric, interests = EXCLUDED.interests,
+                keywords = EXCLUDED.keywords, monogram = EXCLUDED.monogram,
+                colour = EXCLUDED.colour, position = EXCLUDED.position,
+                status = EXCLUDED.status, version = EXCLUDED.version,
+                revision = EXCLUDED.revision, updated_at = now()
+            """,
+            (
+                t.slug,
+                t.depth.value,
+                t.subject,
+                t.rubric,
+                t.interests,
+                t.keywords,
+                t.monogram,
+                t.colour,
+                position,
+                t.status.value,
+                t.version,
+                revision,
+            ),
+        )
+        if new:
+            content = t.model_dump(
+                mode="json", include={"depth", "subject", "rubric", "interests", "keywords"}
             )
-            if new:
-                content = t.model_dump(
-                    mode="json", include={"depth", "subject", "rubric", "interests", "keywords"}
-                )
-                await _add_version(conn, "topic_versions", t.slug, revision, t.version, content)
-                saved.revised_topics.append(t.slug)
+            await _add_version(unit, "topic_versions", t.slug, revision, t.version, content)
+            saved.revised_topics.append(t.slug)
 
-        kept = list(after)
-        gone = await conn.execute(
-            "DELETE FROM topics WHERE class <> ALL(%s) RETURNING class", (kept,)
-        )
-        saved.unfollowed_topics = sorted(r["class"] for r in await gone.fetchall())
-        retired = await conn.execute(
-            "UPDATE classes SET retired_at = now() WHERE retired_at IS NULL "
-            "AND slug <> ALL(%s) RETURNING slug",
-            ([c.slug for c in tree.classes],),
-        )
-        saved.retired_classes = sorted(r["slug"] for r in await retired.fetchall())
-        saved.changed_topics = sorted(
-            s for s in set(before) | set(after) if before.get(s) != after.get(s)
-        )
-        saved.reordered = [s for s in before if s in after] != [s for s in after if s in before]
+    kept = list(after)
+    gone = await unit.execute("DELETE FROM topics WHERE class <> ALL(%s) RETURNING class", (kept,))
+    saved.unfollowed_topics = sorted(r["class"] for r in await gone.fetchall())
+    retired = await unit.execute(
+        "UPDATE classes SET retired_at = now() WHERE retired_at IS NULL "
+        "AND slug <> ALL(%s) RETURNING slug",
+        ([c.slug for c in tree.classes],),
+    )
+    saved.retired_classes = sorted(r["slug"] for r in await retired.fetchall())
+    saved.changed_topics = sorted(
+        s for s in set(before) | set(after) if before.get(s) != after.get(s)
+    )
+    saved.reordered = [s for s in before if s in after] != [s for s in after if s in before]
     return saved
 
 
-async def set_order(conn: psycopg.AsyncConnection, slugs: list[str]) -> None:
+async def set_order(unit: WriteUnit, slugs: list[str]) -> None:
     """The owner's order of the topics. `slugs` must name every followed topic exactly once;
     ValueError otherwise. The order is not part of a topic's version."""
-    async with transaction(conn):
-        await lock(conn)
-        rows = await (await conn.execute("SELECT class FROM topics")).fetchall()
-        if sorted(slugs) != sorted(r["class"] for r in rows):
-            raise ValueError("name every topic exactly once")
-        for position, slug in enumerate(slugs, 1):
-            await conn.execute(
-                "UPDATE topics SET position = %s, updated_at = now() WHERE class = %s",
-                (position, slug),
-            )
+    require_exclusive(unit)
+    rows = await (await unit.execute("SELECT class FROM topics")).fetchall()
+    if sorted(slugs) != sorted(r["class"] for r in rows):
+        raise ValueError("name every topic exactly once")
+    for position, slug in enumerate(slugs, 1):
+        await unit.execute(
+            "UPDATE topics SET position = %s, updated_at = now() WHERE class = %s",
+            (position, slug),
+        )

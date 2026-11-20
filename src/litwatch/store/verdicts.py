@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Fit, Opinion, Verdict
 from litwatch.core.classification import Membership
+from litwatch.gates.database import ReadUnit, WriteUnit
 
 # A current verdict that waits for the owner's word, over its columns (pipeline.md, section 4):
 # a Focus split, an Area escalation whose two graders disagreed (also a split), or a central or
@@ -33,13 +33,13 @@ def _verdict(row: dict[str, Any]) -> Verdict:
     )
 
 
-async def add(conn: psycopg.AsyncConnection, verdict: Verdict) -> Verdict:
+async def add(unit: WriteUnit, verdict: Verdict) -> Verdict:
     """Record a grading as a new row; earlier rows stay as history."""
     opinions = {
         k: o.model_dump(mode="json", exclude_none=True) for k, o in verdict.opinions.items()
     }
     row = await (
-        await conn.execute(
+        await unit.execute(
             """
             INSERT INTO verdicts (paper_id, topic, topic_version, paper_revision, fit, reason,
                                   opinions, split, escalated, one_lab)
@@ -62,14 +62,12 @@ async def add(conn: psycopg.AsyncConnection, verdict: Verdict) -> Verdict:
     return _verdict(row)
 
 
-async def current_fits(
-    conn: psycopg.AsyncConnection, paper_ids: list[str]
-) -> dict[str, dict[str, Fit]]:
+async def current_fits(unit: ReadUnit, paper_ids: list[str]) -> dict[str, dict[str, Fit]]:
     """The Fit of each paper's current verdict per topic, by paper, for those that have one: the
     verdict `core.current_verdict` picks from the history (the newest paper revision that has
     one, then the most recently recorded), without reading the history."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT DISTINCT ON (paper_id, topic) paper_id, topic, fit FROM verdicts "
             "WHERE paper_id = ANY(%s) "
             "ORDER BY paper_id, topic, paper_revision DESC, recorded_at DESC, id DESC",
@@ -83,7 +81,7 @@ async def current_fits(
 
 
 async def candidates(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     runs: int,
     limit: int | None = None,
     ids: list[str] | None = None,
@@ -99,7 +97,7 @@ async def candidates(
     its current text (`failed`), the roles whose every model refused per topic (`refused`) and the
     active topics a miss was reported for (`missed`)."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             """
             WITH chosen AS (
                 SELECT * FROM (
@@ -162,25 +160,23 @@ async def candidates(
     return rows
 
 
-async def passed(conn: psycopg.AsyncConnection, passes: list[tuple[str, int]]) -> None:
+async def passed(unit: WriteUnit, passes: list[tuple[str, int]]) -> None:
     """Record the grading pass of each (paper, revision)."""
     for paper_id, revision in passes:
-        await conn.execute(
+        await unit.execute(
             "INSERT INTO grading_passes (paper_id, paper_revision) VALUES (%s, %s) "
             "ON CONFLICT DO NOTHING",
             (paper_id, revision),
         )
 
 
-async def ungraded_under(
-    conn: psycopg.AsyncConnection, topic: str, version: str, ids: list[str]
-) -> list[str]:
+async def ungraded_under(unit: ReadUnit, topic: str, version: str, ids: list[str]) -> list[str]:
     """Those of `ids`, in their order, not dismissed and whose verdict for the topic on their
     current text, the latest, is not under its `version`: what a re-run of the topic still has
     to grade. A topic edited back to an earlier version grades again what a version between
     them decided (its calls reused from the journal)."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT p.id FROM unnest(%(ids)s::text[]) WITH ORDINALITY AS x (id, n)
             JOIN papers p ON p.id = x.id AND NOT p.dropped
@@ -195,13 +191,11 @@ async def ungraded_under(
     return [r["id"] for r in rows]
 
 
-async def graded_under(
-    conn: psycopg.AsyncConnection, topic: str, version: str, ids: list[str]
-) -> int:
+async def graded_under(unit: ReadUnit, topic: str, version: str, ids: list[str]) -> int:
     """How many of `ids` have their latest verdict for the topic on their current text under
     its `version`: how far a re-run of the topic got."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT count(*) AS n FROM unnest(%(ids)s::text[]) AS x (id)
             JOIN papers p ON p.id = x.id
@@ -215,11 +209,11 @@ async def graded_under(
     return row["n"]
 
 
-async def escalated_share(conn: psycopg.AsyncConnection, topic: str, last: int = 200) -> float:
+async def escalated_share(unit: ReadUnit, topic: str, last: int = 200) -> float:
     """The share of the topic's latest `last` Area verdicts that escalated to `check`: what an
     estimate expects of an Area re-run. 1 with none yet."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT avg(escalated::int) AS share FROM (SELECT escalated FROM verdicts "
             "WHERE topic = %s AND opinions ? 'area_check' ORDER BY id DESC LIMIT %s) recent",
             (topic, last),

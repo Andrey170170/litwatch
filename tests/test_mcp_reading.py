@@ -21,7 +21,7 @@ from litwatch.archive import pages
 from litwatch.archive import text as text_module
 from litwatch.archive.pages import MAX_SIDE
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import TREE, paper
 from tests.fakes_http import FakeArchive, mock
 from tests.test_archive_text import pages_pdf
@@ -80,7 +80,7 @@ def quick_polls(monkeypatch):
 
 @pytest.fixture
 async def shelf(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [HELD, PDF_ONLY])
 
 

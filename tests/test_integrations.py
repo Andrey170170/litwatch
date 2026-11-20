@@ -18,8 +18,8 @@ from litwatch.integrations.archive import Archive
 from litwatch.integrations.webhook import Webhook
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
+from tests import settling
 from tests.conftest import INTERP, TREE, deliver, paper, start
 from tests.fakes_http import FakeArchive, mock
 
@@ -28,7 +28,7 @@ P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computa
 
 @pytest.fixture
 async def world(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     return conn
 
 
@@ -213,7 +213,7 @@ async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_paper
     await _graded(conn, gone.id, "agents", Grade.RELEVANT)
     await word_store.set_effective(conn, gone.id, "agents", None)
     # A paused topic makes no new judgements but keeps its grades, and their PDFs.
-    await taxonomy_store.save(
+    await settling.save_tree(
         conn,
         TREE.model_copy(
             update={
@@ -271,7 +271,7 @@ async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world, db)
     paused = [
         t.model_copy(update={"status": Status.PAUSED}) if t == INTERP else t for t in TREE.topics
     ]
-    await taxonomy_store.save(conn, TREE.model_copy(update={"topics": paused}))
+    await settling.save_tree(conn, TREE.model_copy(update={"topics": paused}))
     # Revised while paused: resuming emits nothing, so the revision asks for the PDF now.
     await papers_store.upsert(conn, [P])
     await deliver(db, a)

@@ -1,15 +1,11 @@
-"""`store` is the only package with SQL: no `execute` or `copy` call outside it beyond the
-ones this list names, per function. The list only shrinks; a call moved into `store` comes
-off it. The Database gate (`gates/database.py`) is exempt as `store` is: its SQL takes locks
-and sets up transactions, which is managing the resource, and no application query."""
+"""`store` is the only package with SQL: no `execute` or `copy` call outside it, per function.
+The Database gate (`gates/database.py`) is exempt as `store` is: its SQL takes locks and sets
+up transactions, which is managing the resource, and no application query."""
 
 import ast
 from pathlib import Path
 
 SRC = Path(__file__).parent.parent / "src" / "litwatch"
-
-# Calls that predate this check, per module-level function or method; to move into `store`.
-BEFORE_THE_RULE: dict[str, int] = {}
 
 DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -50,4 +46,4 @@ def test_sql_stays_in_store():
             if calls := sum(_sql(n) for n in ast.walk(node)):
                 key = f"{name}:{owner}"
                 found[key] = found.get(key, 0) + calls
-    assert found == BEFORE_THE_RULE
+    assert found == {}

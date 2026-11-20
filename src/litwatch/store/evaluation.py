@@ -5,16 +5,16 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Paper
 from litwatch.core.evaluation import Outcome
 from litwatch.core.grading import Opinion
+from litwatch.gates.database import ReadUnit, WriteUnit
 
 
 async def start(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     kind: str,
     models: dict[str, Any],
     topics: dict[str, str],
@@ -22,7 +22,7 @@ async def start(
     note: str | None = None,
 ) -> int:
     row = await (
-        await conn.execute(
+        await unit.execute(
             "INSERT INTO eval_runs (kind, models, topics, params, note) "
             "VALUES (%s, %s, %s, %s, %s) RETURNING id",
             (kind, Jsonb(models), Jsonb(topics), Jsonb(params), note),
@@ -31,11 +31,11 @@ async def start(
     return row["id"]
 
 
-async def get(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str, Any] | None:
+async def get(unit: ReadUnit, eval_run_id: int) -> dict[str, Any] | None:
     """The run with its cost: the journal's calls under every run record it ran under (None
     before any), so an attempt killed before its run record was finished still counts."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT e.*, (SELECT sum((c.usage->>'cost')::numeric) FROM inference_calls c "
             "WHERE c.run_id = ANY(e.run_ids)) AS cost "
             "FROM eval_runs e WHERE e.id = %s",
@@ -44,33 +44,33 @@ async def get(conn: psycopg.AsyncConnection, eval_run_id: int) -> dict[str, Any]
     ).fetchone()
 
 
-async def latest(conn: psycopg.AsyncConnection, kind: str) -> int | None:
+async def latest(unit: ReadUnit, kind: str) -> int | None:
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT id FROM eval_runs WHERE kind = %s ORDER BY id DESC LIMIT 1", (kind,)
         )
     ).fetchone()
     return row["id"] if row else None
 
 
-async def ran_under(conn: psycopg.AsyncConnection, eval_run_id: int, run_id: int) -> None:
+async def ran_under(unit: WriteUnit, eval_run_id: int, run_id: int) -> None:
     """Add a run record whose cost the evaluation carries, once however often it is named."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE eval_runs SET run_ids = CASE WHEN %(run)s = ANY(run_ids) THEN run_ids "
         "ELSE array_append(run_ids, %(run)s) END, finished_at = NULL WHERE id = %(id)s",
         {"run": run_id, "id": eval_run_id},
     )
 
 
-async def finish(conn: psycopg.AsyncConnection, eval_run_id: int) -> None:
-    await conn.execute("UPDATE eval_runs SET finished_at = now() WHERE id = %s", (eval_run_id,))
+async def finish(unit: WriteUnit, eval_run_id: int) -> None:
+    await unit.execute("UPDATE eval_runs SET finished_at = now() WHERE id = %s", (eval_run_id,))
 
 
 async def put_labels(
-    conn: psycopg.AsyncConnection, eval_run_id: int, labels: list[tuple[str, str, str, bool]]
+    unit: WriteUnit, eval_run_id: int, labels: list[tuple[str, str, str, bool]]
 ) -> None:
     """(paper, topic, cohort, positive) for each label the run is measured against."""
-    async with conn.cursor() as cur:
+    async with unit.cursor() as cur:
         await cur.executemany(
             "INSERT INTO eval_labels (eval_run_id, paper_id, topic, cohort, positive) "
             "VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
@@ -78,10 +78,10 @@ async def put_labels(
         )
 
 
-async def pairs(conn: psycopg.AsyncConnection, eval_run_id: int) -> list[dict[str, Any]]:
+async def pairs(unit: ReadUnit, eval_run_id: int) -> list[dict[str, Any]]:
     """Each paper and topic the run covers, with what it has concluded so far."""
     return await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT DISTINCT l.paper_id, l.topic, r.paper_revision, r.classifier, r.fit
             FROM eval_labels l LEFT JOIN eval_results r
@@ -93,16 +93,16 @@ async def pairs(conn: psycopg.AsyncConnection, eval_run_id: int) -> list[dict[st
     ).fetchall()
 
 
-async def forget(conn: psycopg.AsyncConnection, eval_run_id: int, paper_ids: list[str]) -> None:
+async def forget(unit: WriteUnit, eval_run_id: int, paper_ids: list[str]) -> None:
     """Drop what the run concluded on these papers, so both stages run on them again."""
-    await conn.execute(
+    await unit.execute(
         "DELETE FROM eval_results WHERE eval_run_id = %s AND paper_id = ANY(%s)",
         (eval_run_id, paper_ids),
     )
 
 
 async def put_classified(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     eval_run_id: int,
     paper: Paper,
     topic: str,
@@ -114,7 +114,7 @@ async def put_classified(
     error: str | None = None,
 ) -> None:
     """What classification concluded for one paper and topic, replacing an earlier attempt."""
-    await conn.execute(
+    await unit.execute(
         """
         INSERT INTO eval_results (eval_run_id, paper_id, topic, paper_revision, paper_version,
                                   classifier, uncertain, probability, keyword, error)
@@ -141,7 +141,7 @@ async def put_classified(
 
 
 async def put_graded(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     eval_run_id: int,
     paper_id: str,
     paper_revision: int,
@@ -158,7 +158,7 @@ async def put_graded(
         o = opinions.get(role)
         return Jsonb(o.model_dump(mode="json", exclude_none=True)) if o else None
 
-    await conn.execute(
+    await unit.execute(
         """
         INSERT INTO eval_results (eval_run_id, paper_id, topic, paper_revision, fit, judge,
                                   check_opinion, split, grade_error)
@@ -181,11 +181,11 @@ async def put_graded(
     )
 
 
-async def outcomes(conn: psycopg.AsyncConnection, eval_run_id: int) -> list[Outcome]:
+async def outcomes(unit: ReadUnit, eval_run_id: int) -> list[Outcome]:
     """Every label of the run with what the stages concluded for its paper and topic, cohort by
     cohort in the order the run took them."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT l.paper_id, l.topic, l.cohort, l.positive, r.classifier, r.uncertain,
                    r.keyword, r.error, r.fit, r.grade_error
@@ -202,10 +202,10 @@ async def outcomes(conn: psycopg.AsyncConnection, eval_run_id: int) -> list[Outc
     return [Outcome.model_validate(r) for r in rows]
 
 
-async def results(conn: psycopg.AsyncConnection, eval_run_id: int) -> list[dict[str, Any]]:
+async def results(unit: ReadUnit, eval_run_id: int) -> list[dict[str, Any]]:
     """The run's rows as stored, with each paper's title."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT r.*, p.title FROM eval_results r JOIN papers p ON p.id = r.paper_id "
             "WHERE r.eval_run_id = %s ORDER BY r.paper_id, r.topic",
             (eval_run_id,),
@@ -213,9 +213,9 @@ async def results(conn: psycopg.AsyncConnection, eval_run_id: int) -> list[dict[
     ).fetchall()
 
 
-async def misses(conn: psycopg.AsyncConnection) -> list[tuple[str, str]]:
+async def misses(unit: ReadUnit) -> list[tuple[str, str]]:
     """Every reported miss: (paper, topic)."""
     rows = await (
-        await conn.execute("SELECT paper_id, topic FROM misses ORDER BY reported_at, id")
+        await unit.execute("SELECT paper_id, topic FROM misses ORDER BY reported_at, id")
     ).fetchall()
     return [(r["paper_id"], r["topic"]) for r in rows]

@@ -91,7 +91,7 @@ class Priced:
 async def models(conn, monkeypatch):
     """The taxonomy, three papers, prices for the test models on Anthropic, and history that
     bounds those on OpenRouter."""
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [A, B, C])
     for model in ("test-judge", "test-field", "test-brief", "test-analyse"):
         monkeypatch.setitem(prices.ANTHROPIC, model, (1.0, 2.0, 0.1))

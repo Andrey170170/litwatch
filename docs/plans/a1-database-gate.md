@@ -45,11 +45,12 @@ Each stage runs in production before the next starts.
 - **A unit open longer than 5 s is logged** as a warning, with its name. This is not A4's telemetry, only enough to
   find a long unit before A3 depends on short ones. A long unit also holds back the outbox, which waits on the
   cluster's oldest snapshot.
-- **A bridge while code moves.** `DatabaseGate.over(conn)` is a gate whose units all run on one given connection,
-  with no pool, so code not yet migrated can call a migrated Service. It refuses a connection already inside a
-  transaction, so nesting stays strict. It goes in P6, unless tests still need it as a helper. It cannot serve a
-  caller that already holds a transaction around a settle (`request_card`, `jobs.process`, intake's page write, the
-  taxonomy save, a job's end): those callers move to units in P2, with `change`.
+- **A bridge while code moved.** `DatabaseGate.over(conn)` was a gate whose units all ran on one given connection,
+  with no pool, so code not yet migrated could call a migrated Service. It refused a connection already inside a
+  transaction, so nesting stayed strict. It could not serve a caller that already held a transaction around a
+  settle (`request_card`, `jobs.process`, intake's page write, the taxonomy save, a job's end): those callers moved
+  to units in P2, with `change`. P6 took it out of the gate: the tests keep it as their own helper
+  (`tests/sessions.Bridge`), so a Service under test still works on the test's session.
 - **A process's identity is its gate's presence session** (decided by Andrei on 2026-11-18, while P4 was built).
   Run records and job claims name the session that runs them (`backend_pid`, `backend_start`), and `ALIVE` and
   `store.jobs.take_back` judge them by it; on the pool, no one connection lasts as long as a run or a claim. Each gate
@@ -57,7 +58,7 @@ Each stage runs in production before the next starts.
   and opened again when it dropped. Its `(pid, backend_start)` is the process's `Identity` (`db.identity()`), which
   `runs.start` and the job SQL (`claim`, `progress`, `wait`, `finish`) take as a parameter; `ALIVE` and `take_back`
   are unchanged. A presence opened again has a new identity, so the claims made under the old one are taken back,
-  and the worker then closes its open runs and claims afresh. A bridged gate's presence is its one connection.
+  and the worker then closes its open runs and claims afresh.
   Transitional: A2's Work gate replaces it with leases and heartbeats (`docs/backlog.md`, A2, "Leases replace the
   presence session"). Rejected: a dedicated connection per run or claim (one per open job, for as long as a re-run
   waits on its text), keeping the runs and the worker on lent connections (P4's loops would stay off the pool), and
@@ -101,7 +102,7 @@ never commits.
 
 - **D1. A Service reaches the gate by being passed it, as `db`.** It replaces today's `conn` parameter at the
   boundaries, so a signature tells a boundary (`db`) from an inside step (a unit). There is no hidden state, and
-  tests hand in their own gate. The cost is passing `db` through the layers, plus the bridge while code moves.
+  tests hand in their own gate. The cost is passing `db` through the layers, plus the bridge while code moved.
   Chosen over one gate per process fetched where needed, which hides the dependency and gives up part of what strict
   nesting is for.
 - **D2. `ty` in CI from P6, with a baseline.** It is Astral's checker, alongside ruff and uv (`uv run ty check`), with
@@ -136,7 +137,7 @@ never commits.
 | **P1** | **The gate.** Pool; typed units; the lock registry and its order; the session locks on their list; the nesting check (a unit inside a unit, and the model gateway's `complete`, `decide` and batch submit); the slow-unit warning; the `over(conn)` bridge; the two new search checks with today's lists. Nothing uses it yet. | The gate's tests pass (V1, V2), and CI is green with the new checks. |
 | **P2** | **Settling and `change`.** `change` becomes a Service over a write unit, with `settle_many` doing batched reads. The steps' `record(unit, …)` move with it, and so does every write that settles inside a transaction of its own: those transactions become units now, and the rest of their modules move in their later stage. A taxonomy edit settles each paper once. `automatic_deep` becomes an input. Plus the multi-paper `change` tests. | Equivalence on the sandbox (V3), the timing before and after (V4), the change tests (V2). Deployed with P1, then a clean night (V7). |
 | **P3** | **Entries.** The API's `Conn` becomes `db`, with plain reads in read units. The CLI builds one gate per process. MCP and the monitor app move too. | The API tests and the stack smoke test pass, then a clean night (V7). |
-| **P4** | **Loops and bookkeeping.** The scheduler, jobs worker, dispatch, full-text and Deep loops, and publications move. The model run's journal writes in units of its own instead of on a sibling connection. The session locks move into the gate, and retally's becomes a unit's lock. | The advisory-lock list holds one entry, the taxonomy lock's raw-SQL branch (`store/taxonomy.py`), until P6. One sandbox nightly over a small window with the check strict, as intermediate evidence: intake and digests still run partly outside the gate. Then a clean night (V7). |
+| **P4** | **Loops and bookkeeping.** The scheduler, jobs worker, dispatch, full-text and Deep loops, and publications move. The model run's journal writes in units of its own instead of on a sibling connection. The session locks move into the gate, and retally's becomes a unit's lock. | The advisory-lock list holds one entry, the taxonomy lock's raw-SQL branch (`store/taxonomy.py`), which P6 removes. One sandbox nightly over a small window with the check strict, as intermediate evidence: intake and digests still run partly outside the gate. Then a clean night (V7). |
 | **P5** | **The remaining Services.** Intake, digests, Calibrate, misses, quality, replay. The SQL outside `store` moves into it, `events.emit` included, which ends `store`'s imports of `events` and `llm`. | `tests/test_sql_home.py`'s list is empty, `store`'s import-linter ignores are gone, then a clean night. |
 | **P6** | **Tightening.** `store.connect` and `sibling` go, the bridge stays only as a test helper, and store parameters are renamed `unit`. The connection list is empty. `ty` runs in CI with its baseline (D2). | Every A1 check list is empty and CI is green; the sandbox nightly on the whole gate (V6); then a clean night. |
 | **P7** | **Folded items,** one PR each, in parallel: `/summary` with the sidebar's count and today in the schedule's zone; Calibrate reading its pool once; the four read gaps; intake leaving unchanged rows alone; the drops from `notes/still-used.md`. | Each shown by its kind (V8), then deployed together. |
@@ -169,30 +170,6 @@ never commits.
 
 Found while building, owned by the stage named.
 
-- **P6: what P5 left, all of it reached from the tests and old eval scripts only.** P5 moved the last Services onto the gate: nothing in
-  `src` outside `gates/` and `store/` names a connection (the connection list is empty), no SQL is left outside
-  `store` (`tests/test_sql_home.py`'s list is empty), `store` imports neither `events` nor `llm` (no contract keeps
-  an `ignore_imports`), and `db.lend` went with its last caller. No block inside a unit uses a raw connection: there
-  is none left in `src`. What remains for P6, by name:
-  - `store.connect` and `store.sibling` (`store/db.py`, exported by `store/__init__.py`), with no caller in `src`:
-    the tests' fixtures, and the tests that stage a second session (`test_jobs.py`, `test_dispatch.py`,
-    `test_reading.py`, `test_word.py`, `test_grading.py`, `test_batches.py`, `test_api_integrations.py`).
-  - `DatabaseGate.over(conn)` and its bridged branches (`_connection`, `identity`, `held_elsewhere`), with no caller
-    in `src`: `tests/settling.py` and about fifteen test modules reach the Services through it. It stays as a
-    test helper, or gives way to the pooled `db` fixture.
-  - The taxonomy lock's raw branch (`store/taxonomy.py`'s `lock` and `lock_shared`, the advisory-lock list's one
-    entry in `tests/test_database_home.py`), and `store.db.transaction(conn)` in `taxonomy.load`, `save` and
-    `set_order`, `papers.upsert` and `correct`, `digests.record` and `integrations.put_card`: only tests pass them a
-    connection now, about 65 of them seeding with `taxonomy_store.save(conn, …)`.
-  - Store parameters renamed `unit`: a store function still says `psycopg.AsyncConnection` though every caller in
-    `src` passes a unit (`store.outbox.emit` says `WriteUnit` already). Tests pass raw connections to functions
-    typed for units (`outbox.emit`; `feedback.calibrate`'s `session`, `sessions`, `precision` and
-    `matters_no_topic`; `quality.replay`'s `prepare`, `resume`, `estimate`, `misses` and `start`), which `ty` flags
-    once it runs on `tests`.
-  - Three eval scripts of 2026-10-19 still pass a connection where P5's Services take `db`
-    (`evals/2026-10-19-fallback-ladders/baseline.py` and `writer_pairs.py` to `ladders.requests`,
-    `evals/2026-10-19-clear-prose/replay.py` to `digests.compose`). They reproduce their reports under the code of
-    that day and run from a checkout of it: nothing to port.
 - **P4 found no need for `held_elsewhere(mine=…)` in the code.** The nightly passes its run to its full-text step,
   and `fulltext.work` with a run never asks whether the run lock is held elsewhere. The parameter stays for a caller
   that holds the lock without a run.

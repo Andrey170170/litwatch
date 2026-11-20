@@ -1,7 +1,8 @@
 """The Database gate (docs/plans/a1-database-gate.md, V1 and V2's gate part): units, the order
-of their locks, the nesting check, the session locks, the presence session, the bridge. On real
-Postgres. Where a test needs a lock held elsewhere, it takes it at its key written out, as the
-code before the gate did: a process from before it and one after must exclude each other."""
+of their locks, the nesting check, the session locks, the presence session, and the tests' own
+gate on one connection (`sessions.Bridge`). On real Postgres. Where a test needs a lock held
+elsewhere, it takes it at its key written out, as the code before the gate did: a process from
+before it and one after must exclude each other."""
 
 import asyncio
 import contextlib
@@ -18,7 +19,6 @@ from litwatch.config import Models, RoleConfig
 from litwatch.gates import database
 from litwatch.gates.database import (
     STRICT_ENV,
-    BridgeError,
     BusyError,
     DatabaseGate,
     LateLockError,
@@ -30,8 +30,8 @@ from litwatch.gates.database import (
 from litwatch.llm import Gateway, Request
 from litwatch.llm.types import DecisionRequest, Predicate
 from litwatch.store import runs
-from litwatch.store import taxonomy as taxonomy_store
 from tests.fakes import BatchingProvider, ScriptedProvider
+from tests.sessions import Bridge, BridgeError
 
 LOG = "litwatch.gates.database"
 WAIT = 10.0  # how long a test waits on something that must happen; a deadlock ends it sooner
@@ -119,16 +119,21 @@ class Held:
 
     def __init__(self, unit_context) -> None:
         self.entered, self._leave = asyncio.Event(), asyncio.Event()
-        self.unit: WriteUnit | None = None
+        self._unit: WriteUnit | None = None
         self.locks: dict[tuple[int, int, int], str] = {}
         self.task = asyncio.create_task(self._hold(unit_context))
 
     async def _hold(self, unit_context) -> None:
         async with unit_context as unit:
-            self.unit = unit
+            self._unit = unit
             self.locks = await granted(unit, await backend(unit))
             self.entered.set()
             await self._leave.wait()
+
+    @property
+    def unit(self) -> WriteUnit:
+        assert self._unit is not None, "the unit is not open yet"
+        return self._unit
 
     async def opened(self) -> None:
         """Wait until the unit is open; its failure to open is raised here."""
@@ -349,15 +354,15 @@ async def test_the_other_locks_are_taken_in_the_registrys_order(db, conn):
 @pytest.mark.parametrize(
     ("held_today", "unit_takes", "waits"),
     [
-        ("lock", "shared", True),
-        ("lock", "exclusive", True),
-        ("lock_shared", "exclusive", True),
-        ("lock_shared", "shared", False),
+        ("pg_advisory_xact_lock", "shared", True),
+        ("pg_advisory_xact_lock", "exclusive", True),
+        ("pg_advisory_xact_lock_shared", "exclusive", True),
+        ("pg_advisory_xact_lock_shared", "shared", False),
     ],
 )
 async def test_the_taxonomy_lock_is_todays(db, conn, held_today, unit_takes, waits):
     async with conn.transaction():
-        await getattr(taxonomy_store, held_today)(conn)
+        await conn.execute(f"SELECT {held_today}(7213913)")
         held = Held(db.write("u", taxonomy=unit_takes))
         if waits:
             await waiters(conn, TAXONOMY)
@@ -578,7 +583,7 @@ async def test_a_session_lock_lost_with_its_connection_is_logged(db, conn, caplo
 
 
 async def test_the_bridge_runs_units_on_the_given_connection(conn, probe):
-    db = DatabaseGate.over(conn)
+    db = Bridge(conn)
     async with db.write("bridged") as unit:
         assert await backend(unit) == conn.info.backend_pid
         await unit.execute("INSERT INTO probe VALUES (1)")
@@ -594,10 +599,10 @@ async def test_the_bridge_runs_units_on_the_given_connection(conn, probe):
 
 
 async def test_the_bridge_refuses_a_connection_in_a_transaction(conn, probe):
-    db = DatabaseGate.over(conn)
+    db = Bridge(conn)
     async with conn.transaction():
         with pytest.raises(BridgeError, match="not idle"):
-            DatabaseGate.over(conn)
+            Bridge(conn)
         for unit in (db.read("r"), db.write("w")):
             with pytest.raises(BridgeError, match="not idle"):
                 async with unit:
@@ -678,5 +683,5 @@ async def test_a_presence_session_that_ended_is_opened_again_with_a_new_identity
 
 
 async def test_a_bridged_gates_presence_is_its_connection(conn):
-    me = await DatabaseGate.over(conn).identity()
+    me = await Bridge(conn).identity()
     assert me.pid == conn.info.backend_pid

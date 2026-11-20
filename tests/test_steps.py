@@ -129,7 +129,7 @@ class Scripted:
 
 @pytest.fixture
 async def models(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [A, B])
     return Scripted()
 

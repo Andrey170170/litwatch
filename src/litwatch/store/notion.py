@@ -7,8 +7,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
+
+from litwatch.gates.database import ReadUnit, WriteUnit
 
 
 @dataclass
@@ -49,17 +50,17 @@ _DATABASE = (
 _PAGE = "paper_id, added, page_id, properties_hash, body_hash, topics, gone_at"
 
 
-async def database(conn: psycopg.AsyncConnection, integration: str) -> Database | None:
+async def database(unit: ReadUnit, integration: str) -> Database | None:
     row = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT {_DATABASE} FROM notion_databases WHERE integration = %s", (integration,)
         )
     ).fetchone()
     return Database(**row) if row else None
 
 
-async def save_database(conn: psycopg.AsyncConnection, db: Database) -> None:
-    await conn.execute(
+async def save_database(unit: WriteUnit, db: Database) -> None:
+    await unit.execute(
         f"""
         INSERT INTO notion_databases ({_DATABASE}) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (integration) DO UPDATE SET
@@ -73,14 +74,14 @@ async def save_database(conn: psycopg.AsyncConnection, db: Database) -> None:
     )  # fmt: skip
 
 
-async def forget(conn: psycopg.AsyncConnection, integration: str) -> None:
+async def forget(unit: WriteUnit, integration: str) -> None:
     """Drop the integration's database row and every page row under it."""
-    await conn.execute("DELETE FROM notion_databases WHERE integration = %s", (integration,))
+    await unit.execute("DELETE FROM notion_databases WHERE integration = %s", (integration,))
 
 
-async def page(conn: psycopg.AsyncConnection, integration: str, paper_id: str) -> Page | None:
+async def page(unit: ReadUnit, integration: str, paper_id: str) -> Page | None:
     row = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT {_PAGE} FROM notion_pages WHERE integration = %s AND paper_id = %s",
             (integration, paper_id),
         )
@@ -88,8 +89,8 @@ async def page(conn: psycopg.AsyncConnection, integration: str, paper_id: str) -
     return Page(**row) if row else None
 
 
-async def save_page(conn: psycopg.AsyncConnection, integration: str, p: Page) -> None:
-    await conn.execute(
+async def save_page(unit: WriteUnit, integration: str, p: Page) -> None:
+    await unit.execute(
         f"""
         INSERT INTO notion_pages (integration, {_PAGE}) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (integration, paper_id) DO UPDATE SET
@@ -102,26 +103,26 @@ async def save_page(conn: psycopg.AsyncConnection, integration: str, p: Page) ->
     )  # fmt: skip
 
 
-async def forget_page(conn: psycopg.AsyncConnection, integration: str, paper_id: str) -> None:
-    await conn.execute(
+async def forget_page(unit: WriteUnit, integration: str, paper_id: str) -> None:
+    await unit.execute(
         "DELETE FROM notion_pages WHERE integration = %s AND paper_id = %s", (integration, paper_id)
     )
 
 
-async def rewrite_properties(conn: psycopg.AsyncConnection, integration: str) -> None:
+async def rewrite_properties(unit: WriteUnit, integration: str) -> None:
     """Forget every page's properties hash, so each row is written again."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE notion_pages SET properties_hash = NULL WHERE integration = %s", (integration,)
     )
 
 
 async def papers(
-    conn: psycopg.AsyncConnection, integration: str, topics: list[str], grades: list[str]
+    unit: ReadUnit, integration: str, topics: list[str], grades: list[str]
 ) -> list[str]:
     """In id order, the papers not dropped whose effective grade for one of `topics` is one of
     `grades`, and every paper that has a page already."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT g.paper_id FROM effective_grades g JOIN papers p ON p.id = g.paper_id "
             "WHERE NOT p.dropped AND g.topic = ANY(%s) AND g.grade = ANY(%s) "
             "UNION SELECT paper_id FROM notion_pages WHERE integration = %s ORDER BY 1",

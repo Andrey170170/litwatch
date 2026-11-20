@@ -29,7 +29,6 @@ from litwatch.core import (
     Verdict,
 )
 from litwatch.events import dispatch
-from litwatch.gates.database import DatabaseGate
 from litwatch.integrations.notion import FAILED_REVIEW, Notion, NotionClient, _hash
 from litwatch.jobs.publications import store_record
 from litwatch.store import integrations as integrations_store
@@ -37,7 +36,6 @@ from litwatch.store import notion as state
 from litwatch.store import outbox, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as publications_store
-from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
 from tests import settling
 from tests.conftest import (
@@ -53,6 +51,7 @@ from tests.conftest import (
     settled,
 )
 from tests.fakes_http import FakeNotion, mock
+from tests.sessions import Bridge
 
 PARENT = "11111111-1111-1111-1111-111111111111"
 OTHER = "22222222-2222-2222-2222-222222222222"
@@ -108,7 +107,7 @@ INTERNAL = re.compile(r"\b(central|Fit|Weight|verdict)\b|for you|required readin
 
 @pytest.fixture
 async def world(conn):
-    await taxonomy_store.save(conn, TOPICS)
+    await settling.save_tree(conn, TOPICS)
     await papers_store.upsert(conn, [A, B, C])
     return conn
 
@@ -471,7 +470,7 @@ async def test_new_texts_a_card_and_a_published_record_reach_the_page_as_they_co
     asked = len(fake.requests)  # each again: nothing to write
     for event in await outbox.after(conn, outbox.START, 1000):
         if n.wants(event) and event.type != events.GRADE_CHANGED:
-            await n.handle(DatabaseGate.over(conn), event)
+            await n.handle(Bridge(conn), event)
     assert len(fake.requests) == asked
 
 
@@ -590,7 +589,7 @@ async def test_a_repeated_event_or_a_restart_sends_no_write(world, db):
 
     # The same event again: the page already says it.
     changes = [e for e in await outbox.after(conn, outbox.START, 1000) if n.wants(e)]
-    await n.handle(DatabaseGate.over(conn), changes[-1])
+    await n.handle(Bridge(conn), changes[-1])
     assert len(fake.requests) == before
 
     # A restart: nothing is written, and a view the owner deleted is not made again.

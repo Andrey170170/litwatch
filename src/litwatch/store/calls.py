@@ -6,11 +6,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core.budget import Usage
-from litwatch.gates.database import DatabaseGate, Query
+from litwatch.gates.database import DatabaseGate, Query, ReadUnit
 
 RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and accounted for
 EVAL = "eval"  # an evaluation run's kind: its calls say nothing to the status document
@@ -258,11 +257,11 @@ class CallJournal:
         return {r["operation"]: {"calls": r["calls"], "cost": float(r["cost"])} for r in rows}
 
 
-async def spent_since(conn: psycopg.AsyncConnection, since: datetime) -> dict[str, float]:
+async def spent_since(unit: ReadUnit, since: datetime) -> dict[str, float]:
     """What every run's calls started since `since` cost, per provider account (`usage.via`).
     A reused reply costs nothing; a call of unknown cost counts nothing."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT usage->>'via' AS via, sum((usage->>'cost')::numeric) AS cost "
             "FROM inference_calls WHERE started_at >= %s AND usage->>'via' IS NOT NULL "
             "AND usage->>'cost' IS NOT NULL GROUP BY 1",
@@ -273,7 +272,7 @@ async def spent_since(conn: psycopg.AsyncConnection, since: datetime) -> dict[st
 
 
 async def mean_cost(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     role: str,
     provider: str,
     model: str,
@@ -285,7 +284,7 @@ async def mean_cost(
     estimate goes by. Calls under another provider or effort, or answered in a batch, are left
     out, as they cost differently (an estimate is of normal calls)."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT avg(cost) AS cost FROM (SELECT (usage->>'cost')::float AS cost "
             "FROM inference_calls WHERE operation = %s AND usage->>'model' = %s "
             "AND usage->>'via' = %s AND usage->>'effort' IS NOT DISTINCT FROM %s "
@@ -298,7 +297,7 @@ async def mean_cost(
 
 
 async def charged_prices(
-    conn: psycopg.AsyncConnection, provider: str, model: str, last: int = 200
+    unit: ReadUnit, provider: str, model: str, last: int = 200
 ) -> tuple[float | None, float | None]:
     """The highest price per input token and per output token the model's latest `last` billed
     calls on `provider` were charged, in USD, or None where none tells. A call's charge bounds
@@ -307,7 +306,7 @@ async def charged_prices(
     highest across the serving providers holds for the model. A call with cached input left out
     of the input price, as caching discounts it."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             """
             WITH recent AS (
                 SELECT (usage->>'cost')::float AS cost,
@@ -334,19 +333,19 @@ async def charged_prices(
     return row["p_in"], row["p_out"]
 
 
-async def observations(conn: psycopg.AsyncConnection) -> dict[str, dict[str, Any]]:
+async def observations(unit: ReadUnit) -> dict[str, dict[str, Any]]:
     """Each provider's latest account error and latest reply, by provider."""
-    rows = await (await conn.execute("SELECT * FROM provider_observations")).fetchall()
+    rows = await (await unit.execute("SELECT * FROM provider_observations")).fetchall()
     return {r["provider"]: r for r in rows}
 
 
-async def outcomes(conn: psycopg.AsyncConnection, run: dict[str, Any]) -> dict[str, dict[str, int]]:
+async def outcomes(unit: ReadUnit, run: dict[str, Any]) -> dict[str, dict[str, int]]:
     """Per provider, the run's calls that failed without an answer (provider errors and
     timeouts), and the replies it sent while the run went on, whichever run's calls they
     settled (a dead run's batch, read in this one; reused replies and evaluation runs' calls, a
     replay job's included, left out)."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT provider, sum(failed)::int AS failed, sum(replied)::int AS replied FROM ("
             "SELECT usage->>'via' AS provider, 1 AS failed, 0 AS replied FROM inference_calls "
             "WHERE run_id = %(run)s AND (error LIKE 'provider%%' OR error LIKE 'timeout%%') "

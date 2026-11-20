@@ -16,7 +16,6 @@ from litwatch.store import failures, verdicts
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
 from tests.conftest import FAITH, TREE, AppClient, paper
 
@@ -30,7 +29,7 @@ STOPPED = ("awaiting_classification", "analysis_failed", "ungraded", "fulltext_f
 
 @pytest.fixture
 async def client(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P, Q, R])
     await conn.execute(
         "INSERT INTO runs (kind, started_at, finished_at) VALUES ('nightly', now(), now())"

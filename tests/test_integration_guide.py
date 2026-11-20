@@ -13,7 +13,6 @@ from litwatch.config import Config
 from litwatch.core import Cause, Fit, Hand, Opinion, Verdict
 from litwatch.events import Integration
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
 from tests import settling
 from tests.conftest import FAITH, TREE, deliver, paper, start
@@ -51,7 +50,7 @@ async def grade(conn, g: str) -> None:
 
 
 async def test_the_guides_example_loads_by_dotted_path_and_works(conn, db, example):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P])
     config = Config(
         integrations={"phone": {"use": "my_litwatch_ntfy", "topic": "litwatch-must-read"}}

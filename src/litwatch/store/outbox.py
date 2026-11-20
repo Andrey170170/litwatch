@@ -12,11 +12,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Event
-from litwatch.gates.database import WriteUnit
+from litwatch.gates.database import ReadUnit, WriteUnit
 
 _EVENT = "xid::text::bigint AS xid, id, type, paper_id, payload, created_at"
 # Every transaction below the snapshot's xmin has finished: its events are all there is.
@@ -89,10 +88,10 @@ async def emit(unit: WriteUnit, type: str, paper_id: str | None = None, **payloa
     return row["id"]
 
 
-async def after(conn: psycopg.AsyncConnection, position: Position, limit: int) -> list[Event]:
+async def after(unit: ReadUnit, position: Position, limit: int) -> list[Event]:
     """The settled events after `position`, in order."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT {_EVENT} FROM outbox WHERE (xid, id) > (%s::text::xid8, %s) "
             f"AND {_SETTLED} ORDER BY xid, id LIMIT %s",
             (str(position.xid), position.id, limit),
@@ -101,11 +100,11 @@ async def after(conn: psycopg.AsyncConnection, position: Position, limit: int) -
     return [Event(**r) for r in rows]
 
 
-async def of_paper(conn: psycopg.AsyncConnection, paper_id: str, type: str) -> list[Event]:
+async def of_paper(unit: ReadUnit, paper_id: str, type: str) -> list[Event]:
     """The paper's events of one type, settled or not, in the order they were written: a
     paper's changes take its lock, so their ids follow it."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT {_EVENT} FROM outbox WHERE paper_id = %s AND type = %s ORDER BY id",
             (paper_id, type),
         )
@@ -113,10 +112,10 @@ async def of_paper(conn: psycopg.AsyncConnection, paper_id: str, type: str) -> l
     return [Event(**r) for r in rows]
 
 
-async def cursor(conn: psycopg.AsyncConnection, name: str) -> Cursor:
+async def cursor(unit: WriteUnit, name: str) -> Cursor:
     """The integration's cursor, made at the last settled event the first time it is asked
     for: an integration enabled for the first time is not woken by what came before it."""
-    await conn.execute(
+    await unit.execute(
         f"""
         INSERT INTO integration_cursors (name, position_xid, position)
         SELECT %s, coalesce(e.xid, '0'::xid8), coalesce(e.id, 0)
@@ -128,15 +127,15 @@ async def cursor(conn: psycopg.AsyncConnection, name: str) -> Cursor:
         (name,),
     )
     row = await (
-        await conn.execute(f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s", (name,))
+        await unit.execute(f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s", (name,))
     ).fetchone()
     return _cursor(row)
 
 
-async def cursors(conn: psycopg.AsyncConnection, names: list[str]) -> dict[str, Cursor]:
+async def cursors(unit: ReadUnit, names: list[str]) -> dict[str, Cursor]:
     """The named cursors that exist, each with its lag."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT {_FIELDS}, (SELECT count(*) FROM outbox o "
             "WHERE (o.xid, o.id) > (c.position_xid, c.position)) AS lag "
             "FROM integration_cursors c WHERE name = ANY(%s)",
@@ -146,9 +145,9 @@ async def cursors(conn: psycopg.AsyncConnection, names: list[str]) -> dict[str, 
     return {r["name"]: _cursor(r) for r in rows}
 
 
-async def advance(conn: psycopg.AsyncConnection, name: str, position: Position) -> None:
+async def advance(unit: WriteUnit, name: str, position: Position) -> None:
     """Everything up to `position` is done; a failure before it is over."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE integration_cursors SET position_xid = %s::text::xid8, position = %s, "
         "failing = NULL, failures = 0, retry_at = NULL, updated_at = now() "
         "WHERE name = %s AND (position_xid, position) < (%s::text::xid8, %s)",
@@ -157,7 +156,7 @@ async def advance(conn: psycopg.AsyncConnection, name: str, position: Position) 
 
 
 async def failed(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     name: str,
     event: Event,
     failures: int,
@@ -168,7 +167,7 @@ async def failed(
     """Record that `event` failed, unless the cursor has meanwhile gone past it (the owner
     skipped it while it was being tried). Returns whether it was recorded."""
     at = Position.of(event)
-    cur = await conn.execute(
+    cur = await unit.execute(
         "UPDATE integration_cursors SET failing = %s, failures = %s, last_error = %s, "
         "failed_at = %s, retry_at = %s, updated_at = now() "
         "WHERE name = %s AND (position_xid, position) < (%s::text::xid8, %s)",
@@ -178,7 +177,7 @@ async def failed(
 
 
 async def setup_failed(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     name: str,
     failures: int,
     error: str,
@@ -186,16 +185,16 @@ async def setup_failed(
     retry_at: datetime,
 ) -> None:
     """Record that the integration's setup failed for the `failures`th time in a row."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE integration_cursors SET setup_failures = %s, setup_error = %s, "
         "setup_failed_at = %s, setup_retry_at = %s, updated_at = now() WHERE name = %s",
         (failures, error, failed_at, retry_at, name),
     )
 
 
-async def setup_done(conn: psycopg.AsyncConnection, name: str) -> None:
+async def setup_done(unit: WriteUnit, name: str) -> None:
     """The integration's setup succeeded: a failure before it is over."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE integration_cursors SET setup_failures = 0, setup_error = NULL, "
         "setup_failed_at = NULL, setup_retry_at = NULL, updated_at = now() "
         "WHERE name = %s AND setup_failures > 0",
@@ -203,10 +202,10 @@ async def setup_done(conn: psycopg.AsyncConnection, name: str) -> None:
     )
 
 
-async def retry(conn: psycopg.AsyncConnection, name: str) -> bool:
+async def retry(unit: WriteUnit, name: str) -> bool:
     """Try the failing event, or the failing setup, again on the next pass, without waiting
     out the backoff."""
-    cur = await conn.execute(
+    cur = await unit.execute(
         "UPDATE integration_cursors SET retry_at = NULL, setup_retry_at = NULL, "
         "updated_at = now() WHERE name = %s AND (failing IS NOT NULL OR setup_failures > 0)",
         (name,),
@@ -214,12 +213,12 @@ async def retry(conn: psycopg.AsyncConnection, name: str) -> bool:
     return cur.rowcount > 0
 
 
-async def skip(conn: psycopg.AsyncConnection, name: str, expected: int | None = None) -> int | None:
+async def skip(unit: WriteUnit, name: str, expected: int | None = None) -> int | None:
     """Give up on the failing event and go on after it, only if it is `expected` when one
     is given (the event the owner confirmed). Returns its id, or None when nothing was
     skipped."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "UPDATE integration_cursors c SET position_xid = o.xid, position = o.id, "
             "failing = NULL, failures = 0, retry_at = NULL, skipped = skipped + 1, "
             "updated_at = now() FROM outbox o "
@@ -231,8 +230,8 @@ async def skip(conn: psycopg.AsyncConnection, name: str, expected: int | None = 
     return row["id"] if row else None
 
 
-async def event(conn: psycopg.AsyncConnection, event_id: int) -> Event | None:
+async def event(unit: ReadUnit, event_id: int) -> Event | None:
     row = await (
-        await conn.execute(f"SELECT {_EVENT} FROM outbox WHERE id = %s", (event_id,))
+        await unit.execute(f"SELECT {_EVENT} FROM outbox WHERE id = %s", (event_id,))
     ).fetchone()
     return Event(**row) if row else None

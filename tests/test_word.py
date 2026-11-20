@@ -5,7 +5,6 @@ import asyncio
 
 import pytest
 
-from litwatch import store
 from litwatch.core import (
     Analysis,
     Cause,
@@ -30,9 +29,8 @@ from litwatch.core import (
 from litwatch.feedback import word
 from litwatch.store import analyses as analyses_store
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests import settling
+from tests import sessions, settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
 
 P = paper("2610.00001")
@@ -76,7 +74,7 @@ async def classified(conn, revision: int = 1, paper_id: str = P.id) -> None:
 @pytest.fixture
 async def db(conn):
     """P classified: in the collection."""
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P])
     await classified(conn)
     return conn
@@ -387,7 +385,7 @@ async def test_changes_of_overlapping_papers_named_in_reverse_order_both_finish(
         query = "SELECT 1 FROM pg_locks WHERE pid = %s AND NOT granted"
         return await (await conn.execute(query, (pid,))).fetchone() is not None
 
-    async with await store.sibling(db) as one, await store.sibling(db) as other:
+    async with await sessions.sibling(db) as one, await sessions.sibling(db) as other:
         async with settling.held(db, P.id):  # the first paper, held
             waiting = asyncio.create_task(changing(one, third, second, P.id))
             async with asyncio.timeout(10):

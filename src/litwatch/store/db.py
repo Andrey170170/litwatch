@@ -1,20 +1,13 @@
-"""Connections and numbered migrations."""
+"""Numbered migrations."""
 
 from __future__ import annotations
 
 import logging
 import re
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from importlib import resources
 from typing import Any
 
 import psycopg
-from psycopg import sql
-from psycopg.conninfo import make_conninfo
-from psycopg.rows import dict_row
-
-from litwatch.gates.database import ReadUnit
 
 log = logging.getLogger(__name__)
 
@@ -25,39 +18,7 @@ class LegacyDatabaseError(RuntimeError):
     """The database belongs to litwatch 0.x, which v1 never uses (decision 48)."""
 
 
-async def connect(dsn: str, schema: str | None = None) -> psycopg.AsyncConnection[dict[str, Any]]:
-    """An autocommit connection returning rows as dicts. Group writes with `conn.transaction()`.
-
-    One connection serves one coroutine at a time; concurrent work takes its own.
-    """
-    conn = await psycopg.AsyncConnection.connect(dsn, row_factory=dict_row, autocommit=True)
-    if schema:
-        await conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
-    return conn
-
-
-@asynccontextmanager
-async def transaction(conn: psycopg.AsyncConnection | ReadUnit) -> AsyncIterator[None]:
-    """A transaction of its own for a Repository's writes that belong together, on a raw
-    connection; nothing on a unit, which is one transaction already. Transitional, while a
-    Repository is reached both ways: it goes with the raw connections (A1's P6)."""
-    if isinstance(conn, ReadUnit):
-        yield
-        return
-    async with conn.transaction():
-        yield
-
-
-async def sibling(conn: psycopg.AsyncConnection) -> psycopg.AsyncConnection[dict[str, Any]]:
-    """A second connection to the same database and schema, for work that runs alongside."""
-    dsn = make_conninfo(conn.info.dsn, password=conn.info.password)
-    other = await psycopg.AsyncConnection.connect(dsn, row_factory=dict_row, autocommit=True)
-    path = (await (await conn.execute("SHOW search_path")).fetchone())["search_path"]
-    await other.execute(sql.SQL("SET search_path TO " + path))
-    return other
-
-
-async def _exists(conn: psycopg.AsyncConnection, table: str) -> bool:
+async def _exists(conn: psycopg.AsyncConnection[Any], table: str) -> bool:
     row = await (await conn.execute("SELECT to_regclass(%s) AS oid", (table,))).fetchone()
     return row["oid"] is not None
 
@@ -71,7 +32,7 @@ def _migrations() -> list[tuple[int, str, str]]:
     return sorted(found)
 
 
-async def migrate(conn: psycopg.AsyncConnection) -> list[str]:
+async def migrate(conn: psycopg.AsyncConnection[Any]) -> list[str]:
     """Apply every migration not yet applied, in order. Returns the names applied. A process
     runs it on the migration lock's own session (`DatabaseGate.startup("migration")`), so two
     never apply one twice, and it cannot go on after the lock went with its session.

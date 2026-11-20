@@ -24,8 +24,8 @@ production since 2026-10-17, in place of release 0.14.
 ## Rules the code keeps
 
 - `core` is pure: domain types and rules, no I/O, no imports from the rest of litwatch.
-- `store` is the only package with SQL; its functions take a connection and return `core` types. Schema changes are
-  migrations in `store/migrations/`.
+- `store` is the only package with SQL; its functions take a unit and return `core` types: a `ReadUnit` where they
+  only read, a `WriteUnit` where they write. Schema changes are migrations in `store/migrations/`.
 - Pipeline code names an `llm` role, never a model; models are configuration (`litwatch.toml`).
 - Evaluation runs are dry runs: they write to the evaluation tables only, never to verdicts or the outbox.
 - A pipeline step writes its event to the outbox in the same transaction as its data. Integrations react to events
@@ -38,9 +38,9 @@ production since 2026-10-17, in place of release 0.14.
   its `Rules` from the configuration (`word.rules(config)`), never from module state.
 - The Database gate (`gates/database.py`) owns the pool, the units and every advisory lock. A function that takes
   `db` opens its own units; one that takes a unit runs inside it and never commits; units do not nest, and no
-  model call runs inside one (tests raise on it, `LITWATCH_STRICT_GATES=1`). Code moves onto the gate stage by
-  stage (`docs/plans/a1-database-gate.md`): until then, no new advisory-lock SQL outside the gate and no new
-  `AsyncConnection` outside `gates/` and `store/` (`tests/test_database_home.py`, lists that only shrink).
+  model call runs inside one (tests raise on it, `LITWATCH_STRICT_GATES=1`). No advisory-lock SQL outside the
+  gate and no `AsyncConnection` outside `gates/` and `store/` (`tests/test_database_home.py`); only tests hold a
+  connection of their own (`tests/sessions.py`).
 - Which role may import which, and no cycle between Services, is checked (`lint-imports`, `tests/test_roles.py`)
   against the roles in `docs/specs/architecture.md`. Their lists of today's violations only shrink.
 

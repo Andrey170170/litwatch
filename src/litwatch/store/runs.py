@@ -5,18 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from litwatch.gates.database import Identity
+from litwatch.gates.database import Identity, ReadUnit, WriteUnit
 
 _JSON = {"counts", "intake"}
 _FIELDS = {"fetched", "inserted", "updated", "cost", "error", *_JSON}
 
 
 async def start(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     kind: str,
     window_from: datetime | None = None,
     window_to: datetime | None = None,
@@ -28,7 +27,7 @@ async def start(
     (`DatabaseGate.identity`): the run is alive while that session lasts (`ALIVE`). A run of
     kind `job` names its job."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "INSERT INTO runs (kind, window_from, window_to, job_id, backend_pid, backend_start) "
             "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
             (kind, window_from, window_to, job_id, me.pid, me.started),
@@ -45,21 +44,21 @@ ALIVE = (
 )
 
 
-async def latest(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
+async def latest(unit: ReadUnit, kind: str) -> dict[str, Any] | None:
     """The newest run of `kind`, with `alive`."""
     return await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT r.*, {ALIVE} AS alive FROM runs r WHERE kind = %s ORDER BY id DESC LIMIT 1",
             (kind,),
         )
     ).fetchone()
 
 
-async def latest_finished(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
+async def latest_finished(unit: ReadUnit, kind: str) -> dict[str, Any] | None:
     """The newest run of `kind` that finished, with an error or not. One whose process died has
     no known end, nor its counts."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM runs WHERE kind = %s AND finished_at IS NOT NULL "
             "ORDER BY id DESC LIMIT 1",
             (kind,),
@@ -67,10 +66,10 @@ async def latest_finished(conn: psycopg.AsyncConnection, kind: str) -> dict[str,
     ).fetchone()
 
 
-async def last_success(conn: psycopg.AsyncConnection, kind: str) -> dict[str, Any] | None:
+async def last_success(unit: ReadUnit, kind: str) -> dict[str, Any] | None:
     """The newest run of `kind` that finished without an error."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM runs WHERE kind = %s AND finished_at IS NOT NULL AND error IS NULL "
             "ORDER BY id DESC LIMIT 1",
             (kind,),
@@ -78,18 +77,18 @@ async def last_success(conn: psycopg.AsyncConnection, kind: str) -> dict[str, An
     ).fetchone()
 
 
-async def last_started(conn: psycopg.AsyncConnection, kind: str) -> datetime | None:
+async def last_started(unit: ReadUnit, kind: str) -> datetime | None:
     """When the newest run of `kind` started."""
     row = await (
-        await conn.execute("SELECT max(started_at) AS at FROM runs WHERE kind = %s", (kind,))
+        await unit.execute("SELECT max(started_at) AS at FROM runs WHERE kind = %s", (kind,))
     ).fetchone()
     return row["at"]
 
 
-async def first_since(conn: psycopg.AsyncConnection, kind: str, since: datetime) -> datetime | None:
+async def first_since(unit: ReadUnit, kind: str, since: datetime) -> datetime | None:
     """When the first run of `kind` started at or after `since`."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT min(started_at) AS at FROM runs WHERE kind = %s AND started_at >= %s",
             (kind, since),
         )
@@ -97,12 +96,12 @@ async def first_since(conn: psycopg.AsyncConnection, kind: str, since: datetime)
     return row["at"]
 
 
-async def last_harvest_end(conn: psycopg.AsyncConnection, before: int) -> datetime | None:
+async def last_harvest_end(unit: ReadUnit, before: int) -> datetime | None:
     """The end of the window of the newest run before run `before` that harvested arXiv in
     full: it finished without an error, fetched papers, and its intake was complete. A read
     from the archive covers new papers only, not every change, so it is no harvest."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT window_to FROM runs WHERE id<%s AND finished_at IS NOT NULL "
             "AND window_to IS NOT NULL AND error IS NULL AND fetched>0 AND (intake IS NULL OR "
             "(intake->>'status'='complete' AND intake->>'source' IS DISTINCT FROM 'archive')) "
@@ -113,19 +112,19 @@ async def last_harvest_end(conn: psycopg.AsyncConnection, before: int) -> dateti
     return row["window_to"] if row else None
 
 
-async def update(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
+async def update(unit: WriteUnit, run_id: int, **fields: Any) -> None:
     """Set any of fetched, inserted, updated, cost, error, counts, intake on a run that is
     still going."""
-    await _set(conn, run_id, [], fields)
+    await _set(unit, run_id, [], fields)
 
 
-async def finish(conn: psycopg.AsyncConnection, run_id: int, **fields: Any) -> None:
+async def finish(unit: WriteUnit, run_id: int, **fields: Any) -> None:
     """Close the run, setting any of the fields `update` takes."""
-    await _set(conn, run_id, [sql.SQL("finished_at = now()")], fields)
+    await _set(unit, run_id, [sql.SQL("finished_at = now()")], fields)
 
 
 async def _set(
-    conn: psycopg.AsyncConnection, run_id: int, sets: list[sql.Composable], fields: dict[str, Any]
+    unit: WriteUnit, run_id: int, sets: list[sql.Composable], fields: dict[str, Any]
 ) -> None:
     if unknown := set(fields) - _FIELDS:
         raise ValueError(f"unknown run fields: {sorted(unknown)}")
@@ -135,17 +134,17 @@ async def _set(
     for name, value in fields.items():
         sets.append(sql.SQL("{} = %s").format(sql.Identifier(name)))
         values.append(Jsonb(value) if name in _JSON and value is not None else value)
-    await conn.execute(
+    await unit.execute(
         sql.SQL("UPDATE runs SET {} WHERE id = %s").format(sql.SQL(", ").join(sets)),
         (*values, run_id),
     )
 
 
-async def get(conn: psycopg.AsyncConnection, run_id: int) -> dict[str, Any] | None:
-    return await (await conn.execute("SELECT * FROM runs WHERE id = %s", (run_id,))).fetchone()
+async def get(unit: ReadUnit, run_id: int) -> dict[str, Any] | None:
+    return await (await unit.execute("SELECT * FROM runs WHERE id = %s", (run_id,))).fetchone()
 
 
-async def recent(conn: psycopg.AsyncConnection, limit: int = 20) -> list[dict[str, Any]]:
+async def recent(unit: ReadUnit, limit: int = 20) -> list[dict[str, Any]]:
     return await (
-        await conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT %s", (limit,))
+        await unit.execute("SELECT * FROM runs ORDER BY id DESC LIMIT %s", (limit,))
     ).fetchall()

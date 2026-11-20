@@ -4,13 +4,12 @@ the Jobs page lists, Deep cards asked for read alongside from their passes."""
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, overload
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core.fulltext import REQUESTED
-from litwatch.gates.database import Identity, WriteUnit
+from litwatch.gates.database import Identity, ReadUnit, WriteUnit
 from litwatch.store.failures import ACTIONABLE
 from litwatch.store.fulltext import STARTED, STUCK, stuck_params
 from litwatch.store.reading import SHOWN_MEMBER
@@ -33,7 +32,7 @@ def _mine(me: Identity) -> dict[str, Any]:
 
 
 async def create(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     kind: str,
     scope: dict[str, Any],
     papers: int,
@@ -43,7 +42,7 @@ async def create(
     estimate: float | None = None,
 ) -> int:
     row = await (
-        await conn.execute(
+        await unit.execute(
             "INSERT INTO jobs (kind, scope, papers, state, ceiling, estimate) "
             "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
             (kind, Jsonb(scope), papers, state, ceiling, estimate),
@@ -52,24 +51,34 @@ async def create(
     return row["id"]
 
 
+@overload
 async def get(
-    conn: psycopg.AsyncConnection, job_id: int, *, lock: bool = False
-) -> dict[str, Any] | None:
-    """The job; with `lock`, its row locked to the end of the transaction."""
+    unit: ReadUnit, job_id: int, *, lock: Literal[False] = False
+) -> dict[str, Any] | None: ...
+@overload
+async def get(unit: WriteUnit, job_id: int, *, lock: Literal[True]) -> dict[str, Any] | None: ...
+async def get(unit: ReadUnit, job_id: int, *, lock: bool = False) -> dict[str, Any] | None:
+    """The job; with `lock`, its row locked to the end of the unit, a write unit."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM jobs WHERE id = %s" + (" FOR UPDATE" if lock else ""), (job_id,)
         )
     ).fetchone()
 
 
+@overload
 async def process_of(
-    conn: psycopg.AsyncConnection, paper_id: str, *, lock: bool = False
-) -> dict[str, Any] | None:
+    unit: ReadUnit, paper_id: str, *, lock: Literal[False] = False
+) -> dict[str, Any] | None: ...
+@overload
+async def process_of(
+    unit: WriteUnit, paper_id: str, *, lock: Literal[True]
+) -> dict[str, Any] | None: ...
+async def process_of(unit: ReadUnit, paper_id: str, *, lock: bool = False) -> dict[str, Any] | None:
     """The paper's newest Process job not discarded; with `lock`, its row locked to the end of
-    the transaction."""
+    the unit, a write unit."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM jobs WHERE kind = 'process' AND scope -> 'papers' = %s "
             "AND state <> 'discarded' ORDER BY id DESC LIMIT 1" + (" FOR UPDATE" if lock else ""),
             (Jsonb([paper_id]),),
@@ -77,27 +86,27 @@ async def process_of(
     ).fetchone()
 
 
-async def process(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any]:
+async def process(unit: WriteUnit, paper_id: str) -> dict[str, Any]:
     """Queue the paper's Process job (D1): the one already queued or running, the one not run or
     failed put back in the queue, or a new one. Asked again after a lost reply, it finds the job
     the first asking queued. Call it in a change of the paper: the job's row stays locked to its
     end, so the Jobs page's actions wait and then see what this did."""
-    found = await process_of(conn, paper_id, lock=True)
+    found = await process_of(unit, paper_id, lock=True)
     if found is not None and found["state"] in ACTIVE:
         return found
     if found is not None and found["state"] != "done":
-        moved = await move(conn, found["id"], (*NOT_RUN, "failed"), "queued")
+        moved = await move(unit, found["id"], (*NOT_RUN, "failed"), "queued")
         assert moved is not None  # its row is locked: nothing moved it meanwhile
         return moved
-    job = await get(conn, await create(conn, "process", {"papers": [paper_id]}, 1, "queued"))
+    job = await get(unit, await create(unit, "process", {"papers": [paper_id]}, 1, "queued"))
     assert job is not None
     return job
 
 
-async def processing(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+async def processing(unit: ReadUnit, paper_id: str) -> bool:
     """Whether the paper's Process job is under way: on tonight's run, queued or running."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT 1 FROM jobs WHERE kind = 'process' AND scope -> 'papers' = %s "
             "AND state = ANY(%s)",
             (Jsonb([paper_id]), list(ACTIVE)),
@@ -106,11 +115,11 @@ async def processing(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
     return row is not None
 
 
-async def with_process(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> set[str]:
+async def with_process(unit: ReadUnit, paper_ids: list[str]) -> set[str]:
     """Those of the papers that have a Process job, in whatever state: the only ones
     `settle_process` and `processing` have anything to find for."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT DISTINCT scope -> 'papers' ->> 0 AS paper_id FROM jobs "
             "WHERE kind = 'process' AND scope -> 'papers' IN "
             "(SELECT jsonb_build_array(id) FROM unnest(%s::text[]) AS id)",
@@ -120,9 +129,7 @@ async def with_process(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> s
     return {r["paper_id"] for r in rows}
 
 
-async def settle_process(
-    conn: psycopg.AsyncConnection, paper_id: str, *, owner: bool = False
-) -> None:
+async def settle_process(unit: WriteUnit, paper_id: str, *, owner: bool = False) -> None:
     """A failed Process job settles with its paper's failures (DESIGN.md, Jobs): once none is
     left (a later run did the step, the owner acted on Needs you), it goes back in the queue to
     do what is left, or, the paper dropped, it is discarded. A running one the `owner` acted
@@ -130,12 +137,12 @@ async def settle_process(
     asked again: queued since it started, which `finish` reads. Call it under the paper's settle
     lock."""
     if owner:
-        await conn.execute(
+        await unit.execute(
             "UPDATE jobs SET queued_at = clock_timestamp() WHERE kind = 'process' "
             "AND state = 'running' AND scope -> 'papers' = %s",
             (Jsonb([paper_id]),),
         )
-    await conn.execute(
+    await unit.execute(
         f"""
         UPDATE jobs j SET changed_at = now(), queued_at = now(), done = 0, counts = '{{}}',
                error = NULL,
@@ -149,7 +156,7 @@ async def settle_process(
 
 
 async def move(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     job_id: int,
     sources: tuple[str, ...],
     to: str,
@@ -160,7 +167,7 @@ async def move(
     back starts over, its steps taking only what is still due; a stopped one goes on from
     where it stopped."""
     return await (
-        await conn.execute(
+        await unit.execute(
             """
             UPDATE jobs SET state = %(to)s, changed_at = now(), wake_at = NULL,
                    queued_at = CASE WHEN %(to)s IN ('tonight', 'queued') THEN now()
@@ -177,13 +184,13 @@ async def move(
     ).fetchone()
 
 
-async def take_back(conn: psycopg.AsyncConnection) -> list[int]:
+async def take_back(unit: WriteUnit) -> list[int]:
     """Put back in the queue every running job whose session is gone (its process died or its
     connection was lost): its steps pick only what is still due, so nothing done is redone. A
     Process job starts over from its paper, so a step the owner's action left due while it ran
     is done too, though the mark of that action (`settle_process`) is lost here."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"""
             UPDATE jobs r SET state = 'queued', changed_at = now(),
                    done = CASE WHEN kind = 'process' THEN 0 ELSE done END,
@@ -195,9 +202,7 @@ async def take_back(conn: psycopg.AsyncConnection) -> list[int]:
     return [r["id"] for r in rows]
 
 
-async def claim(
-    conn: psycopg.AsyncConnection, *, me: Identity, fresh: bool = True
-) -> dict[str, Any] | None:
+async def claim(unit: WriteUnit, *, me: Identity, fresh: bool = True) -> dict[str, Any] | None:
     """The most urgent job the session `me` may run now, marked running in its name: Process jobs
     and digests written again first (`FIRST`: the owner waits on them), then the oldest in the
     queue. Runnable are the queued jobs, those this session already runs, and those on
@@ -206,7 +211,7 @@ async def claim(
     many runs open as it may). Another session's claim in progress is skipped, so two workers
     never take one job."""
     return await (
-        await conn.execute(
+        await unit.execute(
             f"""
             WITH chosen AS (
                 SELECT j.id FROM jobs j
@@ -230,7 +235,7 @@ async def claim(
 
 
 async def progress(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     job_id: int,
     done: int,
     counts: dict[str, int],
@@ -241,7 +246,7 @@ async def progress(
     """Record how far the job got and what its steps recorded so far (a re-run's `ladder` too,
     when given), for a job the session `me` runs; None when it is no longer that session's."""
     return await (
-        await conn.execute(
+        await unit.execute(
             f"""
             UPDATE jobs SET done = %(done)s, counts = %(counts)s,
                    ladder = coalesce(%(ladder)s, ladder)
@@ -259,23 +264,21 @@ async def progress(
     ).fetchone()
 
 
-async def wait(
-    conn: psycopg.AsyncConnection, job_id: int, until: datetime, *, me: Identity
-) -> None:
+async def wait(unit: WriteUnit, job_id: int, until: datetime, *, me: Identity) -> None:
     """The job, still the session `me`'s, is not claimed again before `until`: what it has left
     waits for the archive."""
-    await conn.execute(
+    await unit.execute(
         f"UPDATE jobs SET wake_at = %(until)s WHERE id = %(id)s AND state = 'running' "
         f"AND (backend_pid, backend_start) = ({_ME})",
         {"until": until, "id": job_id} | _mine(me),
     )
 
 
-async def spent(conn: psycopg.AsyncConnection, job_id: int) -> float:
+async def spent(unit: ReadUnit, job_id: int) -> float:
     """What the job's calls cost so far, in all its runs (a call of unknown cost counts
     nothing, as in the month's spend)."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT coalesce(sum((c.usage ->> 'cost')::numeric), 0) AS cost "
             "FROM inference_calls c JOIN runs r ON r.id = c.run_id WHERE r.job_id = %s",
             (job_id,),
@@ -285,7 +288,7 @@ async def spent(conn: psycopg.AsyncConnection, job_id: int) -> float:
 
 
 async def finish(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     job_id: int,
     state: str,
     error: str | None = None,
@@ -298,7 +301,7 @@ async def finish(
     action left due. Returns whether it did: False when the job is no longer `me`'s (taken
     back, then claimed again or put back in the queue), whose cleanup is then not `me`'s
     either."""
-    cur = await conn.execute(
+    cur = await unit.execute(
         f"""
         UPDATE jobs SET error = %(error)s, changed_at = now(),
                backend_pid = NULL, backend_start = NULL,
@@ -313,9 +316,7 @@ async def finish(
     return cur.rowcount == 1
 
 
-async def listing(
-    conn: psycopg.AsyncConnection, done_limit: int, runs: int
-) -> list[dict[str, Any]]:
+async def listing(unit: ReadUnit, done_limit: int, runs: int) -> list[dict[str, Any]]:
     """Every job not discarded and every Deep card the owner asked for, as the Jobs page shows
     them: a job with its paper (a Process job's), whether a step of that paper waits on the owner
     (`stuck`, after `runs` failed runs), and what its runs' calls cost, a run whose process died
@@ -327,7 +328,7 @@ async def listing(
     and estimate; a replay with its ceiling and estimate; a digest written again with the
     digest's topic, period and day."""
     return await (
-        await conn.execute(
+        await unit.execute(
             f"""
             WITH found AS (
                 SELECT 'job' AS source, j.id, j.kind, j.state, j.papers, j.done, j.counts,
@@ -411,13 +412,21 @@ async def open_replay(unit: WriteUnit) -> dict[str, Any] | None:
     ).fetchone()
 
 
+@overload
 async def digest_job(
-    conn: psycopg.AsyncConnection, digest_id: int, *, lock: bool = False
+    unit: ReadUnit, digest_id: int, *, lock: Literal[False] = False
+) -> dict[str, Any] | None: ...
+@overload
+async def digest_job(
+    unit: WriteUnit, digest_id: int, *, lock: Literal[True]
+) -> dict[str, Any] | None: ...
+async def digest_job(
+    unit: ReadUnit, digest_id: int, *, lock: bool = False
 ) -> dict[str, Any] | None:
     """The digest's newest write job not discarded; with `lock`, its row locked to the end of
-    the transaction."""
+    the unit, a write unit."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM jobs WHERE kind = 'digest' AND scope -> 'digest' = %s "
             "AND state <> 'discarded' ORDER BY id DESC LIMIT 1" + (" FOR UPDATE" if lock else ""),
             (Jsonb(digest_id),),
@@ -425,27 +434,27 @@ async def digest_job(
     ).fetchone()
 
 
-async def write_digest(conn: psycopg.AsyncConnection, digest_id: int) -> dict[str, Any]:
+async def write_digest(unit: WriteUnit, digest_id: int) -> dict[str, Any]:
     """Queue the failed digest's write job: the one already queued or running, the failed one
     put back in the queue, or a new one. Asked again after a lost reply, it finds the job the
     first asking queued. Call it with the digest's row locked, so two asking at once make
     one."""
-    found = await digest_job(conn, digest_id, lock=True)
+    found = await digest_job(unit, digest_id, lock=True)
     if found is not None and found["state"] in ACTIVE:
         return found
     if found is not None and found["state"] == "failed":
-        moved = await move(conn, found["id"], ("failed",), "queued")
+        moved = await move(unit, found["id"], ("failed",), "queued")
         assert moved is not None  # its row is locked: nothing moved it meanwhile
         return moved
-    job = await get(conn, await create(conn, "digest", {"digest": digest_id}, 1, "queued"))
+    job = await get(unit, await create(unit, "digest", {"digest": digest_id}, 1, "queued"))
     assert job is not None
     return job
 
 
-async def settle_digest(conn: psycopg.AsyncConnection, digest_id: int) -> None:
+async def settle_digest(unit: WriteUnit, digest_id: int) -> None:
     """The digest is published (by the nightly run, say): a failed job writing it again settles
     with it, done, as its Needs you item does (DESIGN.md, Jobs)."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE jobs SET state = 'done', error = NULL, changed_at = now() "
         "WHERE kind = 'digest' AND state = 'failed' AND scope -> 'digest' = %s",
         (Jsonb(digest_id),),
@@ -455,10 +464,10 @@ async def settle_digest(conn: psycopg.AsyncConnection, digest_id: int) -> None:
 # -- a topic re-run's scopes (pipeline.md, section 10) ----------------------------------------
 
 
-async def labelled(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
+async def labelled(unit: ReadUnit, topic: str) -> list[str]:
     """The papers the owner labelled for the topic or reported missed there, not dropped."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT id FROM papers WHERE NOT dropped AND id IN ("
             "SELECT paper_id FROM labels WHERE topic = %(t)s "
             "UNION SELECT paper_id FROM misses WHERE topic = %(t)s) ORDER BY id",
@@ -468,12 +477,12 @@ async def labelled(conn: psycopg.AsyncConnection, topic: str) -> list[str]:
     return [r["id"] for r in rows]
 
 
-async def members(conn: psycopg.AsyncConnection, classes: list[str]) -> list[str]:
+async def members(unit: ReadUnit, classes: list[str]) -> list[str]:
     """The papers on a topic's page (`store.reading.SCOPE`), not dropped: those standing in any
     of `classes` (its class and those under it), and those with an effective grade for it or a
     followed topic under it (a keyword hit, a reported miss)."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"""
             SELECT id FROM (
                 SELECT m.paper_id AS id FROM memberships m
@@ -488,12 +497,10 @@ async def members(conn: psycopg.AsyncConnection, classes: list[str]) -> list[str
     return [r["id"] for r in rows]
 
 
-async def published_between(
-    conn: psycopg.AsyncConnection, since: datetime, until: datetime
-) -> list[str]:
+async def published_between(unit: ReadUnit, since: datetime, until: datetime) -> list[str]:
     """The papers published in [since, until), not dropped."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT id FROM papers WHERE NOT dropped AND published >= %s "
             "AND published < %s ORDER BY id",
             (since, until),

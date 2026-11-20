@@ -7,7 +7,7 @@ from litwatch.api import app as app_module
 from litwatch.api import create_app
 from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import FAITH, TREE, AppClient, paper
 
 TOKEN = "s3cret"
@@ -18,7 +18,7 @@ READ_TOKEN = "r3ad"
 
 @pytest.fixture
 async def client(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [paper("2609.1"), paper("2609.2"), paper("2609.3")])
     # The app's gate opens its own connections; point them at the test schema.
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"

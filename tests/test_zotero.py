@@ -19,7 +19,6 @@ from litwatch.core import (
     Publication,
     Verdict,
 )
-from litwatch.gates.database import DatabaseGate
 from litwatch.integrations import webdav as webdav_mod
 from litwatch.integrations.webdav import WebDav, WebDAVWriter
 from litwatch.integrations.zotero import Zotero, ZoteroClient, attachment_filename, is_item_of
@@ -27,10 +26,10 @@ from litwatch.jobs import publications as lookups
 from litwatch.store import integrations as state
 from litwatch.store import outbox, verdicts
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
 from tests.conftest import FAITH, TREE, deliver, fixture_read, paper, start
 from tests.fakes_http import PDF, FakeArxiv, FakeDAV, FakeZotero, mock
+from tests.sessions import Bridge
 
 P = paper(
     "2610.00001",
@@ -64,7 +63,7 @@ CARD = {
 
 @pytest.fixture
 async def world(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P])
     return conn
 
@@ -442,7 +441,7 @@ async def test_a_must_read_pdf_waits_for_its_item_then_is_stored_once(world, db,
     # Handled again (a restart mid-way, say): nothing is fetched or attached twice.
     for event in await outbox.after(conn, outbox.START, 100):
         if w.wants(event):
-            await w.handle(DatabaseGate.over(conn), event)
+            await w.handle(Bridge(conn), event)
     assert len(fake.attachments(item["key"])) == 1 and len(arxiv.calls) == 1
 
 

@@ -8,7 +8,6 @@ from litwatch.config import Config
 from litwatch.core import Cause, Fit, Opinion, Verdict
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
 from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, paper
@@ -20,7 +19,7 @@ Q = paper("2610.00002", title="Protein folding", abstract="Structures.")
 
 @pytest.fixture
 async def client(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P, Q])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, Config())

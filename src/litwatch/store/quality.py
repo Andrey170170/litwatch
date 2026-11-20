@@ -7,23 +7,22 @@ import asyncio
 from datetime import date, datetime, timedelta
 from typing import Any
 
-import psycopg
-
 from litwatch.core import Taxonomy
 from litwatch.core.classification import keyword_hit, with_ancestors
 from litwatch.core.evaluation import recall
+from litwatch.gates.database import ReadUnit
 from litwatch.store import evaluation
 from litwatch.store.reading import SHOWN_MEMBER
 from litwatch.store.verdicts import ASKS_WORD
 
 
-async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> list[dict]:
-    return await (await conn.execute(query, params)).fetchall()
+async def _all(unit: ReadUnit, query: str, params: Any = ()) -> list[dict]:
+    return await (await unit.execute(query, params)).fetchall()
 
 
-async def last_night(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
+async def last_night(unit: ReadUnit) -> dict[str, Any] | None:
     return await (
-        await conn.execute("SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
+        await unit.execute("SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1")
     ).fetchone()
 
 
@@ -33,7 +32,7 @@ def splits_window(night: dict[str, Any] | None) -> datetime | date:
     return night["started_at"] if night else date.today() - timedelta(days=1)
 
 
-async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[str, Any]]:
+async def splits_since(unit: ReadUnit, since: Any) -> list[dict[str, Any]]:
     """Verdicts asking for the owner's word (`ASKS_WORD`) recorded since `since` that are still
     current (Focus splits, Area escalations, central or related grades from one lab, on the
     paper's current text: a verdict on an older revision waits for the regrading, not the
@@ -41,7 +40,7 @@ async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[s
     for the owner to settle if they want to: followed topics only. `revision` is the text the
     verdict is on."""
     return await _all(
-        conn,
+        unit,
         f"""
         SELECT * FROM (
             SELECT DISTINCT ON (v.paper_id, v.topic) v.paper_id, v.topic, t.depth, v.fit,
@@ -62,10 +61,10 @@ async def splits_since(conn: psycopg.AsyncConnection, since: Any) -> list[dict[s
     )
 
 
-async def collected_reactions(conn: psycopg.AsyncConnection, limit: int = 200) -> list[dict]:
+async def collected_reactions(unit: ReadUnit, limit: int = 200) -> list[dict]:
     """Reactions that move nothing by themselves (decision 17), for the owner or an agent."""
     return await _all(
-        conn,
+        unit,
         """
         SELECT r.paper_id, r.topic, r.value, r.reason, r.reacted_at, p.title
         FROM reactions r JOIN papers p ON p.id = r.paper_id
@@ -78,14 +77,14 @@ async def collected_reactions(conn: psycopg.AsyncConnection, limit: int = 200) -
     )
 
 
-async def runs(conn: psycopg.AsyncConnection, limit: int = 30) -> list[dict[str, Any]]:
+async def runs(unit: ReadUnit, limit: int = 30) -> list[dict[str, Any]]:
     """The newest nightly runs, for the Nights table: jobs and other runs never push a night
     out of it. A night's `cost` is the day's spend outside jobs: its own run's, and
     `after_cost`, that of every other run outside a job started from its start until the next
     night's (the Briefs the worker writes once the night's batches have closed, say). Jobs show
     their own cost."""
     return await _all(
-        conn,
+        unit,
         """
         SELECT n.id, n.kind, n.started_at, n.finished_at, n.cost + a.cost AS cost,
                a.cost AS after_cost, n.error, n.counts, n.fetched, n.inserted, n.updated
@@ -101,29 +100,29 @@ async def runs(conn: psycopg.AsyncConnection, limit: int = 30) -> list[dict[str,
     )
 
 
-async def replay_recall(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
+async def replay_recall(unit: ReadUnit) -> dict[str, Any] | None:
     """Recall per Focus topic from the latest replay (feedback.md, evaluation): the four numbers
     for each cohort and topic with their n, never pooled, and the run they come from; None
     before any replay. A replay still running, or cut short, counts what has concluded."""
-    eval_run_id = await evaluation.latest(conn, "replay")
+    eval_run_id = await evaluation.latest(unit, "replay")
     if eval_run_id is None:
         return None
-    run = await evaluation.get(conn, eval_run_id)
+    run = await evaluation.get(unit, eval_run_id)
     return {
         "eval_run": eval_run_id,
         "started_at": run["started_at"],
         "finished_at": run["finished_at"],
         "cost": float(run["cost"]) if run["cost"] is not None else None,
-        "recall": recall(await evaluation.outcomes(conn, eval_run_id)),
+        "recall": recall(await evaluation.outcomes(unit, eval_run_id)),
     }
 
 
-async def reactions_by_topic(conn: psycopg.AsyncConnection, days: int = 30) -> list[dict]:
+async def reactions_by_topic(unit: ReadUnit, days: int = 30) -> list[dict]:
     """Thumbs per followed topic and reason over the trailing days (feedback.md, reactions:
     each reason points at a stage), for Overview's table, in the owner's topic order. A thumb
     without a reason has `reason` null."""
     return await _all(
-        conn,
+        unit,
         """
         SELECT r.topic, r.reason, count(*) AS n FROM reactions r
         JOIN topics t ON t.class = r.topic
@@ -134,12 +133,12 @@ async def reactions_by_topic(conn: psycopg.AsyncConnection, days: int = 30) -> l
     )
 
 
-async def count_misses(conn: psycopg.AsyncConnection) -> int:
-    row = await (await conn.execute("SELECT count(*) AS n FROM misses")).fetchone()
+async def count_misses(unit: ReadUnit) -> int:
+    row = await (await unit.execute("SELECT count(*) AS n FROM misses")).fetchone()
     return row["n"]
 
 
-async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[dict[str, Any]]:
+async def misses(unit: ReadUnit, tree: Taxonomy | None) -> list[dict[str, Any]]:
     """Reported misses, newest first, each with what the stages concluded for the owner's topic
     on the paper's current text (feedback.md, misses): whether it has been classified and the
     classifier's probability for the topic's class, which of the classifier, the uncertain band
@@ -151,7 +150,7 @@ async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[d
     # Each followed topic's class with every class under it, as (topic, class) pairs.
     pairs = [(t.slug, c) for t in (tree.topics if tree else []) for c in tree.subtree(t.slug)]
     return await _all(
-        conn,
+        unit,
         """
         WITH under AS (SELECT * FROM unnest(%s::text[], %s::text[]) AS under (topic, class))
         SELECT m.id, m.paper_id, m.topic, m.reported_at, p.title,
@@ -182,12 +181,12 @@ async def misses(conn: psycopg.AsyncConnection, tree: Taxonomy | None) -> list[d
     )
 
 
-async def class_members(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[str, int]:
+async def class_members(unit: ReadUnit, tree: Taxonomy) -> dict[str, int]:
     """Papers standing in each class or any class under it (the memberships a page shows), by
     class slug; a class with none is left out."""
     pairs = [(c.slug, a) for c in tree.classes for a in with_ancestors(tree, {c.slug})]
     rows = await _all(
-        conn,
+        unit,
         f"""
         SELECT map.target, count(DISTINCT m.paper_id) AS n
         FROM memberships m
@@ -201,24 +200,22 @@ async def class_members(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[s
     return {r["target"]: r["n"] for r in rows}
 
 
-async def topic_revisions(conn: psycopg.AsyncConnection) -> dict[str, int]:
+async def topic_revisions(unit: ReadUnit) -> dict[str, int]:
     """The current revision of every followed topic, by class slug."""
-    rows = await _all(conn, "SELECT class, revision FROM topics")
+    rows = await _all(unit, "SELECT class, revision FROM topics")
     return {r["class"]: r["revision"] for r in rows}
 
 
 KEYWORD_DAYS = 90  # the window the topic editor counts keyword matches over
 
 
-async def _keyword_hits(
-    conn: psycopg.AsyncConnection, patterns: list[str], days: int
-) -> dict[str, list[str]]:
+async def _keyword_hits(unit: ReadUnit, patterns: list[str], days: int) -> dict[str, list[str]]:
     """The papers published in the trailing days that each keyword pattern matches, as the
     keyword check matches them (core.classification.keyword_hit), not dismissed."""
     if not patterns:
         return {}
     rows = await _all(
-        conn,
+        unit,
         "SELECT id, title, abstract FROM papers WHERE NOT dropped "
         "AND published >= now() - make_interval(days => %s) ORDER BY id",
         (days,),
@@ -235,16 +232,16 @@ async def _keyword_hits(
 
 
 async def keyword_matches(
-    conn: psycopg.AsyncConnection, patterns: list[str], days: int = KEYWORD_DAYS
+    unit: ReadUnit, patterns: list[str], days: int = KEYWORD_DAYS
 ) -> dict[str, int]:
     """How many papers published in the trailing days each keyword pattern matches."""
-    return {k: len(ids) for k, ids in (await _keyword_hits(conn, patterns, days)).items()}
+    return {k: len(ids) for k, ids in (await _keyword_hits(unit, patterns, days)).items()}
 
 
 async def keyword_papers(
-    conn: psycopg.AsyncConnection, patterns: list[str], days: int = KEYWORD_DAYS
+    unit: ReadUnit, patterns: list[str], days: int = KEYWORD_DAYS
 ) -> list[str]:
     """The papers published in the trailing days that any keyword pattern matches: the papers
     the editor's keyword counts count."""
-    found = await _keyword_hits(conn, patterns, days)
+    found = await _keyword_hits(unit, patterns, days)
     return sorted({p for ids in found.values() for p in ids})

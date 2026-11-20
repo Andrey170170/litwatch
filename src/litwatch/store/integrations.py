@@ -7,27 +7,26 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core.deepread import Figure
-from litwatch.store.db import transaction
+from litwatch.gates.database import ReadUnit, WriteUnit
 
 # -- zotero ----------------------------------------------------------------------------------------
 
 
-async def zotero_item(conn: psycopg.AsyncConnection, paper_id: str) -> str | None:
+async def zotero_item(unit: ReadUnit, paper_id: str) -> str | None:
     row = await (
-        await conn.execute("SELECT item_key FROM zotero_items WHERE paper_id = %s", (paper_id,))
+        await unit.execute("SELECT item_key FROM zotero_items WHERE paper_id = %s", (paper_id,))
     ).fetchone()
     return row["item_key"] if row else None
 
 
-async def set_zotero_item(conn: psycopg.AsyncConnection, paper_id: str, key: str | None) -> None:
+async def set_zotero_item(unit: WriteUnit, paper_id: str, key: str | None) -> None:
     if key is None:
-        await conn.execute("DELETE FROM zotero_items WHERE paper_id = %s", (paper_id,))
+        await unit.execute("DELETE FROM zotero_items WHERE paper_id = %s", (paper_id,))
         return
-    await conn.execute(
+    await unit.execute(
         "INSERT INTO zotero_items (paper_id, item_key) VALUES (%s, %s) ON CONFLICT (paper_id) "
         "DO UPDATE SET item_key = EXCLUDED.item_key, updated_at = now()",
         (paper_id, key),
@@ -37,22 +36,20 @@ async def set_zotero_item(conn: psycopg.AsyncConnection, paper_id: str, key: str
 # -- webdav ----------------------------------------------------------------------------------------
 
 
-async def webdav_file(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+async def webdav_file(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
     """The paper's PDF attachment, the Zotero item it hangs on, and its state: `pending` until
     litwatch's upload is known to be complete, `stored` after, `owner` for one litwatch leaves
     alone."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT item_key, attachment_key, state FROM webdav_files WHERE paper_id = %s",
             (paper_id,),
         )
     ).fetchone()
 
 
-async def set_webdav_file(
-    conn: psycopg.AsyncConnection, paper_id: str, item: str, key: str, state: str
-) -> None:
-    await conn.execute(
+async def set_webdav_file(unit: WriteUnit, paper_id: str, item: str, key: str, state: str) -> None:
+    await unit.execute(
         "INSERT INTO webdav_files (paper_id, item_key, attachment_key, state) "
         "VALUES (%s, %s, %s, %s) ON CONFLICT (paper_id) DO UPDATE SET "
         "item_key = EXCLUDED.item_key, attachment_key = EXCLUDED.attachment_key, "
@@ -64,12 +61,12 @@ async def set_webdav_file(
 # -- deep cards ------------------------------------------------------------------------------------
 
 
-async def card(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+async def card(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
     """The paper's deep card row: `card` is null while none has been written, `error` the last
     attempt's failure. A card says what it was written from: the paper revision, the arXiv
     version (null when unknown) and the text's source."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT paper_id, card, model, stats, error, written_at, paper_revision AS revision, "
             "arxiv_version, text_source AS source FROM deep_cards WHERE paper_id = %s",
             (paper_id,),
@@ -78,7 +75,7 @@ async def card(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] |
 
 
 async def put_card(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     paper_id: str,
     card: dict[str, Any],
     model: str,
@@ -94,37 +91,36 @@ async def put_card(
     labelled with the text it was written from, and with it the paper's `figures`, which
     replace the earlier card's: both or neither. A card written again has its process notes
     unseen: the owner's Acknowledge was for the card it replaces."""
-    async with transaction(conn):
-        await conn.execute(
-            """
-            INSERT INTO deep_cards (paper_id, card, model, stats, written_at, paper_revision,
-                                    arxiv_version, text_source, pass_id)
-            VALUES (%s, %s, %s, %s, now(), %s, %s, %s, %s)
-            ON CONFLICT (paper_id) DO UPDATE SET
-                card = EXCLUDED.card, model = EXCLUDED.model, stats = EXCLUDED.stats,
-                error = NULL, written_at = now(),
-                paper_revision = EXCLUDED.paper_revision, arxiv_version = EXCLUDED.arxiv_version,
-                text_source = EXCLUDED.text_source, pass_id = EXCLUDED.pass_id,
-                notes_acknowledged_at = NULL
-            """,
-            (paper_id, Jsonb(card), model, Jsonb(stats), revision, version, source, pass_id),
-        )  # fmt: skip
-        await conn.execute("DELETE FROM deep_figures WHERE paper_id = %s", (paper_id,))
-        for f in figures:
-            await conn.execute(
-                "INSERT INTO deep_figures (paper_id, name, mime, data) VALUES (%s, %s, %s, %s)",
-                (paper_id, f.name, f.mime, f.data),
-            )
+    await unit.execute(
+        """
+        INSERT INTO deep_cards (paper_id, card, model, stats, written_at, paper_revision,
+                                arxiv_version, text_source, pass_id)
+        VALUES (%s, %s, %s, %s, now(), %s, %s, %s, %s)
+        ON CONFLICT (paper_id) DO UPDATE SET
+            card = EXCLUDED.card, model = EXCLUDED.model, stats = EXCLUDED.stats,
+            error = NULL, written_at = now(),
+            paper_revision = EXCLUDED.paper_revision, arxiv_version = EXCLUDED.arxiv_version,
+            text_source = EXCLUDED.text_source, pass_id = EXCLUDED.pass_id,
+            notes_acknowledged_at = NULL
+        """,
+        (paper_id, Jsonb(card), model, Jsonb(stats), revision, version, source, pass_id),
+    )  # fmt: skip
+    await unit.execute("DELETE FROM deep_figures WHERE paper_id = %s", (paper_id,))
+    for f in figures:
+        await unit.execute(
+            "INSERT INTO deep_figures (paper_id, name, mime, data) VALUES (%s, %s, %s, %s)",
+            (paper_id, f.name, f.mime, f.data),
+        )
 
 
 async def figure(
-    conn: psycopg.AsyncConnection, paper_id: str, name: str, written: datetime | None = None
+    unit: ReadUnit, paper_id: str, name: str, written: datetime | None = None
 ) -> Figure | None:
     """One of the figures stored with the paper's Deep read, by the name the read cites. With
     `written`, only while the read stored is the one written then: a read written again has its
     own figures, and an old one's are gone."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT f.name, f.mime, f.data
             FROM deep_figures f JOIN deep_cards c USING (paper_id)
@@ -138,14 +134,14 @@ async def figure(
 
 
 async def card_failed(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     paper_id: str,
     error: str,
     stats: dict[str, Any] | None = None,
 ) -> None:
     """Record why the paper's last attempt made no card. A card written earlier stays, and so
     do the last job's stats unless new ones are given."""
-    await conn.execute(
+    await unit.execute(
         """
         INSERT INTO deep_cards (paper_id, stats, error)
         VALUES (%(p)s, coalesce(%(stats)s::jsonb, '{}'), %(error)s)
@@ -161,12 +157,10 @@ async def card_failed(
     )
 
 
-async def add_attempt(
-    conn: psycopg.AsyncConnection, paper_id: str, pass_id: int, automatic: bool
-) -> int:
+async def add_attempt(unit: WriteUnit, paper_id: str, pass_id: int, automatic: bool) -> int:
     """A submission that may reach the service, recorded before it is sent."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "INSERT INTO deep_attempts (paper_id, pass_id, automatic) VALUES (%s, %s, %s) "
             "RETURNING id",
             (paper_id, pass_id, automatic),
@@ -175,18 +169,18 @@ async def add_attempt(
     return row["id"]
 
 
-async def job_started(conn: psycopg.AsyncConnection, attempt_id: int, job_id: str) -> None:
+async def job_started(unit: WriteUnit, attempt_id: int, job_id: str) -> None:
     """The service accepted the attempt's job, or was found to have it after its answer was
     lost: it is followed until it ends, across a failed poll or a worker's death, and never
     submitted again meanwhile."""
-    await conn.execute("UPDATE deep_attempts SET job_id = %s WHERE id = %s", (job_id, attempt_id))
+    await unit.execute("UPDATE deep_attempts SET job_id = %s WHERE id = %s", (job_id, attempt_id))
 
 
-async def open_attempt(conn: psycopg.AsyncConnection, pass_id: int) -> dict[str, Any] | None:
+async def open_attempt(unit: ReadUnit, pass_id: int) -> dict[str, Any] | None:
     """The pass's attempt that has not ended: its job (null when the submission's answer never
     came) and when it was submitted."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT id, job_id, at FROM deep_attempts WHERE pass_id = %s AND ended_at IS NULL "
             "ORDER BY id DESC LIMIT 1",
             (pass_id,),
@@ -195,7 +189,7 @@ async def open_attempt(conn: psycopg.AsyncConnection, pass_id: int) -> dict[str,
 
 
 async def attempt_ended(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     attempt_id: int,
     usage: dict[str, Any] | None,
     error: str | None,
@@ -207,7 +201,7 @@ async def attempt_ended(
     or None when it is unknown (never zero for that), its trace, kept for good, or None when
     there is none (its job never ran, was lost or never ended), and its review rounds as the
     service returned them, or None when no review ran."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE deep_attempts SET ended_at = now(), usage = %(usage)s, error = %(error)s, "
         "failure = %(failure)s, trace = %(trace)s, reviews = %(reviews)s, "
         "service_failed_at = CASE "
@@ -224,21 +218,21 @@ async def attempt_ended(
     )
 
 
-async def service_failed(conn: psycopg.AsyncConnection, attempt_id: int, error: str) -> None:
+async def service_failed(unit: WriteUnit, attempt_id: int, error: str) -> None:
     """The service failed the attempt, which goes on: its submission's answer never came, or
     following its job failed."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE deep_attempts SET error = %s, service_failed_at = now() "
         "WHERE id = %s AND ended_at IS NULL",
         (error[:2000], attempt_id),
     )
 
 
-async def paused_until(conn: psycopg.AsyncConnection, pause: timedelta) -> datetime | None:
+async def paused_until(unit: ReadUnit, pause: timedelta) -> datetime | None:
     """When the Deep queue's pause ends: `pause` after the latest service failure, if that is
     still to come."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT until FROM (SELECT max(service_failed_at) + %s AS until FROM deep_attempts) x "
             "WHERE until > now()",
             (pause,),
@@ -247,12 +241,12 @@ async def paused_until(conn: psycopg.AsyncConnection, pause: timedelta) -> datet
     return row["until"] if row else None
 
 
-async def service_failure(conn: psycopg.AsyncConnection) -> dict[str, Any] | None:
+async def service_failure(unit: ReadUnit) -> dict[str, Any] | None:
     """The latest service failure of a Deep attempt, when no card was made after it: when, and
     its error while the attempt's error is the service's (null once the job it followed ended
     as the paper's failure)."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT service_failed_at AS at, "
             "CASE WHEN failure IS DISTINCT FROM 'paper' THEN error END AS error "
             "FROM deep_attempts "
@@ -262,11 +256,11 @@ async def service_failure(conn: psycopg.AsyncConnection) -> dict[str, Any] | Non
     ).fetchone()
 
 
-async def usage_since(conn: psycopg.AsyncConnection, since: datetime) -> dict[str, Any]:
+async def usage_since(unit: ReadUnit, since: datetime) -> dict[str, Any]:
     """The ended attempts since then, their list cost where known, and how many have their
     usage unknown: the subscription estimate, a lower bound while any is unknown."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT count(*) AS attempts, "
             "coalesce(sum((usage->>'list_cost')::numeric), 0)::float AS list_cost, "
             "count(*) FILTER (WHERE usage IS NULL) AS unknown "
@@ -276,12 +270,12 @@ async def usage_since(conn: psycopg.AsyncConnection, since: datetime) -> dict[st
     ).fetchone()
 
 
-async def attempts(conn: psycopg.AsyncConnection, paper_id: str) -> list[dict[str, Any]]:
+async def attempts(unit: ReadUnit, paper_id: str) -> list[dict[str, Any]]:
     """The paper's Deep attempts, oldest first, without their traces: when each was submitted
     and ended, its job, error, whose failure it was and usage, whether it kept a trace
     (`traced`), and whether it wrote the paper's card (`wrote_card`)."""
     return await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT a.id, a.at, a.ended_at, a.job_id, a.error, a.failure, a.usage, a.automatic,
                    a.trace IS NOT NULL AS traced,
@@ -296,29 +290,27 @@ async def attempts(conn: psycopg.AsyncConnection, paper_id: str) -> list[dict[st
     ).fetchall()
 
 
-async def attempt_trace(conn: psycopg.AsyncConnection, attempt_id: int) -> list[Any] | None:
+async def attempt_trace(unit: ReadUnit, attempt_id: int) -> list[Any] | None:
     """The attempt's trace; None when it kept none."""
     row = await (
-        await conn.execute("SELECT trace FROM deep_attempts WHERE id = %s", (attempt_id,))
+        await unit.execute("SELECT trace FROM deep_attempts WHERE id = %s", (attempt_id,))
     ).fetchone()
     return row["trace"] if row else None
 
 
-async def attempt_reviews(conn: psycopg.AsyncConnection, attempt_id: int) -> list[Any] | None:
+async def attempt_reviews(unit: ReadUnit, attempt_id: int) -> list[Any] | None:
     """The attempt's review rounds, as the service returned them; None when no review ran."""
     row = await (
-        await conn.execute("SELECT reviews FROM deep_attempts WHERE id = %s", (attempt_id,))
+        await unit.execute("SELECT reviews FROM deep_attempts WHERE id = %s", (attempt_id,))
     ).fetchone()
     return row["reviews"] if row else None
 
 
-async def process_notes(
-    conn: psycopg.AsyncConnection, since: datetime | None = None
-) -> list[dict[str, Any]]:
+async def process_notes(unit: ReadUnit, since: datetime | None = None) -> list[dict[str, Any]]:
     """The cards with process notes, newest first, written since `since` if given: the paper,
     its title, when the card was written and its notes."""
     return await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT c.paper_id, p.title, c.written_at, c.card->'process_notes' AS notes
             FROM deep_cards c JOIN papers p ON p.id = c.paper_id
@@ -345,13 +337,13 @@ _NOTED = (
 NOTES_KEPT_DAYS = 14
 
 
-async def deep_notes(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
+async def deep_notes(unit: ReadUnit) -> list[dict[str, Any]]:
     """Needs you's Deep notes: each card with process notes, oldest first, with its paper's
     title, when it was written, which names the card, and when the owner acknowledged its
     notes; acknowledged ones only for `NOTES_KEPT_DAYS` after. They wait on nothing, and count
     in no run status."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT c.paper_id, p.title, c.written_at, c.card->'process_notes' AS notes, "
             "c.notes_acknowledged_at AS acknowledged_at "
             f"FROM deep_cards c JOIN papers p ON p.id = c.paper_id WHERE {_NOTED} "
@@ -364,7 +356,7 @@ async def deep_notes(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
 
 
 async def acknowledge_notes(
-    conn: psycopg.AsyncConnection, items: list[tuple[str, datetime]]
+    unit: WriteUnit, items: list[tuple[str, datetime]]
 ) -> list[dict[str, Any]]:
     """The owner's Acknowledge on the named cards' process notes, each by its paper and when the
     card was written: a card written again since is not the one the owner saw, and stays unseen.
@@ -373,7 +365,7 @@ async def acknowledge_notes(
         return []
     ids, written = map(list, zip(*items, strict=True))
     return await (
-        await conn.execute(
+        await unit.execute(
             "UPDATE deep_cards c "
             "SET notes_acknowledged_at = coalesce(c.notes_acknowledged_at, now()) "
             "FROM papers p, unnest(%(ids)s::text[], %(written)s::timestamptz[]) AS x (id, at) "

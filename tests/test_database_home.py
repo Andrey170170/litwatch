@@ -1,26 +1,14 @@
 """The Database gate is the only door to the database (docs/specs/architecture/a1-database-gate.md):
 no advisory-lock SQL outside `gates/database.py`, and no connection outside `gates/` and
-`store/`. Each list below names what predates the rule and only shrinks: code moved onto the
-gate comes off it, and the lists are empty when A1 is done."""
+`store/`."""
 
 import re
 from pathlib import Path
 
 from litwatch.gates.database import HELD_ACROSS_CALLS, REGISTRY
-from litwatch.store import taxonomy
 
 SRC = Path(__file__).parent.parent / "src" / "litwatch"
 GATE = "gates/database.py"
-
-# Mentions of an advisory-lock function per file, before the rule; to move into the gate. The
-# taxonomy lock's raw-connection branch goes in P6, with the last caller passing a connection.
-LOCKS_BEFORE_THE_RULE = {
-    "store/taxonomy.py": 2,
-}
-
-# Modules outside `gates/` and `store/` that name `AsyncConnection`, before the rule; each is to
-# take `db` or a unit instead.
-CONNECTIONS_BEFORE_THE_RULE: set[str] = set()
 
 
 def _sources():
@@ -36,7 +24,7 @@ def test_advisory_locks_stay_in_the_gate():
         for name, text in _sources()
         if name != GATE and (mentions := re.findall(r"pg_(?:try_)?advisory", text))
     }
-    assert found == LOCKS_BEFORE_THE_RULE
+    assert found == {}
 
 
 def test_connections_stay_in_the_gate_and_store():
@@ -45,7 +33,7 @@ def test_connections_stay_in_the_gate_and_store():
         for name, text in _sources()
         if not name.startswith(("gates/", "store/")) and "AsyncConnection" in text
     }
-    assert found == CONNECTIONS_BEFORE_THE_RULE
+    assert found == set()
 
 
 def test_the_registry_has_todays_keys():
@@ -64,8 +52,6 @@ def test_the_registry_has_todays_keys():
         ("deep-worker", 7213915, "session", None),
         ("migration", 7213910, "startup", None),
     ]
-    # The taxonomy lock's own code still takes it on a raw connection, until P6.
-    assert next(lock.key for lock in REGISTRY if lock.name == "taxonomy") == taxonomy.TAXONOMY_LOCK
 
 
 def test_the_locks_held_across_calls_only_shrink():
