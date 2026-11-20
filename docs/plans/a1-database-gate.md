@@ -240,3 +240,17 @@ Filled in as stages land.
   deploy to 08:30 the log has only info lines: no error, traceback, `gate nesting:`, slow unit or pool timeout. The
   `pg_locks` sampler, every 2 s from 01:55 to 04:30, saw no backend waiting on a lock. Every `/status` component
   is healthy.
+- **P4, V7:** deployed 2026-11-19 08:52 MST as `litwatch:1.0.0-dev-c00e8589`. The night of 2026-11-20 (run 117)
+  finished in 42 min with no error: 675 classified, 753 graded, 49 Briefs, 5 digests, $4.29, in line with runs 113
+  and 115; the publications run of 2026-11-19 finished. No run is left unfinished, no job is running or failed, and
+  both integrations are caught up (lag 0, not failing). Its events per type kept run 115's proportions (745
+  `grade.changed` for 753 verdicts, 14 saved, 2 unsaved). From the deploy to 08:30 the log has only info lines and
+  two model refusals: no error, traceback, `gate nesting:`, slow unit, pool timeout, taken-back job or presence
+  change. The `pg_locks` sampler saw 17 waits in two bursts (09:10:42 and 09:19:13 UTC), each at most 0.1 s: the
+  journal's reply writes, now in a unit each, queued on one another's upsert of the provider's
+  `provider_observations` row. Before P4 the journal wrote on one sibling connection, so these did not overlap.
+  Every `/status` component is healthy.
+- **P5, sandbox nightly (intermediate evidence):** a sandbox built from the archive's papers of 2026-11-17 (400) with
+  production's taxonomy, no integrations but the archive, `LITWATCH_STRICT_GATES=1`, `litwatch nightly --no-fetch
+  --limit 25`: exit 0 in 45 s, $0.09; 25 classified, 25 analysed, 23 graded, 4 full-text passes reconciled, 1 digest
+  written and 4 with nothing new. The log has no warning, error, `gate nesting`, slow unit or pool timeout.
