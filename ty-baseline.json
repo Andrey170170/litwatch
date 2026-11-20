@@ -1523,12 +1523,6 @@
         "startColumn": 8,
         "endColumn": 87,
         "lineCount": 1
-      },
-      {
-        "rule": "invalid-assignment",
-        "startColumn": 8,
-        "endColumn": 65,
-        "lineCount": 1
       }
     ],
     "src/litwatch/store/verdicts.py": [

@@ -49,8 +49,9 @@ production since 2026-10-17, in place of release 0.14.
 CI (`.github/workflows/ci.yaml`) runs all of these; run the ones your change touches before committing.
 
 - `uv run ruff check src tests`, `uv run ruff format --check src tests`
-- `uv run ty check`, on `src` and `tests` against `ty-baseline.json` (`[tool.ty]` in `pyproject.toml`): new code adds
-  no diagnostic. When a change clears a baselined one, run `uv run ty check --update-baseline` and commit the smaller
+- `uv run ty check`, on `src` and `tests` against `ty-baseline.json` (`[tool.ty]` in `pyproject.toml`): a diagnostic
+  the baseline does not match fails it, so new code adds none. The baseline matches by file, rule and position, so a
+  new diagnostic at a baselined one's columns can slip through. When a change clears a baselined one, run `uv run ty check --update-baseline` and commit the smaller
   baseline.
 - `uv run lint-imports` (contracts in `pyproject.toml`) and `uv run pytest tests/test_roles.py`
 - `uv run pytest --strict-markers`. Tests that need PostgreSQL create and drop their own schema in

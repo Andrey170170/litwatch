@@ -45,6 +45,10 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
 - **Intake stops rewriting unchanged rows** on its three-day overlap (review, project 8).
 - **Drops the owner marked** in [`notes/still-used.md`](notes/still-used.md): the live-label `provisional` handling
   and the revision-1 fallback (`papers.py`, `row.get("revision") or 1`).
+- **Tests reach `store` through units** (A1 P6's review): many tests still seed and assert with the raw `conn`
+  fixture, an autocommit connection, passed to store functions typed for units. They work, but a multi-row seed that
+  fails part way commits its first rows, and `ty` does not see the calls because the fixture is untyped. Typing the
+  fixture as a connection makes `ty` list them; each then takes a unit (`tests/sessions.Bridge`). Not in P7's list.
 
 ### A2. Work gate
 

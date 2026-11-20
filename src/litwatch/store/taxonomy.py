@@ -175,7 +175,7 @@ async def save(unit: WriteUnit, tree: Taxonomy) -> Saved:
             saved.revised_classes.append(c.slug)
 
     latest = await _latest(unit, "topic_versions")
-    after: dict[str, tuple[str, bool, int]] = {}
+    after: dict[str, tuple[str, str, int]] = {}
     for position, t in enumerate(tree.topics, 1):
         revision, new = _revision(latest, t.slug, t.version)
         after[t.slug] = (t.depth.value, t.status.value, revision)
