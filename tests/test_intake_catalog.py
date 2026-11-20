@@ -9,6 +9,7 @@ from litwatch import intake
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import Paper
+from litwatch.gates.database import DatabaseGate
 from litwatch.intake import atom, catalog, oai
 from litwatch.intake.http import SourceError, XmlClient
 from litwatch.integrations import IntegrationError
@@ -80,7 +81,12 @@ async def checkpoint(conn) -> date | None:
 async def collect(conn, fake: FakeArchive, categories=("cs.CL",)):
     run_id = await started(conn, "intake", SINCE, NOW)
     return await intake.collect(
-        conn, categories, SINCE, run_id, archive=lambda: archive(fake), rules=settling.RULES
+        DatabaseGate.over(conn),
+        categories,
+        SINCE,
+        run_id,
+        archive=lambda: archive(fake),
+        rules=settling.RULES,
     )
 
 
@@ -88,7 +94,13 @@ async def walk(conn, arxiv: Arxiv, fake: FakeArchive, since: date):
     run_id = await started(conn, "intake", SINCE, NOW)
     with XmlClient() as client:
         return await catalog.run(
-            conn, lambda: archive(fake), ("cs.CL",), since, run_id, client, source=arxiv
+            DatabaseGate.over(conn),
+            lambda: archive(fake),
+            ("cs.CL",),
+            since,
+            run_id,
+            client,
+            source=arxiv,
         )
 
 
@@ -131,7 +143,7 @@ async def test_a_backfill_walks_weeks_and_moves_the_checkpoint_after_each(conn):
     days = {start + timedelta(days=i): [paper(f"2609.{i:05d}", ["cs.CV"])] for i in range(17)}
     arxiv = Arxiv(days=days)
     fake = FakeArchive()
-    await catalog.lower(conn, start)
+    await catalog.lower(DatabaseGate.over(conn), start)
 
     done = await walk(conn, arxiv, fake, TODAY)
 
@@ -156,7 +168,7 @@ async def test_a_failed_registration_keeps_its_window_open(conn):
         return handle(req)
 
     fake.handle = refuse_the_second_week
-    await catalog.lower(conn, start)
+    await catalog.lower(DatabaseGate.over(conn), start)
 
     done = await walk(conn, Arxiv(days=days), fake, TODAY)
 
@@ -164,16 +176,16 @@ async def test_a_failed_registration_keeps_its_window_open(conn):
     assert done["through"] == (start + timedelta(days=6)).isoformat()
     assert await checkpoint(conn) == start + timedelta(days=6)
     # The same command resumes from there; a run from an earlier day starts over.
-    await catalog.lower(conn, start)
+    await catalog.lower(DatabaseGate.over(conn), start)
     assert await checkpoint(conn) == start + timedelta(days=6)
-    await catalog.lower(conn, start - timedelta(days=1))
+    await catalog.lower(DatabaseGate.over(conn), start - timedelta(days=1))
     assert await checkpoint(conn) is None
 
 
 async def test_a_window_over_budget_is_halved(conn):
     start = TODAY - timedelta(days=13)
     arxiv = Arxiv(budget=3)
-    await catalog.lower(conn, start)
+    await catalog.lower(DatabaseGate.over(conn), start)
 
     done = await walk(conn, arxiv, FakeArchive(), TODAY)
 
@@ -192,7 +204,7 @@ async def test_a_day_with_unresolved_versions_stops_the_pass_before_it(conn):
     bad = start + timedelta(days=4)
     days = {start + timedelta(days=i): [paper(f"2609.{i:05d}", ["cs.CV"])] for i in range(7)}
     fake = FakeArchive()
-    await catalog.lower(conn, start)
+    await catalog.lower(DatabaseGate.over(conn), start)
 
     done = await walk(conn, Arxiv(days=days, unresolved=[bad]), fake, TODAY)
 
@@ -256,7 +268,7 @@ async def test_an_archive_client_that_cannot_be_made_fails_only_the_pass(conn, m
     run_id = await started(conn, "intake", SINCE, NOW)
 
     result = await intake.collect(
-        conn, ("cs.CL",), SINCE, run_id, archive=opener, rules=settling.RULES
+        DatabaseGate.over(conn), ("cs.CL",), SINCE, run_id, archive=opener, rules=settling.RULES
     )
 
     assert result.details["status"] == "complete" and result.inserted == 1

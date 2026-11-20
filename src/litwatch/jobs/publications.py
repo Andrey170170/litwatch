@@ -12,6 +12,7 @@ from litwatch.core import Publication
 from litwatch.gates.database import DatabaseGate
 from litwatch.jobs.context import run_record
 from litwatch.publications.dblp import PublicationSource, SourceError
+from litwatch.store import outbox
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
 
@@ -38,7 +39,7 @@ async def store_record(
     async with db.write("store publication", locks=[lock]) as unit:
         stored, before = await store.put(unit, paper_id, record, by_owner=by_owner)
         if stored and record and record != before:
-            await events.emit(
+            await outbox.emit(
                 unit,
                 events.PUBLICATION_FOUND,
                 paper_id,

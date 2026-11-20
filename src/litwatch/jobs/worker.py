@@ -278,11 +278,9 @@ class Worker:
         """A failed digest written again (`jobs.digests.again`), in one chunk."""
         try:
             run = await self._run_of(job)
-            # Transitional: the digests take a connection until P5 moves them.
-            async with self.db.lend("write a digest again") as conn:
-                state, why = await digest_jobs.again(
-                    conn, run, job["scope"]["digest"], rules=word.rules(self.config)
-                )
+            state, why = await digest_jobs.again(
+                self.db, run, job["scope"]["digest"], rules=word.rules(self.config)
+            )
             async with self.db.write("digest job") as unit:
                 await jobs_store.progress(unit, job["id"], 1, dict(run.tally()), me=self._me)
                 await jobs_store.finish(unit, job["id"], state, why, me=self._me)

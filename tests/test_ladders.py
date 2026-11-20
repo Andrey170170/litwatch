@@ -12,6 +12,7 @@ from litwatch import analysis, grading
 from litwatch.archive import ArchiveClient
 from litwatch.config import RoleConfig
 from litwatch.fulltext import brief
+from litwatch.gates.database import DatabaseGate
 from litwatch.llm import ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
 from litwatch.quality import ladders
@@ -362,7 +363,7 @@ async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
         ladders.Case(set="quality", role="brief", paper=unversioned.id, subject=FAITH.slug),
         ladders.Case(set="quality", role="judge", paper="2610.00404", subject=FAITH.slug),
     ]
-    built = await ladders.requests(conn, archive, chosen)
+    built = await ladders.requests(DatabaseGate.over(conn), archive, chosen)
     stored = (await papers_store.get_many(conn, [first.id]))[0]
     keys = [c.key for c in chosen]
     faith_name, interp_name = TREE.get(FAITH.slug).name, TREE.get(INTERP.slug).name

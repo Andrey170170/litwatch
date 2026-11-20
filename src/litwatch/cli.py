@@ -20,7 +20,7 @@ from litwatch import logs, seeds, store
 from litwatch.archive import ArchiveError
 from litwatch.core import Paper, Taxonomy
 from litwatch.feedback import word
-from litwatch.gates.database import BusyError, Connection, DatabaseGate, PoolTimeoutError, ReadUnit
+from litwatch.gates.database import BusyError, DatabaseGate, PoolTimeoutError, ReadUnit
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
@@ -505,20 +505,19 @@ def eval_replay(
         raise typer.BadParameter(f"no cohort {', '.join(sorted(unknown))}")
 
     async def prepare(db: DatabaseGate) -> tuple[Any, dict[str, float]]:
-        async with db.lend("replay: prepare") as conn:  # transitional: replay moves in P5
-            return await prepared(conn)
-
-    async def prepared(conn: Connection) -> tuple[Any, dict[str, float]]:
-        if resume is not None:
-            r = await replay.resume(conn, cfg, resume)
-        else:
-            tree = await taxonomy_store.load(conn)
-            if tree is None:
-                raise ValueError("no taxonomy yet: `litwatch taxonomy import` the seed first")
-            every = replay.load(labels or replay.LABELS) + await replay.misses(conn)
-            chosen = replay.select(every, replay.focus(tree), cohorts=cohort, negatives=sample)
-            r = await replay.prepare(conn, chosen, limit=limit)
-        return r, await replay.estimate(conn, cfg, r)
+        # The owner's label files are read before the unit opens, not while it holds a snapshot.
+        given = replay.load(labels or replay.LABELS) if resume is None else []
+        async with db.read("replay: prepare") as unit:
+            if resume is not None:
+                r = await replay.resume(unit, cfg, resume)
+            else:
+                tree = await taxonomy_store.load(unit)
+                if tree is None:
+                    raise ValueError("no taxonomy yet: `litwatch taxonomy import` the seed first")
+                every = given + await replay.misses(unit)
+                chosen = replay.select(every, replay.focus(tree), cohorts=cohort, negatives=sample)
+                r = await replay.prepare(unit, chosen, limit=limit)
+            return r, await replay.estimate(unit, cfg, r)
 
     try:
         r, cost = _run(prepare)
@@ -544,14 +543,9 @@ def eval_replay(
 
     async def work(db: DatabaseGate) -> dict[str, Any]:
         if r.eval_run_id is None:
-            async with db.lend("replay") as conn:  # transitional: replay moves in P5
-                params = {
-                    "cohorts": cohort,
-                    "negatives": sample,
-                    "seed": replay.SEED,
-                    "limit": limit,
-                }
-                await replay.start(conn, cfg, r, params, note)
+            params = {"cohorts": cohort, "negatives": sample, "seed": replay.SEED, "limit": limit}
+            async with db.write("replay: start") as unit:
+                await replay.start(unit, cfg, r, params, note)
             console.print(f"replay {r.eval_run_id}")
         return await replay.run(db, cfg, r)
 
@@ -766,8 +760,7 @@ def eval_ladders(
 
     async def prepare(db: DatabaseGate) -> dict[str, Any]:
         try:
-            async with db.lend("ladders") as conn:  # transitional: ladders move in P5
-                return await ladders.requests(conn, archive, chosen)
+            return await ladders.requests(db, archive, chosen)
         finally:
             if archive is not None:
                 await archive.aclose()
@@ -836,9 +829,8 @@ def eval_ladders_report(
     async def work(db: DatabaseGate) -> tuple[dict[str, Any], dict[str, str]]:
         ids = sorted({c.paper for c in chosen if c.paper and c.set == "refusals"})
         try:
-            async with db.lend("ladders report") as conn:  # transitional: ladders move in P5
-                built = await ladders.requests(conn, archive, chosen)
-                found_papers = await ladders.papers(conn, archive, ids)
+            built = await ladders.requests(db, archive, chosen)
+            found_papers = await ladders.papers(db, archive, ids)
             return built, {p.id: p.title for p in found_papers.values()}
         finally:
             if archive is not None:

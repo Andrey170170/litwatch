@@ -18,8 +18,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from litwatch import events
-from litwatch.core import Depth, Grade, Status, Taxonomy, Topic
+from litwatch.core import Depth, Grade, Status, Taxonomy, Topic, events
 from litwatch.core.digests import (
     DUE_WINDOW,
     PUBLISHED,
@@ -31,7 +30,7 @@ from litwatch.core.digests import (
 from litwatch.core.fulltext import AWAITING_TOO_LONG
 from litwatch.core.grading import GRADES, NO_WEIGHT
 from litwatch.core.rules import REACTION_WORDS
-from litwatch.store import jobs
+from litwatch.store import jobs, outbox
 from litwatch.store.analyses import CURRENT_GIST
 from litwatch.store.db import transaction
 from litwatch.store.reading import SCOPE, STANDING, _rank, _scope
@@ -634,7 +633,7 @@ async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) 
             )
         if o.state in PUBLISHED:
             await jobs.settle_digest(conn, row["id"])
-            await events.emit(
+            await outbox.emit(
                 conn,
                 events.DIGEST_WRITTEN,
                 digest=row["id"],

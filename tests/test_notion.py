@@ -29,6 +29,7 @@ from litwatch.core import (
     Verdict,
 )
 from litwatch.events import dispatch
+from litwatch.gates.database import DatabaseGate
 from litwatch.integrations.notion import FAILED_REVIEW, Notion, NotionClient, _hash
 from litwatch.jobs.publications import store_record
 from litwatch.store import integrations as integrations_store
@@ -450,7 +451,7 @@ async def test_new_texts_a_card_and_a_published_record_reach_the_page_as_they_co
 
     async def emit(kind: str) -> None:
         async with conn.transaction():
-            await events.emit(conn, kind, A.id)
+            await outbox.emit(conn, kind, A.id)
 
     await texts(conn, A, gist="Probes catch hidden steps.")
     await emit(events.GIST_WRITTEN)
@@ -470,7 +471,7 @@ async def test_new_texts_a_card_and_a_published_record_reach_the_page_as_they_co
     asked = len(fake.requests)  # each again: nothing to write
     for event in await outbox.after(conn, outbox.START, 1000):
         if n.wants(event) and event.type != events.GRADE_CHANGED:
-            await n.handle(conn, event)
+            await n.handle(DatabaseGate.over(conn), event)
     assert len(fake.requests) == asked
 
 
@@ -560,7 +561,7 @@ async def test_an_event_from_before_causes_were_recorded_reads_as_a_verdict(worl
     adjacent = Effective(fit=Fit.ADJACENT, grade=Grade.ADJACENT, rarity=Rarity.UNCOMMON)
     async with conn.transaction():
         await word_store.set_effective(conn, A.id, FAITH.slug, adjacent)
-        await events.emit(
+        await outbox.emit(
             conn,
             events.GRADE_CHANGED,
             A.id,
@@ -589,7 +590,7 @@ async def test_a_repeated_event_or_a_restart_sends_no_write(world, db):
 
     # The same event again: the page already says it.
     changes = [e for e in await outbox.after(conn, outbox.START, 1000) if n.wants(e)]
-    await n.handle(conn, changes[-1])
+    await n.handle(DatabaseGate.over(conn), changes[-1])
     assert len(fake.requests) == before
 
     # A restart: nothing is written, and a view the owner deleted is not made again.
@@ -831,7 +832,7 @@ async def test_a_raised_minimum_keeps_the_cause_of_a_change_not_yet_handed_over(
 
     # A change that moves the Fit but not the grade (a Weight holding it) says nothing new.
     async with conn.transaction():
-        await events.emit(
+        await outbox.emit(
             conn,
             events.GRADE_CHANGED,
             A.id,

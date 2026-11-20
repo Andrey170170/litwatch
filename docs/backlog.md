@@ -28,8 +28,6 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
 
 - **Settling a paper made cheap** (review, project 1): one taxonomy snapshot per transaction, current verdicts only,
   each paper settled once.
-- **The SQL outside `store`** (review, project 4): the places listed in `tests/test_sql_home.py` (30 calls in 17
-  functions on 2026-11-17).
 - **Tests for `change` with several papers** (review, project 7): overlapping sets in reverse order across two
   connections, rollback when a later paper fails; shared test helpers into support modules.
 - **`/summary` reworked** (review): spend summed once, narrow reads instead of full Settings data; with it:
@@ -45,8 +43,6 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
   - which source set the owner's word on a topic, from the API instead of guessed by the UI (`whoseFit`);
   - typed response models for `/quality`, `/runs` and `/calibrate` (review, project 3).
 - **Intake stops rewriting unchanged rows** on its three-day overlap (review, project 8).
-- **The role checks' listed violations in its area:** `store` imports `events` (`store/digests.py`, `store/papers.py`
-  emit events) and `llm` (`store/calls.py` uses `llm.types.Usage`), listed in `pyproject.toml`.
 - **Drops the owner marked** in [`notes/still-used.md`](notes/still-used.md): the live-label `provisional` handling
   and the revision-1 fallback (`papers.py`, `row.get("revision") or 1`).
 
@@ -180,6 +176,9 @@ Built between milestones, on whatever structure exists then.
   makes the length check lax, since the rest stays readable in the session. Idea (2026-11-10): the writer may move a
   part's border when the parsing is wrong, and the length check stays measured on code's cuts, or on the reviewer's,
   so the writer does not set its own bar. Wait for a PDF-only read whose parts came out wrong. *Needs shaping.*
+- **A cleared publication record reaches the exports.** Clearing a paper's record emits no event, so Notion's Venue
+  and Zotero's "Published" line keep the old record until the paper's next event or Notion's reconcile. A write that
+  lands while an export reads the paper is missed the same way (A1 P5's review). An event on clearing closes both.
 - **A0's small fixes left three follow-ups:**
   - `mcp_types`, `starlette` and `pymupdf` are imported but not declared; they arrive through other packages;
   - two more tests in `tests/test_batches.py` share the race #154 fixed (the batched night, the digest batch count):

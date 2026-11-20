@@ -69,23 +69,23 @@ async def test_a_draw_is_even_across_groups_seeded_and_skips_labelled_papers(db)
             origin=LabelOrigin.READER,
         ),
     )
-    first = await items(db, await calibrate.draw(db, seed=7, size=4))
+    first = await items(db, await calibrate.draw(DatabaseGate.over(db), seed=7, size=4))
     assert sorted(i["why"] for i in first) == ["above", "above", "below", "below"]
     assert ABOVE[0].id not in {i["paper_id"] for i in first}
-    again = await items(db, await calibrate.draw(db, seed=7, size=4))
+    again = await items(db, await calibrate.draw(DatabaseGate.over(db), seed=7, size=4))
     assert [i["paper_id"] for i in again] == [i["paper_id"] for i in first]
 
 
 async def test_a_draw_skips_a_verdict_on_text_since_rewritten(db):
     rewritten = ABOVE[0].model_copy(update={"abstract": "An entirely different abstract."})
     await papers_store.upsert(db, [rewritten])
-    drawn = await items(db, await calibrate.draw(db, seed=7, size=6))
+    drawn = await items(db, await calibrate.draw(DatabaseGate.over(db), seed=7, size=6))
     assert ABOVE[0].id not in {i["paper_id"] for i in drawn}
     assert sorted(i["why"] for i in drawn) == ["above", "above", "below", "below", "below"]
 
 
 async def test_answers_become_labels_and_appraisals(db):
-    session_id = await calibrate.draw(db, seed=1, size=2)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     assert item["verdict"] == "related"  # the pipeline's side, for the review
     with pytest.raises(ValueError, match="required"):
@@ -117,7 +117,7 @@ async def test_a_fit_moved_between_topics_keeps_the_paper_in_the_library_through
     topic to another emits no unsave and save between them."""
     second = AGENTS.model_copy(update={"depth": Depth.FOCUS, "rubric": "Tool use, end to end."})
     await settling.save_taxonomy(db, TREE.following(second))
-    session_id = await calibrate.draw(db, seed=1, size=4)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=1, size=4)
     # Drawn above the line on its Focus topic: graded relevant, so in the library.
     (item,) = [
         i for i in await items(db, session_id) if i["topic"] == FAITH.slug and i["why"] == "above"
@@ -140,7 +140,7 @@ async def library_events(conn, paper_id: str) -> list[str]:
 
 
 async def test_precision_judges_the_drawn_verdict_and_ignores_the_unanswered(db):
-    session_id = await calibrate.draw(db, seed=3, size=6)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=3, size=6)
     above = [i for i in await items(db, session_id) if i["why"] == "above"]
     below = [i for i in await items(db, session_id) if i["why"] == "below"]
     await answer(
@@ -174,17 +174,17 @@ async def test_more_takes_in_straddling_splits_and_thumbed_papers_once(db):
             reason=ReactionReason.GREAT_FIND,
         ),
     )
-    session_id = await calibrate.draw(db, seed=5, size=0)
-    assert await calibrate.more(db, session_id) == 2
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=5, size=0)
+    assert await calibrate.more(DatabaseGate.over(db), session_id) == 2
     assert {(i["paper_id"], i["why"]) for i in await items(db, session_id)} >= {
         (extra.id, "split"),
         (BELOW[0].id, "reaction"),
     }
-    assert await calibrate.more(db, session_id) == 0
+    assert await calibrate.more(DatabaseGate.over(db), session_id) == 0
 
 
 async def test_an_answer_counts_even_when_the_paper_had_a_label_since_the_draw(db):
-    session_id = await calibrate.draw(db, seed=3, size=2)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=3, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     await settling.label(
         db,
@@ -212,8 +212,8 @@ async def test_more_takes_in_an_unmarked_miss_for_a_focus_topic_only(db):
         "INSERT INTO misses (paper_id, topic) VALUES (%s, %s), (%s, 'interpretability')",
         (missed.id, FAITH.slug, elsewhere.id),
     )
-    session_id = await calibrate.draw(db, seed=5, size=0)
-    await calibrate.more(db, session_id)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=5, size=0)
+    await calibrate.more(DatabaseGate.over(db), session_id)
     taken = {(i["paper_id"], i["why"]) for i in await items(db, session_id)}
     assert (missed.id, "miss") in taken
     assert (elsewhere.id, "miss") not in taken  # no label can be given for an Area topic
@@ -226,8 +226,8 @@ async def test_a_miss_keeps_the_verdict_standing_when_it_joins(db):
     await db.execute(
         "INSERT INTO misses (paper_id, topic) VALUES (%s, %s)", (missed.id, FAITH.slug)
     )
-    session_id = await calibrate.draw(db, seed=5, size=0)
-    await calibrate.more(db, session_id)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=5, size=0)
+    await calibrate.more(DatabaseGate.over(db), session_id)
     await verdicts.add(db, verdict(missed.id, Fit.CENTRAL))  # regraded after the session
     (item,) = [i for i in await items(db, session_id) if i["why"] == "miss"]
     assert item["verdict"] == "related"
@@ -236,7 +236,7 @@ async def test_a_miss_keeps_the_verdict_standing_when_it_joins(db):
 async def test_an_answer_does_not_renew_a_label_it_leaves_as_it_was(db):
     """Editing only the appraisal sends the drawn Fit again; the label keeps its time, so a
     reaction given since still outranks it."""
-    session_id = await calibrate.draw(db, seed=1, size=2)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     fit = {FAITH.slug: LabelValue.NONE}
     await answer(db, session_id, item["position"], Answer(fit=fit))
@@ -251,7 +251,7 @@ async def test_an_appraisal_edit_after_the_first_answer_writes_no_label(db):
     """The drawn topic's Fit is required on the first answer only. An edit of the appraisal
     alone leaves the Fit out, so a label the owner has since taken back is not recreated from
     the recorded answer; the answer stands as recorded."""
-    session_id = await calibrate.draw(db, seed=1, size=2)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     with pytest.raises(ValueError, match="required"):
         await answer(db, session_id, item["position"], Answer(fit={}, value="fine"))
@@ -268,7 +268,7 @@ async def test_an_appraisal_edit_after_the_first_answer_writes_no_label(db):
 
 
 async def test_fit_names_only_focus_topics(db):
-    session_id = await calibrate.draw(db, seed=1, size=2)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     fit = {FAITH.slug: LabelValue.NONE, "interpretability": LabelValue.NONE}
     with pytest.raises(ValueError, match="not Focus topics: interpretability"):
@@ -276,7 +276,7 @@ async def test_fit_names_only_focus_topics(db):
 
 
 async def test_an_appraisal_can_be_cleared(db):
-    session_id = await calibrate.draw(db, seed=1, size=2)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     fit = {FAITH.slug: LabelValue.NONE}
     await answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
@@ -295,7 +295,7 @@ async def test_the_sessions_list_counts_answers_that_differ_from_the_verdict(db)
     from litwatch.api import create_app
     from litwatch.config import Config
 
-    session_id = await calibrate.draw(db, seed=3, size=4)
+    session_id = await calibrate.draw(DatabaseGate.over(db), seed=3, size=4)
     above = [i for i in await items(db, session_id) if i["why"] == "above"]  # verdict related
     below = [i for i in await items(db, session_id) if i["why"] == "below"]  # verdict none
     for item, fit in (

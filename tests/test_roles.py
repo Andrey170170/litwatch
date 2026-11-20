@@ -2,7 +2,7 @@
 `lint-imports` checks which role may import which, by the contracts in `pyproject.toml`; this
 file keeps those contracts' package lists in step with the packages, and checks that no two
 Service packages import each other in a cycle, function-level imports included, the way back
-through any role counted (a listed violation such as `store -> events` is one). The cycle list
+through any role counted. The cycle list
 only shrinks: an import that leaves a cycle comes off it."""
 
 import tomllib

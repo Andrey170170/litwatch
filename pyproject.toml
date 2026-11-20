@@ -63,8 +63,8 @@ testpaths = ["tests"]
 # gate, `api` and `cli` Entries, and every other package a Service. `store` may import `gates`
 # for the unit types, and `llm` for the nesting check. `config`, `logs`, `concurrency` and `writing` are shared modules: they import
 # only `core`, and any role but `core` and `store` may import them. `tests/test_roles.py` keeps the lists below in step with the
-# packages, and checks that Services form no cycle. `ignore_imports` lists today's violations: it
-# only shrinks, and an entry that no longer matches an import fails the check.
+# packages, and checks that Services form no cycle. No contract has an `ignore_imports`: a
+# violation is fixed, not listed.
 [tool.importlinter]
 root_package = "litwatch"
 
@@ -100,11 +100,6 @@ forbidden_modules = [
     "litwatch.quality",
     "litwatch.seeds",
     "litwatch.writing",
-]
-ignore_imports = [
-    "litwatch.store.calls -> litwatch.llm.types",
-    "litwatch.store.digests -> litwatch.events",
-    "litwatch.store.papers -> litwatch.events",
 ]
 
 [[tool.importlinter.contracts]]

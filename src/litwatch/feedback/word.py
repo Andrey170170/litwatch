@@ -66,6 +66,7 @@ from litwatch.store import analyses as analyses_store
 from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
+from litwatch.store import outbox
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from litwatch.store import word as word_store
@@ -263,7 +264,7 @@ async def _settle(
             moved = cause
             if cause == Cause.VERDICT and b["fit"] == a["fit"]:
                 moved = Cause.WEIGHT
-            await events.emit(
+            await outbox.emit(
                 unit,
                 events.GRADE_CHANGED,
                 paper_id,
@@ -290,7 +291,7 @@ async def _settle(
     result.saved = in_library(hand, focus_grades)
     if result.saved != result.was_saved:
         await word_store.set_saved(unit, paper_id, result.saved)
-        await events.emit(
+        await outbox.emit(
             unit, events.PAPER_SAVED if result.saved else events.PAPER_UNSAVED, paper_id
         )
     await _text_pass(unit, paper_id, topics, tree, after, read.text.get(paper_id), claimed, job)

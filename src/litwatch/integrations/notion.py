@@ -46,11 +46,11 @@ from typing import Any
 from urllib.parse import unquote
 
 import httpx
-import psycopg
 
 from litwatch import events
 from litwatch.config import Config
 from litwatch.core import Cause, Depth, Event, Grade, Paper, Publication, Status, deepread
+from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.integrations import IntegrationError, required, required_secret
 from litwatch.store import analyses as analyses_store
 from litwatch.store import integrations as integrations_store
@@ -260,40 +260,45 @@ class Notion:
     async def aclose(self) -> None:
         await self.notion.aclose()
 
-    async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
+    async def handle(self, db: DatabaseGate, event: Event) -> None:
         # Read again, under the dispatch lock: another service's setup may have made something
         # again since this one's.
-        db = await state.database(conn, self.name)
-        if self._db is None or db is None or db.parent_page != self.parent_page:
+        async with db.read(f"{self.name}: set up") as unit:
+            database = await state.database(unit, self.name)
+        if self._db is None or database is None or database.parent_page != self.parent_page:
             raise NotionError("not set up")
-        self._db = db
-        await self._write(conn, event.paper_id)
+        self._db = database
+        await self._write(db, event.paper_id)
 
     # -- reconcile ---------------------------------------------------------------------------------
 
-    async def setup(self, conn: psycopg.AsyncConnection) -> None:
+    async def setup(self, db: DatabaseGate) -> None:
         """Reconcile: make what is missing, then write every paper that qualifies or has a
         page. Safe to stop and run again at any point."""
-        self.exported = await self._exported(conn)
-        db = await state.database(conn, self.name)
-        if db is not None and db.parent_page != self.parent_page:
+        async with db.read(f"{self.name}: setup") as unit:
+            self.exported = await self._exported(unit)
+            database = await state.database(unit, self.name)
+        if database is not None and database.parent_page != self.parent_page:
             log.info("%s: the parent page changed; building afresh", self.name)
-            await state.forget(conn, self.name)
-            db = None
-        db = db or state.Database(self.name, self.parent_page)
-        await self._database(conn, db)
-        columns = await self._columns(conn, db)
-        await self._guide(conn, db)
-        await self._views(conn, db, columns)
-        self._db = db
+            async with db.write(f"{self.name}: forget") as unit:
+                await state.forget(unit, self.name)
+            database = None
+        database = database or state.Database(self.name, self.parent_page)
+        await self._database(db, database)
+        columns = await self._columns(db, database)
+        await self._guide(db, database)
+        await self._views(db, database, columns)
+        self._db = database
         grades = [g.value for g in Grade if g.at_least(self.minimum)]
-        for paper_id in await state.papers(conn, self.name, list(self.exported), grades):
-            await self._write(conn, paper_id)
+        async with db.read(f"{self.name}: papers") as unit:
+            todo = await state.papers(unit, self.name, list(self.exported), grades)
+        for paper_id in todo:
+            await self._write(db, paper_id)
 
-    async def _exported(self, conn: psycopg.AsyncConnection) -> dict[str, Exported]:
+    async def _exported(self, unit: ReadUnit) -> dict[str, Exported]:
         """The exported topics, in the configuration's order, or the Focus topics in the
         owner's."""
-        tree = await taxonomy_store.load(conn)
+        tree = await taxonomy_store.load(unit)
         if tree is None:
             raise NotionError("there is no taxonomy yet")
         names = {c.slug: c.name for c in tree.classes}
@@ -318,8 +323,8 @@ class Notion:
                 return block["id"]
         return None
 
-    async def _database(self, conn: psycopg.AsyncConnection, db: state.Database) -> None:
-        if db.database_id:
+    async def _database(self, db: DatabaseGate, database: state.Database) -> None:
+        if database.database_id:
             return
         if found := await self._child("child_database", DATABASE_TITLE):
             made = await self.notion.request("GET", f"/databases/{found}")
@@ -334,21 +339,21 @@ class Notion:
                 },
             )
             log.info("%s: made the database %s", self.name, made["id"])
-        db.database_id, db.data_source_id = made["id"], made["data_sources"][0]["id"]
-        await state.save_database(conn, db)
+        database.database_id, database.data_source_id = made["id"], made["data_sources"][0]["id"]
+        await self._save(db, database)
 
-    async def _columns(self, conn: psycopg.AsyncConnection, db: state.Database) -> dict[str, str]:
+    async def _columns(self, db: DatabaseGate, database: state.Database) -> dict[str, str]:
         """Put back the columns litwatch writes, their types and their grade options, add or
         rename each exported topic's grade column, and give Topic an option per topic exported
         so far. Returns the columns' property ids by name. Once a column, type or option was put
         back, every row is written again."""
-        path = f"/data_sources/{db.data_source_id}"
+        path = f"/data_sources/{database.data_source_id}"
         source = await self.notion.request("GET", path)
         if source.get("in_trash"):
             raise NotionError(TRASHED)
         props = source["properties"]
         # A name another topic's column is recorded under, renamed now or not, is that topic's.
-        held = {e["name"]: s for s, e in db.topics.items()}
+        held = {e["name"]: s for s, e in database.topics.items()}
         if clash := sorted(t.name for s, t in self.exported.items() if held.get(t.name, s) != s):
             raise NotionError(
                 f"already the column of another topic: {', '.join(clash)}; give the topic "
@@ -360,15 +365,15 @@ class Notion:
         broken = [c for c in mine if props.get(c, {}).get("type") != next(iter(COLUMNS[c]))]
         change: dict[str, Any] = {c: COLUMNS[c] for c in broken}
         restored, added = bool(broken), []
-        recorded = set(db.topics)  # the topics exported before this pass
+        recorded = set(database.topics)  # the topics exported before this pass
         for slug, topic in self.exported.items():
-            entry = db.topics.get(slug)
+            entry = database.topics.get(slug)
             column = by_id.get(entry["column"]) if entry else None
             if column is None and (column := props.get(topic.name)):
                 # Made, though its reply was lost: a select of the grade options alone, and no
                 # other topic's. Any other column of that name is the reader's, or another topic's.
                 kept = {o["name"] for o in column.get("select", {}).get("options", [])}
-                others = {e["column"] for s, e in db.topics.items() if s != slug}
+                others = {e["column"] for s, e in database.topics.items() if s != slug}
                 if kept != {o["name"] for o in GRADE_OPTIONS} or unquote(column["id"]) in others:
                     raise NotionError(
                         f"{topic.name!r} is already a column of the reader's or another topic's; "
@@ -385,14 +390,17 @@ class Notion:
                 if column["type"] != "select":
                     change.setdefault(key, {})["select"] = {"options": GRADE_OPTIONS}
                     restored = True
-            db.topics[slug] = {
+            database.topics[slug] = {
                 "name": topic.name,
                 "column": unquote(column["id"]) if column else None,
                 "view": entry["view"] if entry else None,
             }
         # The grade options are litwatch's too: one the owner deleted or renamed is put back,
         # which takes any other off the rows, and they are written again.
-        grades = [props.get("Grade"), *(by_id.get(db.topics[s]["column"]) for s in self.exported)]
+        grades = [
+            props.get("Grade"),
+            *(by_id.get(database.topics[s]["column"]) for s in self.exported),
+        ]
         for column in (c for c in grades if c and c["type"] == "select"):
             names = {o["name"] for o in column["select"].get("options", [])}
             if names != {o["name"] for o in GRADE_OPTIONS}:
@@ -402,7 +410,7 @@ class Notion:
         have = [
             o["name"] for o in props.get("Topic", {}).get("multi_select", {}).get("options", [])
         ]
-        wanted = [db.topics[s]["name"] for s in self._order(db)]
+        wanted = [database.topics[s]["name"] for s in self._order(database)]
         if "Topic" in broken or set(have) != set(wanted):
             # The API renames no option: a renamed topic's old one goes, which takes it off the
             # pages, and they are written again with the new name.
@@ -413,24 +421,25 @@ class Notion:
             change["Topic"] = {"multi_select": {"options": options}}
             # Rows lose an option that goes, and lack one the owner deleted: write them again.
             gone = set(have) - set(wanted)
-            lost = {db.topics[s]["name"] for s in recorded} - set(have)
+            lost = {database.topics[s]["name"] for s in recorded} - set(have)
             restored |= bool(gone or lost)
         if restored:  # first: the repair's reply may be lost, and the column then looks whole
-            await state.rewrite_properties(conn, self.name)
+            async with db.write(f"{self.name}: rewrite properties") as unit:
+                await state.rewrite_properties(unit, self.name)
         if change:
             props = (await self.notion.request("PATCH", path, {"properties": change}))["properties"]
         for slug in added:
-            db.topics[slug]["column"] = unquote(props[db.topics[slug]["name"]]["id"])
-        await state.save_database(conn, db)
+            database.topics[slug]["column"] = unquote(props[database.topics[slug]["name"]]["id"])
+        await self._save(db, database)
         return {name: unquote(p["id"]) for name, p in props.items()}
 
-    async def _guide(self, conn: psycopg.AsyncConnection, db: state.Database) -> None:
+    async def _guide(self, db: DatabaseGate, database: state.Database) -> None:
         """ "How to read this", beside the database, rewritten when what it says changed, and
         made again when it was taken away: it is litwatch's."""
-        if db.guide_page and await self._trashed(db.guide_page):
+        if database.guide_page and await self._trashed(database.guide_page):
             log.info("%s: %r was taken away in Notion; making it again", self.name, GUIDE_TITLE)
-            db.guide_page = None
-        if not db.guide_page:
+            database.guide_page = None
+        if not database.guide_page:
             if not (found := await self._child("child_page", GUIDE_TITLE)):
                 made = await self.notion.request(
                     "POST",
@@ -441,61 +450,64 @@ class Notion:
                     },
                 )
                 found = made["id"]
-            db.guide_page, db.guide_hash = found, None
-            await state.save_database(conn, db)
+            database.guide_page, database.guide_hash = found, None
+            await self._save(db, database)
         blocks = self._guide_blocks()
-        if (digest := _hash(blocks)) != db.guide_hash:
-            if db.guide_hash:  # forgotten first, as a page's hashes are (`_write`)
-                db.guide_hash = None
-                await state.save_database(conn, db)
-            await self._replace_body(db.guide_page, blocks)
-            db.guide_hash = digest
-            await state.save_database(conn, db)
+        if (digest := _hash(blocks)) != database.guide_hash:
+            if database.guide_hash:  # forgotten first, as a page's hashes are (`_write`)
+                database.guide_hash = None
+                await self._save(db, database)
+            await self._replace_body(database.guide_page, blocks)
+            database.guide_hash = digest
+            await self._save(db, database)
 
     async def _views(
-        self, conn: psycopg.AsyncConnection, db: state.Database, columns: dict[str, str]
+        self, db: DatabaseGate, database: state.Database, columns: dict[str, str]
     ) -> None:
         """Make the views not made yet: All papers, and one per exported topic. A view once made
         is the owner's and never touched again, even when the owner deleted it."""
-        wanted = [(None, ALL_PAPERS, columns["Grade"])] if not db.all_view else []
+        wanted = [(None, ALL_PAPERS, columns["Grade"])] if not database.all_view else []
         wanted += [
-            (s, t.name, db.topics[s]["column"])
+            (s, t.name, database.topics[s]["column"])
             for s, t in self.exported.items()
-            if not db.topics[s]["view"]
+            if not database.topics[s]["view"]
         ]
         if not wanted:
             return
         known: dict[str, list[str]] = {}  # the database's views by name, oldest first
-        for v in await self.notion.every("/views", database_id=db.database_id):
+        for v in await self.notion.every("/views", database_id=database.database_id):
             view = await self.notion.request("GET", f"/views/{v['id']}")
             known.setdefault(view["name"], []).append(view["id"])
         fresh = list(known) == [DEFAULT_VIEW]  # a new database, with Notion's one view
         # Views litwatch made, whatever the owner named them since: none is taken twice.
-        owned = {db.all_view, *(t["view"] for t in db.topics.values())} - {None}
+        owned = {database.all_view, *(t["view"] for t in database.topics.values())} - {None}
         for slug, name, group in wanted:
             view = next((v for v in known.get(name, []) if v not in owned), None)
             if view is None:
-                body = self._view(db, name, group, columns, filtered=slug is not None)
+                body = self._view(database, name, group, columns, filtered=slug is not None)
                 if slug is None and fresh:
                     made = await self.notion.request(
                         "PATCH", f"/views/{known[DEFAULT_VIEW][0]}", body
                     )
                 else:
-                    target = {"database_id": db.database_id, "data_source_id": db.data_source_id}
+                    target = {
+                        "database_id": database.database_id,
+                        "data_source_id": database.data_source_id,
+                    }
                     made = await self.notion.request(
                         "POST", "/views", {**target, "type": "table", **body}
                     )
                 view = made["id"]
             owned.add(view)
             if slug is None:
-                db.all_view = view
+                database.all_view = view
             else:
-                db.topics[slug]["view"] = view
-            await state.save_database(conn, db)
+                database.topics[slug]["view"] = view
+            await self._save(db, database)
 
     def _view(
         self,
-        db: state.Database,
+        database: state.Database,
         name: str,
         group: str,
         columns: dict[str, str],
@@ -504,7 +516,7 @@ class Notion:
     ) -> dict[str, Any]:
         """A table view grouped by the grade column `group`, newest published first; `filtered`
         shows only the rows with a grade there."""
-        order = [*COLUMNS, *(db.topics[s]["name"] for s in self._order(db))]
+        order = [*COLUMNS, *(database.topics[s]["name"] for s in self._order(database))]
 
         def title(c: str) -> bool:  # by its fixed id: the reader may rename it
             return columns[c] == "title"
@@ -537,52 +549,55 @@ class Notion:
 
     # -- a paper's page --------------------------------------------------------------------------
 
-    async def _write(self, conn: psycopg.AsyncConnection, paper_id: str) -> None:
+    async def _write(self, db: DatabaseGate, paper_id: str) -> None:
         """Bring the paper's page in line with what litwatch holds now, writing nothing that did
         not change. A page someone took away in Notion is left alone from then on."""
-        page = await state.page(conn, self.name, paper_id)
-        if page is not None and page.gone_at is not None:
-            return
-        paper = await papers_store.get(conn, paper_id)
-        if paper is None:
-            return
-        withdrawn = await papers_store.withdrawal(conn, paper_id)
-        dismissed = await papers_store.dismissed_at(conn, paper_id)
-        aside = (
-            _Aside("withdrawn on arXiv.", withdrawn, "withdrawn")
-            if withdrawn
-            else _Aside(f"{self.owner_name} set it aside.", dismissed, "dismissed")
-            if dismissed
-            else None
-        )
-        effective = await word_store.effective_for(conn, paper_id)
-        begun = page is not None and page.page_id is None
-        topics = dict(page.topics) if page else {}
-        history: list[Event] | None = None  # its grade changes, read when one may say why it left
-        for slug in self.exported:
-            grade = effective[slug].grade.value if slug in effective else None
-            if slug in topics and not self._qualifies(grade, aside) and history is None:
-                history = await outbox.of_paper(conn, paper_id, events.GRADE_CHANGED)
-            changes = [e for e in history or [] if e.payload.get("topic") == slug]
-            if (now := self._topic(topics.get(slug), grade, aside, changes)) is None:
-                topics.pop(slug, None)
-            else:
-                topics[slug] = now
-        if not any(slug in topics for slug in self.exported):
-            return  # never listed, or only for topics no longer exported
+        async with db.read(f"{self.name}: {paper_id}") as unit:
+            page = await state.page(unit, self.name, paper_id)
+            if page is not None and page.gone_at is not None:
+                return
+            paper = await papers_store.get(unit, paper_id)
+            if paper is None:
+                return
+            withdrawn = await papers_store.withdrawal(unit, paper_id)
+            dismissed = await papers_store.dismissed_at(unit, paper_id)
+            aside = (
+                _Aside("withdrawn on arXiv.", withdrawn, "withdrawn")
+                if withdrawn
+                else _Aside(f"{self.owner_name} set it aside.", dismissed, "dismissed")
+                if dismissed
+                else None
+            )
+            effective = await word_store.effective_for(unit, paper_id)
+            begun = page is not None and page.page_id is None
+            topics = dict(page.topics) if page else {}
+            # Its grade changes, read when one may say why it left.
+            history: list[Event] | None = None
+            for slug in self.exported:
+                grade = effective[slug].grade.value if slug in effective else None
+                if slug in topics and not self._qualifies(grade, aside) and history is None:
+                    history = await outbox.of_paper(unit, paper_id, events.GRADE_CHANGED)
+                changes = [e for e in history or [] if e.payload.get("topic") == slug]
+                if (now := self._topic(topics.get(slug), grade, aside, changes)) is None:
+                    topics.pop(slug, None)
+                else:
+                    topics[slug] = now
+            if not any(slug in topics for slug in self.exported):
+                return  # never listed, or only for topics no longer exported
+            record = (await publications_store.found(unit, [paper_id])).get(paper_id)
+            gist = await analyses_store.current_gist(unit, paper_id)
+            card = await integrations_store.card(unit, paper_id)
         if page is None:
             page = state.Page(paper_id, added=self.now().astimezone(self.zone).date())
-        record = (await publications_store.found(conn, [paper_id])).get(paper_id)
-        gist = await analyses_store.current_gist(conn, paper_id)
-        card = await integrations_store.card(conn, paper_id)
         properties = self._properties(paper, gist, record, page.added, topics)
         body = self._body(paper, gist, card, topics, withdrawn)
         written = (page.page_id, page.properties_hash, page.body_hash, page.topics)
         if page.page_id is None:
             page.topics = topics  # kept with the creation: a lost reply is then known listed
             listed = any(topics[s]["shown"] != DROPPED for s in self.exported if s in topics)
-            if not await self._create(conn, page, properties, body, begun, make=listed):
-                await state.forget_page(conn, self.name, paper_id)  # it never got a page
+            if not await self._create(db, page, properties, body, begun, make=listed):
+                async with db.write(f"{self.name}: {paper_id} no page") as unit:
+                    await state.forget_page(unit, self.name, paper_id)  # it never got a page
                 return
         wanted = (_hash(properties), _hash(body))
         # A write that fails part way leaves the page unknown: its old hash must not match what
@@ -592,7 +607,7 @@ class Notion:
             h if h in (None, w) else None for h, w in zip(old, wanted, strict=True)
         )
         if (page.properties_hash, page.body_hash) != old:
-            await state.save_page(conn, self.name, page)
+            await self._save_page(db, page)
         try:
             if page.properties_hash != wanted[0]:
                 path = f"/pages/{page.page_id}"
@@ -606,15 +621,15 @@ class Notion:
                 raise
             log.info("%s: the page of %s was taken away in Notion; left alone", self.name, paper_id)
             page.gone_at = self.now()
-            await state.save_page(conn, self.name, page)
+            await self._save_page(db, page)
             return
         page.topics = topics
         if (page.page_id, page.properties_hash, page.body_hash, page.topics) != written:
-            await state.save_page(conn, self.name, page)
+            await self._save_page(db, page)
 
     async def _create(
         self,
-        conn: psycopg.AsyncConnection,
+        db: DatabaseGate,
         page: state.Page,
         properties: dict[str, Any],
         body: list[dict[str, Any]],
@@ -640,7 +655,7 @@ class Notion:
                 return True
         if not make:
             return False
-        await state.save_page(conn, self.name, page)  # begun: its reply may be lost
+        await self._save_page(db, page)  # begun: its reply may be lost
         made = await self.notion.request(
             "POST",
             "/pages",
@@ -652,8 +667,18 @@ class Notion:
         )
         page.page_id, page.properties_hash = made["id"], _hash(properties)
         page.body_hash = _hash(body) if len(body) <= BLOCKS else None
-        await state.save_page(conn, self.name, page)
+        await self._save_page(db, page)
         return True
+
+    async def _save(self, db: DatabaseGate, database: state.Database) -> None:
+        """What litwatch made in Notion, as far as it is known now."""
+        async with db.write(f"{self.name}: database") as unit:
+            await state.save_database(unit, database)
+
+    async def _save_page(self, db: DatabaseGate, page: state.Page) -> None:
+        """Where the paper's page stands, as far as it is known now."""
+        async with db.write(f"{self.name}: page {page.paper_id}") as unit:
+            await state.save_page(unit, self.name, page)
 
     async def _replace_body(self, block: str, body: list[dict[str, Any]]) -> None:
         """Delete the page's blocks, then append the new ones."""
@@ -758,9 +783,9 @@ class Notion:
             return "the topic's definition changed."
         return f"litwatch re-checked it and judged it {what}."
 
-    def _order(self, db: state.Database) -> list[str]:
+    def _order(self, database: state.Database) -> list[str]:
         """Every topic exported so far: those exported now in their order, then the rest."""
-        return [*self.exported, *sorted(s for s in db.topics if s not in self.exported)]
+        return [*self.exported, *sorted(s for s in database.topics if s not in self.exported)]
 
     def _why_lines(self, topics: dict[str, Any]) -> list[str]:
         """One line per topic the paper left, the topic named."""

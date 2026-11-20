@@ -608,28 +608,6 @@ async def test_the_bridge_refuses_a_connection_in_a_transaction(conn, probe):
     assert await count(conn) == 0
 
 
-async def test_a_lent_connection_is_its_own_in_autocommit_and_takes_no_pool_slot(conn, probe):
-    async with DatabaseGate(conn.test_dsn, conn.test_schema, max_size=1, timeout=0.2) as db:
-        async with db.lend("the borrower") as lent:
-            await lent.execute("INSERT INTO probe VALUES (1)")  # in the gate's schema
-            assert await count(conn) == 1  # committed as it ran: no unit around it
-            # The pool's one connection is free while the loan is out: a Service on the loan
-            # that opens a unit of its own does not wait for it.
-            async with db.write("the unit") as unit:
-                await unit.execute("INSERT INTO probe VALUES (2)")
-        assert lent.closed  # opened for the loan, closed at its end
-    assert await count(conn) == 2
-
-
-async def test_lending_a_connection_inside_a_unit_raises_when_strict(db):
-    async with db.read("the outer"):
-        with pytest.raises(NestingError, match="'the borrower' while unit 'the outer' is open"):
-            async with db.lend("the borrower"):
-                pass
-    async with db.lend("the borrower"):  # after it, a connection is lent again
-        pass
-
-
 async def test_a_gate_that_cannot_reach_its_database_fails_to_open():
     gate = DatabaseGate("postgresql://litwatch@127.0.0.1:1/none", timeout=0.3)
     with pytest.raises(PoolTimeoutError, match="no connection to the database in 0.3s"):

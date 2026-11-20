@@ -19,7 +19,6 @@ from litwatch.api.deps import (
     Rules,
     budget_lines,
     protected,
-    resolve_paper,
     set_token_cookie,
     token_ok,
 )
@@ -706,14 +705,7 @@ async def _bibtex(c: ReadUnit, ids: list[str], outside: list[Cited] | None = Non
     """Entries from the stored published records, arXiv ones for the rest, then `outside`
     hits as they are, all keyed in one namespace so no two entries share a key. Never
     waits on a lookup (decision 25)."""
-    rows = await (
-        await c.execute(
-            "SELECT id, title, authors, published, primary_category FROM papers "
-            "WHERE id = ANY(%s) ORDER BY array_position(%s, id)",
-            (ids, ids),
-        )
-    ).fetchall()
-    held = [_cited(r) for r in rows]
+    held = [_cited(r) for r in await papers_store.cited(c, ids)]
     return entries([*held, *(outside or [])], await publications_store.found(c, ids))
 
 
@@ -933,7 +925,7 @@ async def report_miss(body: s.MissIn, db: Db, rules: Rules) -> s.Ack:
     litwatch lacks is fetched first, as Process fetches it, with no transaction open, and
     stored in the report's own, so a refused report stores nothing."""
     try:
-        paper_id, fetched = await resolve_paper(db, body.paper_id)
+        paper_id, fetched = await misses.resolve(db, body.paper_id)
     except misses.NotFoundError as exc:
         raise HTTPException(status_code=404, detail="no such paper") from exc
     except NoAnswerError as exc:

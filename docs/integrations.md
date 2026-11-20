@@ -52,7 +52,7 @@ class Integration(Protocol):
 
 class Reacting(Integration, Protocol):
     def wants(self, event: Event) -> bool: ...
-    async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None: ...
+    async def handle(self, db: DatabaseGate, event: Event) -> None: ...
 ```
 
 An integration that reacts to events is a `Reacting` one; only those are handed events and keep
@@ -60,19 +60,23 @@ a cursor. `deep`, whose work is the full-text queue's, is a plain `Integration`.
 
 - `wants` is a cheap filter on the event alone (no I/O). Events it does not want are passed
   over without calling `handle`.
-- `handle` does the work. `conn` is an autocommit async psycopg connection (rows are dicts);
-  group writes with `async with conn.transaction():`. The connection is the integration's own
-  and serves one event at a time.
+- `handle` does the work. `db` is litwatch's Database gate (`litwatch.gates.database`), and
+  every database access goes through a unit opened on it: `async with db.read("name") as unit:`
+  for reads, which see one snapshot, and `async with db.write("name") as unit:` for writes,
+  which commit together at the end of the block (rows are dicts, as a unit speaks a psycopg
+  connection's `execute`). Keep units short and make no network call inside one: read what
+  you need, close the unit, call out, then write what came back in a unit of its own. Units do
+  not nest.
 - Optional, used when present (`aclose` and `requires` on any integration, the rest on a
   `Reacting` one):
-  - `async def setup(self, conn)`: awaited whenever the dispatcher starts, before any event, under
+  - `async def setup(self, db)`: awaited whenever the dispatcher starts, before any event, under
     the same lock as `handle`. It must be safe to run again. When it raises, no event is handed
     over; the error is shown under Settings → Integrations and setup is tried again after the
     same backoff as a failed event (or at once, on Retry).
   - `async def aclose(self)`: awaited when the service stops. Close HTTP clients here.
   - `requires: tuple[str, ...]`: names of integrations that must be loaded too; loading fails
     otherwise.
-  - `async def idle(self, conn)`: awaited when the integration has no event to be handed, at
+  - `async def idle(self, db)`: awaited when the integration has no event to be handed, at
     most about once a minute, under the same lock as `handle`, for work no event brings
     (retrying a delivery that waits on something outside litwatch). A failure is logged and changes
     nothing else; keep it short and bounded, since events wait while it runs.
@@ -102,12 +106,12 @@ what litwatch stores of it, is under "The deep service's result" below.
   (`litwatch.integrations.must_read_and_saved` does exactly that for `must_read`). An overruled
   `must_read`, one a later verdict superseded, or an unsaved paper gets nothing. When an unsaved
   paper is saved again, `paper.saved` arrives, so also listen to it to do what you skipped.
-- **Use only `events`, `store` and `core`** from litwatch (and your own HTTP client), plus the
-  small helpers in `litwatch.integrations`. Never import `api`, `jobs` or a pipeline package.
+- **Use only `events`, `store`, `core` and `gates.database`** from litwatch (and your own HTTP
+  client), plus the small helpers in `litwatch.integrations`. Never import `api`, `jobs` or a pipeline package.
 - **Keep your own state in your own table.** Read litwatch's data through the `store`
   repositories; do not write to its tables.
-- **You may emit events** of your own with `litwatch.events.emit(conn, type, paper_id, **payload)`,
-  in the same transaction as the state they describe. Other integrations can subscribe to them
+- **You may emit events** of your own with `litwatch.store.outbox.emit(unit, type, paper_id,
+  **payload)`, in the same write unit as the state they describe. Other integrations can subscribe to them
   (`deep` emits `card.ready`, which `zotero` and `notion` react to).
 - **Keep secrets out of logs and errors.** An error message is stored and shown under Settings.
 
@@ -142,18 +146,19 @@ for some Focus topic, plus what the owner saved by hand, minus what the owner un
 
 ## Reading litwatch's data
 
-Through the repositories in `litwatch.store`. Each function takes the connection first.
+Through the repositories in `litwatch.store`, inside a read unit. Each function takes the unit
+first.
 
 | Call | Returns |
 | --- | --- |
-| `store.papers.get(conn, paper_id)` | `core.Paper` (title, abstract, authors, categories, published, url, version, doi, ...) or None |
-| `store.word.effective_for(conn, paper_id)` | `{topic slug: core.Effective}` for every followed topic that has one, Focus, Area or Field: its effective `fit`, `grade` and `rarity` on the topic's page |
-| `store.word.focus_grades(conn, paper_id)` | `{topic slug: core.Grade}`, the effective grades on the Focus topics only: what the library reads |
-| `store.word.library_row(conn, paper_id)` | a dict with `saved` (bool) and `hand` (`save`, `unsave` or None), or None |
-| `store.reading.paper(conn, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug` (its class's), `name`, `depth` (`focus`, `area`, `field`) and `grade` |
-| `store.publications.found(conn, [paper_id])` | `{paper_id: core.Publication}` for those with a published record |
-| `store.taxonomy.topics(conn, core.Status.ACTIVE)` | the active `core.Topic`s, in the owner's order; `store.taxonomy.load(conn)` gives the whole `core.Taxonomy`, class names included |
-| `store.integrations.card(conn, paper_id)` | the deep card row (`card`, `model`, `stats`, `error`, `written_at`, and what it was written from: `revision`, `arxiv_version`, `source`) or None. `card` is a Deep read when its `format` is `"read"` (`core.deepread.is_read`; `core.deepread.section` and `inline` take one apart) and a Deep card, the format from before, when it has none: handle both, and take a field a read lacks as absent. Either may hold `process_notes`, which describe Deep's process, not the paper: the built-in exports leave them out, but for a read's `review` note, which says the read failed its review |
+| `store.papers.get(unit, paper_id)` | `core.Paper` (title, abstract, authors, categories, published, url, version, doi, ...) or None |
+| `store.word.effective_for(unit, paper_id)` | `{topic slug: core.Effective}` for every followed topic that has one, Focus, Area or Field: its effective `fit`, `grade` and `rarity` on the topic's page |
+| `store.word.focus_grades(unit, paper_id)` | `{topic slug: core.Grade}`, the effective grades on the Focus topics only: what the library reads |
+| `store.word.library_row(unit, paper_id)` | a dict with `saved` (bool) and `hand` (`save`, `unsave` or None), or None |
+| `store.reading.paper(unit, paper_id)` | what the paper page shows: `saved`, and `topics`, each with `slug` (its class's), `name`, `depth` (`focus`, `area`, `field`) and `grade` |
+| `store.publications.found(unit, [paper_id])` | `{paper_id: core.Publication}` for those with a published record |
+| `store.taxonomy.topics(unit, core.Status.ACTIVE)` | the active `core.Topic`s, in the owner's order; `store.taxonomy.load(unit)` gives the whole `core.Taxonomy`, class names included |
+| `store.integrations.card(unit, paper_id)` | the deep card row (`card`, `model`, `stats`, `error`, `written_at`, and what it was written from: `revision`, `arxiv_version`, `source`) or None. `card` is a Deep read when its `format` is `"read"` (`core.deepread.is_read`; `core.deepread.section` and `inline` take one apart) and a Deep card, the format from before, when it has none: handle both, and take a field a read lacks as absent. Either may hold `process_notes`, which describe Deep's process, not the paper: the built-in exports leave them out, but for a read's `review` note, which says the read failed its review |
 
 ## Configuration and loading
 
@@ -392,11 +397,11 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-import psycopg
 
 from litwatch import events
 from litwatch.config import Config, secret
 from litwatch.core import Event
+from litwatch.gates.database import DatabaseGate
 from litwatch.integrations import must_read_and_saved, option, required
 from litwatch.store import papers
 
@@ -416,11 +421,14 @@ class Ntfy:
             event.type == events.GRADE_CHANGED and event.payload.get("after") == "must_read"
         )
 
-    async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
+    async def handle(self, db: DatabaseGate, event: Event) -> None:
         # Check the present: the owner may have overruled the grade or unsaved the paper.
-        if not await must_read_and_saved(conn, event.paper_id):
+        async with db.read("phone: paper") as unit:
+            wanted = await must_read_and_saved(unit, event.paper_id)
+            paper = await papers.get(unit, event.paper_id)
+        if not wanted:
             return
-        paper = await papers.get(conn, event.paper_id)
+        # With the unit closed: no network call inside one.
         resp = await self.http.post(
             self.url,
             content=paper.title.encode(),
@@ -457,7 +465,8 @@ Notes on the example:
   is notified again, which is what "do what was skipped" means here.
 - After a failure the event comes again, so a phone may get one notification twice; for a
   notification that is acceptable. Where a repeat would do harm, keep a table of what was done,
-  keyed by paper (create it in `setup` with `CREATE TABLE IF NOT EXISTS`), and check it first.
+  keyed by paper (create it in `setup`, with `CREATE TABLE IF NOT EXISTS` in a write unit), and
+  check it first.
 - To test it, give it an `httpx.AsyncClient(transport=httpx.MockTransport(...))` instead of a
   real one, so no test reaches the service.
 

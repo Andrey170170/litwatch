@@ -17,7 +17,7 @@ from litwatch.core.analysis import WEIGHT_DEFINITIONS
 from litwatch.gates.database import WriteUnit
 from litwatch.llm import CallError, Gateway, Request, Usage
 from litwatch.store import analyses as store
-from litwatch.store import failures
+from litwatch.store import failures, outbox
 from litwatch.store import papers as papers_store
 from litwatch.writing import READER, VOICE
 
@@ -164,7 +164,7 @@ async def record(unit: WriteUnit, a: Analysed) -> bool:
     await failures.succeeded(unit, a.paper.id, "analysis")
     # A Gist the full text already gave this revision stays current.
     if await store.current_gist_id(unit, a.paper.id) == gist:
-        await events.emit(
+        await outbox.emit(
             unit,
             events.GIST_WRITTEN,
             a.paper.id,

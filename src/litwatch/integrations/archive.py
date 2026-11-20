@@ -39,7 +39,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-import psycopg
 
 from litwatch import events
 from litwatch.archive import (
@@ -51,6 +50,7 @@ from litwatch.archive import (
 )
 from litwatch.config import Config
 from litwatch.core import SEARCH_TIMEOUT_SECONDS, Event, SearchFilters, SearchHit
+from litwatch.gates.database import DatabaseGate
 from litwatch.integrations import (
     IntegrationError,
     enabled_using,
@@ -174,12 +174,13 @@ class Archive:
         await self.archive.aclose()
         self.search_http.close()
 
-    async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
-        paper = await papers_store.get(conn, event.paper_id)
+    async def handle(self, db: DatabaseGate, event: Event) -> None:
+        async with db.read(f"{self.name}: {event.paper_id}") as unit:
+            paper = await papers_store.get(unit, event.paper_id)
+            # Read when handled: a grade already taken back asks for nothing.
+            keep = paper is not None and await word_store.keeps_pdf(unit, paper.id)
         if paper is None:
             return
-        # Read when handled: a grade already taken back asks for nothing.
-        keep = await word_store.keeps_pdf(conn, paper.id)
         if _registers(event):
             await self.archive.upsert_paper(paper)
         elif not keep:

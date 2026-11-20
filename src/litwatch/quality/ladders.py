@@ -49,7 +49,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-import psycopg
 from pydantic import BaseModel, Field, model_validator
 
 from litwatch import analysis, grading
@@ -59,6 +58,7 @@ from litwatch.core import Depth, Fit, Paper
 from litwatch.core.digests import DigestPeriod
 from litwatch.digests import writer
 from litwatch.fulltext import brief
+from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.llm import CallError, Gateway, Provider, Request
 from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
 from litwatch.store import digests as digests_store
@@ -181,11 +181,12 @@ def cases(path: Path) -> list[Case]:
 
 
 async def papers(
-    conn: psycopg.AsyncConnection, archive: ArchiveClient | None, ids: list[str]
+    db: DatabaseGate, archive: ArchiveClient | None, ids: list[str]
 ) -> dict[str, Paper]:
     """The papers by id: the database's, else the archive catalog's, of the latest version the
-    catalog knows where its listing names none."""
-    found = {p.id: p for p in await papers_store.get_many(conn, ids)}
+    catalog knows where its listing names none, asked for with no unit open."""
+    async with db.read("ladders: papers") as unit:
+        found = {p.id: p for p in await papers_store.get_many(unit, ids)}
     for pid in ids:
         if pid in found or archive is None or (record := await archive.record(pid)) is None:
             continue
@@ -197,19 +198,21 @@ async def papers(
 
 
 async def requests(
-    conn: psycopg.AsyncConnection, archive: ArchiveClient | None, chosen: list[Case]
+    db: DatabaseGate, archive: ArchiveClient | None, chosen: list[Case]
 ) -> dict[str, Request | str]:
     """Each case's request, built as the pipeline builds it, or why it has none."""
-    tree = await taxonomy_store.load(conn)
+    async with db.read("ladders: taxonomy") as unit:
+        tree = await taxonomy_store.load(unit)
     if tree is None:
         raise ValueError("no taxonomy in the database")
     topics = {t.slug: t for t in tree.topics}
     classes = {c.slug for c in tree.classes}
-    found_papers = await papers(conn, archive, sorted({c.paper for c in chosen if c.paper}))
+    found_papers = await papers(db, archive, sorted({c.paper for c in chosen if c.paper}))
     found: dict[str, Request | str] = {}
     for c in chosen:
         if c.role == "writer":
-            found[c.key] = await _digest(conn, tree, topics, int(c.subject))
+            async with db.read("ladders: digest") as unit:
+                found[c.key] = await _digest(unit, tree, topics, int(c.subject))
         elif (paper := found_papers.get(c.paper or "")) is None:
             found[c.key] = "the paper is in neither the database nor the archive"
         elif c.role in GRADERS:
@@ -238,17 +241,17 @@ async def _brief(archive: ArchiveClient | None, paper: Paper, area: Any) -> Requ
 
 
 async def _digest(
-    conn: psycopg.AsyncConnection, tree: Any, topics: dict[str, Any], digest_id: int
+    unit: ReadUnit, tree: Any, topics: dict[str, Any], digest_id: int
 ) -> Request | str:
     """A published daily digest's request, rebuilt over its papers (`digests.as_shown`)."""
-    d = await digests_store.get(conn, digest_id)
+    d = await digests_store.get(unit, digest_id)
     if d is None or d["text"] is None or d["period"] != DigestPeriod.DAY.value:
         return "not a written daily digest"
     topic = topics.get(d["topic"])
     if topic is None or topic.depth == Depth.FIELD:
         return "not a Focus or Area topic's"
     focus = topic.depth == Depth.FOCUS
-    found = await digests_store.as_shown(conn, digest_id, focus)
+    found = await digests_store.as_shown(unit, digest_id, focus)
     build = writer.focus_day if focus else writer.area_day
     return build(topic, tree.get(topic.slug).name, d["day"], found)
 

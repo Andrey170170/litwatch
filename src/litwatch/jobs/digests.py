@@ -6,8 +6,6 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-import psycopg
-
 from litwatch import digests
 from litwatch.config import Config
 from litwatch.core import Status
@@ -36,32 +34,32 @@ async def window(
     async with (
         db.held("run"),
         model_run(db, config, "digests", gateway=gateway) as run,
-        # Transitional: the digests take a connection until P5 moves them.
-        db.lend("write digests") as conn,
     ):
-        tree = await taxonomy_store.load(conn)
+        async with db.read("write digests: taxonomy") as unit:
+            tree = await taxonomy_store.load(unit)
         if tree is not None:
-            await digests.retry_failed(conn, run, tree, rules=rules)
+            await digests.retry_failed(db, run, tree, rules=rules)
         day = first
         while tree is not None and day <= last:
-            await digests.write_day(conn, run, tree, day, rules=rules)
+            await digests.write_day(db, run, tree, day, rules=rules)
             if day.weekday() == 0 and day - timedelta(days=7) >= first:
-                await digests.write_week(conn, run, tree, day - timedelta(days=7), rules=rules)
+                await digests.write_week(db, run, tree, day - timedelta(days=7), rules=rules)
             day += timedelta(days=1)
         if tree is not None and last.weekday() == 6 and last - timedelta(days=6) >= first:
-            await digests.write_week(conn, run, tree, last - timedelta(days=6), rules=rules)
+            await digests.write_week(db, run, tree, last - timedelta(days=6), rules=rules)
         return run.run_id
 
 
 async def again(
-    conn: psycopg.AsyncConnection, run: ModelRun, digest_id: int, *, rules: word.Rules
+    db: DatabaseGate, run: ModelRun, digest_id: int, *, rules: word.Rules
 ) -> tuple[str, str | None]:
     """Write a failed digest of an active topic again now, over the papers due for it now, on
     the job's run, under the run lock the jobs worker holds: how its job ends, `done` once the
     digest is published (written now, or meanwhile by another run), else `failed` with why (the
     writer failed again, its topic is no longer active)."""
-    tree = await taxonomy_store.load(conn)
-    row = await store_.get(conn, digest_id)
+    async with db.read("digest again") as unit:
+        tree = await taxonomy_store.load(unit)
+        row = await store_.get(unit, digest_id)
     if row is None:
         return "failed", "the digest is gone"
     if row["state"] != DigestState.FAILED:
@@ -71,9 +69,10 @@ async def again(
         status = topic.status.value if topic else "unfollowed"
         return "failed", f"its topic is {status}"
     state = await digests.write(
-        conn, run, tree, topic, DigestPeriod(row["period"]), row["day"], rules=rules
+        db, run, tree, topic, DigestPeriod(row["period"]), row["day"], rules=rules
     )
     if state == DigestState.FAILED:
-        error = (await store_.get(conn, digest_id) or {}).get("error")
+        async with db.read("digest again: error") as unit:
+            error = (await store_.get(unit, digest_id) or {}).get("error")
         return "failed", f"the writer failed again: {error or 'no text'}"
     return "done", None

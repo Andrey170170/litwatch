@@ -11,9 +11,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from litwatch.config import Budget
-from litwatch.core import Paper
 from litwatch.core.budget import Spend, month_start, spend
-from litwatch.feedback import misses, word
+from litwatch.feedback import word
 from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.store import calls
 
@@ -84,14 +83,6 @@ def set_token_cookie(request: Request, response: Response, token: str) -> None:
     response.set_cookie(
         COOKIE, token, httponly=True, samesite="strict", secure=https, max_age=90 * 86400
     )
-
-
-async def resolve_paper(db: DatabaseGate, text: str) -> tuple[str, Paper | None]:
-    """`misses.resolve`, for an owner action on a paper litwatch may lack (Process, a Deep read,
-    a miss): on a connection the gate lends outside any unit, since it may wait on arXiv.
-    Transitional: the lend goes when misses moves onto the gate (A1's P5)."""
-    async with db.lend("resolve paper") as conn:
-        return await misses.resolve(conn, text)
 
 
 async def budget_lines(unit: ReadUnit, budget: Budget) -> list[Spend]:

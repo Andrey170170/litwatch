@@ -9,8 +9,8 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from litwatch.core.budget import Usage
 from litwatch.gates.database import DatabaseGate, Query
-from litwatch.llm.types import Usage
 
 RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and accounted for
 EVAL = "eval"  # an evaluation run's kind: its calls say nothing to the status document

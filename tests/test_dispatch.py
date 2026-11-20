@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from litwatch import events, store
 from litwatch.api import create_app
 from litwatch.events import dispatch
+from litwatch.gates.database import outside_unit
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.store import outbox
 from tests.conftest import deliver, start
@@ -27,7 +28,7 @@ class Recorder:
     def wants(self, event):
         return self.types is None or event.type in self.types
 
-    async def handle(self, conn, event):
+    async def handle(self, db, event):
         if event.id in self.fail:
             if self.before_failing:
                 await self.before_failing()
@@ -36,7 +37,7 @@ class Recorder:
 
 
 async def emit(conn, *types):
-    return [await events.emit(conn, t, "2610.00001") for t in types]
+    return [await outbox.emit(conn, t, "2610.00001") for t in types]
 
 
 async def test_an_integration_enabled_for_the_first_time_starts_at_the_end(conn, db):
@@ -206,14 +207,43 @@ async def test_run_forever_delivers_in_the_background(conn, db, monkeypatch):
             await task
 
 
+class Writer(Recorder):
+    """Keeps a table of its own: made in `setup`, and a row per event in `handle`, written with
+    an event of its own in one write unit, as an integration may (docs/integrations.md)."""
+
+    async def setup(self, db):
+        async with db.write("writer: setup") as unit:
+            await unit.execute("CREATE TABLE IF NOT EXISTS writer_done (event bigint PRIMARY KEY)")
+
+    async def handle(self, db, event):
+        outside_unit("the writer's network call")  # no unit is open around a hook
+        async with db.write("writer: handle") as unit:
+            await unit.execute("INSERT INTO writer_done VALUES (%s)", (event.id,))
+            await outbox.emit(unit, events.CARD_READY, event.paper_id)
+        self.seen.append(event.id)
+
+
+async def test_an_integration_is_given_the_gate_and_writes_in_units_of_its_own(conn, db):
+    writer = Writer(types={events.PAPER_SAVED})
+    await start(db, writer)
+    ids = await emit(conn, events.PAPER_SAVED)
+    assert await deliver(db, writer, NOW) == 1
+    done = await (await conn.execute("SELECT event FROM writer_done")).fetchall()
+    assert [r["event"] for r in done] == writer.seen == ids
+    emitted = await (await conn.execute("SELECT type FROM outbox WHERE id > %s", ids)).fetchall()
+    assert [r["type"] for r in emitted] == [events.CARD_READY]
+
+
 class Idler(Recorder):
-    """Has idle work of its own; the first try of it fails."""
+    """Has idle work of its own, done in a unit of the gate it is given; the first try fails."""
 
     def __init__(self):
         super().__init__("idler")
         self.idled = 0
 
-    async def idle(self, conn):
+    async def idle(self, db):
+        async with db.read("idler: idle") as unit:
+            await unit.execute("SELECT 1")
         self.idled += 1
         if self.idled == 1:
             raise RuntimeError("idle work failed once")

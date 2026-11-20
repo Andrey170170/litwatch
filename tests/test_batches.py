@@ -1186,13 +1186,17 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
         async with gate_on(c) as db, model_run(db, Config(), "nightly", gateway=gateway) as run:
             if together:
                 run.gateway.batch_until(tonight()[1])
-                await digests.nightly(c, run, tree, dg.MON, rules=settling.RULES)
+                await digests.nightly(db, run, tree, dg.MON, rules=settling.RULES)
                 await run.gateway.close()
             else:
-                await digests.retry_failed(c, run, tree, rules=settling.RULES)
-                await digests.write_day(c, run, tree, dg.MON, rules=settling.RULES)
+                await digests.retry_failed(db, run, tree, rules=settling.RULES)
+                await digests.write_day(db, run, tree, dg.MON, rules=settling.RULES)
                 await digests.write_week(
-                    c, run, tree, dg.MON - timedelta(days=7), rules=settling.RULES
+                    db,
+                    run,
+                    tree,
+                    dg.MON - timedelta(days=7),
+                    rules=settling.RULES,
                 )
         rows = await (
             await c.execute("SELECT topic, period, day, state, text FROM digests ORDER BY 1, 2, 3")

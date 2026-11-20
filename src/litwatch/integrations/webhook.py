@@ -25,10 +25,10 @@ import json
 from typing import Any
 
 import httpx
-import psycopg
 
 from litwatch.config import Config
 from litwatch.core import Event
+from litwatch.gates.database import DatabaseGate
 from litwatch.integrations import IntegrationError, required, required_secret
 
 
@@ -64,7 +64,7 @@ class Webhook:
     async def aclose(self) -> None:
         await self.http.aclose()
 
-    async def handle(self, conn: psycopg.AsyncConnection, event: Event) -> None:
+    async def handle(self, db: DatabaseGate, event: Event) -> None:
         content = body(event)
         headers = {"Content-Type": "application/json", "X-Litwatch-Event": str(event.id)}
         if self.secret:

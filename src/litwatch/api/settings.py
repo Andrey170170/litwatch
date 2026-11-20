@@ -539,8 +539,7 @@ class DrawIn(BaseModel):
 async def draw(body: DrawIn, db: Db) -> dict[str, int]:
     """Draw a session of about twenty papers. The seed is recorded with it."""
     seed = body.seed if body.seed is not None else secrets.randbelow(2**31)
-    async with db.lend("calibrate draw") as conn:  # transitional: Calibrate moves in P5
-        return {"id": await calibrate.draw(conn, seed)}
+    return {"id": await calibrate.draw(db, seed)}
 
 
 @router.get("/calibrate")
@@ -570,8 +569,7 @@ async def more(session_id: int, db: Db) -> dict[str, int]:
         found = await calibrate.session(unit, session_id)
     if found is None:
         raise HTTPException(status_code=404, detail="no such session")
-    async with db.lend("calibrate more") as conn:  # transitional: Calibrate moves in P5
-        return {"added": await calibrate.more(conn, session_id)}
+    return {"added": await calibrate.more(db, session_id)}
 
 
 @router.put("/calibrate/{session_id}/items/{position}", status_code=204, responses=NO_ITEM)

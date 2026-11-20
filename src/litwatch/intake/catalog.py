@@ -17,9 +17,8 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-import psycopg
-
 from litwatch.archive import ArchiveClient
+from litwatch.gates.database import DatabaseGate
 from litwatch.intake import oai
 from litwatch.intake.http import SourceError, XmlClient
 from litwatch.intake.source import PaperSource
@@ -30,15 +29,16 @@ log = logging.getLogger(__name__)
 WEEK = 7  # days in the widest window
 
 
-async def lower(conn: psycopg.AsyncConnection, day: date) -> None:
+async def lower(db: DatabaseGate, day: date) -> None:
     """Have the next pass start from `day` (`litwatch intake --catalog-from`), unless a pass was
     already asked from `day` or earlier: then it goes on from its checkpoint, so the same
     command resumes a backfill that stopped."""
-    await checkpoints.lower(conn, oai.ALL, day)
+    async with db.write("catalog pass: lower") as unit:
+        await checkpoints.lower(unit, oai.ALL, day)
 
 
 async def run(
-    conn: psycopg.AsyncConnection,
+    db: DatabaseGate,
     open_archive: Callable[[], ArchiveClient],
     categories: Iterable[str],
     since: date,
@@ -58,7 +58,8 @@ async def run(
     `open_archive` gives the client it registers with, closed at the end; `report` is called
     with the outcome after each window."""
     skip = set(categories)
-    start = await checkpoints.start(conn, oai.ALL, since)
+    async with db.write("catalog pass: start") as unit:
+        start = await checkpoints.start(unit, oai.ALL, since)
     info: dict[str, Any] = {
         "from": start.isoformat(),
         "complete": False,
@@ -101,7 +102,8 @@ async def run(
             for paper in outside:
                 await archive.upsert_paper(paper)
             through = until or harvest.checkpoint.date()
-            await checkpoints.advance(conn, oai.ALL, through, run_id)
+            async with db.write("catalog pass: advance") as unit:
+                await checkpoints.advance(unit, oai.ALL, through, run_id)
             info["windows"] += 1
             info["records"] += len(harvest.papers)
             info["registered"] += len(outside)

@@ -25,7 +25,7 @@ from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.llm import CallError, Gateway, Request
 from litwatch.llm.types import DecisionRequest, Predicate
 from litwatch.store import analyses as analyses_store
-from litwatch.store import failures
+from litwatch.store import failures, outbox
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as store
@@ -302,7 +302,7 @@ async def record(unit: WriteUnit, g: Graded) -> bool:
     stored = await store.add(unit, g.verdict)
     await failures.succeeded(unit, paper.id, "grading", slug)
     weight = await analyses_store.current_weight(unit, paper.id)
-    await events.emit(
+    await outbox.emit(
         unit,
         events.VERDICT_RECORDED,
         paper.id,

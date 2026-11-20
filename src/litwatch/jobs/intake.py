@@ -40,10 +40,9 @@ async def run(db: DatabaseGate, config: Config, days: int | None = None) -> inta
     async with (
         db.held("run"),
         run_record(db, "intake", window=(since, until)) as record,
-        db.lend("intake") as conn,  # transitional: intake moves onto the gate in P5
     ):
         result = await intake.collect(
-            conn,
+            db,
             config.intake.categories,
             since,
             record.run_id,
@@ -77,12 +76,11 @@ async def catalog_from(
     async with (
         db.held("run"),
         run_record(db, "intake", window=window) as record,
-        db.lend("catalog pass") as conn,  # transitional: intake moves onto the gate in P5
     ):
-        await catalog.lower(conn, since)
+        await catalog.lower(db, since)
         with XmlClient() as client:
             done = await catalog.run(
-                conn, archive, config.intake.categories, since, record.run_id, client, report=report
+                db, archive, config.intake.categories, since, record.run_id, client, report=report
             )
         record.fields["intake"] = {"catalog": done}
     return done
@@ -104,10 +102,9 @@ async def from_archive(
     async with (
         db.held("run"),
         run_record(db, "intake", window=window) as record,
-        db.lend("intake from the archive") as conn,  # transitional: intake moves in P5
     ):
         result = await archive_intake.collect(
-            conn, client, config.intake.categories, since, until, rules=word.rules(config)
+            db, client, config.intake.categories, since, until, rules=word.rules(config)
         )
         _record(record, result)
     log.info(

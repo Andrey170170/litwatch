@@ -14,6 +14,7 @@ from litwatch.archive.client import listed
 from litwatch.core import FAILED_RUNS, Cause, Fit, Status
 from litwatch.core.grading import FIT_DEFINITIONS
 from litwatch.feedback import word
+from litwatch.gates.database import DatabaseGate
 from litwatch.intake import atom, oai
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly
@@ -465,7 +466,7 @@ async def test_a_rewrite_harvested_from_arxiv_settles_as_it_is_stored(conn, mode
     monkeypatch.setattr(oai, "fetch_category", lambda *a, **k: oai.OaiBatch([rewrite], now))
     run_id = await started(conn, "intake")
     result = await intake.collect(
-        conn, ("cs.CL",), now - timedelta(days=3), run_id, rules=settling.RULES
+        DatabaseGate.over(conn), ("cs.CL",), now - timedelta(days=3), run_id, rules=settling.RULES
     )
     assert result.rewritten == [B.id]
     await assert_settled_on_solid(conn)

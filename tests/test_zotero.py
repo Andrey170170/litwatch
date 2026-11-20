@@ -19,6 +19,7 @@ from litwatch.core import (
     Publication,
     Verdict,
 )
+from litwatch.gates.database import DatabaseGate
 from litwatch.integrations import webdav as webdav_mod
 from litwatch.integrations.webdav import WebDav, WebDAVWriter
 from litwatch.integrations.zotero import Zotero, ZoteroClient, attachment_filename, is_item_of
@@ -222,7 +223,7 @@ async def test_grades_published_versions_and_cards_reach_the_notes(world, db):
     # Process notes describe Deep's process, not the paper: they stay out of Zotero.
     noted = CARD | {"process_notes": [{"kind": "access", "source": "service", "note": NOTED}]}
     await state.put_card(conn, P.id, noted, "deep-model", {"cells": 3}, **LABEL)
-    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await outbox.emit(conn, events.CARD_READY, P.id, model="deep-model")
     await run(db, z)
     notes = fake.notes(key)
     assert len(notes) == 2
@@ -246,7 +247,7 @@ async def test_a_deep_read_gets_no_note_and_no_card_tags_and_still_sets_the_inbo
     assert "INBOX" not in fake.items[key]["data"]["collections"]  # no card yet
 
     await state.put_card(conn, P.id, fixture_read(name), "deep-model", {"cells": 3}, **LABEL)
-    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await outbox.emit(conn, events.CARD_READY, P.id, model="deep-model")
     await run(db, z)
     assert (await outbox.cursor(conn, z.name)).failing is None
     (note,) = fake.notes(key)  # the screen note alone
@@ -261,7 +262,7 @@ async def test_a_card_written_again_as_a_read_leaves_its_note_and_tags_on_the_it
     await start(db, z)
     await grade(conn, "must_read")
     await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, **LABEL)
-    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await outbox.emit(conn, events.CARD_READY, P.id, model="deep-model")
     await run(db, z)
     (item,) = fake.tops()
     key = item["key"]
@@ -269,10 +270,34 @@ async def test_a_card_written_again_as_a_read_leaves_its_note_and_tags_on_the_it
     assert len(before[0]) == 2 and "litwatch:kind:method" in before[1]
 
     await state.put_card(conn, P.id, fixture_read("scarce"), "deep-model", {}, **LABEL)
-    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await outbox.emit(conn, events.CARD_READY, P.id, model="deep-model")
     await run(db, z)
     assert (await outbox.cursor(conn, z.name)).failing is None
     assert (sorted(fake.notes(key)), fake.tags(key)) == before  # what is on the item stays
+
+
+async def test_a_card_replaced_while_the_screen_note_is_written_is_not_exported(world, db):
+    """The card is read after the screen note's call: a Deep read that replaces a card meanwhile
+    leaves no card note, which no later `card.ready` would take off again."""
+    conn, fake = world, FakeZotero()
+    z = zotero(fake)
+    await start(db, z)
+    await grade(conn, "must_read")
+    await state.put_card(conn, P.id, CARD, "deep-model", {"cells": 3}, **LABEL)
+    await outbox.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    upsert = z.zotero.upsert_note
+
+    async def replaced_meanwhile(key, note, find, tag, attempt):
+        if tag == "litwatch:screen":
+            await state.put_card(conn, P.id, fixture_read("scarce"), "deep-model", {}, **LABEL)
+        return await upsert(key, note, find, tag, attempt)
+
+    z.zotero.upsert_note = replaced_meanwhile
+    await run(db, z)
+    (item,) = fake.tops()
+    assert (await outbox.cursor(conn, z.name)).failing is None
+    assert "litwatch:enrichment" not in json.dumps(fake.items)
+    assert "litwatch:kind:method" not in fake.tags(item["key"])
 
 
 async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(world, db):
@@ -281,7 +306,7 @@ async def test_the_inbox_holds_a_paper_only_while_its_card_and_grade_say_so(worl
     await start(db, z)
     await grade(conn, "must_read")
     await state.put_card(conn, P.id, CARD, "deep-model", {}, **LABEL)
-    await events.emit(conn, events.CARD_READY, P.id, model="deep-model")
+    await outbox.emit(conn, events.CARD_READY, P.id, model="deep-model")
     await run(db, z)
     (item,) = fake.tops()
     key = item["key"]
@@ -417,7 +442,7 @@ async def test_a_must_read_pdf_waits_for_its_item_then_is_stored_once(world, db,
     # Handled again (a restart mid-way, say): nothing is fetched or attached twice.
     for event in await outbox.after(conn, outbox.START, 100):
         if w.wants(event):
-            await w.handle(conn, event)
+            await w.handle(DatabaseGate.over(conn), event)
     assert len(fake.attachments(item["key"])) == 1 and len(arxiv.calls) == 1
 
 

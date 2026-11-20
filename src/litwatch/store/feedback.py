@@ -1,4 +1,4 @@
-"""The owner's labels."""
+"""The owner's labels, and the misses the owner reported."""
 
 from __future__ import annotations
 
@@ -66,3 +66,34 @@ async def labels(conn: psycopg.AsyncConnection, topic: str | None = None) -> lis
         )
     ).fetchall()
     return [_label(r) for r in rows]
+
+
+async def labelled(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> bool:
+    """Whether the paper has a label for the topic, provisional or not."""
+    row = await (
+        await conn.execute(
+            "SELECT 1 FROM labels WHERE paper_id = %s AND topic = %s", (paper_id, topic)
+        )
+    ).fetchone()
+    return row is not None
+
+
+async def add_miss(conn: psycopg.AsyncConnection, paper_id: str, topic: str) -> tuple[int, bool]:
+    """The miss of the paper for the topic, filed now if it was not: its id, and whether it is
+    new."""
+    row = await (
+        await conn.execute(
+            "INSERT INTO misses (paper_id, topic) VALUES (%s, %s) "
+            "ON CONFLICT (paper_id, topic) DO NOTHING RETURNING id",
+            (paper_id, topic),
+        )
+    ).fetchone()
+    if row is not None:
+        return row["id"], True
+    row = await (
+        await conn.execute(
+            "SELECT id FROM misses WHERE paper_id = %s AND topic = %s", (paper_id, topic)
+        )
+    ).fetchone()
+    assert row is not None  # the insert met it
+    return row["id"], False

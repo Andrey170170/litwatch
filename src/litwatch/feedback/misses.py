@@ -7,14 +7,13 @@ says), and the owner's newest Save (feedback.md, misses).
 
 from __future__ import annotations
 
-import psycopg
-
 from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Paper
 from litwatch.core.classification import Source
 from litwatch.feedback import word
-from litwatch.gates.database import WriteUnit
+from litwatch.gates.database import DatabaseGate, WriteUnit
 from litwatch.intake.search import fetch_by_ids, id_from_url
 from litwatch.store import classifications as classifications_store
+from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
@@ -27,16 +26,18 @@ class NotFoundError(LookupError):
 SILENT = "arXiv did not answer in time, and nothing was stored; try again in a minute"
 
 
-async def resolve(conn: psycopg.AsyncConnection, text: str) -> tuple[str, Paper | None]:
-    """The arXiv id `text` names, and arXiv's record of the paper when litwatch lacks it. Call
-    it outside a transaction: arXiv may keep it waiting for `search.LOOKUP_BUDGET`. NotFoundError
+async def resolve(db: DatabaseGate, text: str) -> tuple[str, Paper | None]:
+    """The arXiv id `text` names, and arXiv's record of the paper when litwatch lacks it, asked
+    for with no unit open: arXiv may keep it waiting for `search.LOOKUP_BUDGET`. NotFoundError
     when the text names no paper or arXiv does not know it; NoAnswerError when arXiv gives no
     answer in that time."""
     try:
         paper_id = id_from_url(text)
     except ValueError as exc:
         raise NotFoundError(str(exc)) from exc
-    if await papers_store.get(conn, paper_id):
+    async with db.read("resolve paper") as unit:
+        held = await papers_store.get(unit, paper_id)
+    if held:
         return paper_id, None
     fetched = await fetch_by_ids([paper_id])
     if not fetched:
@@ -73,34 +74,13 @@ async def report(
     )
     # Under the paper's lock, looking for a standing label and giving the word again are one
     # step against any label being written meanwhile.
-    row = await (
-        await unit.execute(
-            "INSERT INTO misses (paper_id, topic) VALUES (%s, %s) "
-            "ON CONFLICT (paper_id, topic) DO NOTHING RETURNING id",
-            (paper_id, topic),
-        )
-    ).fetchone()
+    miss_id, new = await feedback_store.add_miss(unit, paper_id, topic)
     await word_store.set_hand(unit, paper_id, Hand.SAVE)
     tree = await taxonomy_store.load(unit)
     paper = await papers_store.get(unit, paper_id)
     if tree is not None and paper is not None and topic in {c.slug for c in tree.classes}:
         version = tree.get(topic).version
         await classifications_store.put_owner(unit, paper, topic, True, version, source=Source.MISS)
-    if row is None:
-        row = await (
-            await unit.execute(
-                "SELECT id FROM misses WHERE paper_id = %s AND topic = %s",
-                (paper_id, topic),
-            )
-        ).fetchone()
-        labelled = await (
-            await unit.execute(
-                "SELECT 1 FROM labels WHERE paper_id = %s AND topic = %s", (paper_id, topic)
-            )
-        ).fetchone()
-        new = False
-    else:
-        labelled, new = None, True
-    if not labelled:
+    if new or not await feedback_store.labelled(unit, paper_id, topic):
         await word.label(unit, word_on_it)
-    return row["id"], new
+    return miss_id, new
