@@ -36,7 +36,6 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
   - **today in the schedule's zone:** the Digest's defaults (today's Day, the last complete Week, History's pinned
     week) use the browser's date; the summary should carry today's date
     ([`notes/schedule-zone-today.md`](notes/schedule-zone-today.md)).
-- **Calibrate reads each topic's pool once** (review).
 - **Smaller read gaps:**
   - unclassified papers listed on Papers, not only counted (the API can return them);
   - code and weights links from the analysis, not only from a Deep card's URL;
