@@ -44,7 +44,7 @@ def row_to_paper(row: dict[str, Any]) -> Paper:
         updated=_iso(row.get("updated")),
         url=row.get("url"),
         version=row.get("version"),
-        revision=row.get("revision") or 1,
+        revision=row["revision"],
         version_history=row.get("version_history") or [],
         doi=row.get("doi"),
         journal_ref=row.get("journal_ref"),

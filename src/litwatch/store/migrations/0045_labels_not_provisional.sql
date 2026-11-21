@@ -1,5 +1,5 @@
--- A label accepted in bulk, unread (A1, docs/notes/still-used.md D3): nothing has written one
--- since the first v1, and production holds none. A label left would turn firm, so the
+-- A label accepted in bulk, unread (A1, the owner's drops of 2026-11-10): nothing has written
+-- one since the first v1, and production holds none. A label left would turn firm, so the
 -- migration stops instead; the provisional replay cohort (`evals/labels/`) is another thing.
 DO $$
 BEGIN
