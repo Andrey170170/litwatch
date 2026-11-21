@@ -33,7 +33,6 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
 - **Smaller read gaps:**
   - unclassified papers listed on Papers, not only counted (the API can return them);
   - code and weights links from the analysis, not only from a Deep card's URL;
-  - which source set the owner's word on a topic, from the API instead of guessed by the UI (`whoseFit`);
   - typed response models for `/quality`, `/runs` and `/calibrate` (review, project 3).
 - **Tests reach `store` through units** (A1 P6's review): many tests still seed and assert with the raw `conn`
   fixture, an autocommit connection, passed to store functions typed for units. They work, but a multi-row seed that

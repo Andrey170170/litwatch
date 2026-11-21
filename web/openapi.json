@@ -6504,6 +6504,16 @@
               }
             ]
           },
+          "word_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WordSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "label": {
             "anyOf": [
               {
@@ -6545,7 +6555,7 @@
           "topic"
         ],
         "title": "PaperTopic",
-        "description": "A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its\nown effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),\nits current verdict, the owner's word that stands (from the label, a thumb or a miss), the\nlabel and thumb themselves, and its open state."
+        "description": "A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its\nown effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),\nits current verdict, the owner's word that stands and what set it (`word_from`: the label,\na thumb or a miss), the label and thumb themselves, and its open state."
       },
       "Papers": {
         "properties": {
@@ -8572,6 +8582,16 @@
         ],
         "title": "Withdrawn",
         "description": "arXiv withdrew the paper: its newest version is a withdrawal, submitted `at`; `reason` is\nthe comments arXiv gives with it, when known. litwatch no longer processes it."
+      },
+      "WordSource": {
+        "type": "string",
+        "enum": [
+          "label",
+          "reaction",
+          "miss"
+        ],
+        "title": "WordSource",
+        "description": "What set the owner's word on a topic: a label, a word-carrying thumb, or a reported miss\n(the label the report made, origin `miss`, which keeps that origin when changed)."
       }
     }
   }

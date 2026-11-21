@@ -2460,8 +2460,8 @@ export interface components {
          * PaperTopic
          * @description A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its
          *     own effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),
-         *     its current verdict, the owner's word that stands (from the label, a thumb or a miss), the
-         *     label and thumb themselves, and its open state.
+         *     its current verdict, the owner's word that stands and what set it (`word_from`: the label,
+         *     a thumb or a miss), the label and thumb themselves, and its open state.
          */
         PaperTopic: {
             topic: components["schemas"]["Badge"];
@@ -2472,6 +2472,7 @@ export interface components {
             via?: string | null;
             verdict?: components["schemas"]["CurrentVerdict"] | null;
             word?: components["schemas"]["Fit"] | null;
+            word_from?: components["schemas"]["WordSource"] | null;
             label?: components["schemas"]["LabelState"] | null;
             reaction?: components["schemas"]["ReactionState"] | null;
             /**
@@ -3315,6 +3316,13 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /**
+         * WordSource
+         * @description What set the owner's word on a topic: a label, a word-carrying thumb, or a reported miss
+         *     (the label the report made, origin `miss`, which keeps that origin when changed).
+         * @enum {string}
+         */
+        WordSource: "label" | "reaction" | "miss";
     };
     responses: never;
     parameters: never;

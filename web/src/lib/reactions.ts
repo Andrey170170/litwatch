@@ -1,6 +1,5 @@
-/** The thumbs' reasons (feedback.md), and which thumb is the owner's word. */
+/** The thumbs' reasons (feedback.md). */
 import type { Schemas } from "@/api/client";
-import type { Depth } from "./rarity";
 
 export type ReactionReason = Schemas["ReactionReason"];
 export type ReactionValue = Schemas["ReactionValue"];
@@ -23,7 +22,3 @@ export function reasonLabel(reason: ReactionReason | null | undefined): string {
   return "";
 }
 
-/** A word-carrying reason on a Focus topic writes the owner's word; the API's toast says so. */
-export function speaks(depth: Depth, reason: ReactionReason | null | undefined): boolean {
-  return depth === "focus" && (reason === "wrong_topic" || reason === "great_find");
-}

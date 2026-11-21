@@ -22,6 +22,7 @@ from litwatch.core import (
     ReactionValue,
     Status,
     Weight,
+    WordSource,
 )
 from litwatch.core.digests import DigestPeriod, DigestRole, DigestState
 
@@ -373,8 +374,8 @@ type TopicState = Literal["split", "escalated", "one_lab", "ungraded", "grading_
 class PaperTopic(BaseModel):
     """A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its
     own effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),
-    its current verdict, the owner's word that stands (from the label, a thumb or a miss), the
-    label and thumb themselves, and its open state."""
+    its current verdict, the owner's word that stands and what set it (`word_from`: the label,
+    a thumb or a miss), the label and thumb themselves, and its open state."""
 
     topic: Badge
     fit: Fit | None = None  # the effective one, on this topic itself
@@ -383,6 +384,7 @@ class PaperTopic(BaseModel):
     via: str | None = None
     verdict: CurrentVerdict | None = None
     word: Fit | None = None
+    word_from: WordSource | None = None
     label: LabelState | None = None
     reaction: ReactionState | None = None
     missed: bool = False  # reported as missed for this topic
