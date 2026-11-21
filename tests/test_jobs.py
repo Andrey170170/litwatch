@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from litwatch import store
 from litwatch.api import create_app
 from litwatch.api import jobs as jobs_api
 from litwatch.api import reading as api_reading
@@ -25,10 +24,10 @@ from litwatch.llm import Gateway, prices
 from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
-from tests import settling
+from tests import sessions, settling
 from tests.conftest import AGENTS, TREE, AppClient, answering, paper
 from tests.fakes import BatchingProvider, ScriptedProvider
+from tests.sessions import staged
 from tests.test_batches import FAST
 from tests.test_steps import CONFIG, Scripted, decision
 
@@ -47,7 +46,7 @@ TOKEN = "s3cret"
 
 @pytest.fixture
 async def models(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [A, B, C])
     return Scripted()
 
@@ -162,7 +161,7 @@ async def test_a_failure_the_owner_clears_while_the_job_ends_still_settles_it(
     models.decisions[A.title] = {"broken": True}
     job = await queued(conn, A.id)
     read, owner = failures.open_on, None
-    async with await store.sibling(conn) as other:
+    async with await sessions.sibling(conn) as other:
 
         async def clear():  # Needs you's retry, from another request
             async with settling.change(other, A.id, cause=Cause.OWNER) as change:
@@ -191,7 +190,7 @@ async def test_a_failure_the_owner_clears_before_the_job_ends_runs_the_step_agai
 
     async def owner_retries(*args, **kwargs):
         async with (
-            await store.sibling(conn) as owner,
+            await sessions.sibling(conn) as owner,
             settling.change(owner, A.id, cause=Cause.OWNER) as change,
         ):
             await failures.succeeded(change.unit, A.id, "analysis")  # as Needs you's Try again
@@ -299,7 +298,7 @@ async def test_a_job_whose_paper_is_dismissed_while_it_runs_is_discarded_however
 ):
     async def dismissed_then_broken(*_, **__):
         async with (
-            await store.sibling(conn) as owner,
+            await sessions.sibling(conn) as owner,
             settling.change(owner, A.id, cause=Cause.OWNER) as change,
         ):
             await papers_store.dismiss(change.unit, A.id)
@@ -379,15 +378,16 @@ async def test_two_workers_never_run_one_job(conn, db, models):
 
 async def test_a_claim_in_progress_is_skipped_and_a_running_job_is_its_sessions(conn, models):
     job = await queued(conn, A.id)
-    async with await store.sibling(conn) as other:
+    async with await sessions.sibling(conn) as other:
         me, them = await identity_of(conn), await identity_of(other)
+        elsewhere = staged(other)
         async with conn.transaction():
             mine = await jobs_store.claim(conn, me=me)
-            assert await jobs_store.claim(other, me=them) is None  # locked: skipped, not waited on
+            # Locked: skipped, not waited on.
+            assert await jobs_store.claim(elsewhere, me=them) is None
         assert mine["id"] == job
-        assert (
-            await jobs_store.claim(other, me=them) is None
-        )  # running in a live session not its own
+        # Running in a live session not its own.
+        assert await jobs_store.claim(elsewhere, me=them) is None
         assert (await jobs_store.claim(conn, me=me))["id"] == job  # its own, chosen again
 
 
@@ -519,10 +519,12 @@ async def test_no_chunk_starts_while_a_nightly_is_due_or_running(conn, db, model
     job = await queued(conn, A.id)
     w = worker.Worker(db, SCHEDULED, models.gateway)
     assert not await w.step(NIGHT)  # due at 02:00, not started
-    async with await store.sibling(conn) as nightly_session:
-        night = await runs.start(nightly_session, "nightly", me=await identity_of(nightly_session))
+    async with await sessions.sibling(conn) as nightly_session:
+        night = await runs.start(
+            staged(nightly_session), "nightly", me=await identity_of(nightly_session)
+        )
         assert not await w.step(NIGHT + timedelta(minutes=1))  # started, still running
-        await runs.finish(nightly_session, night)
+        await runs.finish(staged(nightly_session), night)
     assert (await jobs_store.get(conn, job))["state"] == "queued" and not await classified(conn)
     assert await w.step(NIGHT + timedelta(minutes=2))  # the night's run done: the job goes
     assert await classified(conn) == {A.id}
@@ -765,7 +767,7 @@ async def test_process_asked_twice_at_once_never_asks_its_running_job_again(
 
     async def queued_and_claimed():  # the first request, then the worker
         async with (
-            await store.sibling(conn) as other,
+            await sessions.sibling(conn) as other,
             settling.change(other, A.id, cause=Cause.OWNER) as change,
         ):
             await jobs_store.process(change.unit, A.id)
@@ -811,11 +813,11 @@ async def test_process_holds_its_job_so_a_try_again_meanwhile_waits_and_is_refus
 ):
     job = await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "failed")
     move, page = jobs_store.move, None
-    async with await store.sibling(conn) as other:
+    async with await sessions.sibling(conn) as other:
 
         async def raced(c, *args):
             nonlocal page  # the Jobs page's Try again comes in while Process decides
-            page = asyncio.create_task(move(other, job, ("failed",), "queued"))
+            page = asyncio.create_task(move(staged(other), job, ("failed",), "queued"))
             await asyncio.sleep(0.3)
             return await move(c, *args)
 

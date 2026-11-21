@@ -13,9 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any
+from typing import Any, Literal, overload
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Depth, Grade, Status, Taxonomy, Topic, events
@@ -30,9 +29,9 @@ from litwatch.core.digests import (
 from litwatch.core.fulltext import AWAITING_TOO_LONG
 from litwatch.core.grading import GRADES, NO_WEIGHT
 from litwatch.core.rules import REACTION_WORDS
+from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import jobs, outbox
 from litwatch.store.analyses import CURRENT_GIST
-from litwatch.store.db import transaction
 from litwatch.store.reading import SCOPE, STANDING, _rank, _scope
 
 _PUBLISHED = "(" + ", ".join(f"'{s.value}'" for s in PUBLISHED) + ")"
@@ -271,7 +270,7 @@ def _params(tree: Taxonomy, topic: Topic, runs: int) -> dict[str, Any]:
 
 
 async def due(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     tree: Taxonomy,
     topic: Topic,
     period: DigestPeriod,
@@ -296,12 +295,10 @@ async def due(
         if topic.depth == Depth.AREA:
             gates += f" AND NOT (s.grade IS NOT DISTINCT FROM 'must_read' AND {_RECHECKING})"
         query = _subtree(which, gates)
-    return _rows(await (await conn.execute(query, params)).fetchall())
+    return _rows(await (await unit.execute(query, params)).fetchall())
 
 
-async def of_week(
-    conn: psycopg.AsyncConnection, tree: Taxonomy, topic: Topic, monday: date
-) -> list[Due]:
+async def of_week(unit: ReadUnit, tree: Taxonomy, topic: Topic, monday: date) -> list[Due]:
     """What the weekly digest of a topic with daily digests covers, rarest first: the papers
     announced by the week's Sunday that its published daily digests covered, up to the
     Monday after (written the same night, before the weekly), and no weekly digest of it has,
@@ -319,11 +316,11 @@ async def of_week(
         "after": sunday + timedelta(days=1),
     }
     query = _focus(which) if topic.depth == Depth.FOCUS else _subtree(which, "")
-    return _rows(await (await conn.execute(query, params)).fetchall())
+    return _rows(await (await unit.execute(query, params)).fetchall())
 
 
 async def due_updated(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     tree: Taxonomy,
     topic: Topic,
     period: DigestPeriod,
@@ -343,7 +340,7 @@ async def due_updated(
     recaps, at the version they listed, the papers its published dailies listed as updated, up
     to the Monday after, still eligible, whatever version has come since."""
     first = last - DUE_WINDOW
-    recapped = {} if week is None else await _listed_updated(conn, topic.slug, week)
+    recapped = {} if week is None else await _listed_updated(unit, topic.slug, week)
     # A listing day comes one to four days after its submission's US Eastern date
     # (`listing_day`): these bounds hold every submission that can list in the window.
     which = f"""((nv.submitted >= %(since)s AND nv.submitted < %(until)s
@@ -371,7 +368,7 @@ async def due_updated(
             gates += f" AND NOT {_RECHECKING}"
         query = _subtree(which, gates, updated=True)
     found = []
-    for row in await (await conn.execute(query, params)).fetchall():
+    for row in await (await unit.execute(query, params)).fetchall():
         submitted = row.pop("submitted")
         if row["paper_id"] in recapped:
             found.append(Due(**row | {"version": recapped[row["paper_id"]]}))
@@ -384,15 +381,13 @@ async def due_updated(
     return found
 
 
-async def _listed_updated(
-    conn: psycopg.AsyncConnection, topic: str, monday: date
-) -> dict[str, int]:
+async def _listed_updated(unit: ReadUnit, topic: str, monday: date) -> dict[str, int]:
     """The papers the topic's published daily digests listed as updated, each with the version
     listed, up to the Monday after the week from `monday` (written the same night, before the
     weekly), less a version of that Monday's own listing: it is the next week's."""
     after = monday + timedelta(days=7)
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"""SELECT dp.paper_id, dp.version, (
                     SELECT (e->>'date')::timestamptz
                     FROM papers p, jsonb_array_elements(
@@ -414,13 +409,11 @@ async def _listed_updated(
     return found
 
 
-async def earlier_central(
-    conn: psycopg.AsyncConnection, topic: str, before: date, limit: int = 20
-) -> list[Due]:
+async def earlier_central(unit: ReadUnit, topic: str, before: date, limit: int = 20) -> list[Due]:
     """The papers the topic's digests listed at Fit central before `before`, newest first, each
     as it was last shown: what a Focus weekly digest may bring back."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT paper_id, revision, title, announced, gist, fit, grade, rarity, graded_on,
                    NULL AS fit_reason, NULL AS brief FROM (
@@ -440,13 +433,13 @@ async def earlier_central(
     return _rows(rows)
 
 
-async def carried(conn: psycopg.AsyncConnection, topic: str, monday: date) -> list[Due]:
+async def carried(unit: ReadUnit, topic: str, monday: date) -> list[Due]:
     """The papers the topic's written daily digests of the week from `monday` covered that an
     earlier published weekly of the topic already has, each as its daily showed it: late
     papers the Monday daily listed, which the week before's weekly took, written after it.
     The weekly reads that daily, so its writer is given them too (digests.md, writing)."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"""
             SELECT paper_id, revision, title, announced, gist, fit, grade, rarity, graded_on,
                    NULL AS fit_reason, NULL AS brief FROM (
@@ -471,7 +464,7 @@ async def carried(conn: psycopg.AsyncConnection, topic: str, monday: date) -> li
     return _rows(rows)
 
 
-async def as_shown(conn: psycopg.AsyncConnection, digest_id: int, focus: bool) -> list[Due]:
+async def as_shown(unit: ReadUnit, digest_id: int, focus: bool) -> list[Due]:
     """A published digest's papers the writer was given (not its updated ones), with what it
     froze of each (title, Gist, Fit, rarity), in a
     writer's order (rarest first), each with the latest Brief and Fit reason of the revision
@@ -479,7 +472,7 @@ async def as_shown(conn: psycopg.AsyncConnection, digest_id: int, focus: bool) -
     writer's input rebuilt for an evaluation's request. It is the input the writer had as far as
     no Brief was written and no grading recorded for that revision since."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"""
             SELECT dp.paper_id, dp.paper_revision AS revision, dp.title, p.announced, dp.gist,
                    dp.fit, dp.grade, dp.rarity, dp.graded_on,
@@ -502,10 +495,10 @@ async def as_shown(conn: psycopg.AsyncConnection, digest_id: int, focus: bool) -
     return _rows(rows)
 
 
-async def daily_texts(conn: psycopg.AsyncConnection, topic: str, monday: date) -> list[dict]:
+async def daily_texts(unit: ReadUnit, topic: str, monday: date) -> list[dict]:
     """The texts of the topic's daily digests written in the week from `monday`."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT day, text FROM digests WHERE topic = %s AND period = 'day' "
             "AND state = 'written' AND day BETWEEN %s AND %s ORDER BY day",
             (topic, monday, monday + timedelta(days=6)),
@@ -513,11 +506,11 @@ async def daily_texts(conn: psycopg.AsyncConnection, topic: str, monday: date) -
     ).fetchall()
 
 
-async def released(conn: psycopg.AsyncConnection, day: date) -> bool:
+async def released(unit: ReadUnit, day: date) -> bool:
     """Whether arXiv listed papers on `day`: a paper litwatch holds is announced on it, dismissed
     or not (dismissing stops processing; it does not undo the listing)."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT EXISTS (SELECT 1 FROM papers WHERE announced = %s) AS released",
             (day,),
         )
@@ -526,10 +519,10 @@ async def released(conn: psycopg.AsyncConnection, day: date) -> bool:
 
 
 async def state_of(
-    conn: psycopg.AsyncConnection, topic: str, period: DigestPeriod, day: date
+    unit: ReadUnit, topic: str, period: DigestPeriod, day: date
 ) -> DigestState | None:
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT state FROM digests WHERE topic = %s AND period = %s AND day = %s",
             (topic, period.value, day),
         )
@@ -567,82 +560,81 @@ class Outcome:
     model: str | None = None
 
 
-async def record(conn: psycopg.AsyncConnection, o: Outcome, run_id: int | None) -> int | None:
+async def record(unit: WriteUnit, o: Outcome, run_id: int | None) -> int | None:
     """Store the outcome, in place of a failed digest of the same topic and period; a published
     one stays as it is (None). Publishing emits `digest.written` with it and settles a failed
     job that wrote it again. Returns the digest's id."""
-    async with transaction(conn):
-        row = await (
-            await conn.execute(
-                f"""
-                INSERT INTO digests (topic, period, day, state, gist, text, counts, best_rarity,
-                                     error, model, run_id)
-                VALUES (%(topic)s, %(period)s, %(day)s, %(state)s, %(gist)s, %(text)s,
-                        %(counts)s, %(best)s, %(error)s, %(model)s, %(run)s)
-                ON CONFLICT (topic, period, day) DO UPDATE SET
-                    state = EXCLUDED.state, gist = EXCLUDED.gist, text = EXCLUDED.text,
-                    counts = EXCLUDED.counts, best_rarity = EXCLUDED.best_rarity,
-                    error = EXCLUDED.error, model = EXCLUDED.model, run_id = EXCLUDED.run_id,
-                    written_at = clock_timestamp(),
-                    -- failed again, it stays as the owner saw it; published, there is none to see
-                    acknowledged_at = CASE WHEN EXCLUDED.state = 'failed'
-                                           THEN digests.acknowledged_at END
-                WHERE digests.state NOT IN {_PUBLISHED}
-                RETURNING id
-                """,
-                {
-                    "topic": o.topic,
-                    "period": o.period.value,
-                    "day": o.day,
-                    "state": o.state.value,
-                    "gist": o.gist,
-                    "text": o.text,
-                    "counts": Jsonb(o.counts),
-                    "best": o.best_rarity,
-                    "error": o.error[:2000] if o.error else None,
-                    "model": o.model,
-                    "run": run_id,
-                },
-            )
-        ).fetchone()
-        if row is None:
-            return None
-        async with conn.cursor() as cur:
-            await cur.executemany(
-                "INSERT INTO digest_papers (digest_id, paper_id, role, position, why, "
-                "paper_revision, title, gist, fit, grade, rarity, graded_on, version) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                [
-                    (
-                        row["id"],
-                        s.due.paper_id,
-                        s.role.value,
-                        i,
-                        s.why,
-                        s.due.revision,
-                        s.due.title,
-                        s.due.gist,
-                        s.due.fit,
-                        s.due.grade,
-                        s.due.rarity,
-                        s.due.graded_on,
-                        s.due.version,
-                    )
-                    for i, s in enumerate(o.papers)
-                ],
-            )
-        if o.state in PUBLISHED:
-            await jobs.settle_digest(conn, row["id"])
-            await outbox.emit(
-                conn,
-                events.DIGEST_WRITTEN,
-                digest=row["id"],
-                topic=o.topic,
-                period=o.period.value,
-                day=o.day.isoformat(),
-                state=o.state.value,
-            )
-        return row["id"]
+    row = await (
+        await unit.execute(
+            f"""
+            INSERT INTO digests (topic, period, day, state, gist, text, counts, best_rarity,
+                                 error, model, run_id)
+            VALUES (%(topic)s, %(period)s, %(day)s, %(state)s, %(gist)s, %(text)s,
+                    %(counts)s, %(best)s, %(error)s, %(model)s, %(run)s)
+            ON CONFLICT (topic, period, day) DO UPDATE SET
+                state = EXCLUDED.state, gist = EXCLUDED.gist, text = EXCLUDED.text,
+                counts = EXCLUDED.counts, best_rarity = EXCLUDED.best_rarity,
+                error = EXCLUDED.error, model = EXCLUDED.model, run_id = EXCLUDED.run_id,
+                written_at = clock_timestamp(),
+                -- failed again, it stays as the owner saw it; published, there is none to see
+                acknowledged_at = CASE WHEN EXCLUDED.state = 'failed'
+                                       THEN digests.acknowledged_at END
+            WHERE digests.state NOT IN {_PUBLISHED}
+            RETURNING id
+            """,
+            {
+                "topic": o.topic,
+                "period": o.period.value,
+                "day": o.day,
+                "state": o.state.value,
+                "gist": o.gist,
+                "text": o.text,
+                "counts": Jsonb(o.counts),
+                "best": o.best_rarity,
+                "error": o.error[:2000] if o.error else None,
+                "model": o.model,
+                "run": run_id,
+            },
+        )
+    ).fetchone()
+    if row is None:
+        return None
+    async with unit.cursor() as cur:
+        await cur.executemany(
+            "INSERT INTO digest_papers (digest_id, paper_id, role, position, why, "
+            "paper_revision, title, gist, fit, grade, rarity, graded_on, version) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            [
+                (
+                    row["id"],
+                    s.due.paper_id,
+                    s.role.value,
+                    i,
+                    s.why,
+                    s.due.revision,
+                    s.due.title,
+                    s.due.gist,
+                    s.due.fit,
+                    s.due.grade,
+                    s.due.rarity,
+                    s.due.graded_on,
+                    s.due.version,
+                )
+                for i, s in enumerate(o.papers)
+            ],
+        )
+    if o.state in PUBLISHED:
+        await jobs.settle_digest(unit, row["id"])
+        await outbox.emit(
+            unit,
+            events.DIGEST_WRITTEN,
+            digest=row["id"],
+            topic=o.topic,
+            period=o.period.value,
+            day=o.day.isoformat(),
+            state=o.state.value,
+        )
+    return row["id"]
 
 
 # A failed digest of an active topic: written again by the next run, and on Quality meanwhile.
@@ -653,24 +645,24 @@ _FAILED = (
 )
 
 
-async def failed(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
+async def failed(unit: ReadUnit) -> list[dict[str, Any]]:
     """The failed digests of active topics, oldest first, the days before the weeks, with when
     the owner acknowledged them."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT d.id, d.topic, d.period, d.day, d.error, d.written_at, d.acknowledged_at "
             f"{_FAILED} ORDER BY d.day, d.period, d.topic"
         )
     ).fetchall()
 
 
-async def failed_writer(conn: psycopg.AsyncConnection, topic: str) -> str | None:
+async def failed_writer(unit: ReadUnit, topic: str) -> str | None:
     """The writer model the topic's latest failed digest attempt started from, while no digest
     of the topic has been published since: the next attempt starts one model further down
     `writer`'s list (models.md, roles). None when its latest digest is published, or it has
     none."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT state, model FROM digests WHERE topic = %s "
             "ORDER BY written_at DESC, id DESC LIMIT 1",
             (topic,),
@@ -679,21 +671,21 @@ async def failed_writer(conn: psycopg.AsyncConnection, topic: str) -> str | None
     return row["model"] if row and row["state"] == DigestState.FAILED else None
 
 
-async def count_failed(conn: psycopg.AsyncConnection, *, unacknowledged: bool = False) -> int:
+async def count_failed(unit: ReadUnit, *, unacknowledged: bool = False) -> int:
     """How many digests failed; with `unacknowledged`, only those the owner has not acknowledged."""
     seen = " AND d.acknowledged_at IS NULL" if unacknowledged else ""
-    row = await (await conn.execute(f"SELECT count(*) AS n {_FAILED}{seen}")).fetchone()
+    row = await (await unit.execute(f"SELECT count(*) AS n {_FAILED}{seen}")).fetchone()
     return row["n"]
 
 
-async def acknowledge(conn: psycopg.AsyncConnection, ids: list[int]) -> list[int]:
+async def acknowledge(unit: WriteUnit, ids: list[int]) -> list[int]:
     """The owner's Acknowledge on the named failed digests, of active topics (a failed digest
     stays the same failure until it is published); one marked already keeps its time. Returns
     the ids marked."""
     if not ids:
         return []
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "UPDATE digests d SET acknowledged_at = coalesce(d.acknowledged_at, now()) "
             "FROM topics t "
             "WHERE d.id = ANY(%s) AND t.class = d.topic AND t.status = 'active' "
@@ -704,24 +696,28 @@ async def acknowledge(conn: psycopg.AsyncConnection, ids: list[int]) -> list[int
     return [r["id"] for r in rows]
 
 
+@overload
 async def get(
-    conn: psycopg.AsyncConnection, digest_id: int, *, lock: bool = False
-) -> dict[str, Any] | None:
-    """The digest; with `lock`, its row locked to the end of the transaction."""
+    unit: ReadUnit, digest_id: int, *, lock: Literal[False] = False
+) -> dict[str, Any] | None: ...
+@overload
+async def get(unit: WriteUnit, digest_id: int, *, lock: Literal[True]) -> dict[str, Any] | None: ...
+async def get(unit: ReadUnit, digest_id: int, *, lock: bool = False) -> dict[str, Any] | None:
+    """The digest; with `lock`, its row locked to the end of the unit, a write unit."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM digests WHERE id = %s" + (" FOR UPDATE" if lock else ""), (digest_id,)
         )
     ).fetchone()
 
 
-async def waiting_passes(conn: psycopg.AsyncConnection, since: datetime) -> int:
+async def waiting_passes(unit: ReadUnit, since: datetime) -> int:
     """The Briefs and Weight re-checks queued since `since` (by a Focus or an Area topic) that a
     digest waits for: still to run on their paper's current text, the paper not dismissed. One
     that failed in this run, or is terminal, waits no longer; nor does a re-run's, which only
     its job works."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT count(*) AS n FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
             "WHERE f.kind <> 'deep' AND f.reason IN ('focus', 'area') AND f.queued_at >= %s "
             "AND f.paper_revision = p.revision AND NOT p.dropped AND f.job_id IS NULL "
@@ -739,7 +735,7 @@ CARD_PAPERS = 3
 
 
 async def digests_on(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     period: DigestPeriod,
     first: date,
     last: date,
@@ -748,7 +744,7 @@ async def digests_on(
     """The digests of `period` from `first` to `last`, of `topic` alone when given, newest
     first."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT id, topic, period, day, state, gist, counts, best_rarity FROM digests "
             "WHERE period = %(period)s AND day BETWEEN %(first)s AND %(last)s "
             "AND (%(topic)s::text IS NULL OR topic = %(topic)s) ORDER BY day DESC, topic",
@@ -770,11 +766,11 @@ _SHOWN = f"""
 """
 
 
-async def card_papers(conn: psycopg.AsyncConnection, ids: list[int]) -> list[dict[str, Any]]:
+async def card_papers(unit: ReadUnit, ids: list[int]) -> list[dict[str, Any]]:
     """The papers each digest's card shows (`CARD_PAPERS`): its picks, else its central papers,
     in the digest's order."""
     return await (
-        await conn.execute(
+        await unit.execute(
             f"""
             SELECT * FROM (
                 SELECT x.*, row_number() OVER (PARTITION BY x.digest_id
@@ -791,18 +787,18 @@ async def card_papers(conn: psycopg.AsyncConnection, ids: list[int]) -> list[dic
     ).fetchall()
 
 
-async def papers_of(conn: psycopg.AsyncConnection, digest_id: int) -> list[dict[str, Any]]:
+async def papers_of(unit: ReadUnit, digest_id: int) -> list[dict[str, Any]]:
     """A digest's papers in its order (`_SHOWN`)."""
     return await (
-        await conn.execute(f"{_SHOWN} WHERE dp.digest_id = %s ORDER BY dp.position", (digest_id,))
+        await unit.execute(f"{_SHOWN} WHERE dp.digest_id = %s ORDER BY dp.position", (digest_id,))
     ).fetchall()
 
 
-async def released_days(conn: psycopg.AsyncConnection, first: date, last: date) -> set[date]:
+async def released_days(unit: ReadUnit, first: date, last: date) -> set[date]:
     """The days from `first` to `last` on which arXiv listed papers litwatch holds, dismissed or
     not."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT DISTINCT announced FROM papers WHERE announced BETWEEN %s AND %s",
             (first, last),
         )
@@ -811,7 +807,7 @@ async def released_days(conn: psycopg.AsyncConnection, first: date, last: date) 
 
 
 async def step(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     period: DigestPeriod,
     day: date,
     later: bool,
@@ -821,7 +817,7 @@ async def step(
     (those shown): where the Day or Week view steps, past the days without."""
     op, order = (">", "ASC") if later else ("<", "DESC")
     row = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT day FROM digests WHERE period = %s AND day {op} %s AND topic = ANY(%s) "
             f"ORDER BY day {order} LIMIT 1",
             (period.value, day, topics),
@@ -830,20 +826,20 @@ async def step(
     return row["day"] if row else None
 
 
-async def first_day(conn: psycopg.AsyncConnection, topics: list[str]) -> date | None:
+async def first_day(unit: ReadUnit, topics: list[str]) -> date | None:
     """The day of the oldest digest of `topics` (those shown): where History stops."""
     row = await (
-        await conn.execute("SELECT min(day) AS day FROM digests WHERE topic = ANY(%s)", (topics,))
+        await unit.execute("SELECT min(day) AS day FROM digests WHERE topic = ANY(%s)", (topics,))
     ).fetchone()
     return row["day"]
 
 
 async def strips(
-    conn: psycopg.AsyncConnection, topics: list[str], period: DigestPeriod, limit: int
+    unit: ReadUnit, topics: list[str], period: DigestPeriod, limit: int
 ) -> list[dict[str, Any]]:
     """Each topic's latest `limit` digests of `period`, oldest first: its digest strip."""
     return await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT id, topic, day, state, best_rarity FROM (
                 SELECT d.*, row_number() OVER (PARTITION BY d.topic ORDER BY d.day DESC) AS n
@@ -855,12 +851,12 @@ async def strips(
     ).fetchall()
 
 
-async def written(conn: psycopg.AsyncConnection, first: date, last: date) -> list[dict[str, Any]]:
+async def written(unit: ReadUnit, first: date, last: date) -> list[dict[str, Any]]:
     """The written digests from `first` to `last` (a weekly one by its Monday), with the
     titles of the papers the writer was given (not its updated papers): what the voice check
     reads."""
     return await (
-        await conn.execute(
+        await unit.execute(
             """
             SELECT d.id, d.topic, d.period, d.day, d.gist, d.text, d.counts,
                    array(SELECT dp.title FROM digest_papers dp

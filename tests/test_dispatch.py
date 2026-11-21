@@ -4,13 +4,15 @@ import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
 
-from litwatch import events, store
+from litwatch import events
 from litwatch.api import create_app
 from litwatch.events import dispatch
 from litwatch.gates.database import outside_unit
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.store import outbox
+from tests import sessions
 from tests.conftest import deliver, start
+from tests.sessions import staged
 
 NOW = datetime(2026, 10, 12, 12, tzinfo=UTC)
 
@@ -67,7 +69,7 @@ async def test_events_arrive_in_order_and_the_cursor_moves_past_unwanted_ones(co
 async def test_an_event_that_commits_after_a_later_one_is_not_passed_over(conn, db):
     rec = Recorder()
     await start(db, rec)
-    other = await store.sibling(conn)
+    other = await sessions.sibling(conn)
     try:
         async with other.transaction():
             (early,) = await emit(other, events.PAPER_SAVED)  # its id is taken, not committed
@@ -161,10 +163,10 @@ async def test_a_skip_during_a_retry_that_then_fails_stays_skipped(conn, db):
     a, b = await emit(conn, events.PAPER_SAVED, events.PAPER_SAVED)
     rec.fail = {a}
     await deliver(db, rec, NOW)
-    owner = await store.sibling(conn)
+    owner = await sessions.sibling(conn)
     try:
         # The owner skips `a` while the dispatcher is retrying it; the retry then fails.
-        rec.before_failing = lambda: outbox.skip(owner, rec.name)
+        rec.before_failing = lambda: outbox.skip(staged(owner), rec.name)
         await outbox.retry(conn, rec.name)
         await deliver(db, rec, NOW)
     finally:

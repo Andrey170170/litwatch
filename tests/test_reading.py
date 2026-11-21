@@ -13,15 +13,15 @@ from litwatch.config import Config
 from litwatch.core import Analysis, Cause, Facets, Fit, Opinion, Status, Verdict, Weight
 from litwatch.core.classification import Membership, Source
 from litwatch.feedback import word
-from litwatch.gates.database import DatabaseGate
 from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, verdicts
 from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
-from tests import settling
+from tests import sessions, settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, answering, paper, started
+from tests.sessions import Bridge
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -32,7 +32,7 @@ VERSIONS = {c.slug: c.version for c in TREE.classes}
 
 @pytest.fixture
 async def client(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P, Q])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, Config())
@@ -608,14 +608,14 @@ async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, m
     import psycopg
 
     from litwatch.feedback import misses
-    from litwatch.store.taxonomy import TAXONOMY_LOCK
+    from litwatch.gates.database import LOCKS
 
     fetched = []
 
     async def fetch(ids):
         # arXiv may keep the fetch waiting for its budget: no transaction holds the taxonomy then.
         async with await psycopg.AsyncConnection.connect(conn.test_dsn, autocommit=True) as other:
-            lock = await other.execute("SELECT pg_try_advisory_lock(%s)", (TAXONOMY_LOCK,))
+            lock = await other.execute("SELECT pg_try_advisory_lock(%s)", (LOCKS["taxonomy"].key,))
             free = (await lock.fetchone())[0]
             await other.execute("SELECT pg_advisory_unlock_all()")
         assert free, "a taxonomy edit would wait on the fetch"
@@ -652,11 +652,10 @@ async def test_two_requests_storing_the_same_fetched_paper_both_get_it(conn, sec
     """An owner request and another owner request, or the nightly intake, that fetched the same
     unfetched paper store it once: the second waits on the first's settle lock, then stores
     over it as intake would, and there is one `paper.added` (L5-2)."""
-    from litwatch import store
     from litwatch.feedback import misses
 
     fetched = paper("2610.06666")
-    async with await store.connect(conn.test_dsn, conn.test_schema) as other:
+    async with await sessions.connect(conn.test_dsn, conn.test_schema) as other:
         async with settling.held(other, fetched.id) as change:
             first = await misses.keep(change.unit, fetched.id, fetched)
             # The second runs into the first's settle lock, and waits on it.
@@ -701,7 +700,7 @@ async def test_an_owners_delayed_fetch_never_overwrites_newer_metadata(conn, mon
     pid = "2610.04444"
     older = paper(pid, title="As first submitted", version=1, updated="2026-10-01T10:00:00Z")
     monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: [older]))
-    _, fetched = await misses.resolve(DatabaseGate.over(conn), pid)
+    _, fetched = await misses.resolve(Bridge(conn), pid)
     newer = paper(pid, title="As revised since", updated="2026-10-05T00:00:00Z")
     await settling.store(conn, [newer], source="oai")
     stored, inserted = await settling.keep(conn, pid, fetched)
@@ -768,13 +767,12 @@ async def test_a_miss_taken_back_can_be_reported_again(client, conn):
 async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, conn):
     """Looking for the owner's standing word and giving it again happen under the paper's
     lock, so a correction being written meanwhile is seen, and stands."""
-    from litwatch import store
     from litwatch.core import Label, LabelOrigin, LabelValue
 
     await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
     await client.delete(f"/api/labels/{FAITH.slug}/{Q.id}")
     given = Label(paper_id=Q.id, topic=FAITH.slug, value=LabelValue.NONE, origin=LabelOrigin.READER)
-    async with await store.sibling(conn) as other:
+    async with await sessions.sibling(conn) as other:
         async with settling.held(other, Q.id) as correction:  # part way through
             again = asyncio.create_task(
                 client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
@@ -865,7 +863,7 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
     from litwatch.feedback import misses
     from tests.fakes_http import FakeArchive, mock
 
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     fake = FakeArchive()
     pid = "2610.09999"
@@ -914,7 +912,7 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
         assert (await c.get("/api/papers/2610.08888")).status_code == 404
         assert fetched == [] and await papers_store.get(conn, pid) is None
 
-        assert (await settling.keep(conn, *await misses.resolve(DatabaseGate.over(conn), pid)))[1]
+        assert (await settling.keep(conn, *await misses.resolve(Bridge(conn), pid)))[1]
         page = (await c.get(f"/api/papers/{pid}")).json()
         assert (page["stored"], page["in_collection"], page["next_run"]) == (True, False, True)
         assert fetched == [[pid]]
@@ -955,7 +953,7 @@ async def test_an_archive_paper_page_ends_at_its_deadline_however_the_archive_tr
 
     slow_arxiv.trickle = trickle  # a local socket that never finishes answering, any path
     monkeypatch.setattr(reading_api, "ARCHIVE_PAGE_BUDGET", 0.5)
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     archive = ArchiveClient(f"http://127.0.0.1:{slow_arxiv.server_port}", "archive-token")
     app = create_app(dsn, TOKEN, Config(), archive=archive)
@@ -970,7 +968,7 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
     from litwatch.archive import ArchiveClient
     from tests.fakes_http import PDF, FakeArchive, mock
 
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     held = P.model_copy(update={"version": 2})
     await papers_store.upsert(conn, [held])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"

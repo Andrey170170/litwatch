@@ -9,7 +9,7 @@ from collections import Counter
 import httpx
 import pytest
 
-from litwatch import fulltext, store
+from litwatch import fulltext
 from litwatch.api import create_app
 from litwatch.archive import URGENT, ArchiveClient, PaperText, PdfText
 from litwatch.config import Config, Models, RoleConfig
@@ -39,7 +39,7 @@ from litwatch.core.fulltext import (
 )
 from litwatch.feedback import word
 from litwatch.fulltext import brief, trim
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import LOCKS
 from litwatch.jobs import nightly
 from litwatch.llm import Gateway, ProviderError
 from litwatch.store import analyses as analyses_store
@@ -48,10 +48,11 @@ from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
-from tests import settling
+from tests import sessions, settling
 from tests.conftest import FAITH, INTERP, TREE, AppClient, gate_on, paper
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
+from tests.sessions import Bridge
 from tests.test_steps import refusal
 
 P = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes.", version=1)
@@ -101,7 +102,7 @@ def archive(fake: FakeArchive) -> ArchiveClient:
 async def db(conn):
     """P classified, its primary class Interpretability (an Area, over the CoT faithfulness
     Focus topic)."""
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P])
     await conn.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
@@ -172,13 +173,13 @@ async def work(conn, fake: FakeArchive, writer: Writer, **kwargs):
 
 async def retry_failed(conn) -> int:
     """`store.fulltext.retry_failed` in a unit of its own, as the nightly calls it."""
-    async with DatabaseGate.over(conn).write("retry failed", taxonomy="shared") as unit:
+    async with Bridge(conn).write("retry failed", taxonomy="shared") as unit:
         return await fulltext_store.retry_failed(unit, FAILED_RUNS)
 
 
 async def record(conn, attempt: fulltext.Attempt) -> bool:
     """Record a pass's attempt as the worker does, in a change of its paper."""
-    return await fulltext.record_in_change(DatabaseGate.over(conn), attempt, settling.RULES)
+    return await fulltext.record_in_change(Bridge(conn), attempt, settling.RULES)
 
 
 def ready(fake: FakeArchive, version: int = 1) -> FakeArchive:
@@ -576,9 +577,10 @@ async def test_failed_passes_are_retried_only_after_a_taxonomy_save_in_flight(db
     await db.execute(
         "UPDATE fulltext_passes SET state = 'failed', failed_runs = 1 WHERE kind <> 'deep'"
     )
-    async with await store.connect(db.test_dsn, db.test_schema) as other:
+    async with await sessions.connect(db.test_dsn, db.test_schema) as other:
         async with other.transaction():
-            await taxonomy_store.lock(other)  # as a save that drops passes holds it
+            # As a save that drops passes holds it.
+            await other.execute("SELECT pg_advisory_xact_lock(%s)", (LOCKS["taxonomy"].key,))
             retry = asyncio.create_task(retry_failed(db))
             await asyncio.sleep(0.3)
             assert not retry.done()  # taxonomy first, as every settle: no deadlock

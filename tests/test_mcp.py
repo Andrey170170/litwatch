@@ -26,7 +26,7 @@ from litwatch.jobs import publications as lookups
 from litwatch.store import digests as digests_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
+from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, fixture_read, gate_on, paper
 from tests.fakes_http import FakeArchive, mock
 from tests.test_archive_text import a_pdf
@@ -124,7 +124,7 @@ def ids(text: str) -> list[str]:
 
 
 async def test_only_the_mcp_token_opens_mcp_and_it_opens_nothing_else(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P])
     async with serving(_app(conn)) as http:
         opened = await rpc(http, "initialize", INIT)
@@ -155,7 +155,7 @@ async def test_mcp_is_not_shadowed_by_the_web_app_and_absent_without_its_token(
     (tmp_path / "assets").mkdir()
     (tmp_path / "index.html").write_text("<p>shell</p>")
     monkeypatch.setattr(app_module, "WEB", tmp_path)
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     async with serving(_app(conn)) as http:
         opened = (await rpc(http, "initialize", INIT)).json()
         assert opened["result"]["serverInfo"]["name"] == "litwatch"
@@ -170,7 +170,7 @@ async def test_mcp_is_not_shadowed_by_the_web_app_and_absent_without_its_token(
 
 
 async def test_the_sdks_own_client_initializes_lists_and_calls_through_create_app(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P])
     app = _app(conn)
     headers = {"authorization": f"Bearer {MCP_TOKEN}"}
@@ -204,7 +204,7 @@ async def shelves(conn):
     """A Focus must read (P), an Area must read on a landmark, a Field adjacent paper, one
     fetched but not processed, and one only the archive holds (`ONLY`), which the fake archive's
     search finds beside P."""
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     landmark = paper(
         "2610.00003",
         title="Hidden features at scale",
@@ -576,7 +576,7 @@ async def test_the_owners_records_on_a_topic_no_longer_followed_all_still_show(c
             answer = await http.request(method, path, json=body, headers=AUTH)
             assert answer.status_code == 200, answer.text
         followed = _owners(await ok(http, "get_paper", paper_id=landmark.id))
-    await taxonomy_store.save(conn, Taxonomy(classes=TREE.classes, topics=[INTERP, AGENTS]))
+    await settling.save_tree(conn, Taxonomy(classes=TREE.classes, topics=[INTERP, AGENTS]))
     async with serving(_app(conn, fake)) as http:
         assert landmark.id in ids(await ok(http, "search_papers", reaction="up"))
         unfollowed = _owners(await ok(http, "get_paper", paper_id=landmark.id))
@@ -614,7 +614,7 @@ async def test_the_library_says_whether_the_owner_or_the_grades_chose(conn, shel
 
 
 async def test_a_paper_the_archive_cannot_be_asked_for_is_an_error_not_a_missing_paper(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     flaky = Flaky()
     flaky.down = True
     async with serving(_app(conn, flaky)) as http:
@@ -667,7 +667,7 @@ async def test_digests_list_by_topic_and_read_in_full(conn, shelves):
 
 
 async def test_the_monitor_counts_calls_and_degrades_mcp_only_while_calls_fail(conn, caplog):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     caplog.set_level(logging.INFO, logger="litwatch.api.mcp")
     flaky = Flaky()
     app = _app(conn, flaky)
@@ -716,7 +716,7 @@ async def test_the_monitor_counts_calls_and_degrades_mcp_only_while_calls_fail(c
 
 
 async def test_a_date_out_of_range_is_an_argument_error_not_a_server_error(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     app = _app(conn)
     transport = httpx.ASGITransport(create_monitor(app))
     async with (
@@ -742,7 +742,7 @@ async def test_a_date_out_of_range_is_an_argument_error_not_a_server_error(conn)
 async def test_arguments_no_query_can_take_are_refused_and_not_counted_as_failures(conn):
     """An offset past bigint, U+0000 (which PostgreSQL cannot hold) and a range ending before
     it starts are the caller's mistakes: errors before any query, never server failures."""
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     weekly = await _digest(conn, AGENTS, DigestPeriod.WEEK, date(2026, 10, 12))
     app = _app(conn)
     transport = httpx.ASGITransport(create_monitor(app))

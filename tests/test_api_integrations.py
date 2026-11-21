@@ -8,18 +8,18 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from litwatch import events, store
+from litwatch import events
 from litwatch.api import create_app, monitor
 from litwatch.config import Config
 from litwatch.core import SearchHit
-from litwatch.gates.database import DatabaseGate
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.integrations.webhook import Webhook
 from litwatch.store import integrations as state
 from litwatch.store import outbox
 from litwatch.store import papers as papers_store
-from litwatch.store import taxonomy as taxonomy_store
+from tests import sessions, settling
 from tests.conftest import TREE, AppClient, deliver, paper, settled, start
+from tests.sessions import Bridge, staged
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -83,7 +83,7 @@ def hit(pid: str, day: int) -> SearchHit:
 
 @pytest.fixture
 async def make(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [P])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     clients = []
@@ -157,7 +157,7 @@ async def test_an_integration_that_reacts_to_no_event_is_never_shown_behind(conn
     client = await make([deep])
     cards = (await client.get("/api/settings/integrations")).json()
     assert [(c["name"], c["lag"], c["failing"]) for c in cards] == [("deep", 0, None)]
-    found = await monitor.facts(DatabaseGate.over(conn), Config(), [deep], None)
+    found = await monitor.facts(Bridge(conn), Config(), [deep], None)
     assert "deep" not in found.cursors
     await deep.aclose()
 
@@ -259,10 +259,10 @@ async def test_the_changes_feed_reads_on_from_a_position_and_misses_no_late_comm
     await settled(conn)
     first = (await client.get("/api/events")).json()
     assert [e["type"] for e in first["events"]][:1] == ["paper.added"]  # the fixture's paper
-    other = await store.sibling(conn)
+    other = await sessions.sibling(conn)
     try:
         async with other.transaction():
-            early = await outbox.emit(other, events.PAPER_SAVED, P.id)  # not yet committed
+            early = await outbox.emit(staged(other), events.PAPER_SAVED, P.id)  # not yet committed
             late = await outbox.emit(conn, events.PAPER_UNSAVED, P.id)
             held = (await client.get("/api/events", params={"after": first["next"]})).json()
             assert held == {"events": [], "next": first["next"]}

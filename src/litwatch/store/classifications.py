@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Paper
 from litwatch.core.classification import Membership, Source
+from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store.papers import COLUMNS, row_to_paper
 
 # The sources a classification writes, and replaces on the next one; the others are the owner's.
@@ -16,7 +16,7 @@ MACHINE = [Source.CLASSIFIER.value, Source.UNCERTAIN.value, Source.KEYWORD.value
 
 
 async def due(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     runs: int,
     limit: int | None = None,
     ids: list[str] | None = None,
@@ -26,7 +26,7 @@ async def due(
     place under `limit`, and after `runs` failed runs it is not tried at all: it waits for the
     owner. A dismissed paper is never classified."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"""
             SELECT {COLUMNS} FROM papers p
             LEFT JOIN step_failures f ON f.paper_id = p.id AND f.step = 'classification'
@@ -45,7 +45,7 @@ async def due(
 
 
 async def add(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     paper: Paper,
     taxonomy_revision: str,
     primary: str,
@@ -53,7 +53,7 @@ async def add(
     model: str,
 ) -> int:
     row = await (
-        await conn.execute(
+        await unit.execute(
             "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
             "primary_class, response, model) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
             (
@@ -69,10 +69,8 @@ async def add(
     return row["id"]
 
 
-async def _put(
-    conn: psycopg.AsyncConnection, paper: Paper, m: Membership, class_version: str
-) -> None:
-    await conn.execute(
+async def _put(unit: WriteUnit, paper: Paper, m: Membership, class_version: str) -> None:
+    await unit.execute(
         """
         INSERT INTO memberships (paper_id, class, source, member, probability, class_version,
                                  paper_revision)
@@ -87,22 +85,22 @@ async def _put(
 
 
 async def replace(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     paper: Paper,
     found: list[Membership],
     versions: dict[str, str],
 ) -> None:
     """Make `found` the paper's classifier, uncertain and keyword memberships. The owner's rows
     stay. `versions` maps each class to the version the memberships were made under."""
-    await conn.execute(
+    await unit.execute(
         "DELETE FROM memberships WHERE paper_id = %s AND source = ANY(%s)", (paper.id, MACHINE)
     )
     for m in found:
-        await _put(conn, paper, m, versions[m.slug])
+        await _put(unit, paper, m, versions[m.slug])
 
 
 async def put_owner(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     paper: Paper,
     slug: str,
     member: bool,
@@ -113,14 +111,14 @@ async def put_owner(
     """The owner's class label: in the class or out of it, whatever the other sources say; or,
     with source `miss`, the class of a topic the owner reported the paper missed for."""
     m = Membership(slug=slug, source=source, member=member)
-    await _put(conn, paper, m, class_version)
+    await _put(unit, paper, m, class_version)
 
 
-async def memberships(conn: psycopg.AsyncConnection, paper_id: str) -> list[Membership]:
+async def memberships(unit: ReadUnit, paper_id: str) -> list[Membership]:
     """Every direct membership row of the paper, whatever its source; `core.classification.
     standing` says which stand."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT class, source, member, probability FROM memberships WHERE paper_id = %s "
             "ORDER BY class, source",
             (paper_id,),
@@ -134,10 +132,10 @@ async def memberships(conn: psycopg.AsyncConnection, paper_id: str) -> list[Memb
     ]
 
 
-async def current(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+async def current(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
     """The newest classification of the paper's current text, or None."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT c.* FROM classifications c JOIN papers p ON p.id = c.paper_id "
             "AND p.revision = c.paper_revision WHERE c.paper_id = %s ORDER BY c.id DESC LIMIT 1",
             (paper_id,),

@@ -7,14 +7,14 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from litwatch import grading, intake, store
+from litwatch import grading, intake
 from litwatch.api import create_app
 from litwatch.archive import ArchiveClient, ArchiveError
 from litwatch.archive.client import listed
 from litwatch.core import FAILED_RUNS, Cause, Fit, Status
 from litwatch.core.grading import FIT_DEFINITIONS
 from litwatch.feedback import word
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import LOCKS
 from litwatch.intake import atom, oai
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly
@@ -25,10 +25,11 @@ from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
-from tests import settling
+from tests import sessions, settling
 from tests.conftest import FAITH, INTERP, TREE, AppClient, started
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
+from tests.sessions import Bridge
 from tests.test_intake import unavailable
 from tests.test_steps import (
     ANALYSIS,
@@ -49,7 +50,7 @@ TOKEN = "s3cret"
 
 @pytest.fixture
 async def models(conn):
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [A, B])
     return Scripted()
 
@@ -346,10 +347,10 @@ async def test_grading_now_checks_the_topic_under_the_taxonomy_lock(conn, models
     lock = papers_store.lock
 
     async def pause_meanwhile(c, paper_id):
-        async with await store.sibling(conn) as other, other.transaction():
+        async with await sessions.sibling(conn) as other, other.transaction():
             row = await (
                 await other.execute(
-                    "SELECT pg_try_advisory_xact_lock(%s) AS got", (taxonomy_store.TAXONOMY_LOCK,)
+                    "SELECT pg_try_advisory_xact_lock(%s) AS got", (LOCKS["taxonomy"].key,)
                 )
             ).fetchone()
             if row["got"]:
@@ -466,7 +467,7 @@ async def test_a_rewrite_harvested_from_arxiv_settles_as_it_is_stored(conn, mode
     monkeypatch.setattr(oai, "fetch_category", lambda *a, **k: oai.OaiBatch([rewrite], now))
     run_id = await started(conn, "intake")
     result = await intake.collect(
-        DatabaseGate.over(conn), ("cs.CL",), now - timedelta(days=3), run_id, rules=settling.RULES
+        Bridge(conn), ("cs.CL",), now - timedelta(days=3), run_id, rules=settling.RULES
     )
     assert result.rewritten == [B.id]
     await assert_settled_on_solid(conn)

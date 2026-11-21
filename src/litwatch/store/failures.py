@@ -12,15 +12,14 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Literal
 
-import psycopg
-
 from litwatch.core import FAILED_RUNS, Paper
+from litwatch.gates.database import ReadUnit, WriteUnit
 
 type Step = Literal["classification", "analysis", "grading"]
 
 
 async def failed(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     paper: Paper,
     step: Step,
     error: str,
@@ -37,7 +36,7 @@ async def failed(
     once, for the owner, and the failure says so (`stopped_by_refusal`). Returns the failed runs
     in a row."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             """
             INSERT INTO step_failures (paper_id, step, topic, paper_revision, failed_runs,
                                        last_error, refused, stopped_by_refusal)
@@ -68,20 +67,18 @@ async def failed(
     return row["failed_runs"]
 
 
-async def succeeded(
-    conn: psycopg.AsyncConnection, paper_id: str, step: Step, topic: str = ""
-) -> None:
-    await conn.execute(
+async def succeeded(unit: WriteUnit, paper_id: str, step: Step, topic: str = "") -> None:
+    await unit.execute(
         "DELETE FROM step_failures WHERE paper_id = %s AND step = %s AND topic = %s",
         (paper_id, step, topic),
     )
 
 
-async def reset(conn: psycopg.AsyncConnection, paper_id: str, step: Step, topic: str = "") -> None:
+async def reset(unit: WriteUnit, paper_id: str, step: Step, topic: str = "") -> None:
     """Forget the failed runs and the refusals but keep the failure: the step is still pending
     on the paper, and the next run tries it again, from the role's own model, if nothing
     records it first."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE step_failures SET failed_runs = 0, refused = '{}', stopped_by_refusal = false, "
         "acknowledged_at = NULL "
         "WHERE paper_id = %s AND step = %s AND topic = %s",
@@ -100,13 +97,13 @@ ACTIONABLE = (
 
 
 async def open_on(
-    conn: psycopg.AsyncConnection, paper_ids: Sequence[str], runs: int
+    unit: ReadUnit, paper_ids: Sequence[str], runs: int
 ) -> dict[Step, tuple[int, int]]:
     """Per step, the distinct papers of `paper_ids` it failed on and has not done since
     (`ACTIONABLE`, whatever the count), and how many of those wait for the owner after at least
     `runs` runs in a row."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT f.step, count(DISTINCT f.paper_id) AS n, "
             "count(DISTINCT f.paper_id) FILTER (WHERE f.failed_runs >= %s) AS stuck "
             "FROM step_failures f JOIN papers p ON p.id = f.paper_id "
@@ -117,21 +114,19 @@ async def open_on(
     return {r["step"]: (r["n"], r["stuck"]) for r in rows}
 
 
-async def waits_on_owner(
-    conn: psycopg.AsyncConnection, paper_ids: Sequence[str], runs: int
-) -> bool:
+async def waits_on_owner(unit: ReadUnit, paper_ids: Sequence[str], runs: int) -> bool:
     """Whether a step of one of the papers waits for the owner after at least `runs` runs in a
     row: no run tries it again until the owner acts on Needs you."""
-    return any(stuck for _, stuck in (await open_on(conn, paper_ids, runs)).values())
+    return any(stuck for _, stuck in (await open_on(unit, paper_ids, runs)).values())
 
 
-async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[dict[str, Any]]:
+async def stuck(unit: ReadUnit, step: Step, runs: int) -> list[dict[str, Any]]:
     """The failures of `step` that wait for the owner (`ACTIONABLE`) after at least `runs` runs
     in a row, with the last error (and the topic, for grading), the roles whose every model
     refused, whether that refusal stopped it, and when the owner acknowledged it. Most failed
     first."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT f.paper_id, f.paper_revision AS revision, p.title, f.failed_runs, "
             "f.last_error, f.refused, f.stopped_by_refusal, f.failed_at, "
             "nullif(f.topic, '') AS topic, "
@@ -145,13 +140,13 @@ async def stuck(conn: psycopg.AsyncConnection, step: Step, runs: int) -> list[di
 
 
 async def stopped_between(
-    conn: psycopg.AsyncConnection, since: datetime, until: datetime, runs: int
+    unit: ReadUnit, since: datetime, until: datetime, runs: int
 ) -> dict[Step, int]:
     """Per step, the distinct papers it stopped on between `since` and `until`: those whose
     failure reached `runs` runs, or was stopped by a refusal, then. A step left for the owner is
     not run again, so its failure's time is when it stopped."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT step, count(DISTINCT paper_id) AS n FROM step_failures "
             "WHERE failed_runs >= %s AND failed_at BETWEEN %s AND %s GROUP BY step",
             (runs, since, until),
@@ -160,14 +155,12 @@ async def stopped_between(
     return {r["step"]: r["n"] for r in rows}
 
 
-async def waiting(
-    conn: psycopg.AsyncConnection, paper: Paper, step: Step, runs: int, topic: str = ""
-) -> bool:
+async def waiting(unit: ReadUnit, paper: Paper, step: Step, runs: int, topic: str = "") -> bool:
     """Whether `step` failed at least `runs` runs in a row on this revision of the paper and
     waits for the owner (`ACTIONABLE`). Read in a change of the paper (`word.change`), under its
     locks and the taxonomy's, to act on it."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT 1 FROM step_failures f JOIN papers p ON p.id = f.paper_id "
             "WHERE f.paper_id = %s AND f.step = %s AND f.topic = %s AND f.paper_revision = %s "
             f"AND f.failed_runs >= %s AND {ACTIONABLE}",
@@ -178,13 +171,13 @@ async def waiting(
 
 
 async def count_stuck(
-    conn: psycopg.AsyncConnection, step: Step, runs: int, *, unacknowledged: bool = False
+    unit: ReadUnit, step: Step, runs: int, *, unacknowledged: bool = False
 ) -> int:
     """How many failures of `step` wait for the owner; with `unacknowledged`, only those the
     owner has not acknowledged."""
     seen = "AND f.acknowledged_at IS NULL" if unacknowledged else ""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT count(*) AS n FROM step_failures f JOIN papers p ON p.id = f.paper_id "
             f"WHERE f.step = %s AND f.failed_runs >= %s AND {ACTIONABLE} {seen}",
             (step, runs),
@@ -199,16 +192,14 @@ async def count_stuck(
 type Item = tuple[Step, str, str, int, datetime]
 
 
-async def acknowledge(
-    conn: psycopg.AsyncConnection, items: list[Item], runs: int
-) -> list[dict[str, Any]]:
+async def acknowledge(unit: WriteUnit, items: list[Item], runs: int) -> list[dict[str, Any]]:
     """The owner's Acknowledge on the named failures: each that still waits for them after at
     least `runs` runs, as named, is marked seen (one marked already keeps its time). Returns
     those marked, as named."""
     if not items:
         return []
     return await (
-        await conn.execute(
+        await unit.execute(
             "UPDATE step_failures f SET acknowledged_at = coalesce(f.acknowledged_at, now()) "
             "FROM papers p, "
             "unnest(%s::text[], %s::text[], %s::text[], %s::int[], %s::timestamptz[]) "

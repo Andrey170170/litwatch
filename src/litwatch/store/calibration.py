@@ -6,20 +6,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-import psycopg
-
+from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store.analyses import CURRENT_WEIGHT
 
 
-async def _all(conn: psycopg.AsyncConnection, query: str, params: Any = ()) -> list[dict]:
-    return await (await conn.execute(query, params)).fetchall()
+async def _all(unit: ReadUnit, query: str, params: Any = ()) -> list[dict]:
+    return await (await unit.execute(query, params)).fetchall()
 
 
-async def pool(conn: psycopg.AsyncConnection, topic: str, days: int) -> list[dict[str, Any]]:
+async def pool(unit: ReadUnit, topic: str, days: int) -> list[dict[str, Any]]:
     """The topic's current verdicts of the trailing `days`, made on the paper's current text and
     with no firm label, each with its Fit and the paper's current Weight."""
     return await _all(
-        conn,
+        unit,
         f"""
         SELECT paper_id, id AS verdict_id, fit,
                (SELECT w.weight FROM papers p JOIN LATERAL ({CURRENT_WEIGHT}) w ON true
@@ -40,17 +39,17 @@ async def pool(conn: psycopg.AsyncConnection, topic: str, days: int) -> list[dic
 
 
 async def new_session(
-    conn: psycopg.AsyncConnection, seed: int, items: Sequence[tuple[str, str, str, int | None]]
+    unit: WriteUnit, seed: int, items: Sequence[tuple[str, str, str, int | None]]
 ) -> int:
     """A session drawn with `seed`, its `items` (paper, topic, why, verdict) in order. Returns
     its id."""
     session = await (
-        await conn.execute(
+        await unit.execute(
             "INSERT INTO calibration_sessions (seed) VALUES (%s) RETURNING id", (seed,)
         )
     ).fetchone()
     for position, item in enumerate(items, 1):
-        await conn.execute(
+        await unit.execute(
             "INSERT INTO calibration_items "
             "(session_id, position, paper_id, topic, why, verdict_id) "
             "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
@@ -59,11 +58,11 @@ async def new_session(
     return session["id"]
 
 
-async def waiting(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
+async def waiting(unit: ReadUnit) -> list[dict[str, Any]]:
     """The papers waiting for a word on a Focus topic, with no firm label there: last night's
     splits that straddle the line, reported misses, and papers with a word-carrying thumb."""
     return await _all(
-        conn,
+        unit,
         """
         SELECT s.paper_id, s.topic, s.why, s.verdict_id FROM (
             SELECT DISTINCT ON (v.paper_id, v.topic) v.paper_id, v.topic, 'split' AS why,
@@ -100,20 +99,18 @@ async def waiting(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
     )
 
 
-async def add(
-    conn: psycopg.AsyncConnection, session_id: int, rows: Sequence[dict[str, Any]]
-) -> int:
+async def add(unit: WriteUnit, session_id: int, rows: Sequence[dict[str, Any]]) -> int:
     """Add `rows` (`waiting`'s) after the session's last item, each paper and topic once: one
     the session holds already is left out. Returns how many were added."""
     last = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT coalesce(max(position), 0) AS n FROM calibration_items WHERE session_id = %s",
             (session_id,),
         )
     ).fetchone()
     position, added = last["n"], 0
     for row in rows:
-        cur = await conn.execute(
+        cur = await unit.execute(
             "INSERT INTO calibration_items (session_id, position, paper_id, topic, why, "
             "verdict_id) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
             (
@@ -130,42 +127,40 @@ async def add(
     return added
 
 
-async def item(conn: psycopg.AsyncConnection, session_id: int, position: int) -> dict | None:
+async def item(unit: ReadUnit, session_id: int, position: int) -> dict | None:
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT * FROM calibration_items WHERE session_id = %s AND position = %s",
             (session_id, position),
         )
     ).fetchone()
 
 
-async def answered(
-    conn: psycopg.AsyncConnection, session_id: int, position: int, answer: str | None
-) -> None:
+async def answered(unit: WriteUnit, session_id: int, position: int, answer: str | None) -> None:
     """The item is answered now; `answer`, its drawn topic's Fit, replaces the one recorded
     unless it is None."""
-    await conn.execute(
+    await unit.execute(
         "UPDATE calibration_items SET answer = coalesce(%s, answer), answered_at = now() "
         "WHERE session_id = %s AND position = %s",
         (answer, session_id, position),
     )
 
 
-async def firm_labels(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, str]:
+async def firm_labels(unit: ReadUnit, paper_id: str) -> dict[str, str]:
     """The paper's firm labels' values, by topic."""
     rows = await _all(
-        conn,
+        unit,
         "SELECT topic, value FROM labels WHERE paper_id = %s AND NOT provisional",
         (paper_id,),
     )
     return {r["topic"]: r["value"] for r in rows}
 
 
-async def appraisal(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str | None, str | None]:
+async def appraisal(unit: ReadUnit, paper_id: str) -> tuple[str | None, str | None]:
     """The paper's newest appraisal, its value and note, or (None, None) without one. The newest
     is the last given (`at`): an imported one keeps its time, not its id."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT value, note FROM appraisals WHERE paper_id = %s "
             "ORDER BY at DESC, id DESC LIMIT 1",
             (paper_id,),
@@ -174,11 +169,9 @@ async def appraisal(conn: psycopg.AsyncConnection, paper_id: str) -> tuple[str |
     return (row["value"], row["note"]) if row else (None, None)
 
 
-async def appraise(
-    conn: psycopg.AsyncConnection, paper_id: str, value: str | None, note: str | None
-) -> None:
+async def appraise(unit: WriteUnit, paper_id: str, value: str | None, note: str | None) -> None:
     """A new appraisal of the paper; `value` and `note` None clear it."""
-    await conn.execute(
+    await unit.execute(
         "INSERT INTO appraisals (paper_id, value, note) VALUES (%s, %s, %s)",
         (paper_id, value, note),
     )
@@ -198,11 +191,11 @@ DIFFERS = f"""i.answer IS NOT NULL AND i.answer <> 'unsure' AND CASE
     ELSE false END"""
 
 
-async def sessions(conn: psycopg.AsyncConnection, limit: int = 20) -> list[dict[str, Any]]:
+async def sessions(unit: ReadUnit, limit: int = 20) -> list[dict[str, Any]]:
     """The newest sessions: how many papers each drew, how many are answered, and how many
     answers differ from the pipeline's Fit (`DIFFERS`)."""
     return await _all(
-        conn,
+        unit,
         f"""
         SELECT s.id, s.seed, s.drawn_at, count(i.*) AS papers, count(i.answered_at) AS answered,
                count(*) FILTER (WHERE {DIFFERS}) AS differ
@@ -213,17 +206,17 @@ async def sessions(conn: psycopg.AsyncConnection, limit: int = 20) -> list[dict[
     )
 
 
-async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, Any] | None:
+async def session(unit: ReadUnit, session_id: int) -> dict[str, Any] | None:
     """A session's papers in order, each with the pipeline's Fit on the drawn topic (the verdict
     the draw read, else the current one), the answer recorded for it (`answer`, null until
     given) and what the owner has said since (`fit`, every current label; `appraisal`)."""
     found = await (
-        await conn.execute("SELECT * FROM calibration_sessions WHERE id = %s", (session_id,))
+        await unit.execute("SELECT * FROM calibration_sessions WHERE id = %s", (session_id,))
     ).fetchone()
     if found is None:
         return None
     items = await _all(
-        conn,
+        unit,
         f"""
         SELECT i.position, i.paper_id, i.topic, i.why, i.answer, i.answered_at, p.title,
                p.abstract, p.authors, p.published, {_VERDICT} AS verdict,
@@ -239,12 +232,12 @@ async def session(conn: psycopg.AsyncConnection, session_id: int) -> dict[str, A
     return found | {"items": items}
 
 
-async def drawn(conn: psycopg.AsyncConnection, days: int) -> list[dict[str, Any]]:
+async def drawn(unit: ReadUnit, days: int) -> list[dict[str, Any]]:
     """Per Focus topic and side of the line (`why`, above or below) over the draws of the
     trailing `days`: how many were answered other than unsure, and how many central or
     related."""
     return await _all(
-        conn,
+        unit,
         """
         SELECT t.class AS topic, i.why,
                count(*) FILTER (WHERE i.answer IS NOT NULL AND i.answer <> 'unsure') AS answered,
@@ -260,11 +253,11 @@ async def drawn(conn: psycopg.AsyncConnection, days: int) -> list[dict[str, Any]
     )
 
 
-async def matters_no_topic(conn: psycopg.AsyncConnection) -> list[dict[str, Any]]:
+async def matters_no_topic(unit: ReadUnit) -> list[dict[str, Any]]:
     """Papers whose newest appraisal is "matters" and that are below relevant for every
     Focus topic, earlier words included: a missing topic or a narrow rubric."""
     return await _all(
-        conn,
+        unit,
         """
         SELECT a.paper_id, a.note, a.at, p.title FROM (
             SELECT DISTINCT ON (paper_id) * FROM appraisals

@@ -23,9 +23,6 @@ Transitional, until A2's Work gate replaces it with leases and heartbeats (docs/
 own for the process's life, whose `Identity` (`db.identity()`) stands for the process in run
 records and job claims, as a job's connection did before the pool (docs/plans/a1-database-gate.md,
 "Choices made without asking", decided 2026-11-18).
-
-While code moves onto the gate (A1's P3 to P6), `DatabaseGate.over(conn)`, a gate on one given
-connection, serves the tests that still hold a connection.
 """
 
 from __future__ import annotations
@@ -45,8 +42,6 @@ from typing import Any, Literal, LiteralString, Self
 import psycopg
 from psycopg import sql
 from psycopg.abc import Params
-from psycopg.conninfo import make_conninfo
-from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row, tuple_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
@@ -114,10 +109,6 @@ async def identity_of(conn: psycopg.AsyncConnection[Any]) -> Identity:
         row = await cur.fetchone()
     assert row is not None  # every session has its row
     return Identity(row[0], row[1])
-
-
-class BridgeError(RuntimeError):
-    """A bridged connection (`DatabaseGate.over`) was already inside a transaction."""
 
 
 # -- the lock registry -----------------------------------------------------------------------------
@@ -351,16 +342,6 @@ class WriteUnit(ReadUnit):
 # -- the gate --------------------------------------------------------------------------------------
 
 
-def _idle(conn: Connection) -> None:
-    """Refuse a bridged connection that is inside a transaction: a unit on it would be a
-    savepoint of that transaction, and its commit no commit."""
-    status = conn.info.transaction_status
-    if status != TransactionStatus.IDLE:
-        raise BridgeError(
-            f"the bridged connection is not idle ({status.name}); a unit is its own transaction"
-        )
-
-
 class DatabaseGate:
     """One pool of connections to one database, and the units and locks on it. One per process;
     open it before use and close it at the end (`async with DatabaseGate(dsn) as db`).
@@ -377,37 +358,24 @@ class DatabaseGate:
         min_size: int = 1,
         max_size: int = 10,
         timeout: float = 30.0,
-        _bridged: Connection | None = None,
     ) -> None:
         self._dsn, self._schema, self.timeout = dsn, schema, timeout
-        self._bridged = _bridged
-        self._pool: AsyncConnectionPool[Connection] | None = None
         # The presence session (`identity`): its connection, and its identity once known.
         self._presence: psycopg.AsyncConnection[Any] | None = None
         self._identity: Identity | None = None
         self._presence_lock = asyncio.Lock()
-        if _bridged is None:
-            self._pool = AsyncConnectionPool(
-                dsn,
-                connection_class=psycopg.AsyncConnection[dict[str, Any]],
-                kwargs={"row_factory": dict_row, "autocommit": True},
-                min_size=min_size,
-                max_size=max_size,
-                open=False,
-                configure=self._configure if schema else None,
-                # A connection the server dropped (a restart) is replaced when it is asked for.
-                check=AsyncConnectionPool.check_connection,
-                name="litwatch",
-            )
-
-    @classmethod
-    def over(cls, conn: Connection) -> DatabaseGate:
-        """A gate whose units all run on `conn`, with no pool: the bridge by which code still
-        holding a connection calls code that takes `db`. One unit at a time, as the connection
-        serves one coroutine at a time. It refuses a connection inside a transaction, here and
-        whenever a unit opens."""
-        _idle(conn)
-        return cls(make_conninfo(conn.info.dsn, password=conn.info.password), _bridged=conn)
+        self._pool = AsyncConnectionPool[Connection](
+            dsn,
+            connection_class=psycopg.AsyncConnection[dict[str, Any]],
+            kwargs={"row_factory": dict_row, "autocommit": True},
+            min_size=min_size,
+            max_size=max_size,
+            open=False,
+            configure=self._configure if schema else None,
+            # A connection the server dropped (a restart) is replaced when it is asked for.
+            check=AsyncConnectionPool[Connection].check_connection,
+            name="litwatch",
+        )
 
     async def _configure(self, conn: Connection) -> None:
         assert self._schema is not None
@@ -417,20 +385,18 @@ class DatabaseGate:
         """Open the pool, waiting until its first connections are made, and the presence
         session; `PoolTimeoutError` when the pool makes none within the timeout (the database
         down or unreachable)."""
-        if self._pool is not None:
-            try:
-                await self._pool.open(wait=True, timeout=self.timeout)
-            except PoolTimeout as exc:
-                raise PoolTimeoutError(
-                    f"the pool made no connection to the database in {self.timeout:g}s"
-                ) from exc
-            await self.identity()
+        try:
+            await self._pool.open(wait=True, timeout=self.timeout)
+        except PoolTimeout as exc:
+            raise PoolTimeoutError(
+                f"the pool made no connection to the database in {self.timeout:g}s"
+            ) from exc
+        await self.identity()
 
     async def close(self) -> None:
         """Close the pool and the presence session: the runs and job claims made in the
         process's name are no longer alive."""
-        if self._pool is not None:
-            await self._pool.close()
+        await self._pool.close()
         async with self._presence_lock:
             if self._presence is not None:
                 await self._presence.close()
@@ -451,13 +417,8 @@ class DatabaseGate:
         and closed with it. Asked for, it is checked first: one that dropped (the database
         restarted, the connection was cut) is opened again, with a new identity, and what was
         claimed in the old one's name is no longer alive, so `store.jobs.take_back` puts it
-        back. A bridged gate's presence is its one connection. Asked for outside units, as a
-        unit is opened."""
+        back. Asked for outside units, as a unit is opened."""
         outside_unit("asking for the presence session's identity")
-        if self._bridged is not None:
-            if self._identity is None:
-                self._identity = await identity_of(self._bridged)
-            return self._identity
         async with self._presence_lock:
             conn = self._presence
             if conn is not None and self._identity is not None:
@@ -478,12 +439,7 @@ class DatabaseGate:
 
     @asynccontextmanager
     async def _connection(self, name: str) -> AsyncIterator[Connection]:
-        """A connection for the unit `name`: the pool's, or the bridged one."""
-        if self._pool is None:
-            assert self._bridged is not None
-            _idle(self._bridged)
-            yield self._bridged
-            return
+        """A connection from the pool for the unit `name`."""
         try:
             conn = await self._pool.getconn(self.timeout)
         except PoolTimeout as exc:
@@ -576,7 +532,7 @@ class DatabaseGate:
         params = _params(lock, key_arg)
         label = lock.name if key_arg is None else f"{lock.name} ({key_arg})"
         outside_unit(f"taking the {label} lock")
-        conn = await psycopg.AsyncConnection.connect(
+        conn = await psycopg.AsyncConnection[dict[str, Any]].connect(
             self._dsn, row_factory=dict_row, autocommit=True
         )
         try:
@@ -619,7 +575,5 @@ class DatabaseGate:
         if mine is not None and mine.name != name:
             raise ValueError(f"the hold given is {mine.name!r}'s, not {name!r}'s")
         params = (lock.key, mine.pid if mine else None)
-        if self._bridged is not None:  # a plain read: inside a transaction or not
-            return (await (await self._bridged.execute(query, params)).fetchone())["held"]
         async with self._connection(f"held_elsewhere {name}") as conn:
             return (await (await conn.execute(query, params)).fetchone())["held"]

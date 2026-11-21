@@ -12,14 +12,15 @@ from litwatch import analysis, grading
 from litwatch.archive import ArchiveClient
 from litwatch.config import RoleConfig
 from litwatch.fulltext import brief
-from litwatch.gates.database import DatabaseGate
 from litwatch.llm import ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
 from litwatch.quality import ladders
 from litwatch.store import papers as papers_store
+from tests import settling
 from tests.conftest import FAITH, INTERP, TREE, paper
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
+from tests.sessions import Bridge
 from tests.test_digests import TUE, Writer, day, focus, listed
 
 LADDERS = """
@@ -331,9 +332,8 @@ async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
     """Graders, `analyse` and `brief` from the pipeline's own builders, a paper the database
     lacks from the archive's catalog, a text only as the archive holds it, and a published
     daily digest rebuilt as it was written, when nothing changed since."""
-    from litwatch.store import taxonomy as taxonomy_store  # noqa: PLC0415
 
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     first = paper("2610.00031", title="Traces that hide steps", version=1)
     await papers_store.upsert(conn, [first])
     w = Writer()
@@ -363,7 +363,7 @@ async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
         ladders.Case(set="quality", role="brief", paper=unversioned.id, subject=FAITH.slug),
         ladders.Case(set="quality", role="judge", paper="2610.00404", subject=FAITH.slug),
     ]
-    built = await ladders.requests(DatabaseGate.over(conn), archive, chosen)
+    built = await ladders.requests(Bridge(conn), archive, chosen)
     stored = (await papers_store.get_many(conn, [first.id]))[0]
     keys = [c.key for c in chosen]
     faith_name, interp_name = TREE.get(FAITH.slug).name, TREE.get(INTERP.slug).name

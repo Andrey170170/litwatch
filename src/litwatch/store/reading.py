@@ -15,10 +15,9 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Literal
 
-import psycopg
-
 from litwatch.core import FAILED_RUNS, Depth, Rarity, ReactionValue, Taxonomy, Weight
 from litwatch.core.grading import NO_WEIGHT, WEIGHT_FLOORS
+from litwatch.gates.database import ReadUnit
 from litwatch.store import failures, fulltext, runs
 from litwatch.store.analyses import CURRENT_GIST, CURRENT_GIST_SOURCE, CURRENT_WEIGHT
 from litwatch.store.verdicts import ASKS_WORD
@@ -127,18 +126,18 @@ class Listed:
     grades: dict[str, int]
 
 
-async def _all(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> list[dict]:
-    return await (await conn.execute(query, params)).fetchall()
+async def _all(unit: ReadUnit, query: Any, params: Any = ()) -> list[dict]:
+    return await (await unit.execute(query, params)).fetchall()
 
 
-async def _one(conn: psycopg.AsyncConnection, query: Any, params: Any = ()) -> dict | None:
-    return await (await conn.execute(query, params)).fetchone()
+async def _one(unit: ReadUnit, query: Any, params: Any = ()) -> dict | None:
+    return await (await unit.execute(query, params)).fetchone()
 
 
 # -- the status line -------------------------------------------------------------------------------
 
 
-async def stopped(conn: psycopg.AsyncConnection, *, unacknowledged: bool) -> dict[str, int]:
+async def stopped(unit: ReadUnit, *, unacknowledged: bool) -> dict[str, int]:
     """What waits on the owner after a failure: papers awaiting classification, with analysis,
     a grading or a full-text pass stopped, and digests that failed; with `unacknowledged`, only
     what the owner has not acknowledged (the status line's count)."""
@@ -147,16 +146,16 @@ async def stopped(conn: psycopg.AsyncConnection, *, unacknowledged: bool) -> dic
     seen = {"unacknowledged": unacknowledged}
     return {
         "awaiting_classification": await failures.count_stuck(
-            conn, "classification", FAILED_RUNS, **seen
+            unit, "classification", FAILED_RUNS, **seen
         ),
-        "analysis_failed": await failures.count_stuck(conn, "analysis", FAILED_RUNS, **seen),
-        "ungraded": await failures.count_stuck(conn, "grading", FAILED_RUNS, **seen),
-        "fulltext_failed": await fulltext.count_stuck(conn, FAILED_RUNS, **seen),
-        "digests_failed": await digests.count_failed(conn, **seen),
+        "analysis_failed": await failures.count_stuck(unit, "analysis", FAILED_RUNS, **seen),
+        "ungraded": await failures.count_stuck(unit, "grading", FAILED_RUNS, **seen),
+        "fulltext_failed": await fulltext.count_stuck(unit, FAILED_RUNS, **seen),
+        "digests_failed": await digests.count_failed(unit, **seen),
     }
 
 
-async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
+async def status(unit: ReadUnit) -> dict[str, Any]:
     """The latest nightly run: none yet, running, failed (or open with its process gone), or done;
     done with papers awaiting classification, with analysis, a grading or a full-text pass
     stopped, or with a digest that failed, needs the owner's attention, until the owner
@@ -164,12 +163,12 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     or not a night ran (a digest written by hand can fail before the first), and only what the
     owner has not acknowledged. `papers` are those the run classified; while it runs, `waiting`
     are those still to classify."""
-    counts = await stopped(conn, unacknowledged=True)
-    run = await runs.latest(conn, "nightly")
+    counts = await stopped(unit, unacknowledged=True)
+    run = await runs.latest(unit, "nightly")
     if run is None:
         return {"state": "none", **counts}
     papers = await _one(
-        conn,
+        unit,
         # The owner's classifications by hand (model `owner`) during the run are not its work.
         "SELECT count(*) AS n FROM classifications WHERE classified_at >= %(from)s "
         "AND (%(to)s::timestamptz IS NULL OR classified_at <= %(to)s) AND model <> 'owner'",
@@ -184,7 +183,7 @@ async def status(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     }
     if run["finished_at"] is None and run["alive"]:
         waiting = await _one(
-            conn,
+            unit,
             """
             SELECT count(*) AS n FROM papers p
             LEFT JOIN step_failures f ON f.paper_id = p.id AND f.step = 'classification'
@@ -290,7 +289,7 @@ def _order(query: Query, rarity: str) -> str:
 
 
 async def _list(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     query: Query,
     *,
     ctes: str,
@@ -311,7 +310,7 @@ async def _list(
     hits = " AND ".join(levels) or "true"
     with_ = f"WITH {ctes}" if ctes else ""
     counted = await _all(
-        conn,
+        unit,
         f"""
         {with_}
         SELECT {rarity} AS rarity, {grade} AS grade, count(*) AS n,
@@ -321,7 +320,7 @@ async def _list(
         params,
     )
     page = await _all(
-        conn,
+        unit,
         f"""
         {with_}
         SELECT p.id{extra} FROM {source} WHERE {on} AND {hits}
@@ -338,7 +337,7 @@ async def _list(
 
 
 async def papers(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     tree: Taxonomy | None,
     query: Query,
     *,
@@ -376,7 +375,7 @@ async def papers(
     )
     levels, more = _levels(query, "r.level", graded, ungraded)
     page, total, rarities, _ = await _list(
-        conn,
+        unit,
         query,
         ctes=ctes,
         source=f"papers p {scoped}LEFT JOIN rarities r ON r.paper_id = p.id "
@@ -390,12 +389,12 @@ async def papers(
         offset=offset,
     )
     ids = [r["id"] for r in page]
-    rows = [{"id": i} for i in ids] if ids_only else await _rows(conn, ids, in_view)
+    rows = [{"id": i} for i in ids] if ids_only else await _rows(unit, ids, in_view)
     return Listed(rows=rows, total=total, rarities=rarities, grades={})
 
 
 async def topic_papers(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     tree: Taxonomy,
     slug: str,
     query: Query,
@@ -409,7 +408,7 @@ async def topic_papers(
     params |= _scope(tree, [slug])
     levels, more = _levels(query, "st.rarity", "st.grade = ANY(%(grades)s)", "st.grade IS NULL")
     page, total, rarities, grades = await _list(
-        conn,
+        unit,
         query,
         ctes=SCOPE + STANDING,
         source="standing st JOIN papers p ON p.id = st.paper_id "
@@ -424,13 +423,13 @@ async def topic_papers(
         offset=offset,
     )
     in_view = list(dict.fromkeys(params["up_below"]))
-    rows = await _rows(conn, [r["id"] for r in page], in_view)
+    rows = await _rows(unit, [r["id"] for r in page], in_view)
     for row, standing in zip(rows, page, strict=True):
         row |= {k: standing[k] for k in ("grade", "rarity", "via")}
     return Listed(rows=rows, total=total, rarities=rarities, grades=grades)
 
 
-async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str]) -> list[dict]:
+async def _rows(unit: ReadUnit, ids: list[str], in_view: list[str]) -> list[dict]:
     """The rows of a page, in its order: each paper with its current Gist, Weight and facets,
     its mixed-list rarity, its effective grades and the classes it stands in on a page
     (`grades`, `members`: what its badges come from), whether it is saved, and its open state
@@ -441,7 +440,7 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
     if not ids:
         return []
     found = await _all(
-        conn,
+        unit,
         f"""
         SELECT p.id, p.title, {AUTHORS} AS authors, p.published, r.level AS rarity, r.weight,
                coalesce(l.saved, false) AS saved, {CURRENT_GIST} AS gist,
@@ -489,7 +488,7 @@ async def _rows(conn: psycopg.AsyncConnection, ids: list[str], in_view: list[str
 # -- topics ----------------------------------------------------------------------------------------
 
 
-async def topic_cards(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[str, dict[str, Any]]:
+async def topic_cards(unit: ReadUnit, tree: Taxonomy) -> dict[str, dict[str, Any]]:
     """Per shown topic: how many papers its page holds, how many of them are saved, how many at
     each of the page's rarity levels, and its newest must read."""
     slugs = [t.slug for t in tree.shown()]
@@ -497,7 +496,7 @@ async def topic_cards(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[str
     levels = [r.value for r in reversed(Rarity)]
     by_level = ", ".join(f"count(*) FILTER (WHERE st.rarity = '{r}') AS {r}" for r in levels)
     counted = await _all(
-        conn,
+        unit,
         f"""
         WITH {SCOPE}{STANDING}
         SELECT st.topic, count(*) AS papers, count(*) FILTER (WHERE l.saved) AS saved, {by_level},
@@ -512,7 +511,7 @@ async def topic_cards(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[str
     newest = [r["newest"] for r in counted if r["newest"]]
     titles = {
         r["id"]: r["title"]
-        for r in await _all(conn, "SELECT id, title FROM papers WHERE id = ANY(%s)", (newest,))
+        for r in await _all(unit, "SELECT id, title FROM papers WHERE id = ANY(%s)", (newest,))
     }
     cards: dict[str, dict[str, Any]] = {
         s: {"papers": 0, "saved": 0, "rarities": dict.fromkeys(levels, 0), "newest": None}
@@ -533,14 +532,14 @@ async def topic_cards(conn: psycopg.AsyncConnection, tree: Taxonomy) -> dict[str
 # -- a paper ---------------------------------------------------------------------------------------
 
 
-async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+async def paper(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
     """What a paper's page is built from, for every topic, followed or not: the paper with its
     library state, rarity, current Weight, Gist and facets; its effective grades, current
     verdicts, labels, reactions and misses; its newest classification and its memberships; the
     steps failing on its current text; its Brief, its current full-text pass and those waiting on
     the owner; and its history."""
     found = await _one(
-        conn,
+        unit,
         f"""
         SELECT p.id, p.title, p.abstract, {AUTHORS} AS authors, p.published, p.updated,
                p.version, p.revision, p.version_history, p.withdrawn_at, p.comments, p.dropped,
@@ -609,17 +608,17 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
             ORDER BY at, what""",
     }
     for key, query in queries.items():
-        found[key] = await _all(conn, query, p)
-    found["brief"] = await fulltext.brief_for(conn, paper_id)
-    found["text_pass"] = await fulltext.text_pass_for(conn, paper_id)
+        found[key] = await _all(unit, query, p)
+    found["brief"] = await fulltext.brief_for(unit, paper_id)
+    found["text_pass"] = await fulltext.text_pass_for(unit, paper_id)
     found["stuck_passes"] = await _all(
-        conn,
+        unit,
         "SELECT f.id, f.kind, f.state, f.last_error, f.refused FROM fulltext_passes f "
         f"JOIN papers p ON p.id = f.paper_id WHERE f.paper_id = %(p)s AND {fulltext.STUCK}",
         p | fulltext.stuck_params(FAILED_RUNS),
     )
     found["classification"] = await _one(
-        conn,
+        unit,
         "SELECT c.primary_class, k.name AS primary_name, c.model, c.classified_at, "
         "c.paper_revision FROM classifications c JOIN classes k ON k.slug = c.primary_class "
         "WHERE c.paper_id = %(p)s ORDER BY c.paper_revision DESC, c.id DESC LIMIT 1",
@@ -628,17 +627,17 @@ async def paper(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] 
     return found
 
 
-async def class_names(conn: psycopg.AsyncConnection, slugs: list[str]) -> dict[str, str]:
+async def class_names(unit: ReadUnit, slugs: list[str]) -> dict[str, str]:
     """The names of classes, retired ones included."""
-    rows = await _all(conn, "SELECT slug, name FROM classes WHERE slug = ANY(%s)", (slugs,))
+    rows = await _all(unit, "SELECT slug, name FROM classes WHERE slug = ANY(%s)", (slugs,))
     return {r["slug"]: r["name"] for r in rows}
 
 
-async def in_library(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+async def in_library(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
     """What an integration acting on the library reads of a paper: whether it is saved, and its
     effective grade per Focus topic (`focus`: slug, name, grade) in the owner's order."""
     found = await _one(
-        conn,
+        unit,
         "SELECT coalesce(l.saved, false) AS saved FROM papers p "
         "LEFT JOIN library l ON l.paper_id = p.id WHERE p.id = %s",
         (paper_id,),
@@ -646,7 +645,7 @@ async def in_library(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, 
     if found is None:
         return None
     found["focus"] = await _all(
-        conn,
+        unit,
         "SELECT t.class AS slug, c.name, g.grade FROM effective_grades g "
         "JOIN topics t ON t.class = g.topic AND t.depth = 'focus' AND t.status <> 'draft' "
         "JOIN classes c ON c.slug = t.class WHERE g.paper_id = %s ORDER BY t.position",

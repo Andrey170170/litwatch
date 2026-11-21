@@ -7,13 +7,12 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-import psycopg
 from psycopg.types.json import Jsonb
 
 from litwatch.core import Paper, events, rewritten, withdrawn_at
 from litwatch.core.digests import announced, first_listing
+from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import outbox
-from litwatch.store.db import transaction
 
 # What `row_to_paper` reads; the stored body of every match would be megabytes nobody looks at.
 COLUMNS = """
@@ -75,7 +74,7 @@ def _iso(value: datetime | None) -> str | None:
 
 
 async def upsert(
-    conn: psycopg.AsyncConnection,
+    unit: WriteUnit,
     papers: list[Paper],
     *,
     source: str = "arxiv",
@@ -104,156 +103,154 @@ async def upsert(
     (`core.withdrawn_at`); a later real version brings it back.
     """
     result = Upserted()
-    async with transaction(conn):
-        before = {
-            r["id"]: r
-            for r in await (
-                await conn.execute(
-                    "SELECT id, title, abstract, version, withdrawn_at FROM papers"
-                    " WHERE id = ANY(%s)",
-                    ([p.id for p in papers],),
+    before = {
+        r["id"]: r
+        for r in await (
+            await unit.execute(
+                "SELECT id, title, abstract, version, withdrawn_at FROM papers WHERE id = ANY(%s)",
+                ([p.id for p in papers],),
+            )
+        ).fetchall()
+    }
+    async with unit.cursor() as cur:
+        for p in papers:
+            await cur.execute(
+                f"""
+                INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
+                                    published, updated, url, metadata_source,
+                                    version, version_history,
+                                    doi, journal_ref, license, comments, announced,
+                                    announced_known, withdrawn_at)
+                VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
+                        %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
+                        %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s,
+                        %(comments)s, %(announced)s, %(known)s, %(withdrawn_at)s)
+                ON CONFLICT (id) DO UPDATE SET
+                    -- Canonical metadata (Atom never updates) dates the first listing;
+                    -- a feed's date stands only until it does. A day read from the
+                    -- version history is never replaced by a guessed one, and corrects
+                    -- any day.
+                    announced = CASE WHEN EXCLUDED.announced_known
+                                          OR NOT papers.announced_known
+                                     THEN coalesce(EXCLUDED.announced, papers.announced)
+                                     ELSE papers.announced END,
+                    announced_known = EXCLUDED.announced_known OR papers.announced_known,
+                    -- The owner's correction stands while arXiv sends the text it fixed.
+                    title = CASE WHEN {_KEPT}
+                                 THEN papers.title ELSE EXCLUDED.title END,
+                    abstract = CASE WHEN {_KEPT}
+                                    THEN papers.abstract ELSE EXCLUDED.abstract END,
+                    corrected_at = CASE WHEN {_KEPT}
+                                        THEN papers.corrected_at END,
+                    corrected_from = CASE WHEN {_KEPT}
+                                          THEN papers.corrected_from END,
+                    authors = EXCLUDED.authors, categories = EXCLUDED.categories,
+                    primary_category = coalesce(EXCLUDED.primary_category,
+                                                papers.primary_category),
+                    published = least(papers.published, EXCLUDED.published),
+                    updated = CASE WHEN %(by_day)s
+                                   AND papers.updated::date = EXCLUDED.updated::date
+                                   THEN papers.updated ELSE EXCLUDED.updated END,
+                    url = EXCLUDED.url, metadata_source = EXCLUDED.metadata_source,
+                    version = CASE WHEN EXCLUDED.version IS NOT NULL THEN EXCLUDED.version
+                        WHEN EXCLUDED.updated IS NOT NULL AND (papers.updated IS NULL
+                             OR EXCLUDED.updated > papers.updated) THEN NULL
+                        ELSE papers.version END,
+                    version_history = CASE
+                        WHEN EXCLUDED.version_history <> '[]'::jsonb
+                             THEN EXCLUDED.version_history
+                        WHEN EXCLUDED.version IS NULL AND EXCLUDED.updated IS NOT NULL
+                             AND (papers.updated IS NULL OR EXCLUDED.updated > papers.updated)
+                             THEN '[]'::jsonb
+                        ELSE papers.version_history END,
+                    doi = coalesce(EXCLUDED.doi,papers.doi),
+                    journal_ref = coalesce(EXCLUDED.journal_ref,papers.journal_ref),
+                    license = coalesce(EXCLUDED.license,papers.license),
+                    comments = coalesce(EXCLUDED.comments, papers.comments),
+                    -- Withdrawn as its version history says, kept while the history is not
+                    -- known, as the history is.
+                    withdrawn_at = CASE WHEN EXCLUDED.version_history <> '[]'::jsonb
+                                        THEN EXCLUDED.withdrawn_at
+                                        ELSE papers.withdrawn_at END
+                WHERE %(source)s <> 'atom'
+                  AND (papers.version IS NULL OR EXCLUDED.version IS NULL
+                       OR EXCLUDED.version >= papers.version)
+                  AND (NOT %(by_day)s OR papers.updated IS NULL
+                       OR EXCLUDED.updated::date >= papers.updated::date)
+                  -- Without two versions to compare, a record definitely older than the
+                  -- stored one changes nothing, whatever its source: from an earlier day,
+                  -- or an earlier time where both carry one.
+                  AND ((papers.version IS NOT NULL AND EXCLUDED.version IS NOT NULL)
+                       OR papers.updated IS NULL OR EXCLUDED.updated IS NULL
+                       OR NOT (EXCLUDED.updated::date < papers.updated::date
+                               OR (EXCLUDED.updated < papers.updated AND NOT %(by_day)s
+                                   AND papers.metadata_source <> ALL(%(by_day_sources)s))))
+                  -- The archive replaces only what it is known to be newer than.
+                  AND (%(source)s <> 'archive' OR EXCLUDED.version > papers.version
+                       OR (papers.version IS NULL AND EXCLUDED.version IS NOT NULL)
+                       OR (EXCLUDED.version = papers.version
+                           AND EXCLUDED.updated::date > papers.updated::date))
+                RETURNING (xmax = 0) AS inserted, version, title, abstract, withdrawn_at
+                """,
+                {
+                    **p.model_dump(),
+                    "authors": Jsonb(p.authors),
+                    "version_history": Jsonb(p.version_history),
+                    "announced": announced(p) or (listed or {}).get(p.id),
+                    "known": first_listing(p) is not None,
+                    "withdrawn_at": withdrawn_at(p),
+                    "source": source,
+                    "by_day": source in _BY_DAY,
+                    "by_day_sources": list(_BY_DAY),
+                },
+            )
+            row = await cur.fetchone()
+            if row is None:
+                continue
+            if row["inserted"]:
+                result.inserted += 1
+                await outbox.emit(
+                    unit, events.PAPER_ADDED, p.id, version=row["version"], source=source
                 )
-            ).fetchall()
-        }
-        async with conn.cursor() as cur:
-            for p in papers:
+                continue
+            result.updated += 1
+            old = before[p.id]
+            # Compared with what was stored, so a kept correction is no rewrite.
+            stored = p.model_copy(update={"title": row["title"], "abstract": row["abstract"]})
+            changed = rewritten(old["title"], old["abstract"], stored)
+            if changed:
+                # A new revision: what was judged of the old text stays as its history.
+                result.rewritten.append(p.id)
                 await cur.execute(
-                    f"""
-                    INSERT INTO papers (id, title, abstract, authors, categories, primary_category,
-                                        published, updated, url, metadata_source,
-                                        version, version_history,
-                                        doi, journal_ref, license, comments, announced,
-                                        announced_known, withdrawn_at)
-                    VALUES (%(id)s, %(title)s, %(abstract)s, %(authors)s, %(categories)s,
-                            %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
-                            %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s,
-                            %(comments)s, %(announced)s, %(known)s, %(withdrawn_at)s)
-                    ON CONFLICT (id) DO UPDATE SET
-                        -- Canonical metadata (Atom never updates) dates the first listing;
-                        -- a feed's date stands only until it does. A day read from the
-                        -- version history is never replaced by a guessed one, and corrects
-                        -- any day.
-                        announced = CASE WHEN EXCLUDED.announced_known
-                                              OR NOT papers.announced_known
-                                         THEN coalesce(EXCLUDED.announced, papers.announced)
-                                         ELSE papers.announced END,
-                        announced_known = EXCLUDED.announced_known OR papers.announced_known,
-                        -- The owner's correction stands while arXiv sends the text it fixed.
-                        title = CASE WHEN {_KEPT}
-                                     THEN papers.title ELSE EXCLUDED.title END,
-                        abstract = CASE WHEN {_KEPT}
-                                        THEN papers.abstract ELSE EXCLUDED.abstract END,
-                        corrected_at = CASE WHEN {_KEPT}
-                                            THEN papers.corrected_at END,
-                        corrected_from = CASE WHEN {_KEPT}
-                                              THEN papers.corrected_from END,
-                        authors = EXCLUDED.authors, categories = EXCLUDED.categories,
-                        primary_category = coalesce(EXCLUDED.primary_category,
-                                                    papers.primary_category),
-                        published = least(papers.published, EXCLUDED.published),
-                        updated = CASE WHEN %(by_day)s
-                                       AND papers.updated::date = EXCLUDED.updated::date
-                                       THEN papers.updated ELSE EXCLUDED.updated END,
-                        url = EXCLUDED.url, metadata_source = EXCLUDED.metadata_source,
-                        version = CASE WHEN EXCLUDED.version IS NOT NULL THEN EXCLUDED.version
-                            WHEN EXCLUDED.updated IS NOT NULL AND (papers.updated IS NULL
-                                 OR EXCLUDED.updated > papers.updated) THEN NULL
-                            ELSE papers.version END,
-                        version_history = CASE
-                            WHEN EXCLUDED.version_history <> '[]'::jsonb
-                                 THEN EXCLUDED.version_history
-                            WHEN EXCLUDED.version IS NULL AND EXCLUDED.updated IS NOT NULL
-                                 AND (papers.updated IS NULL OR EXCLUDED.updated > papers.updated)
-                                 THEN '[]'::jsonb
-                            ELSE papers.version_history END,
-                        doi = coalesce(EXCLUDED.doi,papers.doi),
-                        journal_ref = coalesce(EXCLUDED.journal_ref,papers.journal_ref),
-                        license = coalesce(EXCLUDED.license,papers.license),
-                        comments = coalesce(EXCLUDED.comments, papers.comments),
-                        -- Withdrawn as its version history says, kept while the history is not
-                        -- known, as the history is.
-                        withdrawn_at = CASE WHEN EXCLUDED.version_history <> '[]'::jsonb
-                                            THEN EXCLUDED.withdrawn_at
-                                            ELSE papers.withdrawn_at END
-                    WHERE %(source)s <> 'atom'
-                      AND (papers.version IS NULL OR EXCLUDED.version IS NULL
-                           OR EXCLUDED.version >= papers.version)
-                      AND (NOT %(by_day)s OR papers.updated IS NULL
-                           OR EXCLUDED.updated::date >= papers.updated::date)
-                      -- Without two versions to compare, a record definitely older than the
-                      -- stored one changes nothing, whatever its source: from an earlier day,
-                      -- or an earlier time where both carry one.
-                      AND ((papers.version IS NOT NULL AND EXCLUDED.version IS NOT NULL)
-                           OR papers.updated IS NULL OR EXCLUDED.updated IS NULL
-                           OR NOT (EXCLUDED.updated::date < papers.updated::date
-                                   OR (EXCLUDED.updated < papers.updated AND NOT %(by_day)s
-                                       AND papers.metadata_source <> ALL(%(by_day_sources)s))))
-                      -- The archive replaces only what it is known to be newer than.
-                      AND (%(source)s <> 'archive' OR EXCLUDED.version > papers.version
-                           OR (papers.version IS NULL AND EXCLUDED.version IS NOT NULL)
-                           OR (EXCLUDED.version = papers.version
-                               AND EXCLUDED.updated::date > papers.updated::date))
-                    RETURNING (xmax = 0) AS inserted, version, title, abstract, withdrawn_at
-                    """,
-                    {
-                        **p.model_dump(),
-                        "authors": Jsonb(p.authors),
-                        "version_history": Jsonb(p.version_history),
-                        "announced": announced(p) or (listed or {}).get(p.id),
-                        "known": first_listing(p) is not None,
-                        "withdrawn_at": withdrawn_at(p),
-                        "source": source,
-                        "by_day": source in _BY_DAY,
-                        "by_day_sources": list(_BY_DAY),
-                    },
+                    "UPDATE papers SET revision = revision + 1 WHERE id = %s", (p.id,)
                 )
-                row = await cur.fetchone()
-                if row is None:
-                    continue
-                if row["inserted"]:
-                    result.inserted += 1
-                    await outbox.emit(
-                        conn, events.PAPER_ADDED, p.id, version=row["version"], source=source
-                    )
-                    continue
-                result.updated += 1
-                old = before[p.id]
-                # Compared with what was stored, so a kept correction is no rewrite.
-                stored = p.model_copy(update={"title": row["title"], "abstract": row["abstract"]})
-                changed = rewritten(old["title"], old["abstract"], stored)
-                if changed:
-                    # A new revision: what was judged of the old text stays as its history.
-                    result.rewritten.append(p.id)
-                    await cur.execute(
-                        "UPDATE papers SET revision = revision + 1 WHERE id = %s", (p.id,)
-                    )
-                if (row["withdrawn_at"] is None) != (old["withdrawn_at"] is None):
-                    result.withdrawn.append(p.id)
-                if changed or row["version"] != old["version"]:
-                    await outbox.emit(
-                        conn,
-                        events.PAPER_REVISED,
-                        p.id,
-                        version=row["version"],
-                        previous_version=old["version"],
-                        rewritten=changed,
-                        source=source,
-                    )
+            if (row["withdrawn_at"] is None) != (old["withdrawn_at"] is None):
+                result.withdrawn.append(p.id)
+            if changed or row["version"] != old["version"]:
+                await outbox.emit(
+                    unit,
+                    events.PAPER_REVISED,
+                    p.id,
+                    version=row["version"],
+                    previous_version=old["version"],
+                    rewritten=changed,
+                    source=source,
+                )
     return result
 
 
-async def get(conn: psycopg.AsyncConnection, paper_id: str) -> Paper | None:
+async def get(unit: ReadUnit, paper_id: str) -> Paper | None:
     row = await (
-        await conn.execute(f"SELECT {COLUMNS} FROM papers p WHERE p.id = %s", (paper_id,))
+        await unit.execute(f"SELECT {COLUMNS} FROM papers p WHERE p.id = %s", (paper_id,))
     ).fetchone()
     return row_to_paper(row) if row else None
 
 
-async def marks(conn: psycopg.AsyncConnection, ids: list[str]) -> dict[str, dict[str, Any]]:
+async def marks(unit: ReadUnit, ids: list[str]) -> dict[str, dict[str, Any]]:
     """The papers stored of `ids`, by id: each one's title, whether it is in the collection
     (classified), and its rarity there (null outside it)."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT p.id, p.title, r.level AS rarity, "
             "EXISTS (SELECT 1 FROM classifications c WHERE c.paper_id = p.id) AS in_collection "
             "FROM papers p LEFT JOIN rarities r ON r.paper_id = p.id WHERE p.id = ANY(%s)",
@@ -263,26 +260,26 @@ async def marks(conn: psycopg.AsyncConnection, ids: list[str]) -> dict[str, dict
     return {r["id"]: r for r in rows}
 
 
-async def get_many(conn: psycopg.AsyncConnection, ids: list[str]) -> list[Paper]:
+async def get_many(unit: ReadUnit, ids: list[str]) -> list[Paper]:
     """The stored papers among `ids`, in the order given."""
     rows = await (
-        await conn.execute(f"SELECT {COLUMNS} FROM papers p WHERE p.id = ANY(%s)", (ids,))
+        await unit.execute(f"SELECT {COLUMNS} FROM papers p WHERE p.id = ANY(%s)", (ids,))
     ).fetchall()
     by_id = {r["id"]: row_to_paper(r) for r in rows}
     return [by_id[i] for i in ids if i in by_id]
 
 
-async def held(conn: psycopg.AsyncConnection, ids: list[str]) -> set[str]:
+async def held(unit: ReadUnit, ids: list[str]) -> set[str]:
     """Those of `ids` the database holds."""
-    rows = await (await conn.execute("SELECT id FROM papers WHERE id = ANY(%s)", (ids,))).fetchall()
+    rows = await (await unit.execute("SELECT id FROM papers WHERE id = ANY(%s)", (ids,))).fetchall()
     return {r["id"] for r in rows}
 
 
-async def cited(conn: psycopg.AsyncConnection, ids: list[str]) -> list[dict[str, Any]]:
+async def cited(unit: ReadUnit, ids: list[str]) -> list[dict[str, Any]]:
     """What a citation of each stored paper among `ids` needs, in the order given: its id,
     title, authors, publication date and primary category."""
     return await (
-        await conn.execute(
+        await unit.execute(
             "SELECT id, title, authors, published, primary_category FROM papers "
             "WHERE id = ANY(%s) ORDER BY array_position(%s, id)",
             (ids, ids),
@@ -290,92 +287,89 @@ async def cited(conn: psycopg.AsyncConnection, ids: list[str]) -> list[dict[str,
     ).fetchall()
 
 
-async def count(conn: psycopg.AsyncConnection) -> int:
-    return (await (await conn.execute("SELECT count(*) AS n FROM papers")).fetchone())["n"]
+async def count(unit: ReadUnit) -> int:
+    return (await (await unit.execute("SELECT count(*) AS n FROM papers")).fetchone())["n"]
 
 
-async def revision(conn: psycopg.AsyncConnection, paper_id: str) -> int:
+async def revision(unit: ReadUnit, paper_id: str) -> int:
     row = await (
-        await conn.execute("SELECT revision FROM papers WHERE id = %s", (paper_id,))
+        await unit.execute("SELECT revision FROM papers WHERE id = %s", (paper_id,))
     ).fetchone()
     return row["revision"] if row else 1
 
 
-async def still_current(conn: psycopg.AsyncConnection, paper: Paper) -> bool:
+async def still_current(unit: WriteUnit, paper: Paper) -> bool:
     """Whether a result about `paper` may still be recorded: the stored paper has the same text
     (revision) and has not been dropped (dismissed or withdrawn). Call it inside the recording
     transaction: the share lock waits for a correction, dismissal or intake in progress, which
     update the row."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT revision, dropped FROM papers WHERE id = %s FOR SHARE", (paper.id,)
         )
     ).fetchone()
     return row is not None and not row["dropped"] and row["revision"] == paper.revision
 
 
-async def lock(conn: psycopg.AsyncConnection, paper_id: str) -> Paper | None:
+async def lock(unit: WriteUnit, paper_id: str) -> Paper | None:
     """The paper as stored, its row locked to the end of the transaction: intake, a correction,
     a dismissal and every step's record wait until then. Call it inside a transaction."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT {COLUMNS} FROM papers p WHERE p.id = %s FOR UPDATE", (paper_id,)
         )
     ).fetchone()
     return row_to_paper(row) if row else None
 
 
-async def dismiss(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+async def dismiss(unit: WriteUnit, paper_id: str) -> bool:
     """Drop the paper from processing: never classified, analysed or graded again, even after a
     rewrite. It stays in the collection, and in the archive."""
-    cur = await conn.execute(
+    cur = await unit.execute(
         "UPDATE papers SET dismissed_at = now() WHERE id = %s AND dismissed_at IS NULL",
         (paper_id,),
     )
     return cur.rowcount == 1
 
 
-async def dropped(conn: psycopg.AsyncConnection, paper_id: str) -> bool:
+async def dropped(unit: WriteUnit, paper_id: str) -> bool:
     """Whether litwatch no longer processes the paper: the owner dismissed it, or arXiv
     withdrew it (`papers.dropped`). Read with a share lock that waits for a dismissal or intake
     in progress, as `still_current`."""
     row = await (
-        await conn.execute("SELECT dropped FROM papers WHERE id = %s FOR SHARE", (paper_id,))
+        await unit.execute("SELECT dropped FROM papers WHERE id = %s FOR SHARE", (paper_id,))
     ).fetchone()
     return row is not None and row["dropped"]
 
 
-async def withdrawal(conn: psycopg.AsyncConnection, paper_id: str) -> datetime | None:
+async def withdrawal(unit: ReadUnit, paper_id: str) -> datetime | None:
     """When arXiv withdrew the paper, as stored (`withdrawn_at`): kept while metadata without
     a version history leaves `core.withdrawn_at` nothing to read. None while it is not."""
     row = await (
-        await conn.execute("SELECT withdrawn_at FROM papers WHERE id = %s", (paper_id,))
+        await unit.execute("SELECT withdrawn_at FROM papers WHERE id = %s", (paper_id,))
     ).fetchone()
     return row["withdrawn_at"] if row else None
 
 
-async def dismissed_at(conn: psycopg.AsyncConnection, paper_id: str) -> datetime | None:
+async def dismissed_at(unit: ReadUnit, paper_id: str) -> datetime | None:
     """When the owner dismissed the paper; None while it is not dismissed."""
     row = await (
-        await conn.execute("SELECT dismissed_at FROM papers WHERE id = %s", (paper_id,))
+        await unit.execute("SELECT dismissed_at FROM papers WHERE id = %s", (paper_id,))
     ).fetchone()
     return row["dismissed_at"] if row else None
 
 
-async def correct(
-    conn: psycopg.AsyncConnection, paper_id: str, title: str | None, abstract: str | None
-) -> bool:
+async def correct(unit: WriteUnit, paper_id: str, title: str | None, abstract: str | None) -> bool:
     """The owner's fix of a title or abstract (a broken character, a garbled abstract). It
     counts as a rewrite: the revision goes up, so the paper is classified and analysed again
     with its failures forgotten, and `paper.revised` says so."""
-    async with transaction(conn):
-        cur = await conn.execute(
-            "UPDATE papers SET title = coalesce(%s, title), abstract = coalesce(%s, abstract), "
-            "corrected_at = now(), revision = revision + 1, "
-            f"corrected_from = coalesce(corrected_from, {fingerprint('papers')}) WHERE id = %s",
-            (title, abstract, paper_id),
-        )
-        if cur.rowcount == 0:
-            return False
-        await outbox.emit(conn, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
+    cur = await unit.execute(
+        "UPDATE papers SET title = coalesce(%s, title), abstract = coalesce(%s, abstract), "
+        "corrected_at = now(), revision = revision + 1, "
+        f"corrected_from = coalesce(corrected_from, {fingerprint('papers')}) WHERE id = %s",
+        (title, abstract, paper_id),
+    )
+    if cur.rowcount == 0:
+        return False
+    await outbox.emit(unit, events.PAPER_REVISED, paper_id, rewritten=True, corrected=True)
     return True

@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from litwatch import classification, config, store
+from litwatch import classification, config
 from litwatch.core import Cause
 from litwatch.feedback import word
 from litwatch.gates.database import DatabaseGate
@@ -24,9 +24,10 @@ RULES = word.Rules(automatic_deep=False)
 
 async def main(fixture: Path, slug: str) -> None:
     ids = [item["id"] for item in json.loads(fixture.read_text())]
-    async with await store.connect(config.database_url()) as conn:
-        db = DatabaseGate.over(conn)
-        tree = await taxonomy_store.load(conn)
+    async with DatabaseGate(config.database_url(), min_size=1, max_size=1) as db:
+        async with db.read("taxonomy") as unit:
+            tree = await taxonomy_store.load(unit)
+        assert tree is not None  # the stack's seed saved one
         for paper_id in ids:
             # Classified by hand and settled together.
             async with word.change(db, paper_id, cause=Cause.OWNER, rules=RULES) as change:

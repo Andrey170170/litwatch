@@ -8,17 +8,16 @@ import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
 
-from litwatch import digests, fulltext, store
+from litwatch import digests, fulltext
 from litwatch.archive import PdfText
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import FAILED_RUNS
 from litwatch.core.fulltext import LEASE
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import LOCKS, DatabaseGate
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
@@ -31,7 +30,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
-from tests import settling
+from tests import sessions, settling
 from tests import test_digests as dg
 from tests import test_fulltext as ft
 from tests import test_steps as steps
@@ -880,21 +879,6 @@ async def test_a_call_whose_batch_did_not_answer_it_is_settled_and_asked_again(c
 # -- the nightly run -------------------------------------------------------------------------------
 
 
-@asynccontextmanager
-async def another_schema(conn):
-    """A second empty, migrated schema beside `conn`'s, as the `conn` fixture makes one."""
-    schema = "test_" + uuid4().hex
-    async with await store.connect(conn.test_dsn) as admin:
-        await admin.execute(f'CREATE SCHEMA "{schema}"')
-        try:
-            async with await store.connect(conn.test_dsn, schema) as c:
-                await store.migrate(c)
-                c.test_dsn, c.test_schema = conn.test_dsn, schema
-                yield c
-        finally:
-            await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
-
-
 def factory(respond, anthropic: BatchingProvider):
     """A nightly's gateways over `anthropic`, which batches, and a scripted OpenRouter."""
 
@@ -929,7 +913,7 @@ async def test_a_batched_night_records_what_an_unbatched_one_does(conn, night):
     """V5, and V7's late start: a nightly run started after its deadline does not batch."""
 
     async def one_night(c, batching: str | None) -> tuple[dict, BatchingProvider]:
-        await taxonomy_store.save(c, TREE)
+        await settling.save_tree(c, TREE)
         await papers_store.upsert(c, [steps.A, steps.B])
         models = steps.Scripted()
         anthropic = BatchingProvider("anthropic", models.respond)
@@ -940,7 +924,7 @@ async def test_a_batched_night_records_what_an_unbatched_one_does(conn, night):
         return await records(c), anthropic
 
     expected, plain = await one_night(conn, None)
-    async with another_schema(conn) as other:
+    async with sessions.schema(conn.test_dsn) as other:  # a second one
         found, anthropic = await one_night(other, night)
     assert found == expected and expected["verdicts"]
     if night == "batched":
@@ -975,9 +959,9 @@ async def test_a_run_whose_deadline_passes_before_its_steps_waits_for_the_nights
 async def test_leases_are_taken_back_after_a_taxonomy_edit_in_flight(conn, db):
     """Under the taxonomy lock, shared, as every settle: never in another order than a taxonomy
     save dropping the same passes."""
-    async with await store.connect(conn.test_dsn, conn.test_schema) as other:
+    async with await sessions.connect(conn.test_dsn, conn.test_schema) as other:
         async with other.transaction():
-            await taxonomy_store.lock(other)
+            await other.execute("SELECT pg_advisory_xact_lock(%s)", (LOCKS["taxonomy"].key,))
             taking = asyncio.create_task(take_back(db))
             await asyncio.sleep(0.3)
             assert not taking.done()
@@ -1002,7 +986,7 @@ def batch_recorded(conn):
 
 async def passing(conn):
     """The full-text tests' paper, classified and analysed, graded central: its Brief queued."""
-    await taxonomy_store.save(conn, TREE)
+    await settling.save_tree(conn, TREE)
     await papers_store.upsert(conn, [ft.P])
     await conn.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
@@ -1166,7 +1150,7 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
     turn: a failed digest written again before the day's, the weeklies after the dailies."""
 
     async def monday(c, together: bool) -> tuple[list, BatchingProvider | None]:
-        await taxonomy_store.save(c, TREE)
+        await settling.save_tree(c, TREE)
         await papers_store.upsert(c, [dg.P, dg.Q, dg.R, dg.S])
         friday = dg.MON - timedelta(days=3)
         await dg.focus(c, dg.P, "central")
@@ -1205,7 +1189,7 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
         return found, anthropic
 
     expected, _ = await monday(conn, together=False)
-    async with another_schema(conn) as other:
+    async with sessions.schema(conn.test_dsn) as other:  # a second one
         found, anthropic = await monday(other, together=True)
     assert found == expected
     assert sum(r[3] == "written" for r in found) >= 3

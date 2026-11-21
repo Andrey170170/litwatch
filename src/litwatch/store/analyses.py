@@ -6,15 +6,14 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
-
 from litwatch.core import Analysis, Paper, TaxonomyClass, Weight
+from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store.papers import COLUMNS, row_to_paper
 from litwatch.store.taxonomy import row_to_class
 
 
 async def due(
-    conn: psycopg.AsyncConnection,
+    unit: ReadUnit,
     runs: int,
     limit: int | None = None,
     ids: list[str] | None = None,
@@ -25,7 +24,7 @@ async def due(
     far. One that failed is tried again after the new ones, and after `runs` failed runs it is
     not tried at all: it waits for the owner. A dismissed paper is never analysed."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"""
             SELECT {COLUMNS}, k.slug, k.name, k.description, k.parent, k.threshold,
                    coalesce(f.failed_runs, 0) AS failed_runs
@@ -49,11 +48,9 @@ async def due(
     return [(row_to_paper(r), row_to_class(r), r["failed_runs"]) for r in rows]
 
 
-async def add(
-    conn: psycopg.AsyncConnection, paper: Paper, primary: str, a: Analysis, model: str
-) -> int:
+async def add(unit: WriteUnit, paper: Paper, primary: str, a: Analysis, model: str) -> int:
     """Store the analysis with its Weight and Gist from the abstract. Returns the Gist's id."""
-    await conn.execute(
+    await unit.execute(
         """
         INSERT INTO analyses (paper_id, paper_revision, primary_class, gist, weight,
                               weight_reason, contribution, releases_code, releases_weights, model)
@@ -72,13 +69,13 @@ async def add(
             model,
         ),
     )
-    await conn.execute(
+    await unit.execute(
         "INSERT INTO weights (paper_id, paper_revision, weight, source, reason, model) "
         "VALUES (%s, %s, %s, 'abstract', %s, %s)",
         (paper.id, paper.revision, a.weight.value, a.weight_reason, model),
     )
     row = await (
-        await conn.execute(
+        await unit.execute(
             "INSERT INTO gists (paper_id, paper_revision, arxiv_version, text, source, model) "
             "VALUES (%s, %s, %s, %s, 'abstract', %s) RETURNING id",
             (paper.id, paper.revision, paper.version, a.gist, model),
@@ -100,17 +97,17 @@ CURRENT_WEIGHT = (
 )
 
 
-async def current_weight(conn: psycopg.AsyncConnection, paper_id: str) -> Weight | None:
+async def current_weight(unit: ReadUnit, paper_id: str) -> Weight | None:
     """The paper's current Weight for its current revision, or None until the current text is
     analysed or read (pipeline.md, section 4: it is then treated as solid)."""
-    row = await weight_of(conn, paper_id)
+    row = await weight_of(unit, paper_id)
     return Weight(row["weight"]) if row else None
 
 
-async def current_weights(conn: psycopg.AsyncConnection, paper_ids: list[str]) -> dict[str, Weight]:
+async def current_weights(unit: ReadUnit, paper_ids: list[str]) -> dict[str, Weight]:
     """`current_weight` of each of the papers that has one, by paper."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT p.id, w.weight FROM papers p JOIN LATERAL ({CURRENT_WEIGHT}) w ON true "
             "WHERE p.id = ANY(%s)",
             (paper_ids,),
@@ -119,10 +116,10 @@ async def current_weights(conn: psycopg.AsyncConnection, paper_ids: list[str]) -
     return {r["id"]: Weight(r["weight"]) for r in rows}
 
 
-async def weight_of(conn: psycopg.AsyncConnection, paper_id: str) -> dict[str, Any] | None:
+async def weight_of(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
     """The current Weight's row, `current_weight`'s, with its reason and source."""
     return await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT w.weight, w.reason, w.source FROM papers p "
             f"JOIN LATERAL ({CURRENT_WEIGHT}) w ON true WHERE p.id = %s",
             (paper_id,),
@@ -142,29 +139,29 @@ CURRENT_GIST_ID = _GIST.format(col="id")
 CURRENT_GIST_SOURCE = _GIST.format(col="source")
 
 
-async def current_gist(conn: psycopg.AsyncConnection, paper_id: str) -> str | None:
+async def current_gist(unit: ReadUnit, paper_id: str) -> str | None:
     """The paper's current Gist, the one its page shows; None while it has none."""
     row = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT {CURRENT_GIST} AS text FROM papers p WHERE p.id = %s", (paper_id,)
         )
     ).fetchone()
     return row["text"] if row else None
 
 
-async def current_gist_id(conn: psycopg.AsyncConnection, paper_id: str) -> int | None:
+async def current_gist_id(unit: ReadUnit, paper_id: str) -> int | None:
     row = await (
-        await conn.execute(
+        await unit.execute(
             f"SELECT {CURRENT_GIST_ID} AS id FROM papers p WHERE p.id = %s", (paper_id,)
         )
     ).fetchone()
     return row["id"] if row else None
 
 
-async def abstract_gists(conn: psycopg.AsyncConnection, ids: list[str]) -> dict[str, str]:
+async def abstract_gists(unit: ReadUnit, ids: list[str]) -> dict[str, str]:
     """The newest Gist written from each paper's abstract, of its current revision."""
     rows = await (
-        await conn.execute(
+        await unit.execute(
             "SELECT DISTINCT ON (g.paper_id) g.paper_id, g.text FROM gists g "
             "JOIN papers p ON p.id = g.paper_id AND p.revision = g.paper_revision "
             "WHERE g.paper_id = ANY(%s) AND g.source = 'abstract' ORDER BY g.paper_id, g.id DESC",
