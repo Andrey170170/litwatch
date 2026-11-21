@@ -1,6 +1,6 @@
-"""Digests on a test's connection by a scripted writer (`Writer`): the days of October 2026
-they fall on, a paper listed on a day or graded on a topic, and a day's and a week's digests
-written."""
+"""Digests on a test's connection by a scripted writer (`Writer`): the papers and the days of
+October 2026 they fall on, a paper listed on a day or graded on a topic, a day's and a week's
+digests written, and a digest as it was shown (`shown`)."""
 
 import json
 from datetime import date
@@ -10,10 +10,11 @@ from litwatch.config import Config
 from litwatch.digests import writer
 from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway
+from litwatch.store import digests as store_
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
 from tests import settling
-from tests.conftest import FAITH, INTERP, gate_on
+from tests.conftest import FAITH, INTERP, gate_on, paper
 from tests.fakes import ScriptedProvider
 from tests.seed import analyse, classify, grade
 from tests.sessions import Bridge, Session, in_read, in_write
@@ -89,3 +90,26 @@ async def week(conn: Session, w: Writer, monday: date) -> None:
         model_run(db, Config(), "digests", gateway=w.gateway) as run,
     ):
         await digests.write_week(Bridge(conn), run, tree, monday, rules=settling.RULES)
+
+
+P = paper("2610.00001", title="Traces that hide steps")
+Q = paper("2610.00002", title="A near neighbour")
+R = paper("2610.00003", title="A distant cousin")
+S = paper("2610.00004", title="Late to the party")
+
+
+async def shown(
+    conn: Session, topic: str, period: str, on: date
+) -> tuple[str, list[tuple[str, str]]]:
+    """The digest's state, and its papers with their roles in its order."""
+    row = await (
+        await conn.execute(
+            "SELECT id, state FROM digests WHERE topic = %s AND period = %s AND day = %s",
+            (topic, period, on),
+        )
+    ).fetchone()
+    if row is None:
+        return None, []
+    return row["state"], [
+        (p["paper_id"], p["role"]) for p in await in_read(conn, store_.papers_of, row["id"])
+    ]

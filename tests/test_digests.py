@@ -23,6 +23,7 @@ from litwatch.core import Label, LabelValue, Status
 from litwatch.core.classification import Source
 from litwatch.core.digests import DigestPeriod, listing_day, plain, voice_problems
 from litwatch.digests import writer
+from litwatch.gates.database import DatabaseGate
 from litwatch.jobs import digests as digests_job
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
@@ -34,16 +35,29 @@ from litwatch.store import reading, runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, gate_on, paper, started
-from tests.digesting import MON, SAT, THU, TUE, WED, Writer, area, day, focus, listed, week
+from tests.digesting import (
+    MON,
+    SAT,
+    THU,
+    TUE,
+    WED,
+    P,
+    Q,
+    R,
+    S,
+    Writer,
+    area,
+    day,
+    focus,
+    listed,
+    shown,
+    week,
+)
 from tests.feeds import entry, feed
 from tests.seed import analyse, classify, grade
 from tests.sessions import Bridge, Session, in_read, in_write
 
 TOKEN = "t"
-P = paper("2610.00001", title="Traces that hide steps")
-Q = paper("2610.00002", title="A near neighbour")
-R = paper("2610.00003", title="A distant cousin")
-S = paper("2610.00004", title="Late to the party")
 
 
 @pytest.fixture
@@ -51,23 +65,6 @@ async def db(conn: Session):
     await settling.save_tree(conn, TREE)
     await in_write(conn, papers_store.upsert, [P, Q, R, S])
     return conn
-
-
-async def shown(
-    conn: Session, topic: str, period: str, on: date
-) -> tuple[str, list[tuple[str, str]]]:
-    """The digest's state, and its papers with their roles in its order."""
-    row = await (
-        await conn.execute(
-            "SELECT id, state FROM digests WHERE topic = %s AND period = %s AND day = %s",
-            (topic, period, on),
-        )
-    ).fetchone()
-    if row is None:
-        return None, []
-    return row["state"], [
-        (p["paper_id"], p["role"]) for p in await in_read(conn, store_.papers_of, row["id"])
-    ]
 
 
 # -- the listing a paper belongs to ----------------------------------------------------------------
@@ -1259,7 +1256,7 @@ async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db: Session, ga
     since = datetime.now(UTC) - timedelta(minutes=1)
     worked = []
 
-    async def work(db, config, archive, run=None, limit=None, deadline=None):
+    async def work(db: DatabaseGate, config, archive, run=None, limit=None, deadline=None):
         worked.append(deadline)
         if len(worked) == 2:
             async with db.write("passes done") as unit:
@@ -1279,7 +1276,7 @@ async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db: Session, gate, 
     await focus(db, P, "central")
     since = datetime.now(UTC) - timedelta(minutes=1)
 
-    async def work(db, config, archive, run=None, limit=None, deadline=None):
+    async def work(db: DatabaseGate, config, archive, run=None, limit=None, deadline=None):
         return {}
 
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
@@ -1302,7 +1299,7 @@ async def test_the_wait_works_no_more_passes_than_the_runs_limit_leaves(
     since = datetime.now(UTC) - timedelta(minutes=1)
     limits = []
 
-    async def work(db, config, archive, run=None, limit=None, deadline=None):
+    async def work(db: DatabaseGate, config, archive, run=None, limit=None, deadline=None):
         limits.append(limit)
         return Counter(briefs_written=1)
 

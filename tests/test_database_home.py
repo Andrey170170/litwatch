@@ -38,17 +38,51 @@ def test_connections_stay_in_the_gate_and_store():
     assert found == set()
 
 
+FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.arg]:
+    args = function.args
+    return args.posonlyargs + args.args + args.kwonlyargs
+
+
+def _sessions(module: ast.Module) -> set[str]:
+    """The fixtures that give a test's session in `module`: `conn`, and a fixture of the module
+    returning or yielding a parameter that is one (a seeded `db`, `world`)."""
+    names, grew = {"conn"}, True
+    while grew:
+        grew = False
+        for node in module.body:
+            if (
+                isinstance(node, FUNCTIONS)
+                and node.name not in names
+                and any("fixture" in ast.unparse(d) for d in node.decorator_list)
+            ):
+                given = {arg.arg for arg in _parameters(node)} & names
+                for found in ast.walk(node):
+                    if isinstance(found, ast.Return | ast.Yield) and (
+                        isinstance(found.value, ast.Name) and found.value.id in given
+                    ):
+                        names.add(node.name)
+                        grew = True
+                        break
+    return names
+
+
 def test_a_tests_connection_is_typed():
-    """ty does not follow a fixture into the tests that take it: a `conn` left unannotated is
+    """ty does not follow a fixture into the tests that take it: a session left unannotated is
     unknown to it, and a store function handed it, instead of a unit (`sessions.in_read`,
-    `in_write`), goes unseen."""
+    `in_write`), goes unseen. So every parameter named for a fixture that gives a session, in
+    any function, nested ones too, says its type. A session under any other name a store
+    function is handed raises when it runs (`sessions.SessionInStoreError`)."""
     found = []
     for path in sorted(TESTS.rglob("*.py")):
-        for node in ast.parse(path.read_text()).body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                args = node.args
-                for arg in args.posonlyargs + args.args + args.kwonlyargs:
-                    if arg.arg == "conn" and arg.annotation is None:
+        module = ast.parse(path.read_text())
+        sessions = _sessions(module)
+        for node in ast.walk(module):
+            if isinstance(node, FUNCTIONS):
+                for arg in _parameters(node):
+                    if arg.arg in sessions and arg.annotation is None:
                         found.append(f"{path.relative_to(TESTS)}:{node.lineno} {node.name}")
     assert found == []
 

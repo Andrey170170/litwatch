@@ -5,6 +5,7 @@ through the Database gate's pool (`gates.database`)."""
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Concatenate
@@ -28,10 +29,22 @@ from litwatch.gates.database import (
 )
 
 
+class SessionInStoreError(RuntimeError):
+    """A store function was handed a test's session where it takes a unit."""
+
+
+def _not_from_store() -> None:
+    """Refuse SQL a store function runs on a test's session: it takes a unit (`in_read`,
+    `in_write`), whatever name the session went by. Migrations take a connection."""
+    caller = sys._getframe(2).f_globals.get("__name__", "")
+    if caller.startswith("litwatch.store.") and caller != "litwatch.store.db":
+        raise SessionInStoreError(f"{caller} ran SQL on a test's session; hand it a unit")
+
+
 class Session(psycopg.AsyncConnection[dict[str, Any]]):
     """A test's connection. One made by `schema` names its database and schema, for the gates
-    a test opens on them. Typed so that ty checks what a test hands to litwatch (a store
-    function wants a unit: `in_read`, `in_write`), and not the SQL a test checks the database
+    a test opens on them. A store function handed one raises (`SessionInStoreError`). Typed so
+    that ty checks what a test hands to litwatch, and not the SQL a test checks the database
     with itself, whose rows it reads as it knows them."""
 
     test_dsn: str
@@ -40,6 +53,16 @@ class Session(psycopg.AsyncConnection[dict[str, Any]]):
     if TYPE_CHECKING:
 
         async def execute(self, query: Any, params: Any = None, **kwargs: Any) -> Any: ...
+
+    else:
+
+        def execute(self, *args, **kwargs):
+            _not_from_store()
+            return super().execute(*args, **kwargs)
+
+        def cursor(self, *args, **kwargs):
+            _not_from_store()
+            return super().cursor(*args, **kwargs)
 
 
 async def connect(dsn: str, schema: str | None = None) -> Session:

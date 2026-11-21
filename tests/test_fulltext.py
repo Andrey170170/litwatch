@@ -10,8 +10,7 @@ import httpx
 import pytest
 
 from litwatch import fulltext
-from litwatch.api import create_app
-from litwatch.archive import URGENT, ArchiveClient, PaperText, PdfText
+from litwatch.archive import URGENT, PaperText, PdfText
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import (
     FAILED_RUNS,
@@ -45,40 +44,28 @@ from litwatch.store import papers as papers_store
 from litwatch.store import runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
 from tests import sessions, settling
-from tests.briefs import ANSWER, BODY, BRIEF, GIST, P, analysed
-from tests.conftest import FAITH, INTERP, TREE, AppClient, gate_on, paper
+from tests.briefs import (
+    ANSWER,
+    BODY,
+    BRIEF,
+    BRIEF_ROLE,
+    CONFIG,
+    GIST,
+    P,
+    Writer,
+    analysed,
+    archive,
+    client,
+    graded,
+    passes,
+    ready,
+    work,
+)
+from tests.conftest import FAITH, INTERP, TREE, paper
 from tests.fakes import ScriptedProvider
-from tests.fakes_http import FakeArchive, mock
+from tests.fakes_http import FakeArchive
 from tests.scripted import refusal
 from tests.sessions import Bridge, Session, in_read, in_write
-
-BRIEF_ROLE = RoleConfig(provider="anthropic", model="test-brief")
-CONFIG = Config(models=Models(brief=BRIEF_ROLE))
-TOKEN = "t"
-
-
-class Writer:
-    """The `brief` role, scripted: `answers` in turn (an exception is raised), then ANSWER."""
-
-    def __init__(self) -> None:
-        self.answers: list[dict | Exception | str] = []
-        self.asked: list[str] = []  # each request's user message
-
-    def respond(self, role: RoleConfig, request) -> str:
-        assert role.model == BRIEF_ROLE.model
-        self.asked.append(request.user)
-        answer = self.answers.pop(0) if self.answers else ANSWER
-        if isinstance(answer, Exception):
-            raise answer
-        return answer if isinstance(answer, str) else json.dumps(answer)
-
-    def gateway(self, config: Config, journal) -> Gateway:
-        providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
-
-
-def archive(fake: FakeArchive) -> ArchiveClient:
-    return ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
 
 
 @pytest.fixture
@@ -95,38 +82,6 @@ async def db(conn: Session):
     return conn
 
 
-def client(conn: Session) -> tuple:
-    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, TOKEN, CONFIG)
-    http = AppClient(
-        app,
-        base_url="http://test",
-        headers={"Authorization": f"Bearer {TOKEN}"},
-    )
-    return app, http
-
-
-async def graded(conn: Session, fit: str, topic: str = FAITH.slug) -> None:
-    await in_write(
-        conn,
-        verdicts.add,
-        Verdict(
-            paper_id=P.id, topic=topic, topic_version="v", fit=Fit(fit), reason="r", opinions={}
-        ),
-    )
-    await settling.settle(conn, P.id, cause=Cause.VERDICT)
-
-
-async def passes(conn: Session) -> list[dict]:
-    """P's text passes; its Deep card passes are tests/test_deep.py's."""
-    return await (
-        await conn.execute(
-            "SELECT * FROM fulltext_passes WHERE paper_id = %s AND kind <> 'deep' ORDER BY id",
-            (P.id,),
-        )
-    ).fetchall()
-
-
 async def events(conn: Session, *types: str) -> list[dict]:
     rows = await (
         await conn.execute(
@@ -134,11 +89,6 @@ async def events(conn: Session, *types: str) -> list[dict]:
         )
     ).fetchall()
     return [{"type": r["type"], **r["payload"]} for r in rows]
-
-
-async def work(conn: Session, fake: FakeArchive, writer: Writer, **kwargs):
-    async with gate_on(conn) as db:
-        return await fulltext.work(db, CONFIG, archive(fake), gateway=writer.gateway, **kwargs)
 
 
 async def retry_failed(conn: Session) -> int:
@@ -150,11 +100,6 @@ async def retry_failed(conn: Session) -> int:
 async def record(conn: Session, attempt: fulltext.Attempt) -> bool:
     """Record a pass's attempt as the worker does, in a change of its paper."""
     return await fulltext.record_in_change(Bridge(conn), attempt, settling.RULES)
-
-
-def ready(fake: FakeArchive, version: int = 1) -> FakeArchive:
-    fake.texts[P.id] = (version, BODY)
-    return fake
 
 
 async def current_gist(conn: Session) -> str | None:

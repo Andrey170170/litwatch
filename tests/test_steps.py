@@ -16,6 +16,7 @@ from litwatch.api import create_app
 from litwatch.api import settings as settings_api
 from litwatch.config import Classification, Config
 from litwatch.core import FAILED_RUNS, Cause, Paper
+from litwatch.gates.database import WriteUnit
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run, run_record
 from litwatch.llm import Gateway, ProviderError, Usage
@@ -340,7 +341,7 @@ async def test_a_failing_record_stops_every_call_before_the_run_closes(
         providers = {n: Stalling(n, models.respond) for n in ("anthropic", "openrouter")}
         return Gateway(config.models, providers, journal, retry_delays=(0.0,))
 
-    async def boom(conn, found):
+    async def boom(unit: WriteUnit, found):
         await stalled.wait()
         raise RuntimeError("the database went away")
 

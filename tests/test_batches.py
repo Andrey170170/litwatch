@@ -30,10 +30,10 @@ from litwatch.store import papers as papers_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
+from tests import briefs as ft
+from tests import digesting as dg
+from tests import scripted as steps
 from tests import sessions, settling
-from tests import test_digests as dg
-from tests import test_fulltext as ft
-from tests import test_steps as steps
 from tests.conftest import TREE, gate_on, started
 from tests.fakes import FAST, BatchingProvider, ScriptedProvider, anthropic_message
 from tests.fakes_http import FakeArchive
@@ -926,9 +926,9 @@ async def records(conn: Session) -> dict[str, list]:
 async def test_a_batched_night_records_what_an_unbatched_one_does(conn: Session, night):
     """V5, and V7's late start: a nightly run started after its deadline does not batch."""
 
-    async def one_night(c, batching: str | None) -> tuple[dict, BatchingProvider]:
+    async def one_night(c: Session, batching: str | None) -> tuple[dict, BatchingProvider]:
         await settling.save_tree(c, TREE)
-        await papers_store.upsert(c, [steps.A, steps.B])
+        await in_write(c, papers_store.upsert, [steps.A, steps.B])
         models = steps.Scripted()
         anthropic = BatchingProvider("anthropic", models.respond)
         when = tonight(late=batching == "late") if batching else None
@@ -1163,9 +1163,9 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
     """V11: a Monday's digests through batches, topics concurrently, equal those written in
     turn: a failed digest written again before the day's, the weeklies after the dailies."""
 
-    async def monday(c, together: bool) -> tuple[list, BatchingProvider | None]:
+    async def monday(c: Session, together: bool) -> tuple[list, BatchingProvider | None]:
         await settling.save_tree(c, TREE)
-        await papers_store.upsert(c, [dg.P, dg.Q, dg.R, dg.S])
+        await in_write(c, papers_store.upsert, [dg.P, dg.Q, dg.R, dg.S])
         friday = dg.MON - timedelta(days=3)
         await dg.focus(c, dg.P, "central")
         await dg.listed(c, friday, dg.P)
@@ -1180,7 +1180,7 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
         if together:
             anthropic = BatchingProvider("anthropic", w.respond)
             gateway = factory(w.respond, anthropic)
-        tree = await taxonomy_store.load(c)
+        tree = await in_read(c, taxonomy_store.load)
         async with gate_on(c) as db, model_run(db, Config(), "nightly", gateway=gateway) as run:
             if together:
                 run.gateway.batch_until(tonight()[1])

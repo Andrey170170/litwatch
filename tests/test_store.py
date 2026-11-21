@@ -91,7 +91,7 @@ async def card_with(conn: Session, paper_id: str, trace: list) -> None:
     )
 
 
-async def test_a_cards_trace_moves_to_the_attempt_whose_job_ran(before_traces):
+async def test_a_cards_trace_moves_to_the_attempt_whose_job_ran(before_traces: Session):
     conn = before_traces
     ran = await attempt(conn, "2610.00001", "job-1", {"turns": 2})
     # The remake that followed was turned down before its job ran: the card kept the old trace.
@@ -119,7 +119,9 @@ async def test_a_cards_trace_moves_to_the_attempt_whose_job_ran(before_traces):
         [(None, {"turns": 2})],  # no attempt whose job ran
     ],
 )
-async def test_a_trace_without_its_attempt_stops_the_whole_migration(before_traces, attempts):
+async def test_a_trace_without_its_attempt_stops_the_whole_migration(
+    before_traces: Session, attempts
+):
     conn = before_traces
     for job, usage in attempts:
         await attempt(conn, "2610.00001", job, usage)

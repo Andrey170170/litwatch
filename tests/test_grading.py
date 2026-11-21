@@ -14,7 +14,7 @@ from litwatch.archive.client import listed
 from litwatch.core import FAILED_RUNS, Cause, Fit, Status
 from litwatch.core.grading import FIT_DEFINITIONS
 from litwatch.feedback import word
-from litwatch.gates.database import LOCKS
+from litwatch.gates.database import LOCKS, WriteUnit
 from litwatch.intake import atom, oai
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly
@@ -292,7 +292,7 @@ NOW = f"/api/settings/grading/{FAITH.slug}/{B.id}/now"
 async def test_grading_now_cut_short_is_left_to_the_next_night(conn: Session, models, monkeypatch):
     await stuck(conn, models)
 
-    async def crash(conn, g):
+    async def crash(unit: WriteUnit, g):
         raise RuntimeError("the request went away")
 
     monkeypatch.setattr(grading, "record", crash)
@@ -311,7 +311,7 @@ async def test_grading_now_on_text_that_changed_meanwhile_is_refused(
 ):
     await stuck(conn, models)
 
-    async def rewritten(conn, paper):
+    async def rewritten(unit: WriteUnit, paper):
         return False
 
     monkeypatch.setattr(papers_store, "still_current", rewritten)
