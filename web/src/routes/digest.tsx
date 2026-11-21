@@ -523,7 +523,8 @@ export function HistoryPage() {
       {!q.isFetchNextPageError && <State q={q} what="the history" />}
       {pages.length > 0 && !start && <div className="empty">No digests have been written yet.</div>}
       {start && (cal ? <Calendar pages={pages} now={today} /> : <HistoryList pages={pages} today={today} />)}
-      {q.hasNextPage && !q.isFetchingNextPage && !q.isError && <Sentinel onSeen={() => void q.fetchNextPage()} />}
+      {/* Not while the pages are read again: a next page would cancel that read and land on the old pages. */}
+      {q.hasNextPage && !q.isFetching && !q.isError && <Sentinel onSeen={() => void q.fetchNextPage({ cancelRefetch: false })} />}
       {q.isFetchingNextPage && <div className="loadmore">Loading older weeks…</div>}
       {q.isFetchNextPageError && (
         <div className="loadmore">

@@ -1557,6 +1557,9 @@ async def test_history_without_until_reads_back_from_today_in_the_schedules_zone
         assert (
             await http.get("/api/digests", params={"since": MON.isoformat()})
         ).status_code == 422
+        # The default span stops at the calendar's first day rather than failing before it.
+        earliest = await http.get("/api/digests", params={"until": date.min.isoformat()})
+        assert earliest.status_code == 200
 
 
 async def test_the_digest_tab_reads_days_weeks_history_and_a_digest(db):

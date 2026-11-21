@@ -166,7 +166,8 @@ async def history(params: Annotated[s.HistoryIn, Query()], request: Request, db:
     Marks and whether arXiv listed papers on it, and the weeks those days fall in with their
     weekly Marks. Without `until`, from today in the schedule's zone, `HISTORY_SPAN` back."""
     last = params.until or request.app.state.config.schedule.today(datetime.now(UTC))
-    first = params.since or last - s.HISTORY_SPAN
+    span = min(s.HISTORY_SPAN, last - date.min)  # the calendar has a first day
+    first = params.since or last - span
     async with db.read("digest history") as c:
         return await _history(first, last, c)
 
