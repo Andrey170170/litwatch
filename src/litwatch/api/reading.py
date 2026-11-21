@@ -38,8 +38,8 @@ from litwatch.core import (
     Topic,
     Weight,
     badge_order,
-    owners_word,
     page_standing,
+    whose_word,
     withdrawn_at,
 )
 from litwatch.core.classification import Membership, Source, standing
@@ -569,7 +569,7 @@ def _rail(
         topic = tree.topic(slug)
         shows = standings.get(slug)
         v, label, thumb = verdicts.get(slug), labels.get(slug), reactions.get(slug)
-        said = owners_word(
+        said = whose_word(
             Label(paper_id=found["id"], **label) if label else None,
             Reaction(paper_id=found["id"], **thumb) if thumb else None,
             v["fit"] if v else None,
@@ -590,7 +590,8 @@ def _rail(
                 rarity=shows.rarity if shows else None,
                 via=shows.via if shows else None,
                 verdict=s.CurrentVerdict(**v) if v else None,
-                word=said,
+                word=said[0] if said else None,
+                word_from=said[1] if said else None,
                 label=s.LabelState(**label) if label else None,
                 reaction=s.ReactionState(**thumb) if thumb else None,
                 missed=slug in missed,

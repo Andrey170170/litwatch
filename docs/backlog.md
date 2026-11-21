@@ -26,19 +26,12 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
 [`plans/a1-database-gate.md`](plans/a1-database-gate.md) (P1–P7); drive next. Input: the measurement of where work waits
 ([`notes/where-work-waits.md`](notes/where-work-waits.md), 2026-11-09/10).
 
-- **Settling a paper made cheap** (review, project 1): one taxonomy snapshot per transaction, current verdicts only,
-  each paper settled once.
-- **Tests for `change` with several papers** (review, project 7): overlapping sets in reverse order across two
-  connections, rollback when a later paper fails; shared test helpers into support modules.
-- **Smaller read gaps:**
-  - unclassified papers listed on Papers, not only counted (the API can return them);
-  - code and weights links from the analysis, not only from a Deep card's URL;
-  - which source set the owner's word on a topic, from the API instead of guessed by the UI (`whoseFit`);
-  - typed response models for `/quality`, `/runs` and `/calibrate` (review, project 3).
 - **Tests reach `store` through units** (A1 P6's review): many tests still seed and assert with the raw `conn`
   fixture, an autocommit connection, passed to store functions typed for units. They work, but a multi-row seed that
   fails part way commits its first rows, and `ty` does not see the calls because the fixture is untyped. Typing the
-  fixture as a connection makes `ty` list them; each then takes a unit (`tests/sessions.Bridge`). Not in P7's list.
+  fixture as a connection makes `ty` list them; each then takes a unit (`tests/sessions.Bridge`). With it, the
+  shared test helpers move out of `test_*` modules into support modules (review, project 7; about ten modules import
+  from each other).
 
 ### A2. Work gate
 
@@ -170,6 +163,11 @@ Built between milestones, on whatever structure exists then.
   makes the length check lax, since the rest stays readable in the session. Idea (2026-11-10): the writer may move a
   part's border when the parsing is wrong, and the length check stays measured on code's cuts, or on the reviewer's,
   so the writer does not set its own bar. Wait for a PDF-only read whose parts came out wrong. *Needs shaping.*
+- **Code and weights links on the paper's page,** not only from a Deep card's URL. Taken out of A1's read gaps
+  (2026-11-21): the analysis records only whether a paper releases code or weights (`releases_code`,
+  `releases_weights`), never a link. *Needs a decision:* links found in the abstract and arXiv comments when those
+  are true (no model change, a heuristic), or the analysis returning them (a prompt change, a migration and an
+  evaluation).
 - **A cleared publication record reaches the exports.** Clearing a paper's record emits no event, so Notion's Venue
   and Zotero's "Published" line keep the old record until the paper's next event or Notion's reconcile. A write that
   lands while an export reads the paper is missed the same way (A1 P5's review). An event on clearing closes both.

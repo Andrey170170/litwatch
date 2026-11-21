@@ -87,8 +87,8 @@ export function RunsPage() {
             return (
               <div className={`mr${bad ? " bad" : ""}`} key={r.id}>
                 <span title={dateTime(r.started_at)}>{rowDate(r.started_at)}</span>
-                <span className="mono">{r.counts?.classified ?? 0}</span>
-                {desktop && <span className="mono">{r.counts?.graded ?? 0}</span>}
+                <span className="mono">{r.counts.classified ?? 0}</span>
+                {desktop && <span className="mono">{r.counts.graded ?? 0}</span>}
                 {desktop && (digests(r) === null ? <span className="mono faint">–</span> : <span className="mono">{digests(r)}</span>)}
                 {desktop && <span className="mono">{took(r.started_at, r.finished_at) || "running"}</span>}
                 <span className="mono" title={nightCost(r)}>

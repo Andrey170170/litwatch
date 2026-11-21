@@ -81,7 +81,6 @@ export function PapersPage() {
         listKey={`papers:${JSON.stringify(search)}`}
         empty={page0 && visibleCount(page0.counts, search) === 0 ? <div className="empty">{filtered ? "Nothing matches." : "Nothing in the collection yet."}</div> : null}
       />
-      {page0 && page0.counts.unrated > 0 && !search.rarity?.length && <div className="loadmore">{page0.counts.unrated} not yet classified</div>}
       {search.q && !narrowed && <Outside q={search.q} search={search} />}
     </>
   );

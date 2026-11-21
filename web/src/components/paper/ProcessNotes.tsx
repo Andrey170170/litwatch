@@ -3,7 +3,7 @@ import type { ProcessNote } from "@/lib/settings";
 import { Rung } from "./Rung";
 
 /** A URL to link, only when it is http(s): a note's URL comes from the model, and is never a `javascript:` link. */
-export function webUrl(url: string | undefined): URL | null {
+export function webUrl(url: string | null | undefined): URL | null {
   if (!url) return null;
   try {
     const u = new URL(url);

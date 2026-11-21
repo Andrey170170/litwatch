@@ -242,7 +242,7 @@ describe("labelled and noted", () => {
 });
 
 describe("runFailed", () => {
-  const run = { id: 1, kind: "nightly", started_at: "", finished_at: "", cost: 0, after_cost: 0, error: null, counts: null, fetched: 0, inserted: 0, updated: 0 };
+  const run = { id: 1, kind: "nightly", started_at: "", finished_at: "", cost: "0", after_cost: "0", error: null, counts: {}, fetched: 0, inserted: 0, updated: 0 };
   it("names the error, else the steps that failed on some papers, else nothing", () => {
     expect(runFailed({ ...run, error: "boom" })).toBe("boom");
     expect(runFailed({ ...run, counts: { grading_failed: 20, digests_failed: 2 } })).toBe("20 grading, 2 digests failed");
@@ -323,7 +323,7 @@ describe("toToml", () => {
 });
 
 describe("nightCost", () => {
-  const night = { id: 1, kind: "nightly", started_at: "", finished_at: null, error: null, counts: null, fetched: 0, inserted: 0, updated: 0 };
+  const night = { id: 1, kind: "nightly", started_at: "", finished_at: null, error: null, counts: {}, fetched: 0, inserted: 0, updated: 0 };
   it("splits the run's cost from the runs after it", () => {
     expect(nightCost({ ...night, cost: "10.8949", after_cost: "8.5946" })).toBe("$2.30 in the run · $8.59 after it");
   });

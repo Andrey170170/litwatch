@@ -16,6 +16,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ValidationError
 
 from litwatch import classification, grading, seeds
+from litwatch.api import schemas as s
 from litwatch.api.deps import Db, Rules, budget_lines, protected
 from litwatch.core import FAILED_RUNS, Cause, Fit, Paper, Status, Taxonomy, Topic
 from litwatch.core.budget import month_start
@@ -137,11 +138,13 @@ async def order(body: Order, db: Db, rules: Rules) -> None:
 # -- quality ---------------------------------------------------------------------------------------
 
 
-@router.get("/quality")
-async def quality_page(request: Request, db: Db) -> dict[str, Any]:
+# The Settings reads below answer with the store's rows as they are: a key a row leaves out
+# stays out (`response_model_exclude_unset`) instead of being written null.
+@router.get("/quality", response_model_exclude_unset=True)
+async def quality_page(request: Request, db: Db) -> s.Quality:
     """At the top, what last night left; below, how well the Focus topics are doing."""
     async with db.read("quality") as unit:
-        return await _quality(request, unit)
+        return s.Quality.model_validate(await _quality(request, unit))
 
 
 async def _quality(request: Request, c: ReadUnit) -> dict[str, Any]:
@@ -536,16 +539,17 @@ class DrawIn(BaseModel):
 
 
 @router.post("/calibrate")
-async def draw(body: DrawIn, db: Db) -> dict[str, int]:
+async def draw(body: DrawIn, db: Db) -> s.Drawn:
     """Draw a session of about twenty papers. The seed is recorded with it."""
     seed = body.seed if body.seed is not None else secrets.randbelow(2**31)
-    return {"id": await calibrate.draw(db, seed)}
+    return s.Drawn(id=await calibrate.draw(db, seed))
 
 
-@router.get("/calibrate")
-async def sessions(db: Db) -> list[dict[str, Any]]:
+@router.get("/calibrate", response_model_exclude_unset=True)
+async def sessions(db: Db) -> list[s.SessionRow]:
     async with db.read("calibrate sessions") as unit:
-        return await calibrate.sessions(unit)
+        rows = await calibrate.sessions(unit)
+    return [s.SessionRow.model_validate(r) for r in rows]
 
 
 # What the session endpoints answer besides success, for the API schema.
@@ -553,23 +557,23 @@ NO_SESSION = {404: {"description": "No such session"}}
 NO_ITEM = {404: {"description": "No such session, or no paper at that position in it"}}
 
 
-@router.get("/calibrate/{session_id}", responses=NO_SESSION)
-async def session(session_id: int, db: Db) -> dict[str, Any]:
+@router.get("/calibrate/{session_id}", responses=NO_SESSION, response_model_exclude_unset=True)
+async def session(session_id: int, db: Db) -> s.Session:
     async with db.read("calibrate session") as unit:
         found = await calibrate.session(unit, session_id)
     if found is None:
         raise HTTPException(status_code=404, detail="no such session")
-    return found
+    return s.Session.model_validate(found)
 
 
 @router.post("/calibrate/{session_id}/more", responses=NO_SESSION)
-async def more(session_id: int, db: Db) -> dict[str, int]:
+async def more(session_id: int, db: Db) -> s.Added:
     """Continue with the papers waiting for a word: splits, misses and thumbed papers."""
     async with db.read("calibrate more: session") as unit:
         found = await calibrate.session(unit, session_id)
     if found is None:
         raise HTTPException(status_code=404, detail="no such session")
-    return {"added": await calibrate.more(db, session_id)}
+    return s.Added(added=await calibrate.more(db, session_id))
 
 
 @router.put("/calibrate/{session_id}/items/{position}", status_code=204, responses=NO_ITEM)
@@ -587,10 +591,11 @@ async def answer(
 # -- runs and configuration ------------------------------------------------------------------------
 
 
-@router.get("/runs")
-async def runs(db: Db) -> list[dict[str, Any]]:
+@router.get("/runs", response_model_exclude_unset=True)
+async def runs(db: Db) -> list[s.NightRun]:
     async with db.read("runs") as unit:
-        return await quality.runs(unit)
+        rows = await quality.runs(unit)
+    return [s.NightRun.model_validate(r) for r in rows]
 
 
 class NextFire(BaseModel):

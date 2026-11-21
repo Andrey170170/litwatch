@@ -2,6 +2,8 @@
 import type { Schemas } from "@/api/client";
 
 export type Rarity = Schemas["Rarity"];
+/** A rarity, or `unrated`: not classified yet, the level a list filters such papers by. */
+export type RarityLevel = Schemas["RarityLevel"];
 export type Grade = Schemas["Grade"];
 export type GradeLevel = Schemas["GradeLevel"];
 export type Fit = Schemas["Fit"];
@@ -43,25 +45,26 @@ export function gradeLine(grade: Grade | null | undefined, weight: Weight | null
 }
 
 /**
- * A shelf: which papers it holds (a filter on the list's endpoint), its head's colour, its form (reading rows with
- * Gists, or one-line table rows), and whether it starts open or folded to a count.
+ * A shelf: which papers it holds (a filter on the list's endpoint), its head's colour (none: the line colour), its
+ * form (reading rows with Gists, or one-line table rows), and whether it starts open or folded to a count.
  */
 export type Shelf = {
   key: string;
   name: string;
-  colour: Rarity;
+  colour: Rarity | null;
   form: "reading" | "table";
   open: boolean;
-  rarity?: Rarity[];
+  rarity?: RarityLevel[];
   grade?: GradeLevel[];
 };
 
-/** Papers: shelves by mixed rarity. */
+/** Papers: shelves by mixed rarity, then the papers not classified yet. */
 export const PAPER_SHELVES: Shelf[] = [
   { key: "top", name: "Epic and legendary", colour: "legendary", form: "reading", open: true, rarity: ["epic", "legendary"] },
   { key: "rare", name: "Rare", colour: "rare", form: "table", open: true, rarity: ["rare"] },
   { key: "uncommon", name: "Uncommon", colour: "uncommon", form: "table", open: false, rarity: ["uncommon"] },
   { key: "common", name: "Common", colour: "common", form: "table", open: false, rarity: ["common"] },
+  { key: "unrated", name: "Not yet classified", colour: null, form: "table", open: false, rarity: ["unrated"] },
 ];
 
 /** A topic page: shelves by the topic's grade. */
@@ -72,11 +75,12 @@ export const TOPIC_SHELVES: Shelf[] = [
   { key: "rest", name: "In the topic, not graded up", colour: "common", form: "table", open: false, grade: ["none", "ungraded"] },
 ];
 
-/** The shelves a rarity filter leaves: on Papers those holding a chosen level; a topic page keeps every shelf,
- * since an ungraded paper's colour is its Weight's and could sit anywhere. */
+/** The shelves a rarity filter leaves: on Papers those holding a chosen level (never the unclassified, which have
+ * none); a topic page keeps every shelf, since an ungraded paper's colour is its Weight's and could sit anywhere. */
 export function shelvesFor(shelves: Shelf[], rarity: Rarity[]): Shelf[] {
   if (!rarity.length) return shelves;
-  return shelves.filter((s) => !s.rarity || s.rarity.some((r) => rarity.includes(r)));
+  const chosen: RarityLevel[] = rarity;
+  return shelves.filter((s) => !s.rarity || s.rarity.some((r) => chosen.includes(r)));
 }
 
 /** The rarity bar's segment sizes: each level's share, with a floor so every level stays tappable. */

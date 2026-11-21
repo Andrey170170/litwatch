@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from litwatch.core import (
     Depth,
@@ -22,8 +23,11 @@ from litwatch.core import (
     ReactionValue,
     Status,
     Weight,
+    WordSource,
 )
+from litwatch.core.budget import Spend
 from litwatch.core.digests import DigestPeriod, DigestRole, DigestState
+from litwatch.core.evaluation import Recall
 
 # The most days one History request covers.
 HISTORY_SPAN = timedelta(days=92)
@@ -179,6 +183,8 @@ class GradeCounts(BaseModel):
 
 type Sort = Literal["rarest", "newest", "added", "title", "best"]
 type GradeLevel = Literal["must_read", "relevant", "adjacent", "none", "ungraded"]
+# A rarity, or `unrated`: no rarity, in the list asked for (on Papers, not classified yet).
+type RarityLevel = Literal["legendary", "epic", "rare", "uncommon", "common", "unrated"]
 
 
 class ListQuery(BaseModel):
@@ -189,7 +195,7 @@ class ListQuery(BaseModel):
     else `rarest`."""
 
     q: str | None = None
-    rarity: list[Rarity] = Field(default_factory=list)
+    rarity: list[RarityLevel] = Field(default_factory=list)
     grade: list[GradeLevel] = Field(default_factory=list)
     saved: bool | None = None
     code: bool | None = None  # the abstract announces released code
@@ -373,8 +379,8 @@ type TopicState = Literal["split", "escalated", "one_lab", "ungraded", "grading_
 class PaperTopic(BaseModel):
     """A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its
     own effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),
-    its current verdict, the owner's word that stands (from the label, a thumb or a miss), the
-    label and thumb themselves, and its open state."""
+    its current verdict, the owner's word that stands and what set it (`word_from`: the label,
+    a thumb or a miss), the label and thumb themselves, and its open state."""
 
     topic: Badge
     fit: Fit | None = None  # the effective one, on this topic itself
@@ -383,6 +389,7 @@ class PaperTopic(BaseModel):
     via: str | None = None
     verdict: CurrentVerdict | None = None
     word: Fit | None = None
+    word_from: WordSource | None = None
     label: LabelState | None = None
     reaction: ReactionState | None = None
     missed: bool = False  # reported as missed for this topic
@@ -994,3 +1001,288 @@ class JobRun(BaseModel):
     above what it spent."""
 
     ceiling: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+# -- Settings: Quality, Runs and cost, Calibrate ---------------------------------------------------
+# Each is the store's rows as they are: the routes answer with `response_model_exclude_unset`, so
+# a key a row leaves out stays out rather than turning null.
+
+
+class SplitLabel(BaseModel):
+    value: LabelValue
+
+
+class Split(BaseModel):
+    """A current verdict from since last night asking for the owner's word
+    (`store.quality.splits_since`): a Focus split, an Area escalation, or a central or related
+    grade from one lab, with every grader's answer and the owner's label. `revision` is the
+    text it is on, the paper's current one."""
+
+    paper_id: str
+    topic: str
+    depth: Depth
+    fit: Fit
+    reason: str
+    split: bool
+    escalated: bool
+    one_lab: bool  # one Focus grader refused throughout; `opinions` holds the other's alone
+    opinions: dict[str, Opinion]
+    recorded_at: datetime
+    title: str
+    revision: int
+    label: SplitLabel | None = None
+
+
+class Stuck(BaseModel):
+    """A step that stopped on a paper after failing runs in a row, or that every model refused
+    (`store.failures.stuck`): `refused` names the roles whose whole list refused,
+    `stopped_by_refusal` whether that stopped it; `topic` is a grading's. `acknowledged_at`:
+    when the owner acknowledged it."""
+
+    paper_id: str
+    revision: int
+    title: str
+    failed_runs: int
+    last_error: str | None = None
+    refused: list[str] = Field(default_factory=list)
+    stopped_by_refusal: bool = False
+    failed_at: datetime
+    topic: str | None = None
+    acknowledged_at: datetime | None = None
+
+
+class TextPassStuck(BaseModel):
+    """A full-text pass waiting on the owner (`store.fulltext.stuck`): failed runs in a row or
+    refused by every model (`refused`), or awaiting its text over a week. `since` is since when
+    it waits, which names this failure for Acknowledge."""
+
+    id: int
+    paper_id: str
+    revision: int
+    title: str
+    kind: Literal["brief", "weight", "deep"]
+    state: Literal["failed", "awaiting_text"]
+    failed_runs: int
+    last_error: str | None = None
+    refused: bool = False
+    queued_at: datetime
+    since: datetime
+    acknowledged_at: datetime | None = None
+
+
+class FailedDigest(BaseModel):
+    """A digest whose writer call failed (`store.digests.failed`); a weekly one's `day` is its
+    Monday."""
+
+    id: int
+    topic: str
+    period: DigestPeriod
+    day: date
+    error: str | None = None
+    written_at: datetime
+    acknowledged_at: datetime | None = None
+
+
+class ProcessNote(BaseModel):
+    """A process note on a Deep card or read, as the deep service wrote it: its `kind` (access,
+    tool, budget, input, or a read's `review`), its `source` (`model` or `service`), the note and
+    a page. Any other key the service wrote is kept."""
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: str
+    source: str
+    note: str
+    url: str | None = None
+
+
+class DeepNotes(BaseModel):
+    """A Deep card with process notes (`store.integrations.deep_notes`); `written_at` names the
+    card, for Acknowledge."""
+
+    paper_id: str
+    title: str
+    written_at: datetime
+    notes: list[ProcessNote]
+    acknowledged_at: datetime | None = None
+
+
+class LastNight(BaseModel):
+    """What last night left for the owner: its run and error, the splits since it, the stopped
+    steps and passes, the failed digests, and the Deep notes (which wait on nothing)."""
+
+    run: int | None = None
+    error: str | None = None
+    splits: list[Split]
+    awaiting_classification: list[Stuck]
+    analysis_failed: list[Stuck]
+    ungraded: list[Stuck]
+    fulltext: list[TextPassStuck]
+    digests: list[FailedDigest]
+    deep_notes: list[DeepNotes]
+
+
+class DeepUsage(BaseModel):
+    """Deep's month to date at list prices: the attempts ended, their cost where known, and how
+    many have their usage unknown (the cost is a lower bound while any is)."""
+
+    attempts: int
+    list_cost: float
+    unknown: int
+
+
+class ReplayRecall(BaseModel):
+    """Recall per cohort and Focus topic from the latest replay, and the run it comes from."""
+
+    eval_run: int
+    started_at: datetime
+    finished_at: datetime | None = None
+    cost: float | None = None
+    recall: list[Recall]
+
+
+class TopicPrecision(BaseModel):
+    """A Focus topic's Calibrate draws over the trailing 90 days: precision at relevant (the
+    upper group) and how often grading dropped a wanted paper (the lower group), each with the
+    answers it is over; a side with no draws is left out."""
+
+    topic: str
+    precision: float | None = None
+    precision_n: int | None = None
+    dropped: float | None = None
+    dropped_n: int | None = None
+
+
+class MattersNoTopic(BaseModel):
+    """A paper the owner appraised as mattering that no Focus topic grades relevant or above."""
+
+    paper_id: str
+    note: str | None = None
+    at: datetime
+    title: str
+
+
+class CollectedReaction(BaseModel):
+    """A thumb that moves nothing by itself, collected for the owner."""
+
+    paper_id: str
+    topic: str | None = None
+    value: ReactionValue
+    reason: ReactionReason | None = None
+    reacted_at: datetime
+    title: str
+
+
+class TopicReactions(BaseModel):
+    """Thumbs on a followed topic with one reason (none: null) over the trailing 30 days."""
+
+    topic: str
+    reason: ReactionReason | None = None
+    n: int
+
+
+class Quality(BaseModel):
+    """Quality: what last night left, the month's spend per provider and Deep's, recall from
+    the latest replay, Calibrate's precision, the papers that matter to no topic, and the
+    thumbs."""
+
+    night: LastNight
+    cost: list[Spend]
+    deep: DeepUsage
+    recall: ReplayRecall | None = None
+    calibration: list[TopicPrecision]
+    matters_no_topic: list[MattersNoTopic]
+    collected: list[CollectedReaction]
+    reactions: list[TopicReactions]
+
+
+class CallCount(BaseModel):
+    calls: int
+    cost: float
+
+
+class RunCounts(BaseModel):
+    """What a run counted, free-form by job: the nightly's steps and digests, and its calls by
+    role. A count the run did not make is left out; any other is kept."""
+
+    model_config = ConfigDict(extra="allow")
+
+    classified: int | None = None
+    classification_failed: int | None = None
+    analysed: int | None = None
+    analysis_failed: int | None = None
+    graded: int | None = None
+    grading_failed: int | None = None
+    digests_written: int | None = None
+    digests_empty: int | None = None
+    digests_failed: int | None = None
+    calls: dict[str, CallCount] | None = None
+
+
+class NightRun(BaseModel):
+    """A night for Runs and cost (`store.quality.runs`): `cost` is the day's spend outside
+    jobs, its own run's and `after_cost`, other runs' until the next night."""
+
+    id: int
+    kind: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    cost: Decimal
+    after_cost: Decimal
+    error: str | None = None
+    counts: RunCounts
+    fetched: int
+    inserted: int
+    updated: int
+
+
+class SessionRow(BaseModel):
+    """A Calibrate session: how many papers it drew, how many are answered, and how many answers
+    differ from the pipeline's Fit."""
+
+    id: int
+    seed: int
+    drawn_at: datetime
+    papers: int
+    answered: int
+    differ: int
+
+
+class Appraisal(BaseModel):
+    value: Literal["matters", "fine", "not_for_me"] | None = None
+    note: str | None = None
+
+
+class SessionItem(BaseModel):
+    """A paper of a session: why it was drawn or taken in, the pipeline's Fit on its topic
+    (`verdict`, null without one), the answer recorded (null until given), every current label
+    (`fit`) and the newest appraisal."""
+
+    position: int
+    paper_id: str
+    topic: str
+    why: Literal["above", "below", "split", "miss", "reaction"]
+    answer: LabelValue | None = None
+    answered_at: datetime | None = None
+    title: str
+    abstract: str
+    authors: list[str] | None = None  # as stored: a JSON null stays null
+    published: datetime | None = None
+    verdict: Fit | None = None
+    fit: dict[str, LabelValue]
+    appraisal: Appraisal | None = None
+
+
+class Session(BaseModel):
+    id: int
+    seed: int
+    drawn_at: datetime
+    items: list[SessionItem]
+
+
+class Drawn(BaseModel):
+    id: int
+
+
+class Added(BaseModel):
+    added: int  # papers taken in

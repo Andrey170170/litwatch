@@ -57,7 +57,7 @@
             "schema": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/Rarity"
+                "$ref": "#/components/schemas/RarityLevel"
               },
               "title": "Rarity"
             }
@@ -646,7 +646,7 @@
             "schema": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/Rarity"
+                "$ref": "#/components/schemas/RarityLevel"
               },
               "title": "Rarity"
             }
@@ -1660,9 +1660,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Quality Page Api Settings Quality Get"
+                  "$ref": "#/components/schemas/Quality"
                 }
               }
             }
@@ -2151,8 +2149,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/components/schemas/SessionRow"
                   },
                   "type": "array",
                   "title": "Response Sessions Api Settings Calibrate Get"
@@ -2188,11 +2185,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "integer"
-                  },
-                  "type": "object",
-                  "title": "Response Draw Api Settings Calibrate Post"
+                  "$ref": "#/components/schemas/Drawn"
                 }
               }
             }
@@ -2237,9 +2230,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Session Api Settings Calibrate  Session Id  Get"
+                  "$ref": "#/components/schemas/Session"
                 }
               }
             }
@@ -2288,11 +2279,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "integer"
-                  },
-                  "title": "Response More Api Settings Calibrate  Session Id  More Post"
+                  "$ref": "#/components/schemas/Added"
                 }
               }
             }
@@ -2390,8 +2377,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/components/schemas/NightRun"
                   },
                   "type": "array",
                   "title": "Response Runs Api Settings Runs Get"
@@ -3283,6 +3269,19 @@
         "title": "Acknowledgement",
         "description": "Items of Needs you, each as shown: stopped steps, full-text passes, failed digests (by\nid) and Deep cards with process notes. The owner's Acknowledge names them; the answer names\nthose it marked."
       },
+      "Added": {
+        "properties": {
+          "added": {
+            "type": "integer",
+            "title": "Added"
+          }
+        },
+        "type": "object",
+        "required": [
+          "added"
+        ],
+        "title": "Added"
+      },
       "AmongRow": {
         "properties": {
           "id": {
@@ -3382,6 +3381,39 @@
         ],
         "title": "Answer",
         "description": "One paper's answers. Fit for the topic it was drawn or taken for (central, related,\nadjacent, none or unsure) is required on the first answer; an edit after it may leave it\nout, and the recorded answer stands. A Fit sent is a label; one left out writes none, so\nediting the appraisal alone recreates no label the owner has since taken back."
+      },
+      "Appraisal": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "matters",
+                  "fine",
+                  "not_for_me"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "title": "Appraisal"
       },
       "Awaiting": {
         "properties": {
@@ -3520,6 +3552,24 @@
         ],
         "title": "Brief",
         "description": "The paper's Brief: its current revision's, or the newest from an older revision\n(`revision` says which) until the current one is written. `overstatement`, when the full\ntext does not support the abstract, opens it."
+      },
+      "CallCount": {
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "cost": {
+            "type": "number",
+            "title": "Cost"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calls",
+          "cost"
+        ],
+        "title": "CallCount"
       },
       "CardPass": {
         "properties": {
@@ -3781,6 +3831,56 @@
         "title": "Classification",
         "description": "The newest classification and the current memberships, classes of the current tree only\n(a retired class leads nowhere)."
       },
+      "CollectedReaction": {
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "value": {
+            "$ref": "#/components/schemas/ReactionValue"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reacted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reacted At"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paper_id",
+          "value",
+          "reacted_at",
+          "title"
+        ],
+        "title": "CollectedReaction",
+        "description": "A thumb that moves nothing by itself, collected for the owner."
+      },
       "Contribution": {
         "type": "string",
         "enum": [
@@ -4041,6 +4141,75 @@
         ],
         "title": "DeepCard",
         "description": "A Deep card: the reading card the deep service wrote, as it wrote it, and what it was\nwritten from (the paper revision and arXiv version, null where unknown, and the text's\nsource). `among` is its \"among the collection\" section as rows."
+      },
+      "DeepNotes": {
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "written_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Written At"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessNote"
+            },
+            "type": "array",
+            "title": "Notes"
+          },
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paper_id",
+          "title",
+          "written_at",
+          "notes"
+        ],
+        "title": "DeepNotes",
+        "description": "A Deep card with process notes (`store.integrations.deep_notes`); `written_at` names the\ncard, for Acknowledge."
+      },
+      "DeepUsage": {
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "list_cost": {
+            "type": "number",
+            "title": "List Cost"
+          },
+          "unknown": {
+            "type": "integer",
+            "title": "Unknown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempts",
+          "list_cost",
+          "unknown"
+        ],
+        "title": "DeepUsage",
+        "description": "Deep's month to date at list prices: the attempts ended, their cost where known, and how\nmany have their usage unknown (the cost is a lower bound while any is)."
       },
       "Depth": {
         "type": "string",
@@ -4468,6 +4637,19 @@
         "type": "object",
         "title": "DrawIn"
       },
+      "Drawn": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "Drawn"
+      },
       "Event": {
         "properties": {
           "id": {
@@ -4554,6 +4736,64 @@
         ],
         "title": "Facets",
         "description": "Facts about the paper, never combined into anything."
+      },
+      "FailedDigest": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "period": {
+            "$ref": "#/components/schemas/DigestPeriod"
+          },
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "written_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Written At"
+          },
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "period",
+          "day",
+          "written_at"
+        ],
+        "title": "FailedDigest",
+        "description": "A digest whose writer call failed (`store.digests.failed`); a weekly one's `day` is its\nMonday."
       },
       "Failing": {
         "properties": {
@@ -5584,6 +5824,129 @@
         "title": "LabelValue",
         "description": "A label's answer: a Fit (`core.grading.Fit`), or unsure."
       },
+      "LastNight": {
+        "properties": {
+          "run": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "splits": {
+            "items": {
+              "$ref": "#/components/schemas/Split"
+            },
+            "type": "array",
+            "title": "Splits"
+          },
+          "awaiting_classification": {
+            "items": {
+              "$ref": "#/components/schemas/Stuck"
+            },
+            "type": "array",
+            "title": "Awaiting Classification"
+          },
+          "analysis_failed": {
+            "items": {
+              "$ref": "#/components/schemas/Stuck"
+            },
+            "type": "array",
+            "title": "Analysis Failed"
+          },
+          "ungraded": {
+            "items": {
+              "$ref": "#/components/schemas/Stuck"
+            },
+            "type": "array",
+            "title": "Ungraded"
+          },
+          "fulltext": {
+            "items": {
+              "$ref": "#/components/schemas/TextPassStuck"
+            },
+            "type": "array",
+            "title": "Fulltext"
+          },
+          "digests": {
+            "items": {
+              "$ref": "#/components/schemas/FailedDigest"
+            },
+            "type": "array",
+            "title": "Digests"
+          },
+          "deep_notes": {
+            "items": {
+              "$ref": "#/components/schemas/DeepNotes"
+            },
+            "type": "array",
+            "title": "Deep Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "splits",
+          "awaiting_classification",
+          "analysis_failed",
+          "ungraded",
+          "fulltext",
+          "digests",
+          "deep_notes"
+        ],
+        "title": "LastNight",
+        "description": "What last night left for the owner: its run and error, the splits since it, the stopped\nsteps and passes, the failed digests, and the Deep notes (which wait on nothing)."
+      },
+      "MattersNoTopic": {
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paper_id",
+          "at",
+          "title"
+        ],
+        "title": "MattersNoTopic",
+        "description": "A paper the owner appraised as mattering that no Focus topic grades relevant or above."
+      },
       "Miss": {
         "properties": {
           "id": {
@@ -5769,6 +6132,85 @@
           "next"
         ],
         "title": "NextFire"
+      },
+      "NightRun": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "cost": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cost"
+          },
+          "after_cost": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "After Cost"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/RunCounts"
+          },
+          "fetched": {
+            "type": "integer",
+            "title": "Fetched"
+          },
+          "inserted": {
+            "type": "integer",
+            "title": "Inserted"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "started_at",
+          "cost",
+          "after_cost",
+          "counts",
+          "fetched",
+          "inserted",
+          "updated"
+        ],
+        "title": "NightRun",
+        "description": "A night for Runs and cost (`store.quality.runs`): `cost` is the day's spend outside\njobs, its own run's and `after_cost`, other runs' until the next night."
       },
       "OpenState": {
         "properties": {
@@ -6307,7 +6749,7 @@
           },
           "rarity": {
             "items": {
-              "$ref": "#/components/schemas/Rarity"
+              "$ref": "#/components/schemas/RarityLevel"
             },
             "type": "array",
             "title": "Rarity"
@@ -6504,6 +6946,16 @@
               }
             ]
           },
+          "word_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WordSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "label": {
             "anyOf": [
               {
@@ -6545,7 +6997,7 @@
           "topic"
         ],
         "title": "PaperTopic",
-        "description": "A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its\nown effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),\nits current verdict, the owner's word that stands (from the label, a thumb or a miss), the\nlabel and thumb themselves, and its open state."
+        "description": "A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its\nown effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),\nits current verdict, the owner's word that stands and what set it (`word_from`: the label,\na thumb or a miss), the label and thumb themselves, and its open state."
       },
       "Papers": {
         "properties": {
@@ -6663,6 +7115,42 @@
         ],
         "title": "ProcessJob",
         "description": "A paper's Process job (DESIGN.md, the paper page): its button reads \"Processing\" while\nthe job is queued or running. `again`: failed, and Process would put it back in the queue,\nsince no step of its paper waits on the owner (then the owner's action there settles it)."
+      },
+      "ProcessNote": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "kind",
+          "source",
+          "note"
+        ],
+        "title": "ProcessNote",
+        "description": "A process note on a Deep card or read, as the deep service wrote it: its `kind` (access,\ntool, budget, input, or a read's `review`), its `source` (`model` or `service`), the note and\na page. Any other key the service wrote is kept."
       },
       "Publication": {
         "properties": {
@@ -6827,6 +7315,73 @@
         "title": "PublicationIn",
         "description": "The owner's correction: a DBLP key, a DOI, or that there is no published version."
       },
+      "Quality": {
+        "properties": {
+          "night": {
+            "$ref": "#/components/schemas/LastNight"
+          },
+          "cost": {
+            "items": {
+              "$ref": "#/components/schemas/Spend"
+            },
+            "type": "array",
+            "title": "Cost"
+          },
+          "deep": {
+            "$ref": "#/components/schemas/DeepUsage"
+          },
+          "recall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplayRecall"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "calibration": {
+            "items": {
+              "$ref": "#/components/schemas/TopicPrecision"
+            },
+            "type": "array",
+            "title": "Calibration"
+          },
+          "matters_no_topic": {
+            "items": {
+              "$ref": "#/components/schemas/MattersNoTopic"
+            },
+            "type": "array",
+            "title": "Matters No Topic"
+          },
+          "collected": {
+            "items": {
+              "$ref": "#/components/schemas/CollectedReaction"
+            },
+            "type": "array",
+            "title": "Collected"
+          },
+          "reactions": {
+            "items": {
+              "$ref": "#/components/schemas/TopicReactions"
+            },
+            "type": "array",
+            "title": "Reactions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "night",
+          "cost",
+          "deep",
+          "calibration",
+          "matters_no_topic",
+          "collected",
+          "reactions"
+        ],
+        "title": "Quality",
+        "description": "Quality: what last night left, the month's spend per provider and Deep's, recall from\nthe latest replay, Calibrate's precision, the papers that matter to no topic, and the\nthumbs."
+      },
       "Rarity": {
         "type": "string",
         "enum": [
@@ -6875,6 +7430,17 @@
         "type": "object",
         "title": "RarityCounts",
         "description": "Papers per rarity level; `unrated` have none yet (not classified)."
+      },
+      "RarityLevel": {
+        "type": "string",
+        "enum": [
+          "legendary",
+          "epic",
+          "rare",
+          "uncommon",
+          "common",
+          "unrated"
+        ]
       },
       "ReactionIn": {
         "properties": {
@@ -6951,6 +7517,55 @@
           "down"
         ],
         "title": "ReactionValue"
+      },
+      "Recall": {
+        "properties": {
+          "cohort": {
+            "type": "string",
+            "title": "Cohort"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "positives": {
+            "type": "integer",
+            "title": "Positives"
+          },
+          "classification": {
+            "$ref": "#/components/schemas/Share"
+          },
+          "membership": {
+            "$ref": "#/components/schemas/Share"
+          },
+          "grading": {
+            "$ref": "#/components/schemas/Share"
+          },
+          "end_to_end": {
+            "$ref": "#/components/schemas/Share"
+          },
+          "grading_failed": {
+            "type": "integer",
+            "title": "Grading Failed"
+          },
+          "negatives": {
+            "$ref": "#/components/schemas/Share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cohort",
+          "topic",
+          "positives",
+          "classification",
+          "membership",
+          "grading",
+          "end_to_end",
+          "grading_failed",
+          "negatives"
+        ],
+        "title": "Recall",
+        "description": "The four numbers for one cohort and Focus topic, each over the positives the stages it\nneeds have concluded on; and how many of the cohort's negatives came through end to end."
       },
       "ReplayIn": {
         "properties": {
@@ -7042,6 +7657,57 @@
         ],
         "title": "ReplayOffer",
         "description": "Overview's Run replay (DESIGN.md, Overview): what Run would do. `running`: a replay\nqueued or running already, which Run only answers with. Else `continues`, a replay its\nceiling stopped that Run goes on with, having spent `spent`; else a new replay of every\ncohort's labels. `labels` counts its labels by cohort, `papers` and `pairs` what is left to\nclassify and to grade (paper and topic), `left_out` the labelled papers the database lacks;\n`estimate` what is left would cost, `unpriced` the models (`role: model`) with no price\nbound, whose calls a replay does not send, and `ceiling` the one offered, in USD."
+      },
+      "ReplayRecall": {
+        "properties": {
+          "eval_run": {
+            "type": "integer",
+            "title": "Eval Run"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "recall": {
+            "items": {
+              "$ref": "#/components/schemas/Recall"
+            },
+            "type": "array",
+            "title": "Recall"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_run",
+          "started_at",
+          "recall"
+        ],
+        "title": "ReplayRecall",
+        "description": "Recall per cohort and Focus topic from the latest replay, and the run it comes from."
       },
       "RerunIn": {
         "properties": {
@@ -7322,6 +7988,127 @@
           "failure"
         ]
       },
+      "RunCounts": {
+        "properties": {
+          "classified": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classified"
+          },
+          "classification_failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification Failed"
+          },
+          "analysed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysed"
+          },
+          "analysis_failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Failed"
+          },
+          "graded": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graded"
+          },
+          "grading_failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grading Failed"
+          },
+          "digests_written": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digests Written"
+          },
+          "digests_empty": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digests Empty"
+          },
+          "digests_failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digests Failed"
+          },
+          "calls": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/CallCount"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calls"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "RunCounts",
+        "description": "What a run counted, free-form by job: the nightly's steps and digests, and its calls by\nrole. A count the run did not make is left out; any other is kept."
+      },
       "RunStatus": {
         "properties": {
           "state": {
@@ -7535,6 +8322,38 @@
         "title": "SearchStats",
         "description": "How a search provider has answered since the service started."
       },
+      "Session": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed"
+          },
+          "drawn_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Drawn At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "seed",
+          "drawn_at",
+          "items"
+        ],
+        "title": "Session"
+      },
       "SessionIn": {
         "properties": {
           "token": {
@@ -7547,6 +8366,168 @@
           "token"
         ],
         "title": "SessionIn"
+      },
+      "SessionItem": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "why": {
+            "type": "string",
+            "enum": [
+              "above",
+              "below",
+              "split",
+              "miss",
+              "reaction"
+            ],
+            "title": "Why"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LabelValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "answered_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered At"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "abstract": {
+            "type": "string",
+            "title": "Abstract"
+          },
+          "authors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authors"
+          },
+          "published": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fit": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LabelValue"
+            },
+            "type": "object",
+            "title": "Fit"
+          },
+          "appraisal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Appraisal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "paper_id",
+          "topic",
+          "why",
+          "title",
+          "abstract",
+          "fit"
+        ],
+        "title": "SessionItem",
+        "description": "A paper of a session: why it was drawn or taken in, the pipeline's Fit on its topic\n(`verdict`, null without one), the answer recorded (null until given), every current label\n(`fit`) and the newest appraisal."
+      },
+      "SessionRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed"
+          },
+          "drawn_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Drawn At"
+          },
+          "papers": {
+            "type": "integer",
+            "title": "Papers"
+          },
+          "answered": {
+            "type": "integer",
+            "title": "Answered"
+          },
+          "differ": {
+            "type": "integer",
+            "title": "Differ"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "seed",
+          "drawn_at",
+          "papers",
+          "answered",
+          "differ"
+        ],
+        "title": "SessionRow",
+        "description": "A Calibrate session: how many papers it drew, how many are answered, and how many answers\ndiffer from the pipeline's Fit."
       },
       "SettingsHints": {
         "properties": {
@@ -7661,6 +8642,24 @@
         "title": "SetupFailing",
         "description": "The integration's setup is failing: no event is handed to it until it succeeds."
       },
+      "Share": {
+        "properties": {
+          "hits": {
+            "type": "integer",
+            "title": "Hits"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hits",
+          "n"
+        ],
+        "title": "Share"
+      },
       "Sort": {
         "type": "string",
         "enum": [
@@ -7670,6 +8669,139 @@
           "title",
           "best"
         ]
+      },
+      "Spend": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "spent": {
+            "type": "number",
+            "title": "Spent"
+          },
+          "projected": {
+            "type": "number",
+            "title": "Projected"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "over": {
+            "type": "boolean",
+            "title": "Over",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "spent",
+          "projected"
+        ],
+        "title": "Spend",
+        "description": "One provider's month: spent so far, projected to the end, and its budget (None: none)."
+      },
+      "Split": {
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
+          },
+          "fit": {
+            "$ref": "#/components/schemas/Fit"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "split": {
+            "type": "boolean",
+            "title": "Split"
+          },
+          "escalated": {
+            "type": "boolean",
+            "title": "Escalated"
+          },
+          "one_lab": {
+            "type": "boolean",
+            "title": "One Lab"
+          },
+          "opinions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Opinion"
+            },
+            "type": "object",
+            "title": "Opinions"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded At"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SplitLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "paper_id",
+          "topic",
+          "depth",
+          "fit",
+          "reason",
+          "split",
+          "escalated",
+          "one_lab",
+          "opinions",
+          "recorded_at",
+          "title",
+          "revision"
+        ],
+        "title": "Split",
+        "description": "A current verdict from since last night asking for the owner's word\n(`store.quality.splits_since`): a Focus split, an Area escalation, or a central or related\ngrade from one lab, with every grader's answer and the owner's label. `revision` is the\ntext it is on, the paper's current one."
+      },
+      "SplitLabel": {
+        "properties": {
+          "value": {
+            "$ref": "#/components/schemas/LabelValue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "SplitLabel"
       },
       "Status": {
         "type": "string",
@@ -7762,6 +8894,87 @@
         ],
         "title": "StripDigest",
         "description": "One square of a topic's digest strip: a digest, coloured by its best rarity (none for\nnothing new), red when it failed."
+      },
+      "Stuck": {
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "failed_runs": {
+            "type": "integer",
+            "title": "Failed Runs"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "refused": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Refused"
+          },
+          "stopped_by_refusal": {
+            "type": "boolean",
+            "title": "Stopped By Refusal",
+            "default": false
+          },
+          "failed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Failed At"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paper_id",
+          "revision",
+          "title",
+          "failed_runs",
+          "failed_at"
+        ],
+        "title": "Stuck",
+        "description": "A step that stopped on a paper after failing runs in a row, or that every model refused\n(`store.failures.stuck`): `refused` names the roles whose whole list refused,\n`stopped_by_refusal` whether that stopped it; `topic` is a grading's. `acknowledged_at`:\nwhen the owner acknowledged it."
       },
       "Summary": {
         "properties": {
@@ -7946,6 +9159,99 @@
         ],
         "title": "TextPass",
         "description": "The full-text pass queued last for the paper's current text: a Brief (Focus) or a Weight\nre-check with a Brief (Area pick candidate), and where it is. A paper without one shows its\nabstract in the Brief's place."
+      },
+      "TextPassStuck": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "paper_id": {
+            "type": "string",
+            "title": "Paper Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "brief",
+              "weight",
+              "deep"
+            ],
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "failed",
+              "awaiting_text"
+            ],
+            "title": "State"
+          },
+          "failed_runs": {
+            "type": "integer",
+            "title": "Failed Runs"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "refused": {
+            "type": "boolean",
+            "title": "Refused",
+            "default": false
+          },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Since"
+          },
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "paper_id",
+          "revision",
+          "title",
+          "kind",
+          "state",
+          "failed_runs",
+          "queued_at",
+          "since"
+        ],
+        "title": "TextPassStuck",
+        "description": "A full-text pass waiting on the owner (`store.fulltext.stuck`): failed runs in a row or\nrefused by every model (`refused`), or awaiting its text over a week. `since` is since when\nit waits, which names this failure for Acknowledge."
       },
       "TodayRun": {
         "properties": {
@@ -8253,6 +9559,93 @@
         ],
         "title": "TopicPage",
         "description": "A page of a topic's papers, its total, and the papers per rarity and per grade under\nevery filter but the levels."
+      },
+      "TopicPrecision": {
+        "properties": {
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "precision_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision N"
+          },
+          "dropped": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped"
+          },
+          "dropped_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "topic"
+        ],
+        "title": "TopicPrecision",
+        "description": "A Focus topic's Calibrate draws over the trailing 90 days: precision at relevant (the\nupper group) and how often grading dropped a wanted paper (the lower group), each with the\nanswers it is over; a side with no draws is left out."
+      },
+      "TopicReactions": {
+        "properties": {
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReactionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "topic",
+          "n"
+        ],
+        "title": "TopicReactions",
+        "description": "Thumbs on a followed topic with one reason (none: null) over the trailing 30 days."
       },
       "TopicRow": {
         "properties": {
@@ -8572,6 +9965,16 @@
         ],
         "title": "Withdrawn",
         "description": "arXiv withdrew the paper: its newest version is a withdrawal, submitted `at`; `reason` is\nthe comments arXiv gives with it, when known. litwatch no longer processes it."
+      },
+      "WordSource": {
+        "type": "string",
+        "enum": [
+          "label",
+          "reaction",
+          "miss"
+        ],
+        "title": "WordSource",
+        "description": "What set the owner's word on a topic: a label, a word-carrying thumb, or a reported miss\n(a label the report wrote last, `set_by` miss)."
       }
     }
   }

@@ -9,7 +9,7 @@ import { useGradeNow, useLabel, useReact, useUnlabel, useUnreact } from "@/api/m
 import { Badge } from "@/components/Badge";
 import { FITS, Seg } from "@/components/Seg";
 import { gradeLine, rc, type Weight } from "@/lib/rarity";
-import { REASONS, type ReactionValue, reasonLabel, speaks } from "@/lib/reactions";
+import { REASONS, type ReactionValue, reasonLabel } from "@/lib/reactions";
 
 export type PaperTopic = Schemas["PaperTopic"];
 /** The Fit control: five equal segments; the owner's label filled, the verdict's underlined while unlabelled.
@@ -49,15 +49,14 @@ export function Reasons({ paperId, topic, value, current, onDone, big }: { paper
 }
 
 /** "Fit central · Weight landmark", "your label: related", or the open state's line. */
-/** Whose Fit the row shows: the owner's word and where it came from, else the pipeline's (feedback.md, "The owner's
- * word"). The API names the word but not which of a label, a reaction or a miss set it, so a label that matches the
- * word is named first. */
+/** What set the owner's word, as the row names it. */
+const WORD_FROM: Record<NonNullable<PaperTopic["word_from"]>, string> = { label: "your label", reaction: "your mark", miss: "reported as missed" };
+
+/** Whose Fit the row shows: the owner's word and what set it, as the API says, else the pipeline's (feedback.md,
+ * "The owner's word"). */
 export function whoseFit(t: PaperTopic): string | null {
   if (!t.word) return t.fit ? `pipeline: ${t.fit}` : null;
-  if (t.label && t.label.value !== "unsure" && t.label.value === t.word) return `your label: ${t.word}`;
-  if (t.reaction && speaks(t.topic.depth, t.reaction.reason)) return `your mark: ${t.word}`;
-  if (t.missed) return `reported as missed: ${t.word}`;
-  return `your word: ${t.word}`;
+  return `${t.word_from ? WORD_FROM[t.word_from] : "your word"}: ${t.word}`;
 }
 
 /** The topic states that ask for the owner's word, by the name they show under: a Focus split, an Area escalation,

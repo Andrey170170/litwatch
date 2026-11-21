@@ -1232,6 +1232,11 @@ export interface components {
              */
             cards: components["schemas"]["CardSeen"][];
         };
+        /** Added */
+        Added: {
+            /** Added */
+            added: number;
+        };
         /**
          * AmongRow
          * @description A paper a Deep card places this one among: one of the collection's, by its arXiv id, with
@@ -1268,6 +1273,13 @@ export interface components {
             fit: {
                 [key: string]: components["schemas"]["LabelValue"];
             };
+            /** Value */
+            value?: ("matters" | "fine" | "not_for_me") | null;
+            /** Note */
+            note?: string | null;
+        };
+        /** Appraisal */
+        Appraisal: {
             /** Value */
             value?: ("matters" | "fine" | "not_for_me") | null;
             /** Note */
@@ -1333,6 +1345,13 @@ export interface components {
              * Format: date-time
              */
             written_at: string;
+        };
+        /** CallCount */
+        CallCount: {
+            /** Calls */
+            calls: number;
+            /** Cost */
+            cost: number;
         };
         /**
          * CardPass
@@ -1456,6 +1475,25 @@ export interface components {
             classes: components["schemas"]["PaperClass"][];
         };
         /**
+         * CollectedReaction
+         * @description A thumb that moves nothing by itself, collected for the owner.
+         */
+        CollectedReaction: {
+            /** Paper Id */
+            paper_id: string;
+            /** Topic */
+            topic?: string | null;
+            value: components["schemas"]["ReactionValue"];
+            reason?: components["schemas"]["ReactionReason"] | null;
+            /**
+             * Reacted At
+             * Format: date-time
+             */
+            reacted_at: string;
+            /** Title */
+            title: string;
+        };
+        /**
          * Contribution
          * @description What kind of contribution a paper makes. Facts, not scores.
          * @enum {string}
@@ -1555,6 +1593,39 @@ export interface components {
             source?: ("latex" | "pdf") | null;
             /** Among */
             among?: components["schemas"]["AmongRow"][];
+        };
+        /**
+         * DeepNotes
+         * @description A Deep card with process notes (`store.integrations.deep_notes`); `written_at` names the
+         *     card, for Acknowledge.
+         */
+        DeepNotes: {
+            /** Paper Id */
+            paper_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Written At
+             * Format: date-time
+             */
+            written_at: string;
+            /** Notes */
+            notes: components["schemas"]["ProcessNote"][];
+            /** Acknowledged At */
+            acknowledged_at?: string | null;
+        };
+        /**
+         * DeepUsage
+         * @description Deep's month to date at list prices: the attempts ended, their cost where known, and how
+         *     many have their usage unknown (the cost is a lower bound while any is).
+         */
+        DeepUsage: {
+            /** Attempts */
+            attempts: number;
+            /** List Cost */
+            list_cost: number;
+            /** Unknown */
+            unknown: number;
         };
         /**
          * Depth
@@ -1733,6 +1804,11 @@ export interface components {
             /** Seed */
             seed?: number | null;
         };
+        /** Drawn */
+        Drawn: {
+            /** Id */
+            id: number;
+        };
         /**
          * Event
          * @description A fact written to the outbox in the same transaction as the data it describes.
@@ -1763,6 +1839,32 @@ export interface components {
             releases_code: boolean;
             /** Releases Weights */
             releases_weights: boolean;
+        };
+        /**
+         * FailedDigest
+         * @description A digest whose writer call failed (`store.digests.failed`); a weekly one's `day` is its
+         *     Monday.
+         */
+        FailedDigest: {
+            /** Id */
+            id: number;
+            /** Topic */
+            topic: string;
+            period: components["schemas"]["DigestPeriod"];
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Error */
+            error?: string | null;
+            /**
+             * Written At
+             * Format: date-time
+             */
+            written_at: string;
+            /** Acknowledged At */
+            acknowledged_at?: string | null;
         };
         /**
          * Failing
@@ -2166,6 +2268,48 @@ export interface components {
          * @enum {string}
          */
         LabelValue: "central" | "related" | "adjacent" | "none" | "unsure";
+        /**
+         * LastNight
+         * @description What last night left for the owner: its run and error, the splits since it, the stopped
+         *     steps and passes, the failed digests, and the Deep notes (which wait on nothing).
+         */
+        LastNight: {
+            /** Run */
+            run?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Splits */
+            splits: components["schemas"]["Split"][];
+            /** Awaiting Classification */
+            awaiting_classification: components["schemas"]["Stuck"][];
+            /** Analysis Failed */
+            analysis_failed: components["schemas"]["Stuck"][];
+            /** Ungraded */
+            ungraded: components["schemas"]["Stuck"][];
+            /** Fulltext */
+            fulltext: components["schemas"]["TextPassStuck"][];
+            /** Digests */
+            digests: components["schemas"]["FailedDigest"][];
+            /** Deep Notes */
+            deep_notes: components["schemas"]["DeepNotes"][];
+        };
+        /**
+         * MattersNoTopic
+         * @description A paper the owner appraised as mattering that no Focus topic grades relevant or above.
+         */
+        MattersNoTopic: {
+            /** Paper Id */
+            paper_id: string;
+            /** Note */
+            note?: string | null;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Title */
+            title: string;
+        };
         /** Miss */
         Miss: {
             /** Id */
@@ -2244,6 +2388,37 @@ export interface components {
              * Format: date-time
              */
             next: string;
+        };
+        /**
+         * NightRun
+         * @description A night for Runs and cost (`store.quality.runs`): `cost` is the day's spend outside
+         *     jobs, its own run's and `after_cost`, other runs' until the next night.
+         */
+        NightRun: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Cost */
+            cost: string;
+            /** After Cost */
+            after_cost: string;
+            /** Error */
+            error?: string | null;
+            counts: components["schemas"]["RunCounts"];
+            /** Fetched */
+            fetched: number;
+            /** Inserted */
+            inserted: number;
+            /** Updated */
+            updated: number;
         };
         /**
          * OpenState
@@ -2428,7 +2603,7 @@ export interface components {
             /** Q */
             q?: string | null;
             /** Rarity */
-            rarity?: components["schemas"]["Rarity"][];
+            rarity?: components["schemas"]["RarityLevel"][];
             /** Grade */
             grade?: components["schemas"]["GradeLevel"][];
             /** Saved */
@@ -2460,8 +2635,8 @@ export interface components {
          * PaperTopic
          * @description A followed topic the paper is in, graded for, or has the owner's word or a thumb on: its
          *     own effective Fit, how its page shows the paper (grade, rarity, `via`: as the topic page),
-         *     its current verdict, the owner's word that stands (from the label, a thumb or a miss), the
-         *     label and thumb themselves, and its open state.
+         *     its current verdict, the owner's word that stands and what set it (`word_from`: the label,
+         *     a thumb or a miss), the label and thumb themselves, and its open state.
          */
         PaperTopic: {
             topic: components["schemas"]["Badge"];
@@ -2472,6 +2647,7 @@ export interface components {
             via?: string | null;
             verdict?: components["schemas"]["CurrentVerdict"] | null;
             word?: components["schemas"]["Fit"] | null;
+            word_from?: components["schemas"]["WordSource"] | null;
             label?: components["schemas"]["LabelState"] | null;
             reaction?: components["schemas"]["ReactionState"] | null;
             /**
@@ -2541,6 +2717,24 @@ export interface components {
             again: boolean;
         };
         /**
+         * ProcessNote
+         * @description A process note on a Deep card or read, as the deep service wrote it: its `kind` (access,
+         *     tool, budget, input, or a read's `review`), its `source` (`model` or `service`), the note and
+         *     a page. Any other key the service wrote is kept.
+         */
+        ProcessNote: {
+            /** Kind */
+            kind: string;
+            /** Source */
+            source: string;
+            /** Note */
+            note: string;
+            /** Url */
+            url?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * Publication
          * @description The published record of a paper: what a BibTeX entry needs, as DBLP has it.
          */
@@ -2589,6 +2783,27 @@ export interface components {
             none: boolean;
         };
         /**
+         * Quality
+         * @description Quality: what last night left, the month's spend per provider and Deep's, recall from
+         *     the latest replay, Calibrate's precision, the papers that matter to no topic, and the
+         *     thumbs.
+         */
+        Quality: {
+            night: components["schemas"]["LastNight"];
+            /** Cost */
+            cost: components["schemas"]["Spend"][];
+            deep: components["schemas"]["DeepUsage"];
+            recall?: components["schemas"]["ReplayRecall"] | null;
+            /** Calibration */
+            calibration: components["schemas"]["TopicPrecision"][];
+            /** Matters No Topic */
+            matters_no_topic: components["schemas"]["MattersNoTopic"][];
+            /** Collected */
+            collected: components["schemas"]["CollectedReaction"][];
+            /** Reactions */
+            reactions: components["schemas"]["TopicReactions"][];
+        };
+        /**
          * Rarity
          * @description What a paper's colour shows, low to high.
          * @enum {string}
@@ -2630,6 +2845,8 @@ export interface components {
              */
             unrated: number;
         };
+        /** @enum {string} */
+        RarityLevel: "legendary" | "epic" | "rare" | "uncommon" | "common" | "unrated";
         /** ReactionIn */
         ReactionIn: {
             /** Topic */
@@ -2654,6 +2871,26 @@ export interface components {
          * @enum {string}
          */
         ReactionValue: "up" | "down";
+        /**
+         * Recall
+         * @description The four numbers for one cohort and Focus topic, each over the positives the stages it
+         *     needs have concluded on; and how many of the cohort's negatives came through end to end.
+         */
+        Recall: {
+            /** Cohort */
+            cohort: string;
+            /** Topic */
+            topic: string;
+            /** Positives */
+            positives: number;
+            classification: components["schemas"]["Share"];
+            membership: components["schemas"]["Share"];
+            grading: components["schemas"]["Share"];
+            end_to_end: components["schemas"]["Share"];
+            /** Grading Failed */
+            grading_failed: number;
+            negatives: components["schemas"]["Share"];
+        };
         /**
          * ReplayIn
          * @description Run replay under a ceiling, in USD; a stopped replay goes on only above what it spent.
@@ -2715,6 +2952,25 @@ export interface components {
             unpriced: string[];
             /** Ceiling */
             ceiling: number;
+        };
+        /**
+         * ReplayRecall
+         * @description Recall per cohort and Focus topic from the latest replay, and the run it comes from.
+         */
+        ReplayRecall: {
+            /** Eval Run */
+            eval_run: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Cost */
+            cost?: number | null;
+            /** Recall */
+            recall: components["schemas"]["Recall"][];
         };
         /**
          * RerunIn
@@ -2812,6 +3068,37 @@ export interface components {
         };
         /** @enum {string} */
         RowState: "word" | "failure";
+        /**
+         * RunCounts
+         * @description What a run counted, free-form by job: the nightly's steps and digests, and its calls by
+         *     role. A count the run did not make is left out; any other is kept.
+         */
+        RunCounts: {
+            /** Classified */
+            classified?: number | null;
+            /** Classification Failed */
+            classification_failed?: number | null;
+            /** Analysed */
+            analysed?: number | null;
+            /** Analysis Failed */
+            analysis_failed?: number | null;
+            /** Graded */
+            graded?: number | null;
+            /** Grading Failed */
+            grading_failed?: number | null;
+            /** Digests Written */
+            digests_written?: number | null;
+            /** Digests Empty */
+            digests_empty?: number | null;
+            /** Digests Failed */
+            digests_failed?: number | null;
+            /** Calls */
+            calls?: {
+                [key: string]: components["schemas"]["CallCount"];
+            } | null;
+        } & {
+            [key: string]: unknown;
+        };
         /**
          * RunStatus
          * @description The latest nightly run: none yet, running, failed, or finished without an error, with
@@ -2913,10 +3200,82 @@ export interface components {
             /** Last Error At */
             last_error_at?: string | null;
         };
+        /** Session */
+        Session: {
+            /** Id */
+            id: number;
+            /** Seed */
+            seed: number;
+            /**
+             * Drawn At
+             * Format: date-time
+             */
+            drawn_at: string;
+            /** Items */
+            items: components["schemas"]["SessionItem"][];
+        };
         /** SessionIn */
         SessionIn: {
             /** Token */
             token: string;
+        };
+        /**
+         * SessionItem
+         * @description A paper of a session: why it was drawn or taken in, the pipeline's Fit on its topic
+         *     (`verdict`, null without one), the answer recorded (null until given), every current label
+         *     (`fit`) and the newest appraisal.
+         */
+        SessionItem: {
+            /** Position */
+            position: number;
+            /** Paper Id */
+            paper_id: string;
+            /** Topic */
+            topic: string;
+            /**
+             * Why
+             * @enum {string}
+             */
+            why: "above" | "below" | "split" | "miss" | "reaction";
+            answer?: components["schemas"]["LabelValue"] | null;
+            /** Answered At */
+            answered_at?: string | null;
+            /** Title */
+            title: string;
+            /** Abstract */
+            abstract: string;
+            /** Authors */
+            authors?: string[] | null;
+            /** Published */
+            published?: string | null;
+            verdict?: components["schemas"]["Fit"] | null;
+            /** Fit */
+            fit: {
+                [key: string]: components["schemas"]["LabelValue"];
+            };
+            appraisal?: components["schemas"]["Appraisal"] | null;
+        };
+        /**
+         * SessionRow
+         * @description A Calibrate session: how many papers it drew, how many are answered, and how many answers
+         *     differ from the pipeline's Fit.
+         */
+        SessionRow: {
+            /** Id */
+            id: number;
+            /** Seed */
+            seed: number;
+            /**
+             * Drawn At
+             * Format: date-time
+             */
+            drawn_at: string;
+            /** Papers */
+            papers: number;
+            /** Answered */
+            answered: number;
+            /** Differ */
+            differ: number;
         };
         /**
          * SettingsHints
@@ -2957,8 +3316,75 @@ export interface components {
             /** Failed At */
             failed_at?: string | null;
         };
+        /** Share */
+        Share: {
+            /** Hits */
+            hits: number;
+            /** N */
+            n: number;
+        };
         /** @enum {string} */
         Sort: "rarest" | "newest" | "added" | "title" | "best";
+        /**
+         * Spend
+         * @description One provider's month: spent so far, projected to the end, and its budget (None: none).
+         */
+        Spend: {
+            /** Provider */
+            provider: string;
+            /** Spent */
+            spent: number;
+            /** Projected */
+            projected: number;
+            /** Budget */
+            budget?: number | null;
+            /**
+             * Over
+             * @default false
+             */
+            over: boolean;
+        };
+        /**
+         * Split
+         * @description A current verdict from since last night asking for the owner's word
+         *     (`store.quality.splits_since`): a Focus split, an Area escalation, or a central or related
+         *     grade from one lab, with every grader's answer and the owner's label. `revision` is the
+         *     text it is on, the paper's current one.
+         */
+        Split: {
+            /** Paper Id */
+            paper_id: string;
+            /** Topic */
+            topic: string;
+            depth: components["schemas"]["Depth"];
+            fit: components["schemas"]["Fit"];
+            /** Reason */
+            reason: string;
+            /** Split */
+            split: boolean;
+            /** Escalated */
+            escalated: boolean;
+            /** One Lab */
+            one_lab: boolean;
+            /** Opinions */
+            opinions: {
+                [key: string]: components["schemas"]["Opinion"];
+            };
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Title */
+            title: string;
+            /** Revision */
+            revision: number;
+            label?: components["schemas"]["SplitLabel"] | null;
+        };
+        /** SplitLabel */
+        SplitLabel: {
+            value: components["schemas"]["LabelValue"];
+        };
         /**
          * Status
          * @description Whether a topic is in use.
@@ -3001,6 +3427,41 @@ export interface components {
             day: string;
             state: components["schemas"]["DigestState"];
             best_rarity?: components["schemas"]["Rarity"] | null;
+        };
+        /**
+         * Stuck
+         * @description A step that stopped on a paper after failing runs in a row, or that every model refused
+         *     (`store.failures.stuck`): `refused` names the roles whose whole list refused,
+         *     `stopped_by_refusal` whether that stopped it; `topic` is a grading's. `acknowledged_at`:
+         *     when the owner acknowledged it.
+         */
+        Stuck: {
+            /** Paper Id */
+            paper_id: string;
+            /** Revision */
+            revision: number;
+            /** Title */
+            title: string;
+            /** Failed Runs */
+            failed_runs: number;
+            /** Last Error */
+            last_error?: string | null;
+            /** Refused */
+            refused?: string[];
+            /**
+             * Stopped By Refusal
+             * @default false
+             */
+            stopped_by_refusal: boolean;
+            /**
+             * Failed At
+             * Format: date-time
+             */
+            failed_at: string;
+            /** Topic */
+            topic?: string | null;
+            /** Acknowledged At */
+            acknowledged_at?: string | null;
         };
         /**
          * Summary
@@ -3090,6 +3551,53 @@ export interface components {
              * Format: date-time
              */
             queued_at: string;
+        };
+        /**
+         * TextPassStuck
+         * @description A full-text pass waiting on the owner (`store.fulltext.stuck`): failed runs in a row or
+         *     refused by every model (`refused`), or awaiting its text over a week. `since` is since when
+         *     it waits, which names this failure for Acknowledge.
+         */
+        TextPassStuck: {
+            /** Id */
+            id: number;
+            /** Paper Id */
+            paper_id: string;
+            /** Revision */
+            revision: number;
+            /** Title */
+            title: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "brief" | "weight" | "deep";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "failed" | "awaiting_text";
+            /** Failed Runs */
+            failed_runs: number;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Refused
+             * @default false
+             */
+            refused: boolean;
+            /**
+             * Queued At
+             * Format: date-time
+             */
+            queued_at: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /** Acknowledged At */
+            acknowledged_at?: string | null;
         };
         /**
          * TodayRun
@@ -3213,6 +3721,35 @@ export interface components {
             grades: components["schemas"]["GradeCounts"];
         };
         /**
+         * TopicPrecision
+         * @description A Focus topic's Calibrate draws over the trailing 90 days: precision at relevant (the
+         *     upper group) and how often grading dropped a wanted paper (the lower group), each with the
+         *     answers it is over; a side with no draws is left out.
+         */
+        TopicPrecision: {
+            /** Topic */
+            topic: string;
+            /** Precision */
+            precision?: number | null;
+            /** Precision N */
+            precision_n?: number | null;
+            /** Dropped */
+            dropped?: number | null;
+            /** Dropped N */
+            dropped_n?: number | null;
+        };
+        /**
+         * TopicReactions
+         * @description Thumbs on a followed topic with one reason (none: null) over the trailing 30 days.
+         */
+        TopicReactions: {
+            /** Topic */
+            topic: string;
+            reason?: components["schemas"]["ReactionReason"] | null;
+            /** N */
+            n: number;
+        };
+        /**
          * TopicRow
          * @description A paper on a topic's page: the topic's own grade, else the highest of the followed topics
          *     under it (`via`), else none (ungraded there, coloured by its Weight).
@@ -3315,6 +3852,13 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /**
+         * WordSource
+         * @description What set the owner's word on a topic: a label, a word-carrying thumb, or a reported miss
+         *     (a label the report wrote last, `set_by` miss).
+         * @enum {string}
+         */
+        WordSource: "label" | "reaction" | "miss";
     };
     responses: never;
     parameters: never;
@@ -3330,7 +3874,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 q?: string | null;
-                rarity?: components["schemas"]["Rarity"][];
+                rarity?: components["schemas"]["RarityLevel"][];
                 grade?: components["schemas"]["GradeLevel"][];
                 saved?: boolean | null;
                 code?: boolean | null;
@@ -3716,7 +4260,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 q?: string | null;
-                rarity?: components["schemas"]["Rarity"][];
+                rarity?: components["schemas"]["RarityLevel"][];
                 grade?: components["schemas"]["GradeLevel"][];
                 saved?: boolean | null;
                 code?: boolean | null;
@@ -4633,9 +5177,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Quality"];
                 };
             };
             /** @description Missing or wrong token */
@@ -5176,9 +5718,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["SessionRow"][];
                 };
             };
             /** @description Missing or wrong token */
@@ -5216,9 +5756,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["Drawn"];
                 };
             };
             /** @description Missing or wrong token */
@@ -5263,9 +5801,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["Session"];
                 };
             };
             /** @description Missing or wrong token */
@@ -5317,9 +5853,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["Added"];
                 };
             };
             /** @description Missing or wrong token */
@@ -5424,9 +5958,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["NightRun"][];
                 };
             };
             /** @description Missing or wrong token */

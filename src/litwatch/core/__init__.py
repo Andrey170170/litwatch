@@ -19,9 +19,11 @@ from litwatch.core.grading import (
 )
 from litwatch.core.rules import (
     FAILED_RUNS,
+    WordSource,
     in_library,
     owners_word,
     rewritten,
+    whose_word,
     withdrawn_at,
 )
 from litwatch.core.search import (
@@ -37,6 +39,7 @@ from litwatch.core.types import (
     Hand,
     Label,
     LabelOrigin,
+    LabelSetter,
     LabelValue,
     Paper,
     Publication,
@@ -61,6 +64,7 @@ __all__ = [
     "Hand",
     "Label",
     "LabelOrigin",
+    "LabelSetter",
     "LabelValue",
     "Opinion",
     "PageStanding",
@@ -79,6 +83,7 @@ __all__ = [
     "Topic",
     "Verdict",
     "Weight",
+    "WordSource",
     "badge_order",
     "current_verdict",
     "effective",
@@ -89,5 +94,6 @@ __all__ = [
     "owners_word",
     "page_standing",
     "rewritten",
+    "whose_word",
     "withdrawn_at",
 ]

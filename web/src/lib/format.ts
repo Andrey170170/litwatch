@@ -32,8 +32,9 @@ export function dateTime(iso: string | null | undefined, zone?: string): string 
   return f.format(new Date(iso));
 }
 
-/** The first three authors and "+N" (DESIGN.md, the paper header). */
-export function authorsShort(authors: readonly string[], max = 3): { shown: string[]; more: number } {
+/** The first three authors and "+N" (DESIGN.md, the paper header); none when the record has none (null). */
+export function authorsShort(given: readonly string[] | null | undefined, max = 3): { shown: string[]; more: number } {
+  const authors = given ?? [];
   if (authors.length <= max + 1) return { shown: [...authors], more: 0 };
   return { shown: authors.slice(0, max), more: authors.length - max };
 }

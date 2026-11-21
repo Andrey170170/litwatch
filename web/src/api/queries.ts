@@ -2,7 +2,7 @@
 import { infiniteQueryOptions, queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { api, ok } from "./client";
 import type { RerunScope } from "@/lib/jobs";
-import type { Shelf } from "@/lib/rarity";
+import type { RarityLevel, Shelf } from "@/lib/rarity";
 import type { Quality, Run, Session, SessionRow } from "@/lib/settings";
 import { sortOf, type ListSearch } from "@/lib/search";
 import { addDays, nextSpan } from "@/lib/digests";
@@ -55,7 +55,8 @@ export const taxonomyQuery = queryOptions({
 /** A shelf's filter: the list's search plus the shelf's own levels or grades. A level filter narrows a Papers
  * shelf to the levels it holds. */
 function shelfFilter(search: ListSearch, shelf: Shelf) {
-  const rarity = shelf.rarity ? shelf.rarity.filter((r) => !search.rarity?.length || search.rarity.includes(r)) : search.rarity;
+  const chosen: RarityLevel[] | undefined = search.rarity;
+  const rarity = shelf.rarity ? shelf.rarity.filter((r) => !chosen?.length || chosen.includes(r)) : chosen;
   return {
     q: search.q,
     rarity: rarity?.length ? rarity : undefined,
@@ -194,18 +195,18 @@ export async function patchRead<T>(qc: QueryClient, key: QueryKey, patch: (old: 
   else void qc.invalidateQueries({ queryKey: key, exact: true });
 }
 
-export const qualityQuery = (page: "needs" | "overview" | "runs") => settingsRead(page, "quality", async ({ signal }) => ok(await api.GET("/api/settings/quality", { signal })) as unknown as Quality);
+export const qualityQuery = (page: "needs" | "overview" | "runs") => settingsRead(page, "quality", async ({ signal }) => ok(await api.GET("/api/settings/quality", { signal })));
 
 export const missesQuery = settingsRead("misses", "list", async ({ signal }) => ok(await api.GET("/api/settings/misses", { signal })));
 
-export const sessionsQuery = (page: "calibrate" | "overview") => settingsRead(page, "sessions", async ({ signal }) => ok(await api.GET("/api/settings/calibrate", { signal })) as unknown as SessionRow[]);
+export const sessionsQuery = (page: "calibrate" | "overview") => settingsRead(page, "sessions", async ({ signal }) => ok(await api.GET("/api/settings/calibrate", { signal })));
 
 /** A Calibrate session, run to its end even when its page is left (no `signal`): a write patches the session lists
  * from it (`sessionChanged`). */
 export const sessionQuery = (id: number) =>
-  settingsRead(`calibrate/${id}`, "session", async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })) as unknown as Session);
+  settingsRead(`calibrate/${id}`, "session", async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })));
 
-export const runsQuery = (page: "overview" | "runs") => settingsRead(page, "runs", async ({ signal }) => ok(await api.GET("/api/settings/runs", { signal })) as unknown as Run[]);
+export const runsQuery = (page: "overview" | "runs") => settingsRead(page, "runs", async ({ signal }) => ok(await api.GET("/api/settings/runs", { signal })));
 
 export const scheduleQuery = settingsRead("runs", "schedule", async ({ signal }) => ok(await api.GET("/api/settings/schedule", { signal })));
 

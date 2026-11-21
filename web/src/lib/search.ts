@@ -1,5 +1,5 @@
 /** A list's filters as search params (plain strings, so links stay readable), and back. */
-import type { Rarity } from "./rarity";
+import type { Rarity, RarityLevel } from "./rarity";
 import { RARITIES } from "./rarity";
 
 export type Sort = "newest" | "rarest" | "best";
@@ -75,8 +75,9 @@ export function parseSearch(search: string): Record<string, string> {
   return Object.fromEntries(new URLSearchParams(search));
 }
 
-/** The papers a list shows under its rarity filter: the chosen levels' counts, else every level's. */
-export function visibleCount(counts: Record<Rarity, number>, search: ListSearch): number {
-  const levels: readonly Rarity[] = search.rarity?.length ? search.rarity : RARITIES;
+/** The papers a list shows under its rarity filter: the chosen levels' counts, else every level's, the unclassified
+ * included. */
+export function visibleCount(counts: Record<RarityLevel, number>, search: ListSearch): number {
+  const levels: readonly RarityLevel[] = search.rarity?.length ? search.rarity : [...RARITIES, "unrated"];
   return levels.reduce((n, r) => n + counts[r], 0);
 }

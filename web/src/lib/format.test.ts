@@ -15,6 +15,9 @@ describe("format", () => {
     expect(authorsShort(["a", "b", "c", "d"])).toEqual({ shown: ["a", "b", "c", "d"], more: 0 });
     expect(authorsShort(["a", "b", "c", "d", "e"])).toEqual({ shown: ["a", "b", "c"], more: 2 });
   });
+  it("shows no authors for a record whose authors are null", () => {
+    expect(authorsShort(null)).toEqual({ shown: [], more: 0 });
+  });
   it("prints a count at a glance", () => {
     expect([3_141_592, 850_000, 12].map(compact)).toEqual(["3.1M", "850K", "12"]);
   });

@@ -82,6 +82,10 @@ type Sort = Literal["rarest", "newest", "added", "title", "best"]
 type GradeLevel = Literal["must_read", "relevant", "adjacent", "none", "ungraded"]
 UNGRADED = "ungraded"
 GRADE_LEVELS: tuple[str, ...] = ("must_read", "relevant", "adjacent", "none", UNGRADED)
+# A rarity, or `unrated`: no rarity, in the list asked for (on Papers, a paper not classified
+# yet).
+type RarityLevel = Literal["legendary", "epic", "rare", "uncommon", "common", "unrated"]
+UNRATED = "unrated"
 
 
 @dataclass
@@ -94,7 +98,7 @@ class Query:
     q: str | None = None
     topics: list[str] = field(default_factory=list)
     depth: Depth | None = None
-    rarity: list[Rarity] = field(default_factory=list)
+    rarity: list[RarityLevel] = field(default_factory=list)
     grade: list[GradeLevel] = field(default_factory=list)
     saved: bool | None = None
     code: bool | None = None  # the abstract announces released code
@@ -264,12 +268,16 @@ def _filters(query: Query) -> tuple[list[str], dict[str, Any]]:
 def _levels(
     query: Query, rarity: str, graded: str, ungraded: str
 ) -> tuple[list[str], dict[str, Any]]:
-    """Conditions for the level filters: `rarity` is the level's column, `graded` and
-    `ungraded` say a paper has one of `%(grades)s` or no grade at all."""
+    """Conditions for the level filters: `rarity` is the level's column (null: unrated),
+    `graded` and `ungraded` say a paper has one of `%(grades)s` or no grade at all."""
     where, params = [], {}
-    if query.rarity:
-        where.append(f"{rarity} = ANY(%(rarity)s)")
-        params["rarity"] = [r.value for r in query.rarity]
+    named = [r for r in query.rarity if r != UNRATED]
+    either = ([f"{rarity} = ANY(%(rarity)s)"] if named else []) + (
+        [f"{rarity} IS NULL"] if UNRATED in query.rarity else []
+    )
+    if either:
+        where.append("(" + " OR ".join(either) + ")")
+        params["rarity"] = named
     named = [g for g in query.grade if g != UNGRADED]
     either = ([graded] if named else []) + ([ungraded] if UNGRADED in query.grade else [])
     if either:
@@ -328,10 +336,10 @@ async def _list(
         """,
         params | {"limit": limit, "offset": offset},
     )
-    rarities = dict.fromkeys([r.value for r in reversed(Rarity)], 0) | {"unrated": 0}
+    rarities = dict.fromkeys([r.value for r in reversed(Rarity)], 0) | {UNRATED: 0}
     grades = dict.fromkeys(GRADE_LEVELS, 0)
     for row in counted:
-        rarities[row["rarity"] or "unrated"] += row["n"]
+        rarities[row["rarity"] or UNRATED] += row["n"]
         grades[row["grade"] or UNGRADED] += row["n"]
     return page, sum(row["hits"] for row in counted), rarities, grades
 
@@ -577,7 +585,8 @@ async def paper(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
         "one_lab, "
         "paper_revision, recorded_at FROM verdicts WHERE paper_id = %(p)s "
         "ORDER BY topic, paper_revision DESC, recorded_at DESC, id DESC",
-        "labels": "SELECT topic, value, origin, labelled_at FROM labels WHERE paper_id = %(p)s",
+        "labels": "SELECT topic, value, origin, set_by, labelled_at FROM labels "
+        "WHERE paper_id = %(p)s",
         "reactions": "SELECT topic, value, reason, reacted_at FROM reactions "
         "WHERE paper_id = %(p)s",
         "misses": "SELECT topic, reported_at FROM misses WHERE paper_id = %(p)s",

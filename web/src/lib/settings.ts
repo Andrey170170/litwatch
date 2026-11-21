@@ -1,7 +1,7 @@
 /**
  * Settings' pages and the pure rules behind them (DESIGN.md, "Settings"): the index in its groups, what each
- * page's hint says, how a share is coloured, a spend bar's geometry, and the shapes of the endpoints the API
- * leaves untyped (`/quality`, `/runs`, `/calibrate`).
+ * page's hint says, how a share is coloured, a spend bar's geometry, and the shapes of the endpoints' answers as the
+ * pages keep them.
  */
 import type { Schemas } from "@/api/client";
 import { admits } from "./rarity";
@@ -39,123 +39,46 @@ export function isPage(s: string): s is Page {
   return GROUPS.some((g) => g.pages.some((p) => p.id === s));
 }
 
-// -- the untyped endpoints -----------------------------------------------------------------------------------------
+// -- the endpoints' shapes ------------------------------------------------------------------------------------------
 
 export type Fit = Schemas["Fit"];
 export type LabelValue = Schemas["LabelValue"];
 export type Opinion = Schemas["Opinion"];
 
-/** A split, escalation or central or related grade from one lab from last night (`store.quality.splits_since`). */
-export type Split = {
-  paper_id: string;
-  topic: string;
-  /** The paper revision the verdict is on (the current one: `splits_since` lists no older text's). */
-  revision: number;
-  depth: Schemas["Depth"];
-  fit: Fit;
-  reason: string;
-  split: boolean;
-  escalated: boolean;
-  /** One Focus grader refused throughout; the other's Fit stands (`opinions` holds its answer alone). */
-  one_lab: boolean;
-  opinions: Record<string, Opinion>;
-  recorded_at: string;
-  title: string;
-  label: { value: LabelValue } | null;
-  /** What settled it on this visit (client-side; DESIGN.md: a settled item keeps its result in place). */
-  settled?: string;
+/** What settled a row on this visit (client-side; DESIGN.md: a settled item keeps its result in place). */
+type Settles = { settled?: string };
+
+/** A split, escalation or central or related grade from one lab from last night. */
+export type Split = Schemas["Split"] & Settles;
+/** A paper stuck after three failed runs of a step, or one every model refused. */
+export type Stuck = Schemas["Stuck"] & Settles;
+/** A full-text pass waiting on the owner. */
+export type TextPassStuck = Schemas["TextPassStuck"] & Settles;
+/** A digest whose writer call failed; `note` is what the last write-again from this visit said while the digest is
+ * still to be written (client-side). */
+export type FailedDigest = Schemas["FailedDigest"] & Settles & { note?: string };
+/** A process note on a Deep read or a Deep card (GLOSSARY.md). `url`, when given, is linked only if it is http(s). */
+export type ProcessNote = Schemas["ProcessNote"];
+/** A Deep card with process notes: Needs you's Deep notes, which wait on nothing. */
+export type DeepNotes = Schemas["DeepNotes"];
+export type Spend = Schemas["Spend"];
+export type Recall = Schemas["Recall"];
+
+type Night = Schemas["LastNight"];
+/** Quality, with what this visit settled kept on its rows. */
+export type Quality = Omit<Schemas["Quality"], "night"> & {
+  night: Omit<Night, "splits" | "awaiting_classification" | "analysis_failed" | "ungraded" | "fulltext" | "digests"> & {
+    splits: Split[];
+    awaiting_classification: Stuck[];
+    analysis_failed: Stuck[];
+    ungraded: Stuck[];
+    fulltext: TextPassStuck[];
+    digests: FailedDigest[];
+  };
 };
 
-/** A paper stuck after three failed runs of a step, or one every model refused (`store.failures.stuck`; `refused`
- * names the roles whose whole list refused, `stopped_by_refusal` whether that stopped it: a Focus side can refuse
- * throughout while the other fails three runs). `acknowledged_at`: when the owner acknowledged it, as for passes and
- * digests (it no longer counts in the run status, and folds away). */
-export type Stuck = { paper_id: string; revision: number; title: string; failed_runs: number; last_error: string | null; failed_at: string; topic?: string | null; refused?: string[]; stopped_by_refusal?: boolean; acknowledged_at?: string | null; settled?: string };
-
-/** A full-text pass waiting on the owner (`store.fulltext.stuck`): failed three runs or refused by every model
- * (`refused`), or awaiting its text over a week. `since`: since when it waits, which names this failure for
- * Acknowledge. */
-export type TextPassStuck = {
-  id: number;
-  paper_id: string;
-  revision: number;
-  title: string;
-  kind: "brief" | "weight" | "deep";
-  state: "failed" | "awaiting_text";
-  failed_runs: number;
-  last_error: string | null;
-  refused?: boolean;
-  queued_at: string;
-  since: string;
-  acknowledged_at?: string | null;
-  settled?: string;
-};
-
-/** A digest whose writer call failed (`store.digests.failed`): the next run writes it again, or the owner now. A
- * weekly digest's `day` is its Monday. */
-export type FailedDigest = {
-  id: number;
-  topic: string;
-  period: "day" | "week";
-  day: string;
-  error: string | null;
-  written_at: string;
-  acknowledged_at?: string | null;
-  settled?: string;
-  /** What the last write-again from this visit said while the digest is still to be written (client-side). */
-  note?: string;
-};
-
-/** A process note on a Deep read or a Deep card (GLOSSARY.md): what the Deep agent could not do, as the model or the
- * service wrote it. `url`, when given, is linked only if it is http(s). `review` is a read's alone: the service's
- * note on a read that still failed its review (plans/deep-read.md). */
-export type ProcessNote = { kind: "access" | "tool" | "budget" | "input" | "review"; source: "model" | "service"; note: string; url?: string };
-
-/** A Deep card with process notes (`store.integrations.deep_notes`): Needs you's Deep notes, which wait on nothing.
- * `written_at` names the card, for Acknowledge: a card written again since is another. */
-export type DeepNotes = { paper_id: string; title: string; written_at: string; notes: ProcessNote[]; acknowledged_at?: string | null };
-
-export type Spend = { provider: string; spent: number; projected: number; budget: number | null; over: boolean };
-
-export type Recall = {
-  cohort: string;
-  topic: string;
-  positives: number;
-  classification: { hits: number; n: number };
-  membership: { hits: number; n: number };
-  grading: { hits: number; n: number };
-  end_to_end: { hits: number; n: number };
-  grading_failed: number;
-  negatives: number;
-};
-
-export type Quality = {
-  night: { run: number | null; error: string | null; splits: Split[]; awaiting_classification: Stuck[]; analysis_failed: Stuck[]; ungraded: Stuck[]; fulltext: TextPassStuck[]; digests: FailedDigest[]; deep_notes: DeepNotes[] };
-  cost: Spend[];
-  /** Deep cards' month to date at list prices: the attempts ended, their cost where known, and how many have their
-   * usage unknown (the cost is "at least" while any is). */
-  deep?: { attempts: number; list_cost: number; unknown: number };
-  recall: { eval_run: number; started_at: string; finished_at: string | null; cost: number; recall: Recall[] } | null;
-  calibration: { topic: string; precision: number | null; precision_n: number; dropped: number | null; dropped_n: number }[];
-  matters_no_topic: { paper_id: string; note: string | null; at: string; title: string }[];
-  collected: { since: string; thumbs: number; papers: number } | Record<string, unknown>;
-  reactions: { topic: string; reason: Schemas["ReactionReason"] | null; n: number }[];
-};
-
-export type Run = {
-  id: number;
-  kind: string;
-  started_at: string;
-  finished_at: string | null;
-  /** The day's spend outside jobs: the run's own and `after_cost`, other runs' until the next night. */
-  cost: number | string;
-  after_cost: number | string;
-  error: string | null;
-  counts: { classified?: number; classification_failed?: number; analysed?: number; analysis_failed?: number; graded?: number; grading_failed?: number; digests_written?: number; digests_empty?: number; digests_failed?: number; calls?: Record<string, { cost: number; calls: number }> } | null;
-  fetched: number;
-  inserted: number;
-  updated: number;
-};
+/** A night on Runs and cost. */
+export type Run = Schemas["NightRun"];
 
 /** A night's cost split, for its hover; none when no run followed it. */
 export function nightCost(r: Run): string | undefined {
@@ -165,7 +88,7 @@ export function nightCost(r: Run): string | undefined {
 
 /** The digests a night wrote; null for a night that recorded none (before digests, or none due). */
 export function digests(r: Run): number | null {
-  const c = r.counts ?? {};
+  const c = r.counts;
   return c.digests_written ?? (c.digests_empty != null || c.digests_failed != null ? 0 : null);
 }
 
@@ -173,7 +96,7 @@ export function digests(r: Run): number | null {
  * that failed on some papers ("20 grading, 1 digest failed"); "" for a clean run. */
 export function runFailed(r: Run): string {
   if (r.error) return r.error;
-  const c = r.counts ?? {};
+  const c = r.counts;
   const parts = [
     c.classification_failed ? `${c.classification_failed} classification` : "",
     c.analysis_failed ? `${c.analysis_failed} analysis` : "",
@@ -183,27 +106,9 @@ export function runFailed(r: Run): string {
   return parts.length ? `${parts.join(", ")} failed` : "";
 }
 
-export type SessionRow = { id: number; seed: number; drawn_at: string; papers: number; answered: number; differ: number };
-
-export type SessionItem = {
-  position: number;
-  paper_id: string;
-  topic: string;
-  why: "above" | "below" | "split" | "miss" | "reaction";
-  /** The pipeline's Fit on the drawn topic; null while it has no verdict. */
-  verdict: Fit | null;
-  /** The Fit the owner answered on the drawn topic; null until answered. `fit` holds the current labels. */
-  answer: LabelValue | null;
-  answered_at: string | null;
-  title: string;
-  abstract: string;
-  authors: string[];
-  published: string | null;
-  fit: Record<string, LabelValue>;
-  appraisal: { value: "matters" | "fine" | "not_for_me" | null; note: string | null } | null;
-};
-
-export type Session = { id: number; seed: number; drawn_at: string; items: SessionItem[] };
+export type SessionRow = Schemas["SessionRow"];
+export type SessionItem = Schemas["SessionItem"];
+export type Session = Schemas["Session"];
 
 export type Value = NonNullable<Schemas["Answer"]["value"]>;
 
@@ -419,7 +324,7 @@ export function spendBar(s: Spend): { spent: number; projected: number; budget: 
 export const usd = (x: number | string) => `$${Number(x).toFixed(2)}`;
 
 /** "41 min" or "2 h 05" between two instants; "" while still running. */
-export function took(start: string, end: string | null): string {
+export function took(start: string, end: string | null | undefined): string {
   if (!end) return "";
   const m = Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60_000));
   if (m < 60) return `${m} min`;

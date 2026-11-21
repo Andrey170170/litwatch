@@ -120,7 +120,8 @@ awaits its text); the first v1's
 written: the labelled sets are files in `evals/labels/`.
 
 **Kept as they are:** `papers`, `intake_checkpoints`, `intake_snapshots`, `runs`, `inference_calls` (plus the batch a call went in, and the reply of a failed call, kept in debug mode), `labels` (plus
-class labels; the value is a Fit or unsure, and the grade column is gone: the grade follows from the Fit), `reactions` (reason values changed: wrong_topic, overrated, not_interesting, already_knew, underrated, great_find), `appraisals`, `calibration_sessions`,
+class labels; the value is a Fit or unsure, and the grade column is gone: the grade follows from the Fit; `set_by` says
+whether the owner or a miss report wrote the value last, while `origin` keeps how the paper was first chosen), `reactions` (reason values changed: wrong_topic, overrated, not_interesting, already_knew, underrated, great_find), `appraisals`, `calibration_sessions`,
 `topic_visits`, `misses` (plus the per-stage record), `calibration_items` (plus the pipeline's frozen Fit and grade at
 the draw), `publications`, `library`, `outbox`, `integration_cursors`,
 `zotero_items`, `webdav_files`, `deep_cards` (plus what it was written from: paper revision, arXiv version, text

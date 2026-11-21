@@ -359,3 +359,53 @@ async def test_a_seeded_draw_reads_each_pool_once_and_draws_as_it_did(conn, monk
         ("2610.00301", PROBES.slug, "below"),
         ("2610.00302", PROBES.slug, "below"),
     ]
+
+
+async def test_a_session_answers_in_the_shape_its_schema_names(db):
+    """A session's page, through the API: each item as the store reads it, in the shape the
+    OpenAPI schema declares for the web app's client."""
+    from litwatch.api import create_app
+    from litwatch.config import Config
+
+    session_id = await calibrate.draw(Bridge(db), seed=1, size=2)
+    (above,) = [i for i in await items(db, session_id) if i["why"] == "above"]
+    given = Answer(fit={FAITH.slug: LabelValue.CENTRAL}, value="fine", note=None)
+    await answer(db, session_id, above["position"], given)
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    app = create_app(dsn, "t", Config())
+    async with AppClient(app, base_url="http://t", headers={"authorization": "Bearer t"}) as c:
+        found = (await c.get(f"/api/settings/calibrate/{session_id}")).json()
+        assert (await c.get("/api/settings/calibrate/0")).status_code == 404
+    item = next(i for i in found["items"] if i["position"] == above["position"])
+    assert {k: item[k] for k in ("paper_id", "topic", "why", "verdict", "answer")} == {
+        "paper_id": above["paper_id"],
+        "topic": FAITH.slug,
+        "why": "above",
+        "verdict": "related",
+        "answer": "central",
+    }
+    assert item["fit"] == {FAITH.slug: "central"}
+    assert item["appraisal"] == {"value": "fine", "note": None}
+    schemas = app.openapi()["components"]["schemas"]
+    assert set(found) == set(schemas["Session"]["properties"])
+    assert all(set(i) == set(schemas["SessionItem"]["properties"]) for i in found["items"])
+
+
+async def test_a_session_keeps_a_paper_whose_authors_are_null(db):
+    """A paper stored with JSON-null authors answers as it is stored, null, and does not take
+    the whole session down with it."""
+    from litwatch.api import create_app
+    from litwatch.config import Config
+
+    session_id = await calibrate.draw(Bridge(db), seed=1, size=2)
+    first = (await items(db, session_id))[0]
+    await db.execute(
+        "UPDATE papers SET authors = 'null'::jsonb WHERE id = %s", (first["paper_id"],)
+    )
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    app = create_app(dsn, "t", Config())
+    async with AppClient(app, base_url="http://t", headers={"authorization": "Bearer t"}) as c:
+        found = await c.get(f"/api/settings/calibrate/{session_id}")
+    assert found.status_code == 200
+    item = next(i for i in found.json()["items"] if i["paper_id"] == first["paper_id"])
+    assert item["authors"] is None

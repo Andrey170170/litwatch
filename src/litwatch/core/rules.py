@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
+from enum import StrEnum
 
 from litwatch.core.grading import Fit
 from litwatch.core.types import (
     Grade,
     Hand,
     Label,
+    LabelSetter,
     LabelValue,
     Paper,
     Reaction,
@@ -28,6 +30,15 @@ REACTION_WORDS = (ReactionReason.WRONG_TOPIC, ReactionReason.GREAT_FIND)
 _NOW = datetime.max.replace(tzinfo=UTC)
 
 
+class WordSource(StrEnum):
+    """What set the owner's word on a topic: a label, a word-carrying thumb, or a reported miss
+    (a label the report wrote last, `set_by` miss)."""
+
+    LABEL = "label"
+    REACTION = "reaction"
+    MISS = "miss"
+
+
 def owners_word(
     label: Label | None, reaction: Reaction | None, verdict: Fit | None, *, focus: bool
 ) -> Fit | None:
@@ -35,17 +46,29 @@ def owners_word(
     a word-carrying reaction. A reported miss is a label. An unsure label is no word. A reaction
     speaks on a Focus topic only: wrong topic is none; great find is the verdict's Fit if central or
     related, else related. A time not yet stored counts as now."""
+    said = whose_word(label, reaction, verdict, focus=focus)
+    return said[0] if said else None
+
+
+def whose_word(
+    label: Label | None, reaction: Reaction | None, verdict: Fit | None, *, focus: bool
+) -> tuple[Fit, WordSource] | None:
+    """The owner's word (`owners_word`) and what set it; None when there is none."""
     if label is not None and label.value == LabelValue.UNSURE:
         label = None
     if not focus or (reaction is not None and reaction.reason not in REACTION_WORDS):
         reaction = None
-    labelled = Fit(label.value) if label else None
+    labelled = None
+    if label is not None:
+        source = WordSource.MISS if label.set_by == LabelSetter.MISS else WordSource.LABEL
+        labelled = (Fit(label.value), source)
     if reaction is None:
         return labelled
     if reaction.reason == ReactionReason.WRONG_TOPIC:
-        heard = Fit.NONE
+        heard = (Fit.NONE, WordSource.REACTION)
     else:
-        heard = verdict if verdict in (Fit.CENTRAL, Fit.RELATED) else Fit.RELATED
+        fit = verdict if verdict in (Fit.CENTRAL, Fit.RELATED) else Fit.RELATED
+        heard = (fit, WordSource.REACTION)
     if label is None:
         return heard
     if (label.labelled_at or _NOW) > (reaction.reacted_at or _NOW):

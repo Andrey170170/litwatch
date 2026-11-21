@@ -134,6 +134,11 @@ async def test_papers_are_rarest_first_with_the_counts_the_shelves_need(client, 
     shelf = (await client.get("/api/papers", params={"rarity": ["epic", "legendary"]})).json()
     assert [r["id"] for r in shelf["rows"]] == [legendary.id, epic.id]
     assert (shelf["total"], shelf["counts"]) == (2, counts)
+    # Not classified yet: no rarity, a level of its own.
+    unrated = (await client.get("/api/papers", params={"rarity": ["unrated"]})).json()
+    assert [r["id"] for r in unrated["rows"]] == [Q.id, unread.id]
+    assert (unrated["total"], unrated["counts"]) == (2, counts)
+    assert await ids(client, rarity=["epic", "unrated"]) == [epic.id, Q.id, unread.id]
     # A row: its current Gist, Weight, facets, badge, library state and no open state.
     row = page["rows"][1]
     assert (row["gist"], row["weight"], row["saved"], row["state"]) == (
@@ -519,6 +524,56 @@ async def test_a_label_is_a_fit_or_unsure_on_any_topic(client, conn):
     assert (await rail())["label"] is None
 
 
+async def test_the_rail_says_what_set_the_owners_word(client, conn):
+    await classify(conn, P, FAITH.slug)
+    await grade(conn, P, "related")
+
+    async def faith():
+        page = (await client.get(f"/api/papers/{P.id}")).json()
+        return next(t for t in page["topics"] if t["topic"]["slug"] == FAITH.slug)
+
+    said = await faith()
+    assert (said["word"], said["word_from"], said["fit"]) == (None, None, "related")
+    await client.put(f"/api/labels/{FAITH.slug}/{P.id}", json={"value": "central"})
+    said = await faith()
+    assert (said["word"], said["word_from"]) == ("central", "label")
+    # A newer thumb that speaks is the word, though the label is still there.
+    thumb = {"topic": FAITH.slug, "value": "down", "reason": "wrong_topic"}
+    await client.put(f"/api/reactions/{P.id}", json=thumb)
+    said = await faith()
+    assert (said["word"], said["word_from"], said["label"]["value"]) == (
+        "none",
+        "reaction",
+        "central",
+    )
+    # A thumb that does not speak leaves the label's word.
+    thumb["reason"] = "not_interesting"
+    await client.put(f"/api/reactions/{P.id}", json=thumb)
+    said = await faith()
+    assert (said["word"], said["word_from"]) == ("central", "label")
+
+
+async def test_the_rail_credits_the_owners_word_to_whoever_wrote_the_label_last(client, conn):
+    async def faith(p):
+        page = (await client.get(f"/api/papers/{p.id}")).json()
+        return next(t for t in page["topics"] if t["topic"]["slug"] == FAITH.slug)
+
+    # A miss, then a label over it: the label is the owner's, though its origin stays the miss.
+    await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug, "fit": "related"})
+    await client.put(f"/api/labels/{FAITH.slug}/{Q.id}", json={"value": "none"})
+    said = await faith(Q)
+    assert (said["word"], said["word_from"], said["label"]["origin"]) == ("none", "label", "miss")
+    # A label, then a first miss over it: the miss's, though the origin stays the reader's.
+    await classify(conn, P, FAITH.slug)
+    await grade(conn, P, "adjacent")
+    await client.put(f"/api/labels/{FAITH.slug}/{P.id}", json={"value": "adjacent"})
+    await client.post("/api/misses", json={"paper_id": P.id, "topic": FAITH.slug})
+    said = await faith(P)
+    assert (said["word"], said["word_from"], said["label"]["origin"]) == (
+        "central", "miss", "reader",
+    )  # fmt: skip
+
+
 # -- carried from the first v1 ---------------------------------------------------------------------
 
 
@@ -586,6 +641,7 @@ async def test_a_reported_miss_is_the_owners_word(client, conn):
     assert (interp["topic"]["slug"], interp["via"]) == (INTERP.slug, FAITH.slug)
     assert faith["label"] == {"value": "central", "origin": "miss"}
     assert faith["missed"] and faith["word"] == "central" and faith["grade"] == "must_read"
+    assert faith["word_from"] == "miss"
     said = [(h["what"], h["value"]) for h in page["history"]]
     assert said == [("missed", None), ("labelled", "central")]
     # A membership of the topic's class, so grading runs for it whatever classification says,
