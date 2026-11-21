@@ -1243,26 +1243,40 @@
     "/api/digests": {
       "get": {
         "summary": "History",
-        "description": "History from `until` back to `since` (at most `HISTORY_SPAN`): every day with its daily\nMarks and whether arXiv listed papers on it, and the weeks those days fall in with their\nweekly Marks.",
+        "description": "History from `until` back to `since` (at most `HISTORY_SPAN`): every day with its daily\nMarks and whether arXiv listed papers on it, and the weeks those days fall in with their\nweekly Marks. Without `until`, from today in the schedule's zone, `HISTORY_SPAN` back.",
         "operationId": "history_api_digests_get",
         "parameters": [
           {
             "name": "since",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "format": "date",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Since"
             }
           },
           {
             "name": "until",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "format": "date",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Until"
             }
           }

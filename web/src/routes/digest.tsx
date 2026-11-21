@@ -10,7 +10,7 @@ import { Fragment, useEffect, useReducer, type CSSProperties, type MouseEvent, t
 import { ApiError, type Schemas } from "@/api/client";
 import { useWriteAgain, WRITE_POLL_MOST } from "@/api/mutations";
 import { underWay } from "@/lib/jobs";
-import { dayQuery, digestQuery, historyFrom, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
+import { dayQuery, digestQuery, historyQuery, summaryQuery, weekQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
 import { Prose } from "@/components/Prose";
 import { RowDate } from "@/components/Rows";
@@ -259,11 +259,17 @@ export function DigestPage() {
   const search = useSearch({ from: "/" });
   const now = useToday();
   const day = search.day ?? now;
-  return day ? <Day day={day} now={now} digest={search.digest} /> : <AwaitToday view="day" bar="Digest" />;
+  // The slide-over is the link's own: a digest linked to opens whatever today's state.
+  return (
+    <>
+      {day ? <Day day={day} now={now} /> : <AwaitToday view="day" bar="Digest" />}
+      <SlideOver id={search.digest} />
+    </>
+  );
 }
 
 /** A Day; `now` is today, undefined while the summary has not said it (a day asked for by its date). */
-function Day({ day, now, digest }: { day: string; now: string | undefined; digest: number | undefined }) {
+function Day({ day, now }: { day: string; now: string | undefined }) {
   // Today, the Day is read again every minute until its run is done, so the panel follows the run.
   const q = useQuery({ ...dayQuery(day), refetchInterval: (query) => (unsettled(query.state.data) ? 60_000 : false) });
   const desktop = useDesktop();
@@ -297,7 +303,6 @@ function Day({ day, now, digest }: { day: string; now: string | undefined; diges
       {q.data?.digests.map((c) => (
         <DigestCard key={c.id} card={c} />
       ))}
-      <SlideOver id={digest} />
     </>
   );
 }
@@ -308,10 +313,15 @@ export function WeekPage() {
   const today = useToday();
   const last = today && addDays(mondayOf(today), -7);
   const week = search.week ?? last;
-  return week ? <Week week={week} last={last} digest={search.digest} /> : <AwaitToday view="week" bar="Digest · Week" />;
+  return (
+    <>
+      {week ? <Week week={week} last={last} /> : <AwaitToday view="week" bar="Digest · Week" />}
+      <SlideOver id={search.digest} />
+    </>
+  );
 }
 
-function Week({ week, last, digest }: { week: string; last: string | undefined; digest: number | undefined }) {
+function Week({ week, last }: { week: string; last: string | undefined }) {
   const q = useQuery(weekQuery(week));
   const desktop = useDesktop();
   useStepTo("/week", q.data?.previous, q.data?.next);
@@ -337,7 +347,6 @@ function Week({ week, last, digest }: { week: string; last: string | undefined; 
       {q.data?.digests.map((c) => (
         <DigestCard key={c.id} card={c} />
       ))}
-      <SlideOver id={digest} />
     </>
   );
 }
@@ -377,7 +386,7 @@ function Group({ to, label, sub, pin }: { to?: LinkProps; label: string; sub?: s
   );
 }
 
-function HistoryList({ pages, today }: { pages: Schemas["History"][]; today: string }) {
+function HistoryList({ pages, today }: { pages: Schemas["History"][]; today: string | undefined }) {
   return listRows(pages, today).map((r) => {
     switch (r.kind) {
       case "pin":
@@ -424,7 +433,7 @@ function Bar({ m, text }: { m: Mark; text: boolean }) {
 
 /** History as months, newest first, a row per week: Monday to Friday, then the week's weeklies in two columns, Focus
  * and Area level with the days' bars and Field beside them. */
-function Calendar({ pages, now }: { pages: Schemas["History"][]; now: string }) {
+function Calendar({ pages, now }: { pages: Schemas["History"][]; now: string | undefined }) {
   const desktop = useDesktop();
   const navigate = useNavigate();
   // The topics' fixed order, from the summary the shell reads; a day's bars and the W cell's columns keep a slot per
@@ -486,20 +495,14 @@ function Calendar({ pages, now }: { pages: Schemas["History"][]; now: string }) 
   ));
 }
 
+/** History back from the server's today (`historyQuery`); today from the summary only places the pin, the today
+ * row and the calendar's outline, once it has arrived. */
 export function HistoryPage() {
-  const today = useToday();
-  return today ? <History today={today} /> : <AwaitToday view="history" bar="Digest · History" />;
-}
-
-/** History from `today` back. Today moving on (the schedule's midnight) reads the loaded pages again from the new
- * day, as many as were loaded, so the reader keeps their place (`historyFrom`). */
-function History({ today }: { today: string }) {
   const search = useSearch({ from: "/history" });
   const cal = search.view === "cal";
   const desktop = useDesktop();
-  const qc = useQueryClient();
-  const q = useInfiniteQuery(historyQuery(today, SPAN));
-  useEffect(() => historyFrom(qc, today, SPAN), [qc, today]);
+  const today = useToday();
+  const q = useInfiniteQuery(historyQuery(SPAN));
   const pages = q.data?.pages ?? [];
   const start = pages[0]?.start;
   return (

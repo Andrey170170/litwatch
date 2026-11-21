@@ -767,11 +767,18 @@ class History(BaseModel):
 
 
 class HistoryIn(BaseModel):
-    since: date
-    until: date
+    """History's range: `until` today in the schedule's zone when not given, `since` then
+    `HISTORY_SPAN` before it; `since` alone is refused."""
+
+    since: date | None = None
+    until: date | None = None
 
     @model_validator(mode="after")
     def _span(self) -> HistoryIn:
+        if self.since is None:
+            return self
+        if self.until is None:
+            raise ValueError("since needs until")
         if not timedelta(0) <= self.until - self.since <= HISTORY_SPAN:
             raise ValueError(f"since must be before until, at most {HISTORY_SPAN.days} days")
         return self

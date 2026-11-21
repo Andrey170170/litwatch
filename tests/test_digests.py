@@ -14,8 +14,10 @@ import pytest
 
 from litwatch import digests, fulltext
 from litwatch.api import create_app
+from litwatch.api import digests as digests_api
 from litwatch.api import summary as summary_api
 from litwatch.api.digests import today_run
+from litwatch.api.schemas import HISTORY_SPAN
 from litwatch.config import Config, Schedule
 from litwatch.core import Label, LabelValue, Status
 from litwatch.core.classification import Source
@@ -1535,6 +1537,26 @@ async def test_the_summary_carries_today_in_the_schedules_zone_and_its_digests_c
     utc = await summary("UTC")
     assert utc["today"] == WED.isoformat()
     assert [t["count"] for t in utc["topics"]] == [None, None, None]
+
+
+async def test_history_without_until_reads_back_from_today_in_the_schedules_zone(db, monkeypatch):
+    """Wednesday 02:00 UTC is still Tuesday in New York: History asked for no date ends on
+    Tuesday and goes `HISTORY_SPAN` back; `since` without `until` is refused."""
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            at = datetime(2026, 10, 7, 2, 0, tzinfo=UTC)
+            return at.astimezone(tz) if tz else at
+
+    monkeypatch.setattr(digests_api, "datetime", Clock)
+    config = Config.model_validate({"schedule": {"timezone": "America/New_York"}})
+    async with client(db, Writer(), config) as http:
+        days = [d["day"] for d in (await http.get("/api/digests")).json()["days"]]
+        assert (days[0], days[-1]) == (TUE.isoformat(), (TUE - HISTORY_SPAN).isoformat())
+        assert (
+            await http.get("/api/digests", params={"since": MON.isoformat()})
+        ).status_code == 422
 
 
 async def test_the_digest_tab_reads_days_weeks_history_and_a_digest(db):

@@ -153,28 +153,18 @@ export const weekQuery = (day: string) => digestRead(["week", day], async ({ sig
 /** A digest's own read, run to its end even when its page is left (no `signal`): a refused write restripes from it. */
 export const digestQuery = (id: number) => digestRead([String(id)], async () => ok(await api.GET("/api/digests/{digest_id}", { params: { path: { digest_id: id } } })));
 
-/** History back from `until`, a span of days at a time (`SPAN`), older pages as the reader scrolls until the
- * archive's start. One key whatever `until`: today moving on reads the same pages again (`historyFrom`), not a
- * history of its own with only its newest page. */
-export const historyQuery = (until: string, span: number) =>
+/** History, a span of days at a time (`SPAN`), older pages as the reader scrolls until the archive's start. The
+ * first page asks for no date, so the server answers back from its own today (the schedule's); each later page
+ * goes on from the day before the oldest already read (`nextSpan`), never from the client's today. */
+export const historyQuery = (span: number) =>
   infiniteQueryOptions({
     queryKey: ["digest", "history"],
-    queryFn: async ({ pageParam, signal }) => ok(await api.GET("/api/digests", { signal, params: { query: { until: pageParam, since: addDays(pageParam, -span) } } })),
-    initialPageParam: until,
+    queryFn: async ({ pageParam, signal }) =>
+      ok(await api.GET("/api/digests", { signal, params: { query: pageParam === null ? {} : { until: pageParam, since: addDays(pageParam, -span) } } })),
+    initialPageParam: null as string | null,
     getNextPageParam: (_last, pages) => nextSpan(pages),
     ...listOptions,
   });
-
-/** Today has moved on to `until`: History's loaded pages are read again from it, the first from `until` and each
- * after it from the one before (TanStack refetches an infinite query that way, from its first stored param), so as
- * many pages stay loaded and the reader keeps their place. Nothing to do before History is read, or once it is. */
-export function historyFrom(qc: QueryClient, until: string, span: number) {
-  const { queryKey } = historyQuery(until, span);
-  const data = qc.getQueryData(queryKey);
-  if (!data || data.pageParams[0] === until) return;
-  qc.setQueryData(queryKey, { ...data, pageParams: [until, ...data.pageParams.slice(1)] });
-  void qc.invalidateQueries({ queryKey, exact: true });
-}
 
 // -- Settings (DESIGN.md, "Settings") ---------------------------------------------------------------------------
 

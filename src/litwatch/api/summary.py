@@ -31,7 +31,7 @@ async def summary(request: Request, db: Db) -> s.Summary:
 
 async def _summary(request: Request, c: ReadUnit) -> s.Summary:
     config = request.app.state.config
-    today = datetime.now(UTC).astimezone(config.schedule.zone).date()
+    today = config.schedule.today(datetime.now(UTC))
     spend = await budget_lines(c, config.budget)
     status = s.RunStatus(
         **await reading.status(c), over_budget=[line.provider for line in spend if line.over]

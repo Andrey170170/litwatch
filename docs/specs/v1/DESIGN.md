@@ -66,9 +66,10 @@ the night's papers again. A failed nightly run can't be acknowledged.
 Three views: **Day**, **Week** and **History**. On the desktop they are a segmented control at the top of the tab; on
 the phone they are the drawer's items under Digest, and the bottom bar holds the view's controls. The tab opens on
 Day, today. Today is the schedule's: the date in the configured timezone, which the server's summary carries, never
-the browser's; until the summary has arrived a view that needs it says it is loading. The Day's default and its stop,
-Week's last week and History's pinned week, its today and its outlined cell all take it, and History keeps the pages
-it has loaded when today moves on.
+the browser's. The Day's default and its stop and Week's last week take it, and until the summary has arrived those
+views say they are loading (a digest linked to opens all the same). History reads back from the server's own today,
+each older page on from the oldest day read, and takes the summary's today only for its pinned week, its today and
+its outlined cell; it picks up a new day when it is next read.
 
 **Day.** The date with "‹ ›" to step (on the phone the bottom bar's "‹ Tue 13 Oct ›" with large arrows, plus the
 swipe), "Today" over it on today. Then one digest card per daily topic in the fixed order, at Gist level (anatomy

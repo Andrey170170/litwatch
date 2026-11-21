@@ -325,7 +325,7 @@ export interface paths {
          * History
          * @description History from `until` back to `since` (at most `HISTORY_SPAN`): every day with its daily
          *     Marks and whether arXiv listed papers on it, and the weeks those days fall in with their
-         *     weekly Marks.
+         *     weekly Marks. Without `until`, from today in the schedule's zone, `HISTORY_SPAN` back.
          */
         get: operations["history_api_digests_get"];
         put?: never;
@@ -4197,9 +4197,9 @@ export interface operations {
     };
     history_api_digests_get: {
         parameters: {
-            query: {
-                since: string;
-                until: string;
+            query?: {
+                since?: string | null;
+                until?: string | null;
             };
             header?: never;
             path?: never;

@@ -132,32 +132,51 @@ describe("the Digest", () => {
     expect(await screen.findByText("2 new · 1 must read")).toBeInTheDocument();
   });
 
-  it("keeps History's older pages loaded when the schedule's midnight moves today, and adds the new day", async () => {
+  it("reads History's first page back from the server's today, each older one on from the oldest day read", async () => {
     vi.setSystemTime(new Date(2026, 9, 18, 22));
     viewport(true);
     let today = "2026-10-18";
+    // The server answers from its own today without `until`, the API's 92 days back.
     const calls = scriptFetch({
       "GET /api/summary": () => ({ ...summary, today }),
       "GET /api/digests": ({ url }) => {
-        const until = new URLSearchParams(url.split("?")[1]).get("until")!;
-        return { days: Array.from({ length: SPAN + 1 }, (_, i) => ({ day: addDays(until, -i), released: true, marks: [] })), weeks: [], start: "2026-01-05" };
+        const asked = new URLSearchParams(url.split("?")[1] ?? "");
+        const until = asked.get("until") ?? today;
+        const since = asked.get("since") ?? addDays(until, -92);
+        const days = [];
+        for (let d = until; d >= since; d = addDays(d, -1)) days.push({ day: d, released: true, marks: [] });
+        return { days, weeks: [], start: "2026-01-05" };
       },
     });
+    const history = () => calls.filter((c) => c.url.startsWith("/api/digests") && !c.url.startsWith("/api/digests/")).map((c) => c.url);
     const client = freshClient();
     renderApp("/history", client);
     expect((await screen.findByRole("link", { name: "Sun 18 Oct" })).closest(".grp")).toHaveTextContent("today");
-    // The reader scrolls on to an older page.
-    const older = addDays("2026-10-18", -SPAN - 1);
-    await act(() => new InfiniteQueryObserver(client, historyQuery("2026-10-18", SPAN)).fetchNextPage());
+    // The reader scrolls on to an older page: it begins the day before the oldest one read.
+    const oldest = addDays("2026-10-18", -92);
+    await act(() => new InfiniteQueryObserver(client, historyQuery(SPAN)).fetchNextPage());
+    const older = addDays(oldest, -10);
     expect(await screen.findByRole("link", { name: dayLabel(older) })).toBeInTheDocument();
+    expect(history()).toEqual(["/api/digests", `/api/digests?until=${addDays(oldest, -1)}&since=${addDays(oldest, -1 - SPAN)}`]);
+    // The schedule's midnight asks History for nothing; a refetch (a run's end, a visit) asks the server again, and
+    // the older page stays loaded.
     today = "2026-10-19";
     await vi.advanceTimersByTimeAsync(60_000);
+    expect(history()).toHaveLength(2);
+    await act(() => client.invalidateQueries({ queryKey: historyQuery(SPAN).queryKey }));
     expect((await screen.findByRole("link", { name: "Mon 19 Oct" })).closest(".grp")).toHaveTextContent("today");
-    expect(screen.getByRole("link", { name: "Sun 18 Oct" }).closest(".grp")).not.toHaveTextContent("today");
     expect(screen.getByRole("link", { name: dayLabel(older) })).toBeInTheDocument();
-    // Both pages read again, the older one from the newer's end.
-    const untils = calls.filter((c) => c.url.startsWith("/api/digests?")).map((c) => new URLSearchParams(c.url.split("?")[1]).get("until"));
-    expect(untils).toEqual(["2026-10-18", addDays("2026-10-18", -SPAN - 1), "2026-10-19", addDays("2026-10-19", -SPAN - 1)]);
+    const after = addDays("2026-10-19", -92);
+    expect(history().slice(2)).toEqual(["/api/digests", `/api/digests?until=${addDays(after, -1)}&since=${addDays(after, -1 - SPAN)}`]);
+  });
+
+  it("opens a linked digest over the Day even while today is unknown", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/summary": () => json({ detail: "down" }, 500), "GET /api/digests/7": digest });
+    renderApp("/?digest=7");
+    const over = await screen.findByRole("dialog");
+    expect(await within(over).findByText(/Daily digest · Wed 14 Oct/)).toBeInTheDocument();
+    expect(screen.getByText(/Could not load today/)).toBeInTheDocument();
   });
 
   it("takes Week's last week and History's pinned week and today from the schedule's today", async () => {
@@ -165,7 +184,7 @@ describe("the Digest", () => {
     viewport(true);
     const mark = (id: number, d: string, period = "day") => ({ id, topic: focus, period, day: d, state: "written", counts, best_rarity: "rare" });
     const days = ["2026-10-19", "2026-10-18", "2026-10-17", "2026-10-16"].map((d, i) => ({ day: d, released: i === 0 || i === 3, marks: i === 0 || i === 3 ? [mark(i, d)] : [] }));
-    const calls = scriptFetch({
+    scriptFetch({
       "GET /api/summary": ahead,
       "GET /api/digests/weeks/2026-10-12": { monday: "2026-10-12", digests: [], previous: "2026-10-05", next: null },
       "GET /api/digests": { days, weeks: [{ monday: "2026-10-12", marks: [mark(50, "2026-10-12", "week")] }], start: "2026-10-16" },
@@ -177,7 +196,6 @@ describe("the Digest", () => {
     expect(await screen.findByText("This week")).toBeInTheDocument();
     expect(screen.getByText("weekly digests · 12–18 Oct")).toBeInTheDocument();
     expect(screen.getByText("today").closest(".grp")).toHaveTextContent("Mon 19 Oct");
-    expect(calls.filter((c) => c.url.startsWith("/api/digests?")).map((c) => new URLSearchParams(c.url.split("?")[1]).get("until"))).toContain("2026-10-19");
     await userEvent.click(screen.getByRole("link", { name: "Calendar" }));
     await waitFor(() => expect(document.querySelector(".mday.today .mnum")).toHaveTextContent("19"));
   });

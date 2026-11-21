@@ -17,7 +17,7 @@ const reads: [string, { queryKey: readonly unknown[]; initialPageParam?: unknown
   ["a topic shelf", q.topicQuery("mi", search, TOPIC_SHELVES[0]!)],
   ["day", q.dayQuery("2026-11-10")],
   ["week", q.weekQuery("2026-11-10")],
-  ["history", q.historyQuery("2026-11-10", 14)],
+  ["history", q.historyQuery(14)],
   ["quality", q.qualityQuery("needs")],
   ["misses", q.missesQuery],
   ["sessions", q.sessionsQuery("calibrate")],
