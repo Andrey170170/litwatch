@@ -260,3 +260,65 @@ async def test_canonical_text_replacing_a_feed_abstract_counts_as_rewritten(conn
     (stored,) = await rows(conn, "papers")
     assert stored["metadata_source"] == "oai" and result.rewritten == [stored["id"]]
     assert calls == [{"include_versions": True}]
+
+
+async def versions(conn):
+    """Each stored paper's row version (`xmin`), which any write to the row moves."""
+    found = await (await conn.execute("SELECT id, xmin::text AS v FROM papers")).fetchall()
+    return {r["id"]: r["v"] for r in found}
+
+
+def listed(id, **update):
+    """A paper as OAI lists it with its versions, as intake asks for them."""
+    v1 = {"version": 1, "date": (NOW - timedelta(days=1)).isoformat(), "size": "400kb"}
+    paper = canonical(id).model_copy(update={"version": 1, "version_history": [v1]})
+    return paper.model_copy(update=update)
+
+
+async def test_reading_the_overlap_again_rewrites_no_row_and_emits_nothing(conn, monkeypatch):
+    """Each night reads three days again: a paper whose record resolves to what is stored is
+    left alone, counted as unchanged, not updated."""
+    page = [listed("2609.11934"), listed("2609.11935", doi="10.1/x")]
+    monkeypatch.setattr(atom, "fetch_category", unavailable)
+    monkeypatch.setattr(oai, "fetch_category", lambda *args, **kwargs: oai.OaiBatch(page, NOW))
+    _, first = await collect(conn)
+    assert first.inserted == 2
+    before, sent = await versions(conn), await events(conn)
+
+    _, again = await collect(conn)
+    assert (again.fetched, again.inserted, again.updated, again.unchanged) == (2, 0, 0, 2)
+    assert again.rewritten == []
+    assert await versions(conn) == before
+    assert await events(conn) == sent
+
+
+async def test_a_changed_paper_on_the_overlap_is_the_only_row_updated(conn, monkeypatch):
+    """One paper of the page comes back as a new version with a rewritten abstract: only its
+    row is written, and it is revised, rewritten and settled as before; the others stay as
+    they were."""
+    same, changed = listed("2609.11934"), listed("2609.11935")
+    page = [same, changed]
+    monkeypatch.setattr(atom, "fetch_category", unavailable)
+    monkeypatch.setattr(oai, "fetch_category", lambda *args, **kwargs: oai.OaiBatch(page, NOW))
+    await collect(conn)
+    before, sent = await versions(conn), await events(conn)
+
+    v2 = {"version": 2, "date": NOW.isoformat(), "size": "420kb"}
+    page[1] = changed.model_copy(
+        update={
+            "version": 2,
+            "version_history": [*changed.version_history, v2],
+            "abstract": "A different abstract altogether.",
+        }
+    )
+    _, result = await collect(conn)
+    assert (result.inserted, result.updated, result.unchanged) == (0, 1, 1)
+    assert result.rewritten == [changed.id]
+    after = await versions(conn)
+    assert after[same.id] == before[same.id] and after[changed.id] != before[changed.id]
+    stored = {r["id"]: r for r in await rows(conn, "papers")}
+    assert stored[changed.id]["revision"] == 2 and stored[same.id]["revision"] == 1
+    assert await events(conn) == [
+        *sent,
+        ("paper.revised", changed.id, {**revision(2, 1), "rewritten": True}),
+    ]

@@ -19,6 +19,9 @@ Every paper intake stores is registered with the archive, which fetches its LaTe
 policy, its PDF (see [archive.md](archive.md)). Registration is delivered through the outbox like an integration's
 work (durable, retried with backoff, idempotent on the archive's side), so an archive outage delays registration and
 never loses it; intake's checkpoint does not wait for it. Intake emits `paper.added` and `paper.revised`.
+Each night's window (`window_days`, three by default) overlaps the nights before it: a paper whose record resolves to
+what is stored is left as it was, with no row update and no event. The run records the papers read (`fetched`), the new
+ones (`inserted`) and those whose stored row changed (`updated`); the rest are unchanged.
 
 With `harvest` on (decisions 88–90), intake also runs a **catalog pass** after its categories: an OAI-PMH harvest
 of all of arXiv from its own checkpoint (category `*`), which registers each record outside the configured categories
