@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { PAPER_SHELVES, segmentFlex, shelvesFor, TOPIC_SHELVES } from "./rarity";
 
 describe("shelves", () => {
-  it("cuts Papers by rarity, the top two open as reading rows, the lower ones folded", () => {
+  it("cuts Papers by rarity, the top two open as reading rows, the lower ones and the unclassified folded", () => {
     expect(PAPER_SHELVES.map((s) => [s.key, s.form, s.open])).toEqual([
       ["top", "reading", true],
       ["rare", "table", true],
       ["uncommon", "table", false],
       ["common", "table", false],
+      ["unrated", "table", false],
     ]);
   });
   it("keeps only the shelves a rarity filter leaves something on", () => {

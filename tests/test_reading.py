@@ -134,6 +134,11 @@ async def test_papers_are_rarest_first_with_the_counts_the_shelves_need(client, 
     shelf = (await client.get("/api/papers", params={"rarity": ["epic", "legendary"]})).json()
     assert [r["id"] for r in shelf["rows"]] == [legendary.id, epic.id]
     assert (shelf["total"], shelf["counts"]) == (2, counts)
+    # Not classified yet: no rarity, a level of its own.
+    unrated = (await client.get("/api/papers", params={"rarity": ["unrated"]})).json()
+    assert [r["id"] for r in unrated["rows"]] == [Q.id, unread.id]
+    assert (unrated["total"], unrated["counts"]) == (2, counts)
+    assert await ids(client, rarity=["epic", "unrated"]) == [epic.id, Q.id, unread.id]
     # A row: its current Gist, Weight, facets, badge, library state and no open state.
     row = page["rows"][1]
     assert (row["gist"], row["weight"], row["saved"], row["state"]) == (

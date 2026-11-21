@@ -180,6 +180,8 @@ class GradeCounts(BaseModel):
 
 type Sort = Literal["rarest", "newest", "added", "title", "best"]
 type GradeLevel = Literal["must_read", "relevant", "adjacent", "none", "ungraded"]
+# A rarity, or `unrated`: not classified yet (Papers; a topic page gives each paper a level).
+type RarityLevel = Literal["legendary", "epic", "rare", "uncommon", "common", "unrated"]
 
 
 class ListQuery(BaseModel):
@@ -190,7 +192,7 @@ class ListQuery(BaseModel):
     else `rarest`."""
 
     q: str | None = None
-    rarity: list[Rarity] = Field(default_factory=list)
+    rarity: list[RarityLevel] = Field(default_factory=list)
     grade: list[GradeLevel] = Field(default_factory=list)
     saved: bool | None = None
     code: bool | None = None  # the abstract announces released code

@@ -6,7 +6,7 @@ import { settled } from "@/api/mutations";
 import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const counts = { legendary: 1, epic: 1, rare: 1, uncommon: 4, common: 9, unrated: 2 };
-const row = (id: string, title: string, rarity: string, saved = false) => ({
+const row = (id: string, title: string, rarity: string | null, saved = false) => ({
   id,
   title,
   authors: ["A. Author"],
@@ -31,6 +31,7 @@ describe("Papers", () => {
         if (rarity.includes("epic")) return { rows: [row("2610.00001", "Legendary one", "legendary"), row("2610.00002", "Epic one", "epic")], total: 2, counts };
         if (rarity === "rare") return { rows: [row("2610.00003", "Rare one", "rare")], total: 1, counts };
         if (rarity === "uncommon") return { rows: [], total: 4, counts };
+        if (rarity === "unrated") return { rows: [row("2610.00004", "Waiting one", null)], total: 2, counts };
         return { rows: [], total: 9, counts };
       },
       "PUT /api/library/2610.00002": { message: null, saved: true, grades: {} },
@@ -45,9 +46,14 @@ describe("Papers", () => {
     const uncommon = screen.getByRole("region", { name: "Uncommon" });
     await within(uncommon).findByText("4");
     expect(within(uncommon).queryByRole("link")).toBeNull();
-    expect(await screen.findByText("16 papers")).toBeInTheDocument();
-    expect(screen.getByText("2 not yet classified")).toBeInTheDocument();
-    // The folded shelf asked only for its count.
+    expect(await screen.findByText("18 papers")).toBeInTheDocument();
+    // The papers not classified yet: a folded shelf of their own, after Common, that opens to its rows.
+    const unrated = screen.getByRole("region", { name: "Not yet classified" });
+    await within(unrated).findByText("2");
+    expect(screen.getAllByRole("region").at(-1)).toBe(unrated);
+    await userEvent.click(within(unrated).getByRole("button", { name: /Not yet classified/ }));
+    expect(await within(unrated).findByText("Waiting one")).toBeInTheDocument();
+    // A folded shelf asked only for its count.
     const folded = calls.find((c) => c.url.includes("rarity=uncommon"));
     expect(folded?.url).toContain("limit=1");
 
@@ -56,7 +62,7 @@ describe("Papers", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.url === "/api/library/2610.00002")).toBe(true));
     expect(within(top).getByRole("button", { name: "Unsave" })).toBeInTheDocument();
     // Saving does not refetch the list, so rows keep their places.
-    expect(calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/papers")).length).toBe(4);
+    expect(calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/papers")).length).toBe(6);
   });
 
   it("filters a rarity from the bar and puts it in the URL", async () => {
@@ -69,6 +75,7 @@ describe("Papers", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Rare: 1" }));
     await waitFor(() => expect(router.state.location.searchStr).toBe("?rarity=rare"));
     expect(screen.queryByRole("region", { name: "Epic and legendary" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Not yet classified" })).toBeNull();
   });
 
   it("names the archive's size in the search box", async () => {

@@ -2428,7 +2428,7 @@ export interface components {
             /** Q */
             q?: string | null;
             /** Rarity */
-            rarity?: components["schemas"]["Rarity"][];
+            rarity?: components["schemas"]["RarityLevel"][];
             /** Grade */
             grade?: components["schemas"]["GradeLevel"][];
             /** Saved */
@@ -2631,6 +2631,8 @@ export interface components {
              */
             unrated: number;
         };
+        /** @enum {string} */
+        RarityLevel: "legendary" | "epic" | "rare" | "uncommon" | "common" | "unrated";
         /** ReactionIn */
         ReactionIn: {
             /** Topic */
@@ -3338,7 +3340,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 q?: string | null;
-                rarity?: components["schemas"]["Rarity"][];
+                rarity?: components["schemas"]["RarityLevel"][];
                 grade?: components["schemas"]["GradeLevel"][];
                 saved?: boolean | null;
                 code?: boolean | null;
@@ -3724,7 +3726,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 q?: string | null;
-                rarity?: components["schemas"]["Rarity"][];
+                rarity?: components["schemas"]["RarityLevel"][];
                 grade?: components["schemas"]["GradeLevel"][];
                 saved?: boolean | null;
                 code?: boolean | null;

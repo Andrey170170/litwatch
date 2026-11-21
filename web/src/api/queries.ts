@@ -2,7 +2,7 @@
 import { infiniteQueryOptions, queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { api, ok } from "./client";
 import type { RerunScope } from "@/lib/jobs";
-import type { Shelf } from "@/lib/rarity";
+import type { RarityLevel, Shelf } from "@/lib/rarity";
 import type { Quality, Run, Session, SessionRow } from "@/lib/settings";
 import { sortOf, type ListSearch } from "@/lib/search";
 import { addDays, nextSpan } from "@/lib/digests";
@@ -55,7 +55,8 @@ export const taxonomyQuery = queryOptions({
 /** A shelf's filter: the list's search plus the shelf's own levels or grades. A level filter narrows a Papers
  * shelf to the levels it holds. */
 function shelfFilter(search: ListSearch, shelf: Shelf) {
-  const rarity = shelf.rarity ? shelf.rarity.filter((r) => !search.rarity?.length || search.rarity.includes(r)) : search.rarity;
+  const chosen: RarityLevel[] | undefined = search.rarity;
+  const rarity = shelf.rarity ? shelf.rarity.filter((r) => !chosen?.length || chosen.includes(r)) : chosen;
   return {
     q: search.q,
     rarity: rarity?.length ? rarity : undefined,

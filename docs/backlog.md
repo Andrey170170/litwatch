@@ -31,7 +31,6 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
 - **Tests for `change` with several papers** (review, project 7): overlapping sets in reverse order across two
   connections, rollback when a later paper fails; shared test helpers into support modules.
 - **Smaller read gaps:**
-  - unclassified papers listed on Papers, not only counted (the API can return them);
   - code and weights links from the analysis, not only from a Deep card's URL;
   - typed response models for `/quality`, `/runs` and `/calibrate` (review, project 3).
 - **Tests reach `store` through units** (A1 P6's review): many tests still seed and assert with the raw `conn`

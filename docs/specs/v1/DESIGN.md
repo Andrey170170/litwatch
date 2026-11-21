@@ -144,8 +144,10 @@ sized by count), the title of its newest must read (which opens that paper), and
 **Papers.** The whole collection with the same controls and shelves, plus: a wide search box over the collection and
 the archive ("Search the collection and the archive (3.1M papers)"); a row of topic badges that filter to one or more
 topics; Saved labelled "★ Saved · the library". The shelves are by mixed rarity: Epic and legendary, Rare, Uncommon,
-Common. Rows carry their topic badges. While a search is typed, the archive's hits sit in their own band under the
-collection, "Outside the collection · from the archive", each with its authors, year and id and a Process button.
+Common; after them, folded, Not yet classified: the papers classification has not reached, in the line colour, which a
+rarity filter leaves out. Rows carry their topic badges. While a search is typed, the archive's hits sit in their own
+band under the collection, "Outside the collection · from the archive", each with its authors, year and id and a
+Process button.
 
 **On the phone**, both pages put the search box and a filter button (with the number of active filters) in the bottom
 bar. The button opens a sheet with the topic badges (Papers), the rarity bar, Saved and Code, the sort and the count,

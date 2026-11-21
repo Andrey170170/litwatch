@@ -57,7 +57,7 @@
             "schema": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/Rarity"
+                "$ref": "#/components/schemas/RarityLevel"
               },
               "title": "Rarity"
             }
@@ -646,7 +646,7 @@
             "schema": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/Rarity"
+                "$ref": "#/components/schemas/RarityLevel"
               },
               "title": "Rarity"
             }
@@ -6307,7 +6307,7 @@
           },
           "rarity": {
             "items": {
-              "$ref": "#/components/schemas/Rarity"
+              "$ref": "#/components/schemas/RarityLevel"
             },
             "type": "array",
             "title": "Rarity"
@@ -6885,6 +6885,17 @@
         "type": "object",
         "title": "RarityCounts",
         "description": "Papers per rarity level; `unrated` have none yet (not classified)."
+      },
+      "RarityLevel": {
+        "type": "string",
+        "enum": [
+          "legendary",
+          "epic",
+          "rare",
+          "uncommon",
+          "common",
+          "unrated"
+        ]
       },
       "ReactionIn": {
         "properties": {
