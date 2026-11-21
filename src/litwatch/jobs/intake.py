@@ -109,11 +109,10 @@ async def from_archive(
         )
         _record(record, result)
     log.info(
-        "run %s intake from the archive: %s papers (%s new, %s updated, %s unchanged)",
+        "run %s intake from the archive: %s papers (%s new, %s updated)",
         record.run_id,
         result.fetched,
         result.inserted,
         result.updated,
-        result.unchanged,
     )
     return result
