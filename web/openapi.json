@@ -5505,11 +5505,6 @@
           "origin": {
             "type": "string",
             "title": "Origin"
-          },
-          "provisional": {
-            "type": "boolean",
-            "title": "Provisional",
-            "default": false
           }
         },
         "type": "object",

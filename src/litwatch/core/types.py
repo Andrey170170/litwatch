@@ -105,8 +105,6 @@ class Label(BaseModel):
     topic: str
     value: LabelValue
     origin: LabelOrigin
-    # Accepted in bulk without being read; the owner's own label replaces it.
-    provisional: bool = False
     note: str | None = None
     labelled_at: datetime | None = None
 

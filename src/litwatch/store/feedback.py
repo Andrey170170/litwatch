@@ -19,14 +19,10 @@ async def set_label(unit: WriteUnit, label: Label) -> Label:
     row = await (
         await unit.execute(
             """
-            INSERT INTO labels (paper_id, topic, value, origin, provisional, note, labelled_at)
-            VALUES (%s, %s, %s, %s, %s, %s, clock_timestamp())
+            INSERT INTO labels (paper_id, topic, value, origin, note, labelled_at)
+            VALUES (%s, %s, %s, %s, %s, clock_timestamp())
             ON CONFLICT (paper_id, topic) DO UPDATE SET
-                value = EXCLUDED.value, note = EXCLUDED.note,
-                provisional = EXCLUDED.provisional, labelled_at = EXCLUDED.labelled_at,
-                -- A bulk-accepted label was never read; a Calibrate draw of it is the sample.
-                origin = CASE WHEN labels.provisional AND EXCLUDED.origin = 'sample'
-                              THEN EXCLUDED.origin ELSE labels.origin END
+                value = EXCLUDED.value, note = EXCLUDED.note, labelled_at = EXCLUDED.labelled_at
             RETURNING *
             """,
             (
@@ -34,7 +30,6 @@ async def set_label(unit: WriteUnit, label: Label) -> Label:
                 label.topic,
                 label.value.value,
                 label.origin.value,
-                label.provisional,
                 label.note,
             ),
         )
@@ -68,7 +63,7 @@ async def labels(unit: ReadUnit, topic: str | None = None) -> list[Label]:
 
 
 async def labelled(unit: ReadUnit, paper_id: str, topic: str) -> bool:
-    """Whether the paper has a label for the topic, provisional or not."""
+    """Whether the paper has a label for the topic."""
     row = await (
         await unit.execute(
             "SELECT 1 FROM labels WHERE paper_id = %s AND topic = %s", (paper_id, topic)

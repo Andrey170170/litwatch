@@ -36,15 +36,12 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
   - **today in the schedule's zone:** the Digest's defaults (today's Day, the last complete Week, History's pinned
     week) use the browser's date; the summary should carry today's date
     ([`notes/schedule-zone-today.md`](notes/schedule-zone-today.md)).
-- **Calibrate reads each topic's pool once** (review).
 - **Smaller read gaps:**
   - unclassified papers listed on Papers, not only counted (the API can return them);
   - code and weights links from the analysis, not only from a Deep card's URL;
   - which source set the owner's word on a topic, from the API instead of guessed by the UI (`whoseFit`);
   - typed response models for `/quality`, `/runs` and `/calibrate` (review, project 3).
 - **Intake stops rewriting unchanged rows** on its three-day overlap (review, project 8).
-- **Drops the owner marked** in [`notes/still-used.md`](notes/still-used.md): the live-label `provisional` handling
-  and the revision-1 fallback (`papers.py`, `row.get("revision") or 1`).
 - **Tests reach `store` through units** (A1 P6's review): many tests still seed and assert with the raw `conn`
   fixture, an autocommit connection, passed to store functions typed for units. They work, but a multi-row seed that
   fails part way commits its first rows, and `ty` does not see the calls because the fixture is untyped. Typing the

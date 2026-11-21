@@ -7,9 +7,8 @@ and never asks for it; Calibrate, on the Quality page, asks, because the owner o
 ## The owner's word
 
 The owner's word on a paper for a topic is a Fit, and it outranks every verdict for that topic. It comes from a label,
-a word-carrying reaction, or a reported miss, whichever is newest; an unsure label is no word, and a provisional label
-(the first v1's bulk-accepted positives) is older than any other. The effective Fit and effective grade follow from it
-([pipeline.md](pipeline.md), section 4). Clearing or changing a reaction takes back its word and nothing else.
+a word-carrying reaction, or a reported miss, whichever is newest; an unsure label is no word. The effective Fit and
+effective grade follow from it ([pipeline.md](pipeline.md), section 4). Clearing or changing a reaction takes back its word and nothing else.
 
 ## Reactions
 

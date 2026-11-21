@@ -16,7 +16,7 @@ async def _all(unit: ReadUnit, query: str, params: Any = ()) -> list[dict]:
 
 async def pool(unit: ReadUnit, topic: str, days: int) -> list[dict[str, Any]]:
     """The topic's current verdicts of the trailing `days`, made on the paper's current text and
-    with no firm label, each with its Fit and the paper's current Weight."""
+    with no label, each with its Fit and the paper's current Weight."""
     return await _all(
         unit,
         f"""
@@ -31,7 +31,7 @@ async def pool(unit: ReadUnit, topic: str, days: int) -> list[dict[str, Any]]:
         WHERE paper_revision = (SELECT revision FROM papers WHERE id = v.paper_id)
           AND recorded_at >= now() - make_interval(days => %s)
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = v.paper_id
-                          AND l.topic = v.topic AND NOT l.provisional)
+                          AND l.topic = v.topic)
         ORDER BY paper_id
         """,
         (topic, days),
@@ -59,7 +59,7 @@ async def new_session(
 
 
 async def waiting(unit: ReadUnit) -> list[dict[str, Any]]:
-    """The papers waiting for a word on a Focus topic, with no firm label there: last night's
+    """The papers waiting for a word on a Focus topic, with no label there: last night's
     splits that straddle the line, reported misses, and papers with a word-carrying thumb."""
     return await _all(
         unit,
@@ -78,7 +78,7 @@ async def waiting(unit: ReadUnit) -> list[dict[str, Any]]:
               (SELECT started_at FROM runs WHERE kind = 'nightly' ORDER BY id DESC LIMIT 1),
               now() - interval '36 hours')
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = s.paper_id
-                          AND l.topic = s.topic AND NOT l.provisional)
+                          AND l.topic = s.topic)
         UNION ALL
         -- a miss or a reaction keeps the verdict standing when it joins, as a draw does
         SELECT m.paper_id, m.topic, 'miss', (SELECT v.id FROM verdicts v
@@ -86,7 +86,7 @@ async def waiting(unit: ReadUnit) -> list[dict[str, Any]]:
             ORDER BY v.recorded_at DESC, v.id DESC LIMIT 1) FROM misses m
         JOIN topics t ON t.class = m.topic AND t.depth = 'focus'
         WHERE NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = m.paper_id
-                          AND l.topic = m.topic AND NOT l.provisional)
+                          AND l.topic = m.topic)
         UNION ALL
         SELECT r.paper_id, r.topic, 'reaction', (SELECT v.id FROM verdicts v
             WHERE v.paper_id = r.paper_id AND v.topic = r.topic
@@ -94,7 +94,7 @@ async def waiting(unit: ReadUnit) -> list[dict[str, Any]]:
         JOIN topics t ON t.class = r.topic AND t.depth = 'focus'
         WHERE r.reason IN ('wrong_topic', 'great_find')
           AND NOT EXISTS (SELECT 1 FROM labels l WHERE l.paper_id = r.paper_id
-                          AND l.topic = r.topic AND NOT l.provisional)
+                          AND l.topic = r.topic)
         """,
     )
 
@@ -146,11 +146,11 @@ async def answered(unit: WriteUnit, session_id: int, position: int, answer: str 
     )
 
 
-async def firm_labels(unit: ReadUnit, paper_id: str) -> dict[str, str]:
-    """The paper's firm labels' values, by topic."""
+async def label_values(unit: ReadUnit, paper_id: str) -> dict[str, str]:
+    """The paper's labels' values, by topic."""
     rows = await _all(
         unit,
-        "SELECT topic, value FROM labels WHERE paper_id = %s AND NOT provisional",
+        "SELECT topic, value FROM labels WHERE paper_id = %s",
         (paper_id,),
     )
     return {r["topic"]: r["value"] for r in rows}
@@ -221,7 +221,7 @@ async def session(unit: ReadUnit, session_id: int) -> dict[str, Any] | None:
         SELECT i.position, i.paper_id, i.topic, i.why, i.answer, i.answered_at, p.title,
                p.abstract, p.authors, p.published, {_VERDICT} AS verdict,
                (SELECT coalesce(jsonb_object_agg(l.topic, l.value), '{{}}') FROM labels l
-                WHERE l.paper_id = i.paper_id AND NOT l.provisional) AS fit,
+                WHERE l.paper_id = i.paper_id) AS fit,
                (SELECT row_to_json(a) FROM (SELECT value, note FROM appraisals
                 WHERE paper_id = i.paper_id ORDER BY at DESC, id DESC LIMIT 1) a) AS appraisal
         FROM calibration_items i JOIN papers p ON p.id = i.paper_id

@@ -2140,11 +2140,6 @@ export interface components {
             value: components["schemas"]["LabelValue"];
             /** Origin */
             origin: string;
-            /**
-             * Provisional
-             * @default false
-             */
-            provisional: boolean;
         };
         /**
          * LabelValue

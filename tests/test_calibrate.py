@@ -13,6 +13,7 @@ from litwatch.core import (
     Reaction,
     ReactionReason,
     ReactionValue,
+    TaxonomyClass,
     Verdict,
 )
 from litwatch.feedback import calibrate
@@ -307,3 +308,54 @@ async def test_the_sessions_list_counts_answers_that_differ_from_the_verdict(db)
     async with AppClient(app, base_url="http://t", headers={"authorization": "Bearer t"}) as c:
         (row,) = (await c.get("/api/settings/calibrate")).json()
     assert (row["papers"], row["answered"], row["differ"]) == (4, 4, 3)
+
+
+# A second Focus topic beside FAITH, so a draw crosses topics and a paper both hold is
+# drawn once.
+PROBES = FAITH.model_copy(update={"slug": "probes", "monogram": "PR", "keywords": []})
+SHARED = [paper(f"2610.0030{i}") for i in range(8)]
+
+
+async def test_a_seeded_draw_reads_each_pool_once_and_draws_as_it_did(conn, monkeypatch):
+    tree = TREE.model_copy(
+        update={
+            "classes": [
+                *TREE.classes,
+                TaxonomyClass(
+                    slug="probes",
+                    name="Probes",
+                    description=PROBES.subject,
+                    parent="interpretability",
+                ),
+            ],
+            "topics": [*TREE.topics, PROBES],
+        }
+    )
+    await settling.save_tree(conn, tree)
+    await papers_store.upsert(conn, SHARED)
+    fits = ["central", "related", "adjacent", "none"]
+    for i, p in enumerate(SHARED):
+        for topic, fit in [(FAITH.slug, fits[i % 4]), (PROBES.slug, fits[(i + 1) % 4])]:
+            await verdicts.add(conn, verdict(p.id, Fit(fit)).model_copy(update={"topic": topic}))
+        await settling.settle(conn, p.id, cause=Cause.VERDICT)
+    reads = []
+    pool = calibrate.store.pool
+
+    async def counted(unit, topic, days):
+        reads.append(topic)
+        return await pool(unit, topic, days)
+
+    monkeypatch.setattr(calibrate.store, "pool", counted)
+    drawn = await items(conn, await calibrate.draw(Bridge(conn), seed=11, size=8))
+    assert sorted(reads) == sorted([FAITH.slug, PROBES.slug])
+    # The draw this seed made before the pool was read once per topic.
+    assert [(i["paper_id"], i["topic"], i["why"]) for i in drawn] == [
+        ("2610.00305", FAITH.slug, "above"),
+        ("2610.00304", FAITH.slug, "above"),
+        ("2610.00307", FAITH.slug, "below"),
+        ("2610.00303", FAITH.slug, "below"),
+        # of the papers above for probes, 2610.00303, 04 and 07 are drawn already
+        ("2610.00300", PROBES.slug, "above"),
+        ("2610.00301", PROBES.slug, "below"),
+        ("2610.00302", PROBES.slug, "below"),
+    ]
