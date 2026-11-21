@@ -374,8 +374,9 @@ async def test_a_nights_cost_takes_in_the_runs_outside_jobs_until_the_next_night
         (job,),
     )
     nights = (await client.get("/api/settings/runs")).json()
-    costs = [(float(n["cost"]), float(n["after_cost"])) for n in nights]
-    assert costs == [(5.5, 0.5), (5.0, 3.0)]
+    # Decimal strings at the column's scale, as the API has always answered them.
+    costs = [(n["cost"], n["after_cost"]) for n in nights]
+    assert costs == [("5.5000", "0.5000"), ("5.0000", "3.0000")]
 
 
 async def test_a_split_on_an_older_text_no_longer_waits(client, conn):

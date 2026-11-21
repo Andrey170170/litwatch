@@ -183,7 +183,7 @@ class GradeCounts(BaseModel):
 
 type Sort = Literal["rarest", "newest", "added", "title", "best"]
 type GradeLevel = Literal["must_read", "relevant", "adjacent", "none", "ungraded"]
-# A rarity, or `unrated`: not classified yet (Papers; a topic page gives each paper a level).
+# A rarity, or `unrated`: no rarity, in the list asked for (on Papers, not classified yet).
 type RarityLevel = Literal["legendary", "epic", "rare", "uncommon", "common", "unrated"]
 
 

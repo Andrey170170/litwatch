@@ -82,8 +82,8 @@ type Sort = Literal["rarest", "newest", "added", "title", "best"]
 type GradeLevel = Literal["must_read", "relevant", "adjacent", "none", "ungraded"]
 UNGRADED = "ungraded"
 GRADE_LEVELS: tuple[str, ...] = ("must_read", "relevant", "adjacent", "none", UNGRADED)
-# A rarity, or `unrated`: no rarity yet, a paper not classified (on Papers; a topic page gives
-# every paper of its own a level).
+# A rarity, or `unrated`: no rarity, in the list asked for (on Papers, a paper not classified
+# yet).
 type RarityLevel = Literal["legendary", "epic", "rare", "uncommon", "common", "unrated"]
 UNRATED = "unrated"
 
