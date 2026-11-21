@@ -38,7 +38,7 @@ PRECISION_DAYS = 90
 
 async def _sides(unit: ReadUnit, topic: str) -> dict[bool, list[dict[str, Any]]]:
     """The topic's current verdicts of the trailing days, made on the paper's current text and
-    with no firm label, read once and split by side of the line (True: relevant or above), each in
+    with no label, read once and split by side of the line (True: relevant or above), each in
     the pool's order. The side is the pipeline's grade, from the verdict's Fit and the current
     Weight, whatever the owner said."""
     sides: dict[bool, list[dict[str, Any]]] = {True: [], False: []}
@@ -108,11 +108,11 @@ async def answer(
         focus = {t.slug for t in await taxonomy_store.topics(unit) if t.depth == Depth.FOCUS}
         if unknown := sorted(set(given.fit) - focus):
             raise ValueError(f"not Focus topics: {', '.join(unknown)}")
-        # A firm label already saying this Fit is not written again: writing renews its time,
+        # A label already saying this Fit is not written again: writing renews its time,
         # which would put it above a reaction given since (the newest word wins).
-        firm = await store.firm_labels(unit, item["paper_id"])
+        held = await store.label_values(unit, item["paper_id"])
         for topic, fit in given.fit.items():
-            if firm.get(topic) == fit.value:
+            if held.get(topic) == fit.value:
                 continue
             # The drawn topic's answer is the sample; any other is the owner's own choice.
             drawn = topic == item["topic"] and item["why"] in ("above", "below")

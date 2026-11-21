@@ -592,7 +592,7 @@ def _rail(
         state = None
         if slug in failed and failed[slug]["failed_runs"] >= FAILED_RUNS:
             state = "ungraded"
-        elif v and _asks_word(v) and not (label and not label["provisional"]):
+        elif v and _asks_word(v) and not label:
             state = "escalated" if v["escalated"] else "split" if v["split"] else "one_lab"
         elif slug in failed:
             state = "grading_again"

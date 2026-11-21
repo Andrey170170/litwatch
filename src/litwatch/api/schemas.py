@@ -346,7 +346,6 @@ class CurrentVerdict(BaseModel):
 class LabelState(BaseModel):
     value: LabelValue
     origin: str
-    provisional: bool = False
 
 
 class ReactionState(BaseModel):

@@ -172,3 +172,32 @@ async def test_papers_already_withdrawn_are_dropped_from_their_stored_histories(
         ("2610.00002", False, False),
         ("2610.00003", False, False),
     ]
+
+
+# -- 0045: no provisional labels -------------------------------------------------------------------
+
+PROVISIONAL = 45
+
+
+async def test_a_provisional_label_left_stops_its_column_being_dropped(conn, monkeypatch):
+    """Dropping the column would make a provisional label firm, so the migration refuses it;
+    without one, the column goes."""
+    for table in await tables(conn):
+        await conn.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
+    every = db._migrations()
+    monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] < PROVISIONAL])
+    await store.migrate(conn)
+    await conn.execute("INSERT INTO papers (id, title, abstract) VALUES ('2610.00001', 't', 'a')")
+    await conn.execute(
+        "INSERT INTO labels (paper_id, topic, value, origin, provisional) "
+        "VALUES ('2610.00001', 't', 'central', 'reader', true)"
+    )
+    monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] <= PROVISIONAL])
+    with pytest.raises(psycopg.errors.RaiseException, match="provisional labels"):
+        await store.migrate(conn)
+    await conn.execute("UPDATE labels SET provisional = false")
+    assert await store.migrate(conn) == ["0045_labels_not_provisional.sql"]
+    column = "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+    column += "AND table_name = 'labels' AND column_name = 'provisional'"
+    assert await (await conn.execute(column)).fetchone() is None
+    assert len(await (await conn.execute("SELECT * FROM labels")).fetchall()) == 1

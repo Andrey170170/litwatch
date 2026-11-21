@@ -32,9 +32,8 @@ def owners_word(
     label: Label | None, reaction: Reaction | None, verdict: Fit | None, *, focus: bool
 ) -> Fit | None:
     """The owner's word on a paper for a topic, a Fit (feedback.md): the newer of the label and
-    a word-carrying reaction. A reported miss is a label. An unsure label is no word, and a
-    provisional label, accepted in bulk, is older than any reaction. A reaction speaks on a
-    Focus topic only: wrong topic is none; great find is the verdict's Fit if central or
+    a word-carrying reaction. A reported miss is a label. An unsure label is no word. A reaction
+    speaks on a Focus topic only: wrong topic is none; great find is the verdict's Fit if central or
     related, else related. A time not yet stored counts as now."""
     if label is not None and label.value == LabelValue.UNSURE:
         label = None
@@ -47,7 +46,7 @@ def owners_word(
         heard = Fit.NONE
     else:
         heard = verdict if verdict in (Fit.CENTRAL, Fit.RELATED) else Fit.RELATED
-    if label is None or label.provisional:
+    if label is None:
         return heard
     if (label.labelled_at or _NOW) > (reaction.reacted_at or _NOW):
         return labelled
