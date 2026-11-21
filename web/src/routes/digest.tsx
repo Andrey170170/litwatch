@@ -17,9 +17,10 @@ import { RowDate } from "@/components/Rows";
 import { Sheet } from "@/components/Sheet";
 import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
+import { useToday } from "@/components/Summary";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
-import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, tonight, unsettled, updatedLine, weekRange, type Card, type DigestPaper, type Mark, type Section, type TodayRun } from "@/lib/digests";
+import { addDays, calendarMonths, dayLabel, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, tonight, unsettled, updatedLine, weekRange, type Card, type DigestPaper, type Mark, type Section, type TodayRun } from "@/lib/digests";
 import { openedFrom } from "@/lib/listContext";
 import { useSteps } from "@/lib/steps";
 import { rowDate } from "@/lib/format";
@@ -27,7 +28,6 @@ import { setShelfOpen, shelfOpen } from "@/lib/remember";
 import { rc } from "@/lib/rarity";
 import { Failed, Load } from "./settings/parts";
 
-const today = () => isoDay(new Date());
 const stop = (e: MouseEvent) => e.stopPropagation();
 
 // -- the views' chrome ---------------------------------------------------------------------------------------------
@@ -241,13 +241,13 @@ function Tonight({ run }: { run: TodayRun }) {
 
 export function DigestPage() {
   const search = useSearch({ from: "/" });
-  const now = today();
+  const now = useToday();
   const day = search.day ?? now;
   // Today, the Day is read again every minute until its run is done, so the panel follows the run.
   const q = useQuery({ ...dayQuery(day), refetchInterval: (query) => (unsettled(query.state.data) ? 60_000 : false) });
   const desktop = useDesktop();
-  // Stepping skips days without digests, but today is always a stop: the tab opens there, so › always leads back.
-  // (A browser behind the server's zone can be shown a later day as the next: today still comes first.)
+  // Stepping skips days without digests, but today (the schedule's) is always a stop: the tab opens there, so ›
+  // always leads back.
   const next = q.data && (day < now && (!q.data.next || q.data.next > now) ? now : q.data.next);
   useStepTo("/", q.data?.previous, next);
   const page = useOnPage();
@@ -284,7 +284,7 @@ export function DigestPage() {
 export function WeekPage() {
   const search = useSearch({ from: "/week" });
   // Without a week: last week's, written this Monday.
-  const last = addDays(mondayOf(today()), -7);
+  const last = addDays(mondayOf(useToday()), -7);
   const week = search.week ?? last;
   const q = useQuery(weekQuery(week));
   const desktop = useDesktop();
@@ -352,7 +352,7 @@ function Group({ to, label, sub, pin }: { to?: LinkProps; label: string; sub?: s
 }
 
 function HistoryList({ pages }: { pages: Schemas["History"][] }) {
-  return listRows(pages, today()).map((r) => {
+  return listRows(pages, useToday()).map((r) => {
     switch (r.kind) {
       case "pin":
         return (
@@ -401,7 +401,7 @@ function Bar({ m, text }: { m: Mark; text: boolean }) {
 function Calendar({ pages }: { pages: Schemas["History"][] }) {
   const desktop = useDesktop();
   const navigate = useNavigate();
-  const now = today();
+  const now = useToday();
   // The topics' fixed order, from the summary the shell reads; a day's bars and the W cell's columns keep a slot per
   // topic, empty where it has no digest, so a topic is always in the same place (digests.md).
   const topics = useQuery(summaryQuery).data?.topics ?? [];
@@ -465,7 +465,7 @@ export function HistoryPage() {
   const search = useSearch({ from: "/history" });
   const cal = search.view === "cal";
   const desktop = useDesktop();
-  const q = useInfiniteQuery(historyQuery(today(), SPAN));
+  const q = useInfiniteQuery(historyQuery(useToday(), SPAN));
   const pages = q.data?.pages ?? [];
   const start = pages[0]?.start;
   return (

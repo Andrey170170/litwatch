@@ -74,12 +74,45 @@ describe("the Digest", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("stops on today even when a browser behind the server's zone is shown a later day as the next", async () => {
+  // The browser's clock says Sunday evening; the schedule's zone, ahead of it, is already on Monday.
+  const ahead = { ...summary, today: "2026-10-19" };
+
+  it("opens on today in the schedule's zone, not the browser's, and always stops on it", async () => {
     vi.setSystemTime(new Date(2026, 9, 18, 20));
     viewport(true);
-    scriptFetch({ "GET /api/summary": summary, "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", next: "2026-10-19" } });
-    renderApp("/?day=2026-10-16");
-    expect(await screen.findByRole("link", { name: "Newer" })).toHaveAttribute("href", "/?day=2026-10-18");
+    scriptFetch({
+      "GET /api/summary": ahead,
+      "GET /api/digests/days/2026-10-19": { ...day, day: "2026-10-19", previous: "2026-10-16" },
+      "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", next: null },
+    });
+    renderApp("/");
+    expect(await screen.findByText("Mon 19 Oct")).toBeInTheDocument();
+    expect(screen.getByText("Today")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "Older" }));
+    // Nothing after the 16th has digests, as the server sees it: › still leads back to the schedule's today.
+    await waitFor(() => expect(screen.getByRole("link", { name: "Newer" })).toHaveAttribute("href", "/?day=2026-10-19"));
+  });
+
+  it("takes Week's last week and History's pinned week and today from the schedule's today", async () => {
+    vi.setSystemTime(new Date(2026, 9, 18, 20));
+    viewport(true);
+    const mark = (id: number, d: string, period = "day") => ({ id, topic: focus, period, day: d, state: "written", counts, best_rarity: "rare" });
+    const days = ["2026-10-19", "2026-10-18", "2026-10-17", "2026-10-16"].map((d, i) => ({ day: d, released: i === 0 || i === 3, marks: i === 0 || i === 3 ? [mark(i, d)] : [] }));
+    const calls = scriptFetch({
+      "GET /api/summary": ahead,
+      "GET /api/digests/weeks/2026-10-12": { monday: "2026-10-12", digests: [], previous: "2026-10-05", next: null },
+      "GET /api/digests": { days, weeks: [{ monday: "2026-10-12", marks: [mark(50, "2026-10-12", "week")] }], start: "2026-10-16" },
+    });
+    renderApp("/week");
+    expect(await screen.findByText("Last week")).toBeInTheDocument();
+    expect(screen.getByText("12–18 Oct")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "History" }));
+    expect(await screen.findByText("This week")).toBeInTheDocument();
+    expect(screen.getByText("weekly digests · 12–18 Oct")).toBeInTheDocument();
+    expect(screen.getByText("today").closest(".grp")).toHaveTextContent("Mon 19 Oct");
+    expect(calls.filter((c) => c.url.startsWith("/api/digests?")).map((c) => new URLSearchParams(c.url.split("?")[1]).get("until"))).toContain("2026-10-19");
+    await userEvent.click(screen.getByRole("link", { name: "Calendar" }));
+    await waitFor(() => expect(document.querySelector(".mday.today .mnum")).toHaveTextContent("19"));
   });
 
   it("opens a digest over the day on the desktop, its papers by role, and closes it back to the day", async () => {

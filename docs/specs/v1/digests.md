@@ -169,7 +169,7 @@ The detail-level ladder for digests, and the order rules the mechanics must supp
 3. **A digest**: its full text, its picks and listed papers at their Mark and Gist, then its updated papers, folded.
 4. **A paper**: the paper page, from its Brief down.
 
-The tab opens on today. Topics keep **one fixed order** everywhere (Focus first, then Area, then Field, each in the
-owner's order), and a topic with nothing new keeps its slot, so a topic is always in the same place. Weekly digests sit
-in the group of the Monday they were written, marked as a week, and the current week's are also pinned above History
-until the next Monday.
+The tab opens on today, in the configured timezone. Topics keep **one fixed order** everywhere (Focus first, then
+Area, then Field, each in the owner's order), and a topic with nothing new keeps its slot, so a topic is always in the
+same place. Weekly digests sit in the group of the Monday they were written, marked as a week, and the current week's
+are also pinned above History until the next Monday.

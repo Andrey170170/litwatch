@@ -14,6 +14,7 @@ import pytest
 
 from litwatch import digests, fulltext
 from litwatch.api import create_app
+from litwatch.api import summary as summary_api
 from litwatch.api.digests import today_run
 from litwatch.config import Config, Schedule
 from litwatch.core import Label, LabelValue, Status
@@ -1489,6 +1490,51 @@ def client(conn, w: Writer, config: Config | None = None) -> httpx.AsyncClient:
         base_url="http://test",
         headers={"Authorization": f"Bearer {TOKEN}"},
     )
+
+
+async def test_the_summary_carries_today_in_the_schedules_zone_and_its_digests_counts(
+    db, monkeypatch
+):
+    """Wednesday 02:00 UTC is still Tuesday in New York: the summary's today is the schedule's,
+    and beside each topic the new papers of that day's digest, where it was written; none where
+    it found nothing new, and none for a topic with no daily digest."""
+    w = Writer()
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    found = await (
+        await db.execute(
+            "SELECT topic, state FROM digests WHERE period = 'day' AND day = %s", (TUE,)
+        )
+    ).fetchall()
+    assert {r["topic"]: r["state"] for r in found} == {
+        FAITH.slug: "written",
+        INTERP.slug: "nothing_new",
+    }
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            at = datetime(2026, 10, 7, 2, 0, tzinfo=UTC)
+            return at.astimezone(tz) if tz else at
+
+    monkeypatch.setattr(summary_api, "datetime", Clock)
+
+    async def summary(zone: str) -> dict:
+        config = Config.model_validate({"schedule": {"timezone": zone}})
+        async with client(db, w, config) as http:
+            return (await http.get("/api/summary")).json()
+
+    there = await summary("America/New_York")
+    assert there["today"] == TUE.isoformat()
+    assert {t["slug"]: t["count"] for t in there["topics"]} == {
+        FAITH.slug: 1,
+        INTERP.slug: None,
+        AGENTS.slug: None,
+    }
+    utc = await summary("UTC")
+    assert utc["today"] == WED.isoformat()
+    assert [t["count"] for t in utc["topics"]] == [None, None, None]
 
 
 async def test_the_digest_tab_reads_days_weeks_history_and_a_digest(db):

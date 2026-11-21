@@ -411,6 +411,46 @@ async def test_a_split_on_an_older_text_no_longer_waits(client, conn):
     assert (await client.get("/api/summary")).json()["settings"]["waiting"] == 0
 
 
+async def test_the_summarys_hints_count_what_the_settings_pages_list(client, conn):
+    """The summary counts with narrow reads of its own: the splits Needs you lists that the
+    owner has not labelled, and the last Calibrate session Calibrate lists."""
+    await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
+    opinions = {
+        "judge": Opinion(fit=Fit.CENTRAL, reason="yes", model="a"),
+        "check": Opinion(fit=Fit.NONE, reason="no", model="b"),
+    }
+    for p in (P, Q):
+        split = Verdict(
+            paper_id=p.id,
+            topic=FAITH.slug,
+            topic_version="v",
+            fit=Fit.CENTRAL,
+            reason="yes",
+            opinions=opinions,
+            split=True,
+        )
+        await verdicts.add(conn, split)
+    await conn.execute(
+        "INSERT INTO labels (paper_id, topic, value, origin) VALUES (%s, %s, 'central', 'owner')",
+        (P.id, FAITH.slug),
+    )
+    for seed in (1, 2):
+        assert (
+            await client.post("/api/settings/calibrate", json={"seed": seed})
+        ).status_code == 200
+    splits = (await client.get("/api/settings/quality")).json()["night"]["splits"]
+    assert [
+        (r["paper_id"], r["label"] is None) for r in sorted(splits, key=lambda r: r["paper_id"])
+    ] == [
+        (P.id, False),
+        (Q.id, True),
+    ]
+    sessions = (await client.get("/api/settings/calibrate")).json()
+    hints = (await client.get("/api/summary")).json()["settings"]
+    assert hints["waiting"] == 1
+    assert hints["last_session"] == sessions[0]["drawn_at"]
+
+
 async def test_the_summary_carries_the_status_line_the_badges_and_the_hints(client, conn):
     """One read for the shell: the run status, the shown topics in the fixed order as badges, and
     the Settings sidebar's counts, which follow the misses reported and the digests that failed."""

@@ -4616,6 +4616,50 @@
         "title": "Fit",
         "description": "How close a paper is to one topic, most inclusive first."
       },
+      "FollowedTopic": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "depth": {
+            "$ref": "#/components/schemas/Depth"
+          },
+          "monogram": {
+            "type": "string",
+            "title": "Monogram"
+          },
+          "colour": {
+            "type": "string",
+            "title": "Colour"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "depth",
+          "monogram",
+          "colour"
+        ],
+        "title": "FollowedTopic",
+        "description": "A shown topic as the sidebar lists it: its badge, and `count`, the new papers its daily\ndigest of today covered; null where it has none written today (none yet, nothing new, or\nfailed)."
+      },
       "Gist": {
         "properties": {
           "text": {
@@ -7710,9 +7754,14 @@
           "status": {
             "$ref": "#/components/schemas/RunStatus"
           },
+          "today": {
+            "type": "string",
+            "format": "date",
+            "title": "Today"
+          },
           "topics": {
             "items": {
-              "$ref": "#/components/schemas/Badge"
+              "$ref": "#/components/schemas/FollowedTopic"
             },
             "type": "array",
             "title": "Topics"
@@ -7724,11 +7773,12 @@
         "type": "object",
         "required": [
           "status",
+          "today",
           "topics",
           "settings"
         ],
         "title": "Summary",
-        "description": "What the shell shows on every page (the status line, the sidebar's topics, the Settings\nhints), read by one poll and never through a page's own reads: counts only."
+        "description": "What the shell shows on every page (the status line, the sidebar's topics, the Settings\nhints), read by one poll and never through a page's own reads: counts only. `today` is\ntoday's date in the schedule's zone, the day the app takes as today."
       },
       "Taxonomy": {
         "properties": {
