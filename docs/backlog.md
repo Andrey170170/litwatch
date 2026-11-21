@@ -11,14 +11,15 @@ it are merged. A note leaves `docs/notes/` once every item it holds is merged.
 
 ## Now
 
-The rework's A1, below.
+The rework's A2, below, once A1's first full night on all its stages is checked (its plan's V7).
 
 ## The rework
 
 The backend brought to the roles and gates of [`specs/architecture.md`](specs/architecture.md), one milestone at a
 time. A0, the role checks and the baseline, was merged on 2026-11-10
-([`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md)); A1 is next. Each
-milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
+([`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md)). A1, the Database gate, was built and deployed by
+2026-11-21 ([`plans/a1-database-gate.md`](plans/a1-database-gate.md)); A2 is next. Each milestone's shape goes in
+`specs/architecture/`, its plan in `plans/`.
 
 ### A1. Database gate
 
@@ -26,7 +27,7 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
 [`plans/a1-database-gate.md`](plans/a1-database-gate.md) (P1–P7). Input: the measurement of where work waits
 ([`notes/where-work-waits.md`](notes/where-work-waits.md), 2026-11-09/10).
 
-All built.
+All built, and deployed on 2026-11-21.
 
 ### A2. Work gate
 

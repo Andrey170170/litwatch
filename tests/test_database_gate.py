@@ -658,6 +658,17 @@ async def alive(conn: Session, run_id: int) -> bool:
     return row["alive"]
 
 
+async def ended(conn: Session, run_id: int, timeout: float = 5.0) -> bool:
+    """Whether the run stops counting as alive within `timeout`. A closed or terminated session's
+    backend leaves `pg_stat_activity` a moment after the client sees it gone."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while await alive(conn, run_id):
+        if asyncio.get_running_loop().time() > deadline:
+            return False
+        await asyncio.sleep(0.05)
+    return True
+
+
 async def test_a_run_stays_alive_while_its_pool_connections_are_replaced(conn: Session):
     async with DatabaseGate(conn.test_dsn, conn.test_schema, max_size=2) as db:
         me = await db.identity()
@@ -668,7 +679,7 @@ async def test_a_run_stays_alive_while_its_pool_connections_are_replaced(conn: S
         assert await alive(conn, run_id)
         assert await db.identity() == me
     # The gate closed, its presence with it: the run is over.
-    assert not await alive(conn, run_id)
+    assert await ended(conn, run_id)
 
 
 async def test_a_presence_session_that_ended_is_opened_again_with_a_new_identity(
@@ -685,7 +696,7 @@ async def test_a_presence_session_that_ended_is_opened_again_with_a_new_identity
         assert [r.getMessage() for r in logged(caplog)] == [
             f"the presence session (backend {me.pid}) ended; opening another"
         ]
-        assert not await alive(conn, run_id)  # what was claimed in the old one's name is over
+        assert await ended(conn, run_id)  # what was claimed in the old one's name is over
 
 
 async def test_a_bridged_gates_presence_is_its_connection(conn: Session):
