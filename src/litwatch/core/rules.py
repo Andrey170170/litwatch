@@ -12,7 +12,7 @@ from litwatch.core.types import (
     Grade,
     Hand,
     Label,
-    LabelOrigin,
+    LabelSetter,
     LabelValue,
     Paper,
     Reaction,
@@ -32,7 +32,7 @@ _NOW = datetime.max.replace(tzinfo=UTC)
 
 class WordSource(StrEnum):
     """What set the owner's word on a topic: a label, a word-carrying thumb, or a reported miss
-    (the label the report made, origin `miss`, which keeps that origin when changed)."""
+    (a label the report wrote last, `set_by` miss)."""
 
     LABEL = "label"
     REACTION = "reaction"
@@ -60,7 +60,7 @@ def whose_word(
         reaction = None
     labelled = None
     if label is not None:
-        source = WordSource.MISS if label.origin == LabelOrigin.MISS else WordSource.LABEL
+        source = WordSource.MISS if label.set_by == LabelSetter.MISS else WordSource.LABEL
         labelled = (Fit(label.value), source)
     if reaction is None:
         return labelled

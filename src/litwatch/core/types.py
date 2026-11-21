@@ -98,6 +98,14 @@ class LabelOrigin(StrEnum):
     MISS = "miss"
 
 
+class LabelSetter(StrEnum):
+    """Who last wrote a label's value: the owner's own label (a paper page, Calibrate), or a
+    miss report. Unlike the origin, it follows each write."""
+
+    READER = "reader"
+    MISS = "miss"
+
+
 class Label(BaseModel):
     """The owner's answer on a paper's Fit for one topic. It outranks any verdict."""
 
@@ -105,6 +113,7 @@ class Label(BaseModel):
     topic: str
     value: LabelValue
     origin: LabelOrigin
+    set_by: LabelSetter = LabelSetter.READER
     note: str | None = None
     labelled_at: datetime | None = None
 

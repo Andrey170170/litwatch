@@ -3855,7 +3855,7 @@ export interface components {
         /**
          * WordSource
          * @description What set the owner's word on a topic: a label, a word-carrying thumb, or a reported miss
-         *     (the label the report made, origin `miss`, which keeps that origin when changed).
+         *     (a label the report wrote last, `set_by` miss).
          * @enum {string}
          */
         WordSource: "label" | "reaction" | "miss";

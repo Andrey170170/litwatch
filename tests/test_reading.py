@@ -553,6 +553,27 @@ async def test_the_rail_says_what_set_the_owners_word(client, conn):
     assert (said["word"], said["word_from"]) == ("central", "label")
 
 
+async def test_the_rail_credits_the_owners_word_to_whoever_wrote_the_label_last(client, conn):
+    async def faith(p):
+        page = (await client.get(f"/api/papers/{p.id}")).json()
+        return next(t for t in page["topics"] if t["topic"]["slug"] == FAITH.slug)
+
+    # A miss, then a label over it: the label is the owner's, though its origin stays the miss.
+    await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug, "fit": "related"})
+    await client.put(f"/api/labels/{FAITH.slug}/{Q.id}", json={"value": "none"})
+    said = await faith(Q)
+    assert (said["word"], said["word_from"], said["label"]["origin"]) == ("none", "label", "miss")
+    # A label, then a first miss over it: the miss's, though the origin stays the reader's.
+    await classify(conn, P, FAITH.slug)
+    await grade(conn, P, "adjacent")
+    await client.put(f"/api/labels/{FAITH.slug}/{P.id}", json={"value": "adjacent"})
+    await client.post("/api/misses", json={"paper_id": P.id, "topic": FAITH.slug})
+    said = await faith(P)
+    assert (said["word"], said["word_from"], said["label"]["origin"]) == (
+        "central", "miss", "reader",
+    )  # fmt: skip
+
+
 # -- carried from the first v1 ---------------------------------------------------------------------
 
 

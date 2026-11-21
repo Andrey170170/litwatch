@@ -7,7 +7,7 @@ says), and the owner's newest Save (feedback.md, misses).
 
 from __future__ import annotations
 
-from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelValue, Paper
+from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelSetter, LabelValue, Paper
 from litwatch.core.classification import Source
 from litwatch.feedback import word
 from litwatch.gates.database import DatabaseGate, WriteUnit
@@ -70,7 +70,11 @@ async def report(
     if fit not in (Fit.CENTRAL, Fit.RELATED):
         raise ValueError("a miss is central or related")
     word_on_it = Label(
-        paper_id=paper_id, topic=topic, value=LabelValue(fit.value), origin=LabelOrigin.MISS
+        paper_id=paper_id,
+        topic=topic,
+        value=LabelValue(fit.value),
+        origin=LabelOrigin.MISS,
+        set_by=LabelSetter.MISS,
     )
     # Under the paper's lock, looking for a standing label and giving the word again are one
     # step against any label being written meanwhile.

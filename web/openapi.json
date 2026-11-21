@@ -9974,7 +9974,7 @@
           "miss"
         ],
         "title": "WordSource",
-        "description": "What set the owner's word on a topic: a label, a word-carrying thumb, or a reported miss\n(the label the report made, origin `miss`, which keeps that origin when changed)."
+        "description": "What set the owner's word on a topic: a label, a word-carrying thumb, or a reported miss\n(a label the report wrote last, `set_by` miss)."
       }
     }
   }

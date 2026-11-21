@@ -585,7 +585,8 @@ async def paper(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
         "one_lab, "
         "paper_revision, recorded_at FROM verdicts WHERE paper_id = %(p)s "
         "ORDER BY topic, paper_revision DESC, recorded_at DESC, id DESC",
-        "labels": "SELECT topic, value, origin, labelled_at FROM labels WHERE paper_id = %(p)s",
+        "labels": "SELECT topic, value, origin, set_by, labelled_at FROM labels "
+        "WHERE paper_id = %(p)s",
         "reactions": "SELECT topic, value, reason, reacted_at FROM reactions "
         "WHERE paper_id = %(p)s",
         "misses": "SELECT topic, reported_at FROM misses WHERE paper_id = %(p)s",

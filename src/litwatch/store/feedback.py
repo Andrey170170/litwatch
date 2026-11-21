@@ -14,15 +14,17 @@ def _label(row: dict[str, Any]) -> Label:
 
 async def set_label(unit: WriteUnit, label: Label) -> Label:
     """Store the owner's label. A paper keeps the origin it was first labelled under, since
-    that says how it was chosen; the value and note are replaced. The time is the
-    wall clock, as a reaction's is, so the newer word wins even inside one transaction."""
+    that says how it was chosen; the value, note and who set them (`set_by`) are replaced. The
+    time is the wall clock, as a reaction's is, so the newer word wins even inside one
+    transaction."""
     row = await (
         await unit.execute(
             """
-            INSERT INTO labels (paper_id, topic, value, origin, note, labelled_at)
-            VALUES (%s, %s, %s, %s, %s, clock_timestamp())
+            INSERT INTO labels (paper_id, topic, value, origin, set_by, note, labelled_at)
+            VALUES (%s, %s, %s, %s, %s, %s, clock_timestamp())
             ON CONFLICT (paper_id, topic) DO UPDATE SET
-                value = EXCLUDED.value, note = EXCLUDED.note, labelled_at = EXCLUDED.labelled_at
+                value = EXCLUDED.value, set_by = EXCLUDED.set_by, note = EXCLUDED.note,
+                labelled_at = EXCLUDED.labelled_at
             RETURNING *
             """,
             (
@@ -30,6 +32,7 @@ async def set_label(unit: WriteUnit, label: Label) -> Label:
                 label.topic,
                 label.value.value,
                 label.origin.value,
+                label.set_by.value,
                 label.note,
             ),
         )
