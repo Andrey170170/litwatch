@@ -33,7 +33,8 @@ class IntakeResult:
 
     @property
     def unchanged(self) -> int:
-        """The papers read that were neither new nor changed: most of a night's overlap."""
+        """The papers read that were neither new nor changed: most of a night's overlap. Only for
+        arXiv intake, where each paper is written once; the archive's pages can write one twice."""
         return self.fetched - self.inserted - self.updated
 
 

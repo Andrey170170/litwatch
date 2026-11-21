@@ -186,7 +186,7 @@ def intake_archive(
         raise SystemExit(f"archive: {exc}") from exc
     console.print(
         f"intake from the archive, {first} to {last}: {result.fetched} papers, "
-        f"{result.inserted} new, {result.updated} updated, {result.unchanged} unchanged"
+        f"{result.inserted} new, {result.updated} updated"
         + (f", {len(result.details['skipped'])} without text" if result.details["skipped"] else "")
     )
 
