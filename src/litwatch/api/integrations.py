@@ -128,6 +128,14 @@ async def cards(request: Request, c: ReadUnit) -> list[s.IntegrationCard]:
     return shown
 
 
+async def failing(request: Request, c: ReadUnit) -> list[str]:
+    """The loaded integrations whose card shows them failing (`cards`: stuck on an event or on
+    their setup), in the cards' order, without the cards' other reads: for the summary."""
+    reacting = [i.name for i in events.reacting(loaded(request))]
+    stuck = await outbox.failing(c, reacting)
+    return [name for name in reacting if name in stuck]
+
+
 def _known(request: Request, name: str) -> None:
     if name not in {i.name for i in loaded(request)}:
         raise HTTPException(status_code=404, detail="no such integration is loaded")

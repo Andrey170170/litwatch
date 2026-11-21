@@ -17,9 +17,10 @@ import { RowDate } from "@/components/Rows";
 import { Sheet } from "@/components/Sheet";
 import { Sentinel } from "@/components/Shelves";
 import { Back } from "@/components/Shell";
+import { useToday } from "@/components/Summary";
 import { Fill } from "@/components/slots";
 import { useDesktop } from "@/hooks/useDesktop";
-import { addDays, calendarMonths, dayLabel, isoDay, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, tonight, unsettled, updatedLine, weekRange, type Card, type DigestPaper, type Mark, type Section, type TodayRun } from "@/lib/digests";
+import { addDays, calendarMonths, dayLabel, listRows, markLine, markShort, mondayOf, monthLabel, periodLine, sections, slotted, SPAN, tonight, unsettled, updatedLine, weekRange, type Card, type DigestPaper, type Mark, type Section, type TodayRun } from "@/lib/digests";
 import { openedFrom } from "@/lib/listContext";
 import { useSteps } from "@/lib/steps";
 import { rowDate } from "@/lib/format";
@@ -27,7 +28,6 @@ import { setShelfOpen, shelfOpen } from "@/lib/remember";
 import { rc } from "@/lib/rarity";
 import { Failed, Load } from "./settings/parts";
 
-const today = () => isoDay(new Date());
 const stop = (e: MouseEvent) => e.stopPropagation();
 
 // -- the views' chrome ---------------------------------------------------------------------------------------------
@@ -239,16 +239,43 @@ function Tonight({ run }: { run: TodayRun }) {
   );
 }
 
+/** A view in place until the summary has said what today is (the schedule's; DESIGN.md, Digest): its chrome, then
+ * loading, or the summary's failure with the way to try again. */
+function AwaitToday({ view, bar }: { view: View; bar: string }) {
+  const q = useQuery({ ...summaryQuery, select: (s) => s.today });
+  const desktop = useDesktop();
+  return (
+    <>
+      <Fill name="bar">
+        <span className="t">{bar}</span>
+      </Fill>
+      {desktop && <Views view={view} />}
+      <State q={q} what="today" />
+    </>
+  );
+}
+
 export function DigestPage() {
   const search = useSearch({ from: "/" });
-  const now = today();
+  const now = useToday();
   const day = search.day ?? now;
+  // The slide-over is the link's own: a digest linked to opens whatever today's state.
+  return (
+    <>
+      {day ? <Day day={day} now={now} /> : <AwaitToday view="day" bar="Digest" />}
+      <SlideOver id={search.digest} />
+    </>
+  );
+}
+
+/** A Day; `now` is today, undefined while the summary has not said it (a day asked for by its date). */
+function Day({ day, now }: { day: string; now: string | undefined }) {
   // Today, the Day is read again every minute until its run is done, so the panel follows the run.
   const q = useQuery({ ...dayQuery(day), refetchInterval: (query) => (unsettled(query.state.data) ? 60_000 : false) });
   const desktop = useDesktop();
-  // Stepping skips days without digests, but today is always a stop: the tab opens there, so › always leads back.
-  // (A browser behind the server's zone can be shown a later day as the next: today still comes first.)
-  const next = q.data && (day < now && (!q.data.next || q.data.next > now) ? now : q.data.next);
+  // Stepping skips days without digests, but today (the schedule's) is always a stop: the tab opens there, so ›
+  // always leads back.
+  const next = q.data && (now && day < now && (!q.data.next || q.data.next > now) ? now : q.data.next);
   useStepTo("/", q.data?.previous, next);
   const page = useOnPage();
   const stepper = (foot?: boolean) => <Stepper to="/" prev={q.data?.previous} next={next} label={dayLabel(day)} small={day === now ? "Today" : undefined} foot={foot} />;
@@ -276,7 +303,6 @@ export function DigestPage() {
       {q.data?.digests.map((c) => (
         <DigestCard key={c.id} card={c} />
       ))}
-      <SlideOver id={search.digest} />
     </>
   );
 }
@@ -284,8 +310,18 @@ export function DigestPage() {
 export function WeekPage() {
   const search = useSearch({ from: "/week" });
   // Without a week: last week's, written this Monday.
-  const last = addDays(mondayOf(today()), -7);
+  const today = useToday();
+  const last = today && addDays(mondayOf(today), -7);
   const week = search.week ?? last;
+  return (
+    <>
+      {week ? <Week week={week} last={last} /> : <AwaitToday view="week" bar="Digest · Week" />}
+      <SlideOver id={search.digest} />
+    </>
+  );
+}
+
+function Week({ week, last }: { week: string; last: string | undefined }) {
   const q = useQuery(weekQuery(week));
   const desktop = useDesktop();
   useStepTo("/week", q.data?.previous, q.data?.next);
@@ -311,7 +347,6 @@ export function WeekPage() {
       {q.data?.digests.map((c) => (
         <DigestCard key={c.id} card={c} />
       ))}
-      <SlideOver id={search.digest} />
     </>
   );
 }
@@ -351,8 +386,8 @@ function Group({ to, label, sub, pin }: { to?: LinkProps; label: string; sub?: s
   );
 }
 
-function HistoryList({ pages }: { pages: Schemas["History"][] }) {
-  return listRows(pages, today()).map((r) => {
+function HistoryList({ pages, today }: { pages: Schemas["History"][]; today: string | undefined }) {
+  return listRows(pages, today).map((r) => {
     switch (r.kind) {
       case "pin":
         return (
@@ -398,10 +433,9 @@ function Bar({ m, text }: { m: Mark; text: boolean }) {
 
 /** History as months, newest first, a row per week: Monday to Friday, then the week's weeklies in two columns, Focus
  * and Area level with the days' bars and Field beside them. */
-function Calendar({ pages }: { pages: Schemas["History"][] }) {
+function Calendar({ pages, now }: { pages: Schemas["History"][]; now: string | undefined }) {
   const desktop = useDesktop();
   const navigate = useNavigate();
-  const now = today();
   // The topics' fixed order, from the summary the shell reads; a day's bars and the W cell's columns keep a slot per
   // topic, empty where it has no digest, so a topic is always in the same place (digests.md).
   const topics = useQuery(summaryQuery).data?.topics ?? [];
@@ -461,11 +495,14 @@ function Calendar({ pages }: { pages: Schemas["History"][] }) {
   ));
 }
 
+/** History back from the server's today (`historyQuery`); today from the summary only places the pin, the today
+ * row and the calendar's outline, once it has arrived. */
 export function HistoryPage() {
   const search = useSearch({ from: "/history" });
   const cal = search.view === "cal";
   const desktop = useDesktop();
-  const q = useInfiniteQuery(historyQuery(today(), SPAN));
+  const today = useToday();
+  const q = useInfiniteQuery(historyQuery(SPAN));
   const pages = q.data?.pages ?? [];
   const start = pages[0]?.start;
   return (
@@ -485,8 +522,9 @@ export function HistoryPage() {
       )}
       {!q.isFetchNextPageError && <State q={q} what="the history" />}
       {pages.length > 0 && !start && <div className="empty">No digests have been written yet.</div>}
-      {start && (cal ? <Calendar pages={pages} /> : <HistoryList pages={pages} />)}
-      {q.hasNextPage && !q.isFetchingNextPage && !q.isError && <Sentinel onSeen={() => void q.fetchNextPage()} />}
+      {start && (cal ? <Calendar pages={pages} now={today} /> : <HistoryList pages={pages} today={today} />)}
+      {/* Not while the pages are read again: a next page would cancel that read and land on the old pages. */}
+      {q.hasNextPage && !q.isFetching && !q.isError && <Sentinel onSeen={() => void q.fetchNextPage({ cancelRefetch: false })} />}
       {q.isFetchingNextPage && <div className="loadmore">Loading older weeks…</div>}
       {q.isFetchNextPageError && (
         <div className="loadmore">

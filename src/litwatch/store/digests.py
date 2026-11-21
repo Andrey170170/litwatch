@@ -753,6 +753,19 @@ async def digests_on(
     ).fetchall()
 
 
+async def papers_written(unit: ReadUnit, period: DigestPeriod, day: date) -> dict[str, int]:
+    """Per topic, the new papers its digest of `period` on `day` covered (its Mark's count),
+    where that digest is written: one that found nothing new or failed is not here."""
+    rows = await (
+        await unit.execute(
+            "SELECT topic, (counts->>'papers')::int AS papers FROM digests "
+            "WHERE period = %s AND day = %s AND state = 'written'",
+            (period.value, day),
+        )
+    ).fetchall()
+    return {r["topic"]: r["papers"] for r in rows}
+
+
 # A digest's papers as it shows them: frozen, with whether the owner has since set each aside:
 # the owner's word is in force where its grade was shown and puts it below relevant.
 _SHOWN = f"""

@@ -145,6 +145,19 @@ async def cursors(unit: ReadUnit, names: list[str]) -> dict[str, Cursor]:
     return {r["name"]: _cursor(r) for r in rows}
 
 
+async def failing(unit: ReadUnit, names: list[str]) -> set[str]:
+    """Those of the named cursors stuck on an event or on their setup: what a card shows as
+    failing, without the lag `cursors` counts."""
+    rows = await (
+        await unit.execute(
+            "SELECT name FROM integration_cursors WHERE name = ANY(%s) "
+            "AND (failing IS NOT NULL OR setup_failures > 0)",
+            (names,),
+        )
+    ).fetchall()
+    return {r["name"] for r in rows}
+
+
 async def advance(unit: WriteUnit, name: str, position: Position) -> None:
     """Everything up to `position` is done; a failure before it is over."""
     await unit.execute(

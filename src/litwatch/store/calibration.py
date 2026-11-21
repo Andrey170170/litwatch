@@ -4,6 +4,7 @@ and the reads behind Calibrate's pool, its sessions and its precision (feedback.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
 from litwatch.gates.database import ReadUnit, WriteUnit
@@ -204,6 +205,14 @@ async def sessions(unit: ReadUnit, limit: int = 20) -> list[dict[str, Any]]:
         """,
         (limit,),
     )
+
+
+async def last_drawn(unit: ReadUnit) -> datetime | None:
+    """When the newest session was drawn; None before the first."""
+    row = await (
+        await unit.execute("SELECT drawn_at FROM calibration_sessions ORDER BY id DESC LIMIT 1")
+    ).fetchone()
+    return row["drawn_at"] if row else None
 
 
 async def session(unit: ReadUnit, session_id: int) -> dict[str, Any] | None:

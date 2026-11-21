@@ -161,16 +161,18 @@ async def week(day: date, db: Db) -> s.Week:
 
 
 @router.get("")
-async def history(params: Annotated[s.HistoryIn, Query()], db: Db) -> s.History:
+async def history(params: Annotated[s.HistoryIn, Query()], request: Request, db: Db) -> s.History:
     """History from `until` back to `since` (at most `HISTORY_SPAN`): every day with its daily
     Marks and whether arXiv listed papers on it, and the weeks those days fall in with their
-    weekly Marks."""
+    weekly Marks. Without `until`, from today in the schedule's zone, `HISTORY_SPAN` back."""
+    last = params.until or request.app.state.config.schedule.today(datetime.now(UTC))
+    span = min(s.HISTORY_SPAN, last - date.min)  # the calendar has a first day
+    first = params.since or last - span
     async with db.read("digest history") as c:
-        return await _history(params, c)
+        return await _history(first, last, c)
 
 
-async def _history(params: s.HistoryIn, c: ReadUnit) -> s.History:
-    first, last = params.since, params.until
+async def _history(first: date, last: date, c: ReadUnit) -> s.History:
     days: dict[date, list[s.DigestMark]] = {}
     for r, badge in await marks(c, DigestPeriod.DAY, first, last):
         days.setdefault(r["day"], []).append(s.DigestMark(**_mark(r, badge)))

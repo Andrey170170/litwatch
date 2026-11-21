@@ -30,12 +30,6 @@ Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architectu
   each paper settled once.
 - **Tests for `change` with several papers** (review, project 7): overlapping sets in reverse order across two
   connections, rollback when a later paper fails; shared test helpers into support modules.
-- **`/summary` reworked** (review): spend summed once, narrow reads instead of full Settings data; with it:
-  - **the sidebar's count for today:** the count beside a followed topic with a digest today, highlighted for Focus
-    (DESIGN.md, "Shell"); `/api/summary` carries badges only;
-  - **today in the schedule's zone:** the Digest's defaults (today's Day, the last complete Week, History's pinned
-    week) use the browser's date; the summary should carry today's date
-    ([`notes/schedule-zone-today.md`](notes/schedule-zone-today.md)).
 - **Smaller read gaps:**
   - unclassified papers listed on Papers, not only counted (the API can return them);
   - code and weights links from the analysis, not only from a Deep card's URL;

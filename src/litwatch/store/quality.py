@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, LiteralString
 
 from litwatch.core import Taxonomy
 from litwatch.core.classification import keyword_hit, with_ancestors
@@ -32,22 +32,16 @@ def splits_window(night: dict[str, Any] | None) -> datetime | date:
     return night["started_at"] if night else date.today() - timedelta(days=1)
 
 
-async def splits_since(unit: ReadUnit, since: Any) -> list[dict[str, Any]]:
-    """Verdicts asking for the owner's word (`ASKS_WORD`) recorded since `since` that are still
-    current (Focus splits, Area escalations, central or related grades from one lab, on the
-    paper's current text: a verdict on an older revision waits for the regrading, not the
-    owner), with every grader's answer and the owner's label,
-    for the owner to settle if they want to: followed topics only. `revision` is the text the
-    verdict is on."""
-    return await _all(
-        unit,
-        f"""
-        SELECT * FROM (
+def _asking(columns: LiteralString) -> LiteralString:
+    """The verdicts asking for the owner's word (`ASKS_WORD`) recorded since the query's `since`
+    (passed twice) that are still current, with `columns` of each: Focus splits, Area
+    escalations, central or related grades from one lab, on the paper's current text (a verdict
+    on an older revision waits for the regrading, not the owner), followed topics only."""
+    return f"""
+        SELECT {columns} FROM (
             SELECT DISTINCT ON (v.paper_id, v.topic) v.paper_id, v.topic, t.depth, v.fit,
                    v.reason, v.split, v.escalated, v.one_lab, v.opinions, v.recorded_at, p.title,
-                   v.paper_revision AS revision,
-                   (SELECT row_to_json(l) FROM (SELECT value FROM labels
-                    WHERE paper_id = v.paper_id AND topic = v.topic) l) AS label
+                   v.paper_revision AS revision
             FROM verdicts v JOIN papers p ON p.id = v.paper_id AND p.revision = v.paper_revision
                  AND NOT p.dropped
             JOIN topics t ON t.class = v.topic
@@ -55,10 +49,32 @@ async def splits_since(unit: ReadUnit, since: Any) -> list[dict[str, Any]]:
             ORDER BY v.paper_id, v.topic, v.paper_revision DESC, v.recorded_at DESC,
                      v.id DESC) current
         WHERE {ASKS_WORD} AND recorded_at >= %s
-        ORDER BY recorded_at DESC
-        """,
-        (since, since),
+    """
+
+
+async def splits_since(unit: ReadUnit, since: Any) -> list[dict[str, Any]]:
+    """The verdicts asking for the owner's word since `since` (`_asking`), newest first, with
+    every grader's answer and the owner's label, for the owner to settle if they want to.
+    `revision` is the text the verdict is on."""
+    label = (
+        "(SELECT row_to_json(l) FROM (SELECT value FROM labels"
+        " WHERE paper_id = current.paper_id AND topic = current.topic) l) AS label"
     )
+    return await _all(
+        unit, _asking(f"current.*, {label}") + " ORDER BY recorded_at DESC", (since, since)
+    )
+
+
+async def count_unlabelled_splits(unit: ReadUnit, since: Any) -> int:
+    """How many of the verdicts `splits_since` lists the owner has not labelled: those Needs you
+    waits on."""
+    query = _asking("count(*) AS n") + (
+        " AND NOT EXISTS (SELECT 1 FROM labels l"
+        " WHERE l.paper_id = current.paper_id AND l.topic = current.topic)"
+    )
+    row = await (await unit.execute(query, (since, since))).fetchone()
+    assert row is not None  # a count has its row
+    return row["n"]
 
 
 async def collected_reactions(unit: ReadUnit, limit: int = 200) -> list[dict]:

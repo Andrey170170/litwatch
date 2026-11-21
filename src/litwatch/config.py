@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 import os
 import tomllib
-from datetime import UTC, datetime, time, timedelta, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -286,6 +286,10 @@ class Schedule(_Section):
     @property
     def zone(self) -> tzinfo:
         return ZoneInfo(self.timezone) if self.timezone else system_zone()
+
+    def today(self, now: datetime) -> date:
+        """The date `now` (aware) falls on in the schedule's zone: the app's today."""
+        return now.astimezone(self.zone).date()
 
     def night(self, now: datetime) -> tuple[datetime, datetime] | None:
         """The night a nightly started at `now` (aware) belongs to: the nightly time that last

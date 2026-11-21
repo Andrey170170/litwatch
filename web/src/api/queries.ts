@@ -153,13 +153,15 @@ export const weekQuery = (day: string) => digestRead(["week", day], async ({ sig
 /** A digest's own read, run to its end even when its page is left (no `signal`): a refused write restripes from it. */
 export const digestQuery = (id: number) => digestRead([String(id)], async () => ok(await api.GET("/api/digests/{digest_id}", { params: { path: { digest_id: id } } })));
 
-/** History back from `until`, a span of days at a time (`SPAN`), older pages as the reader scrolls until the
- * archive's start. */
-export const historyQuery = (until: string, span: number) =>
+/** History, a span of days at a time (`SPAN`), older pages as the reader scrolls until the archive's start. The
+ * first page asks for no date, so the server answers back from its own today (the schedule's); each later page
+ * goes on from the day before the oldest already read (`nextSpan`), never from the client's today. */
+export const historyQuery = (span: number) =>
   infiniteQueryOptions({
-    queryKey: ["digest", "history", until],
-    queryFn: async ({ pageParam, signal }) => ok(await api.GET("/api/digests", { signal, params: { query: { until: pageParam, since: addDays(pageParam, -span) } } })),
-    initialPageParam: until,
+    queryKey: ["digest", "history"],
+    queryFn: async ({ pageParam, signal }) =>
+      ok(await api.GET("/api/digests", { signal, params: { query: pageParam === null ? {} : { until: pageParam, since: addDays(pageParam, -span) } } })),
+    initialPageParam: null as string | null,
     getNextPageParam: (_last, pages) => nextSpan(pages),
     ...listOptions,
   });

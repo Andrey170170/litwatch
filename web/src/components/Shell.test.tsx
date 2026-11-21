@@ -38,6 +38,23 @@ describe("The shell's sidebar", () => {
     expect(renders).toEqual(after);
   });
 
+  it("shows today's count beside each topic with a digest written today, the Focus one highlighted", async () => {
+    viewport(true);
+    const area = { slug: "in", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" };
+    const field = { slug: "ag", name: "Agents", depth: "field", monogram: "AG", colour: "#0891b2" };
+    scriptFetch({
+      "GET /api/summary": { ...summary, topics: [{ ...badge, count: 4 }, { ...area, count: 12 }, { ...field, count: null }] },
+      "GET /api/papers": { rows: [], total: 0, counts, grades, outside: [] },
+    });
+    renderApp("/papers");
+    const count = async (name: RegExp) => (await screen.findByRole("link", { name })).querySelector(".k");
+    expect(await count(/Mech interp/)).toHaveTextContent("4");
+    expect(await count(/Mech interp/)).toHaveClass("k", "hot");
+    expect(await count(/Interpretability/)).toHaveTextContent("12");
+    expect(await count(/Interpretability/)).not.toHaveClass("hot");
+    expect(await count(/Agents/)).toBeNull();
+  });
+
   it("mounts the desktop's column anew on each navigation, so its arrival plays again from the same side", async () => {
     viewport(true);
     scriptFetch({

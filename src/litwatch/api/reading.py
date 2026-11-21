@@ -17,7 +17,6 @@ from litwatch.api import schemas as s
 from litwatch.api.deps import (
     Db,
     Rules,
-    budget_lines,
     protected,
     set_token_cookie,
     token_ok,
@@ -73,10 +72,6 @@ ARCHIVE_DOWN = "The archive did not answer"
 PDF_READ_SLACK = 10.0
 # The archive's record of a paper litwatch lacks, for its page: one bound over the whole read.
 ARCHIVE_PAGE_BUDGET = 10.0
-
-
-def _config(request: Request) -> Any:
-    return request.app.state.config
 
 
 async def _shown(c: ReadUnit, slug: str) -> tuple[str, Topic] | None:
@@ -190,15 +185,6 @@ def _topics_known(tree: Taxonomy | None, slugs: list[str]) -> None:
     shown = {t.slug for t in tree.shown()} if tree else set()
     if unknown := [x for x in slugs if x not in shown]:
         raise HTTPException(status_code=404, detail=f"no such topic: {', '.join(unknown)}")
-
-
-# -- the status line -------------------------------------------------------------------------------
-
-
-async def run_status(request: Request, c: ReadUnit) -> s.RunStatus:
-    spend = await budget_lines(c, _config(request).budget)
-    over = [line.provider for line in spend if line.over]
-    return s.RunStatus(**await reading.status(c), over_budget=over)
 
 
 # -- papers ----------------------------------------------------------------------------------------

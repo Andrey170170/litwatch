@@ -171,14 +171,15 @@ export type ListRow =
 /** History as a list: the current week's weeklies pinned at the top until the next Monday; then days, newest
  * first, a weekend as one line, each week's weeklies closing the week they cover (after the Monday that wrote
  * them). Days before the oldest digest are left out. */
-export function listRows(pages: HistoryPage[], today: string): ListRow[] {
+export function listRows(pages: HistoryPage[], today: string | undefined): ListRow[] {
   const start = pages[0]?.start ?? null;
   const weeks = new Map(pages.flatMap((p) => p.weeks).map((w) => [w.monday, w.marks]));
   const days = pages.flatMap((p) => p.days).filter((d) => start && d.day >= start);
-  const pinned = addDays(mondayOf(today), -7);
+  // Until today is known (the summary), nothing is pinned.
+  const pinned = today === undefined ? undefined : addDays(mondayOf(today), -7);
   const rows: ListRow[] = [];
-  const pin = weeks.get(pinned);
-  if (pin?.length) rows.push({ kind: "pin", monday: pinned, marks: pin });
+  const pin = pinned === undefined ? undefined : weeks.get(pinned);
+  if (pinned !== undefined && pin?.length) rows.push({ kind: "pin", monday: pinned, marks: pin });
   for (let i = 0; i < days.length; i++) {
     const d = days[i]!;
     if (!d.released && !d.marks.length) {

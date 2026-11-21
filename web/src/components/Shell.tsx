@@ -71,8 +71,9 @@ function useCame(): Came {
   return came;
 }
 
-/** The followed topics, from the shell's summary: the list re-renders only when the topics themselves change. A
- * summary never read leaves the section with that word, not empty. */
+/** The followed topics, from the shell's summary, each with the count of its daily digest of today where one was
+ * written, highlighted for Focus: the list re-renders only when the topics themselves change. A summary never read
+ * leaves the section with that word, not empty. */
 const Following = memo(function Following({ onPick }: { onPick?: () => void }) {
   const { data: topics, unavailable, retry } = useSummary((s) => s.topics);
   countRender("following");
@@ -91,6 +92,7 @@ const Following = memo(function Following({ onPick }: { onPick?: () => void }) {
         <Link key={t.slug} to="/topics/$slug" params={{ slug: t.slug }} className="it" activeProps={{ className: "it on" }} onClick={onPick}>
           <Badge topic={t} />
           <span className="nm">{t.name}</span>
+          {t.count != null && <span className={`k${t.depth === "focus" ? " hot" : ""}`}>{t.count}</span>}
         </Link>
       ))}
     </>

@@ -325,7 +325,7 @@ export interface paths {
          * History
          * @description History from `until` back to `since` (at most `HISTORY_SPAN`): every day with its daily
          *     Marks and whether arXiv listed papers on it, and the weeks those days fall in with their
-         *     weekly Marks.
+         *     weekly Marks. Without `until`, from today in the schedule's zone, `HISTORY_SPAN` back.
          */
         get: operations["history_api_digests_get"];
         put?: never;
@@ -1788,6 +1788,25 @@ export interface components {
          * @enum {string}
          */
         Fit: "central" | "related" | "adjacent" | "none";
+        /**
+         * FollowedTopic
+         * @description A shown topic as the sidebar lists it: its badge, and `count`, the new papers its daily
+         *     digest of today covered; null where it has none written today (none yet, nothing new, or
+         *     failed).
+         */
+        FollowedTopic: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            depth: components["schemas"]["Depth"];
+            /** Monogram */
+            monogram: string;
+            /** Colour */
+            colour: string;
+            /** Count */
+            count?: number | null;
+        };
         /** Gist */
         Gist: {
             /** Text */
@@ -2986,12 +3005,18 @@ export interface components {
         /**
          * Summary
          * @description What the shell shows on every page (the status line, the sidebar's topics, the Settings
-         *     hints), read by one poll and never through a page's own reads: counts only.
+         *     hints), read by one poll and never through a page's own reads: counts only. `today` is
+         *     today's date in the schedule's zone, the day the app takes as today.
          */
         Summary: {
             status: components["schemas"]["RunStatus"];
+            /**
+             * Today
+             * Format: date
+             */
+            today: string;
             /** Topics */
-            topics: components["schemas"]["Badge"][];
+            topics: components["schemas"]["FollowedTopic"][];
             settings: components["schemas"]["SettingsHints"];
         };
         /**
@@ -4172,9 +4197,9 @@ export interface operations {
     };
     history_api_digests_get: {
         parameters: {
-            query: {
-                since: string;
-                until: string;
+            query?: {
+                since?: string | null;
+                until?: string | null;
             };
             header?: never;
             path?: never;

@@ -1,12 +1,16 @@
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { InfiniteQueryObserver } from "@tanstack/react-query";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
+import { historyQuery } from "@/api/queries";
+import { addDays, dayLabel, isoDay, SPAN } from "@/lib/digests";
+import { freshClient, json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" };
 const area = { slug: "interp", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" };
 const status = { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
-const summary = { status, topics: [focus, area], settings: { waiting: 0, last_session: null, misses: 0, topics: 2, classes: 2, spent: 0, budget: null, failing: [] } };
+// The server's today is the clock's, as when the browser and the schedule share a zone.
+const summary = { status, topics: [focus, area], settings: { waiting: 0, last_session: null, misses: 0, topics: 2, classes: 2, spent: 0, budget: null, failing: [] }, get today() { return isoDay(new Date()); } };
 const counts = { papers: 2, picks: 0, central: 1, related: 1, must_read: 1 };
 const paper = { id: "2610.00001", title: "Faithful traces", announced: "2026-10-14", role: "listed", why: null, revision: 1, gist: "Traces leave steps out.", fit: "central", grade: "must_read", rarity: "epic", set_aside: false };
 const related = { ...paper, id: "2610.00002", title: "A related one", fit: "related", grade: "relevant", rarity: "rare", gist: "Related gist." };
@@ -74,12 +78,126 @@ describe("the Digest", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("stops on today even when a browser behind the server's zone is shown a later day as the next", async () => {
+  // The browser's clock says Sunday evening; the schedule's zone, ahead of it, is already on Monday.
+  const ahead = { ...summary, today: "2026-10-19" };
+
+  it("opens on today in the schedule's zone, not the browser's, and always stops on it", async () => {
     vi.setSystemTime(new Date(2026, 9, 18, 20));
     viewport(true);
-    scriptFetch({ "GET /api/summary": summary, "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", next: "2026-10-19" } });
-    renderApp("/?day=2026-10-16");
-    expect(await screen.findByRole("link", { name: "Newer" })).toHaveAttribute("href", "/?day=2026-10-18");
+    scriptFetch({
+      "GET /api/summary": ahead,
+      "GET /api/digests/days/2026-10-19": { ...day, day: "2026-10-19", previous: "2026-10-16" },
+      "GET /api/digests/days/2026-10-16": { ...day, day: "2026-10-16", next: null },
+    });
+    renderApp("/");
+    expect(await screen.findByText("Mon 19 Oct")).toBeInTheDocument();
+    expect(screen.getByText("Today")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "Older" }));
+    // Nothing after the 16th has digests, as the server sees it: › still leads back to the schedule's today.
+    await waitFor(() => expect(screen.getByRole("link", { name: "Newer" })).toHaveAttribute("href", "/?day=2026-10-19"));
+  });
+
+  it("waits for the schedule's today before it reads a Day, so a day that becomes today is read as today", async () => {
+    // Just past the browser's midnight, the schedule's zone still on Sunday: Monday is not read before it is today.
+    vi.setSystemTime(new Date(2026, 9, 19, 0, 5));
+    viewport(true);
+    let land: (s: object) => void = () => {};
+    const first = new Promise<object>((resolve) => (land = resolve));
+    let today = "2026-10-18";
+    const calls = scriptFetch({
+      "GET /api/summary": () => (calls.filter((c) => c.url === "/api/summary").length === 1 ? first : { ...summary, today }),
+      "GET /api/digests/days/2026-10-18": { ...day, day: "2026-10-18", digests: [], previous: null },
+      "GET /api/digests/days/2026-10-19": { ...day, day: "2026-10-19", released: false, digests: [], previous: "2026-10-18", run: { state: "waiting", due: new Date(2026, 9, 19, 2).toISOString(), deadline: new Date(2026, 9, 19, 7, 30).toISOString(), papers: 0, total: null, error: null } },
+    });
+    renderApp("/");
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    land({ ...summary, today });
+    expect(await screen.findByText("Sun 18 Oct")).toBeInTheDocument();
+    expect(calls.some((c) => c.url.startsWith("/api/digests/days/2026-10-19"))).toBe(false);
+    // The schedule's midnight: the next poll moves today, and Monday is read as today, with its run.
+    today = "2026-10-19";
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await screen.findByText("Mon 19 Oct")).toBeInTheDocument();
+    expect(within(await screen.findByRole("status")).getByText("Standby")).toBeInTheDocument();
+  });
+
+  it("says when today is unknown because the summary failed, and tries again", async () => {
+    viewport(true);
+    let down = true;
+    scriptFetch({ "GET /api/summary": () => (down ? json({ detail: "down" }, 500) : summary), "GET /api/digests/days/2026-10-14": day });
+    renderApp("/");
+    expect(await screen.findByText(/Could not load today/)).toBeInTheDocument();
+    down = false;
+    await userEvent.click(screen.getAllByRole("button", { name: "Try again" })[0]!);
+    expect(await screen.findByText("2 new · 1 must read")).toBeInTheDocument();
+  });
+
+  it("reads History's first page back from the server's today, each older one on from the oldest day read", async () => {
+    vi.setSystemTime(new Date(2026, 9, 18, 22));
+    viewport(true);
+    let today = "2026-10-18";
+    // The server answers from its own today without `until`, the API's 92 days back.
+    const calls = scriptFetch({
+      "GET /api/summary": () => ({ ...summary, today }),
+      "GET /api/digests": ({ url }) => {
+        const asked = new URLSearchParams(url.split("?")[1] ?? "");
+        const until = asked.get("until") ?? today;
+        const since = asked.get("since") ?? addDays(until, -92);
+        const days = [];
+        for (let d = until; d >= since; d = addDays(d, -1)) days.push({ day: d, released: true, marks: [] });
+        return { days, weeks: [], start: "2026-01-05" };
+      },
+    });
+    const history = () => calls.filter((c) => c.url.startsWith("/api/digests") && !c.url.startsWith("/api/digests/")).map((c) => c.url);
+    const client = freshClient();
+    renderApp("/history", client);
+    expect((await screen.findByRole("link", { name: "Sun 18 Oct" })).closest(".grp")).toHaveTextContent("today");
+    // The reader scrolls on to an older page: it begins the day before the oldest one read.
+    const oldest = addDays("2026-10-18", -92);
+    await act(() => new InfiniteQueryObserver(client, historyQuery(SPAN)).fetchNextPage());
+    const older = addDays(oldest, -10);
+    expect(await screen.findByRole("link", { name: dayLabel(older) })).toBeInTheDocument();
+    expect(history()).toEqual(["/api/digests", `/api/digests?until=${addDays(oldest, -1)}&since=${addDays(oldest, -1 - SPAN)}`]);
+    // The schedule's midnight asks History for nothing; a refetch (a run's end, a visit) asks the server again, and
+    // the older page stays loaded.
+    today = "2026-10-19";
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(history()).toHaveLength(2);
+    await act(() => client.invalidateQueries({ queryKey: historyQuery(SPAN).queryKey }));
+    expect((await screen.findByRole("link", { name: "Mon 19 Oct" })).closest(".grp")).toHaveTextContent("today");
+    expect(screen.getByRole("link", { name: dayLabel(older) })).toBeInTheDocument();
+    const after = addDays("2026-10-19", -92);
+    expect(history().slice(2)).toEqual(["/api/digests", `/api/digests?until=${addDays(after, -1)}&since=${addDays(after, -1 - SPAN)}`]);
+  });
+
+  it("opens a linked digest over the Day even while today is unknown", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/summary": () => json({ detail: "down" }, 500), "GET /api/digests/7": digest });
+    renderApp("/?digest=7");
+    const over = await screen.findByRole("dialog");
+    expect(await within(over).findByText(/Daily digest · Wed 14 Oct/)).toBeInTheDocument();
+    expect(screen.getByText(/Could not load today/)).toBeInTheDocument();
+  });
+
+  it("takes Week's last week and History's pinned week and today from the schedule's today", async () => {
+    vi.setSystemTime(new Date(2026, 9, 18, 20));
+    viewport(true);
+    const mark = (id: number, d: string, period = "day") => ({ id, topic: focus, period, day: d, state: "written", counts, best_rarity: "rare" });
+    const days = ["2026-10-19", "2026-10-18", "2026-10-17", "2026-10-16"].map((d, i) => ({ day: d, released: i === 0 || i === 3, marks: i === 0 || i === 3 ? [mark(i, d)] : [] }));
+    scriptFetch({
+      "GET /api/summary": ahead,
+      "GET /api/digests/weeks/2026-10-12": { monday: "2026-10-12", digests: [], previous: "2026-10-05", next: null },
+      "GET /api/digests": { days, weeks: [{ monday: "2026-10-12", marks: [mark(50, "2026-10-12", "week")] }], start: "2026-10-16" },
+    });
+    renderApp("/week");
+    expect(await screen.findByText("Last week")).toBeInTheDocument();
+    expect(screen.getByText("12–18 Oct")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "History" }));
+    expect(await screen.findByText("This week")).toBeInTheDocument();
+    expect(screen.getByText("weekly digests · 12–18 Oct")).toBeInTheDocument();
+    expect(screen.getByText("today").closest(".grp")).toHaveTextContent("Mon 19 Oct");
+    await userEvent.click(screen.getByRole("link", { name: "Calendar" }));
+    await waitFor(() => expect(document.querySelector(".mday.today .mnum")).toHaveTextContent("19"));
   });
 
   it("opens a digest over the day on the desktop, its papers by role, and closes it back to the day", async () => {

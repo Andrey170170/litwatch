@@ -72,10 +72,12 @@ class SettingsHints(BaseModel):
 
 class Summary(BaseModel):
     """What the shell shows on every page (the status line, the sidebar's topics, the Settings
-    hints), read by one poll and never through a page's own reads: counts only."""
+    hints), read by one poll and never through a page's own reads: counts only. `today` is
+    today's date in the schedule's zone, the day the app takes as today."""
 
     status: RunStatus
-    topics: list[Badge]  # the shown topics in the fixed order
+    today: date
+    topics: list[FollowedTopic]  # the shown topics in the fixed order
     settings: SettingsHints
 
 
@@ -88,6 +90,14 @@ class Badge(BaseModel):
     depth: Depth
     monogram: str
     colour: str
+
+
+class FollowedTopic(Badge):
+    """A shown topic as the sidebar lists it: its badge, and `count`, the new papers its daily
+    digest of today covered; null where it has none written today (none yet, nothing new, or
+    failed)."""
+
+    count: int | None = None
 
 
 class GradedBadge(Badge):
@@ -757,11 +767,18 @@ class History(BaseModel):
 
 
 class HistoryIn(BaseModel):
-    since: date
-    until: date
+    """History's range: `until` today in the schedule's zone when not given, `since` then
+    `HISTORY_SPAN` before it; `since` alone is refused."""
+
+    since: date | None = None
+    until: date | None = None
 
     @model_validator(mode="after")
     def _span(self) -> HistoryIn:
+        if self.since is None:
+            return self
+        if self.until is None:
+            raise ValueError("since needs until")
         if not timedelta(0) <= self.until - self.since <= HISTORY_SPAN:
             raise ValueError(f"since must be before until, at most {HISTORY_SPAN.days} days")
         return self
