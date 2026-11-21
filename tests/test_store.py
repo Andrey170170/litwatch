@@ -209,22 +209,25 @@ SET_BY = 46
 
 
 async def test_a_label_from_before_is_set_by_what_its_origin_says(conn, monkeypatch):
-    """A miss's label was set by the miss, every other by the owner: the backfill of `set_by`."""
+    """A miss's label was set by the miss, unless its value is one a miss can't write; every
+    other by the owner: the backfill of `set_by`."""
     for table in await tables(conn):
         await conn.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
     every = db._migrations()
     monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] < SET_BY])
     await store.migrate(conn)
     await conn.execute("INSERT INTO papers (id, title, abstract) VALUES ('2610.00001', 't', 'a')")
-    for topic, origin in [("a", "miss"), ("b", "reader"), ("c", "sample")]:
+    for topic, value, origin in [
+        ("a", "central", "miss"), ("b", "central", "reader"), ("c", "central", "sample"),
+        ("d", "none", "miss"),
+    ]:  # fmt: skip
         await conn.execute(
-            "INSERT INTO labels (paper_id, topic, value, origin) VALUES ('2610.00001', %s, "
-            "'central', %s)",
-            (topic, origin),
+            "INSERT INTO labels (paper_id, topic, value, origin) VALUES ('2610.00001', %s, %s, %s)",
+            (topic, value, origin),
         )
     monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] <= SET_BY])
     assert await store.migrate(conn) == ["0046_labels_set_by.sql"]
     rows = await (await conn.execute("SELECT topic, set_by FROM labels ORDER BY topic")).fetchall()
     assert [(r["topic"], r["set_by"]) for r in rows] == [
-        ("a", "miss"), ("b", "reader"), ("c", "reader"),
+        ("a", "miss"), ("b", "reader"), ("c", "reader"), ("d", "reader"),
     ]  # fmt: skip
