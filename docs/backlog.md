@@ -21,14 +21,6 @@ time. A0, the role checks and the baseline, was merged on 2026-11-10
 2026-11-21 ([`plans/a1-database-gate.md`](plans/a1-database-gate.md)); A2 is next. Each milestone's shape goes in
 `specs/architecture/`, its plan in `plans/`.
 
-### A1. Database gate
-
-Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architecture/a1-database-gate.md), planned in
-[`plans/a1-database-gate.md`](plans/a1-database-gate.md) (P1–P7). Input: the measurement of where work waits
-([`notes/where-work-waits.md`](notes/where-work-waits.md), 2026-11-09/10).
-
-All built, and deployed on 2026-11-21.
-
 ### A2. Work gate
 
 Shape, blueprint, drive.
