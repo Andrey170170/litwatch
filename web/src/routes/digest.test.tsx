@@ -1,12 +1,16 @@
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { InfiniteQueryObserver } from "@tanstack/react-query";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { json, renderApp, scriptFetch, viewport } from "@/test/harness";
+import { historyQuery } from "@/api/queries";
+import { addDays, dayLabel, isoDay, SPAN } from "@/lib/digests";
+import { freshClient, json, renderApp, scriptFetch, viewport } from "@/test/harness";
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" };
 const area = { slug: "interp", name: "Interpretability", depth: "area", monogram: "IN", colour: "#4f46e5" };
 const status = { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
-const summary = { status, topics: [focus, area], settings: { waiting: 0, last_session: null, misses: 0, topics: 2, classes: 2, spent: 0, budget: null, failing: [] } };
+// The server's today is the clock's, as when the browser and the schedule share a zone.
+const summary = { status, topics: [focus, area], settings: { waiting: 0, last_session: null, misses: 0, topics: 2, classes: 2, spent: 0, budget: null, failing: [] }, get today() { return isoDay(new Date()); } };
 const counts = { papers: 2, picks: 0, central: 1, related: 1, must_read: 1 };
 const paper = { id: "2610.00001", title: "Faithful traces", announced: "2026-10-14", role: "listed", why: null, revision: 1, gist: "Traces leave steps out.", fit: "central", grade: "must_read", rarity: "epic", set_aside: false };
 const related = { ...paper, id: "2610.00002", title: "A related one", fit: "related", grade: "relevant", rarity: "rare", gist: "Related gist." };
@@ -91,6 +95,69 @@ describe("the Digest", () => {
     await userEvent.click(screen.getByRole("link", { name: "Older" }));
     // Nothing after the 16th has digests, as the server sees it: › still leads back to the schedule's today.
     await waitFor(() => expect(screen.getByRole("link", { name: "Newer" })).toHaveAttribute("href", "/?day=2026-10-19"));
+  });
+
+  it("waits for the schedule's today before it reads a Day, so a day that becomes today is read as today", async () => {
+    // Just past the browser's midnight, the schedule's zone still on Sunday: Monday is not read before it is today.
+    vi.setSystemTime(new Date(2026, 9, 19, 0, 5));
+    viewport(true);
+    let land: (s: object) => void = () => {};
+    const first = new Promise<object>((resolve) => (land = resolve));
+    let today = "2026-10-18";
+    const calls = scriptFetch({
+      "GET /api/summary": () => (calls.filter((c) => c.url === "/api/summary").length === 1 ? first : { ...summary, today }),
+      "GET /api/digests/days/2026-10-18": { ...day, day: "2026-10-18", digests: [], previous: null },
+      "GET /api/digests/days/2026-10-19": { ...day, day: "2026-10-19", released: false, digests: [], previous: "2026-10-18", run: { state: "waiting", due: new Date(2026, 9, 19, 2).toISOString(), deadline: new Date(2026, 9, 19, 7, 30).toISOString(), papers: 0, total: null, error: null } },
+    });
+    renderApp("/");
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    land({ ...summary, today });
+    expect(await screen.findByText("Sun 18 Oct")).toBeInTheDocument();
+    expect(calls.some((c) => c.url.startsWith("/api/digests/days/2026-10-19"))).toBe(false);
+    // The schedule's midnight: the next poll moves today, and Monday is read as today, with its run.
+    today = "2026-10-19";
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await screen.findByText("Mon 19 Oct")).toBeInTheDocument();
+    expect(within(await screen.findByRole("status")).getByText("Standby")).toBeInTheDocument();
+  });
+
+  it("says when today is unknown because the summary failed, and tries again", async () => {
+    viewport(true);
+    let down = true;
+    scriptFetch({ "GET /api/summary": () => (down ? json({ detail: "down" }, 500) : summary), "GET /api/digests/days/2026-10-14": day });
+    renderApp("/");
+    expect(await screen.findByText(/Could not load today/)).toBeInTheDocument();
+    down = false;
+    await userEvent.click(screen.getAllByRole("button", { name: "Try again" })[0]!);
+    expect(await screen.findByText("2 new · 1 must read")).toBeInTheDocument();
+  });
+
+  it("keeps History's older pages loaded when the schedule's midnight moves today, and adds the new day", async () => {
+    vi.setSystemTime(new Date(2026, 9, 18, 22));
+    viewport(true);
+    let today = "2026-10-18";
+    const calls = scriptFetch({
+      "GET /api/summary": () => ({ ...summary, today }),
+      "GET /api/digests": ({ url }) => {
+        const until = new URLSearchParams(url.split("?")[1]).get("until")!;
+        return { days: Array.from({ length: SPAN + 1 }, (_, i) => ({ day: addDays(until, -i), released: true, marks: [] })), weeks: [], start: "2026-01-05" };
+      },
+    });
+    const client = freshClient();
+    renderApp("/history", client);
+    expect((await screen.findByRole("link", { name: "Sun 18 Oct" })).closest(".grp")).toHaveTextContent("today");
+    // The reader scrolls on to an older page.
+    const older = addDays("2026-10-18", -SPAN - 1);
+    await act(() => new InfiniteQueryObserver(client, historyQuery("2026-10-18", SPAN)).fetchNextPage());
+    expect(await screen.findByRole("link", { name: dayLabel(older) })).toBeInTheDocument();
+    today = "2026-10-19";
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect((await screen.findByRole("link", { name: "Mon 19 Oct" })).closest(".grp")).toHaveTextContent("today");
+    expect(screen.getByRole("link", { name: "Sun 18 Oct" }).closest(".grp")).not.toHaveTextContent("today");
+    expect(screen.getByRole("link", { name: dayLabel(older) })).toBeInTheDocument();
+    // Both pages read again, the older one from the newer's end.
+    const untils = calls.filter((c) => c.url.startsWith("/api/digests?")).map((c) => new URLSearchParams(c.url.split("?")[1]).get("until"));
+    expect(untils).toEqual(["2026-10-18", addDays("2026-10-18", -SPAN - 1), "2026-10-19", addDays("2026-10-19", -SPAN - 1)]);
   });
 
   it("takes Week's last week and History's pinned week and today from the schedule's today", async () => {

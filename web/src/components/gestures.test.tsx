@@ -1,10 +1,12 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp, scriptFetch, viewport } from "@/test/harness";
+import { isoDay } from "@/lib/digests";
 
 const focus = { slug: "cotf", name: "CoT faithfulness", depth: "focus", monogram: "CF", colour: "#c026d3" };
 const status = { state: "quiet", papers: 212, awaiting_classification: 0, analysis_failed: 0, ungraded: 0, fulltext_failed: 0, digests_failed: 0 };
-const summary = { status, topics: [focus], settings: { waiting: 0, last_session: null, misses: 0, topics: 1, classes: 1, spent: 0, budget: null, failing: [] } };
+// The server's today is the clock's, as when the browser and the schedule share a zone.
+const summary = { status, topics: [focus], settings: { waiting: 0, last_session: null, misses: 0, topics: 1, classes: 1, spent: 0, budget: null, failing: [] }, get today() { return isoDay(new Date()); } };
 const counts = { papers: 1, picks: 0, central: 1, related: 0, must_read: 1 };
 const paper = { id: "2610.00001", title: "Faithful traces", announced: "2026-10-14", role: "listed", why: null, revision: 1, gist: "Traces leave steps out.", fit: "central", grade: "must_read", rarity: "epic", set_aside: false };
 const card = { id: 7, topic: focus, period: "day", day: "2026-10-14", state: "written", counts, best_rarity: "epic", gist: "One paper.", papers: [paper], more: 0 };

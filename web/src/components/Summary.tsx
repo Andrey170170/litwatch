@@ -7,7 +7,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Schemas } from "@/api/client";
 import { summaryQuery } from "@/api/queries";
-import { isoDay } from "@/lib/digests";
 
 export function useSummary<T>(select: (s: Schemas["Summary"]) => T): { data: T | undefined; unavailable: boolean; retry: () => void } {
   const q = useQuery({ ...summaryQuery, select, notifyOnChangeProps: ["data", "status"] });
@@ -15,9 +14,9 @@ export function useSummary<T>(select: (s: Schemas["Summary"]) => T): { data: T |
 }
 
 /** Today, as the server's schedule counts it (its zone's date, carried by the summary), so the Digest opens on the
- * day the nightly run writes; the browser's date until the summary has landed. */
-export function useToday(): string {
-  return useSummary((s) => s.today).data ?? isoDay(new Date());
+ * day the nightly run writes; undefined until the summary has landed, never the browser's date. */
+export function useToday(): string | undefined {
+  return useSummary((s) => s.today).data;
 }
 
 /** "status unavailable · Try again": as the status line (`line`) or as a line in a sidebar's list. */
