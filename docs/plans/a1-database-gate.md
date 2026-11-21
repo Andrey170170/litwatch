@@ -113,6 +113,9 @@ never commits.
 - **D3. Every stage deploys before the next starts,** as the spec says. P1 runs nothing, so it goes out with P2:
   five deploys for the gate and one for the folded items. Each deploy is the owner's command, which the agent
   prepares. Chosen over three checkpoint deploys, which would make a bad night harder to trace to one stage.
+  Changed on 2026-11-21, after P5: a night's wait between stages cost more than the tracing was worth, so P6 and P7
+  merge without waiting on a night, and the first full night after both are deployed checks them together (V7).
+  A failure that night is debugged then.
 
 ## Risks
 
@@ -140,7 +143,7 @@ never commits.
 | **P4** | **Loops and bookkeeping.** The scheduler, jobs worker, dispatch, full-text and Deep loops, and publications move. The model run's journal writes in units of its own instead of on a sibling connection. The session locks move into the gate, and retally's becomes a unit's lock. | The advisory-lock list holds one entry, the taxonomy lock's raw-SQL branch (`store/taxonomy.py`), which P6 removes. One sandbox nightly over a small window with the check strict, as intermediate evidence: intake and digests still run partly outside the gate. Then a clean night (V7). |
 | **P5** | **The remaining Services.** Intake, digests, Calibrate, misses, quality, replay. The SQL outside `store` moves into it, `events.emit` included, which ends `store`'s imports of `events` and `llm`. | `tests/test_sql_home.py`'s list is empty, `store`'s import-linter ignores are gone, then a clean night. |
 | **P6** | **Tightening.** `store.connect` and `sibling` go, the bridge stays only as a test helper, and store parameters are renamed `unit`. The connection list is empty. `ty` runs in CI with its baseline (D2). | Every A1 check list is empty and CI is green; the sandbox nightly on the whole gate (V6); then a clean night. |
-| **P7** | **Folded items,** one PR each, in parallel: `/summary` with the sidebar's count and today in the schedule's zone; Calibrate reading its pool once; the four read gaps; intake leaving unchanged rows alone; the drops from `notes/still-used.md`. | Each shown by its kind (V8), then deployed together. |
+| **P7** | **Folded items,** one PR each, in parallel: `/summary` with the sidebar's count and today in the schedule's zone; Calibrate reading its pool once; the four read gaps; intake leaving unchanged rows alone; the drops from `notes/still-used.md`. | Each shown by its kind (V8), then deployed together; one full night checks P6 and P7 together (V7). |
 
 ## Verification
 
@@ -231,3 +234,17 @@ Filled in as stages land.
   production's taxonomy, no integrations but the archive, `LITWATCH_STRICT_GATES=1`, `litwatch nightly --no-fetch
   --limit 25`: exit 0 in 45 s, $0.09; 25 classified, 25 analysed, 23 graded, 4 full-text passes reconciled, 1 digest
   written and 4 with nothing new. The log has no warning, error, `gate nesting`, slow unit or pool timeout.
+- **P5, V7:** deployed 2026-11-20 08:55 MST as `litwatch:1.0.0-dev-b396e5eb`.
+  - **Its first night, 2026-11-21 (run 119), was a Saturday:** arXiv announced nothing new, so it is quiet by design.
+    - It finished in 4 min with no error: 2,152 fetched, 1 new and 2,151 updated. That is in line with the last
+      Saturday (run 105: 1,843 fetched, none new, 2 min 41 s).
+    - Every category's intake checkpoint advanced to 2026-11-21.
+    - Grading, digests and Notion writes had nothing to do. No verdict was recorded, no digest was written, as on
+      2026-11-14 and 15, and no Notion page changed. Both integrations' cursors still reached the outbox's last
+      event.
+    - The publications run of 2026-11-20 finished. No run is left unfinished, and no job is running or failed.
+    - From the deploy to 08:30 the log has only info lines (12,847): no warning, error, traceback, `gate nesting:`,
+      slow unit or pool timeout.
+    - The `pg_locks` sampler saw no lock wait from 01:55 to 04:30. Every `/status` component is healthy.
+  - **No full night ran on P5 alone:** P6 deployed on 2026-11-21 (D3's change), so the first full night checks P5 and
+    P6, with P7, together.
