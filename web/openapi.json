@@ -8423,10 +8423,17 @@
             "title": "Abstract"
           },
           "authors": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Authors"
           },
           "published": {
@@ -8477,7 +8484,6 @@
           "why",
           "title",
           "abstract",
-          "authors",
           "fit"
         ],
         "title": "SessionItem",

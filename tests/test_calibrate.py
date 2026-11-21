@@ -389,3 +389,23 @@ async def test_a_session_answers_in_the_shape_its_schema_names(db):
     schemas = app.openapi()["components"]["schemas"]
     assert set(found) == set(schemas["Session"]["properties"])
     assert all(set(i) == set(schemas["SessionItem"]["properties"]) for i in found["items"])
+
+
+async def test_a_session_keeps_a_paper_whose_authors_are_null(db):
+    """A paper stored with JSON-null authors answers as it is stored, null, and does not take
+    the whole session down with it."""
+    from litwatch.api import create_app
+    from litwatch.config import Config
+
+    session_id = await calibrate.draw(Bridge(db), seed=1, size=2)
+    first = (await items(db, session_id))[0]
+    await db.execute(
+        "UPDATE papers SET authors = 'null'::jsonb WHERE id = %s", (first["paper_id"],)
+    )
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    app = create_app(dsn, "t", Config())
+    async with AppClient(app, base_url="http://t", headers={"authorization": "Bearer t"}) as c:
+        found = await c.get(f"/api/settings/calibrate/{session_id}")
+    assert found.status_code == 200
+    item = next(i for i in found.json()["items"] if i["paper_id"] == first["paper_id"])
+    assert item["authors"] is None

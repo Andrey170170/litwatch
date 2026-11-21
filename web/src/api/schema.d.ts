@@ -3245,7 +3245,7 @@ export interface components {
             /** Abstract */
             abstract: string;
             /** Authors */
-            authors: string[];
+            authors?: string[] | null;
             /** Published */
             published?: string | null;
             verdict?: components["schemas"]["Fit"] | null;

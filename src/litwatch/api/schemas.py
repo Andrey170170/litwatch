@@ -1266,7 +1266,7 @@ class SessionItem(BaseModel):
     answered_at: datetime | None = None
     title: str
     abstract: str
-    authors: list[str]
+    authors: list[str] | None = None  # as stored: a JSON null stays null
     published: datetime | None = None
     verdict: Fit | None = None
     fit: dict[str, LabelValue]
