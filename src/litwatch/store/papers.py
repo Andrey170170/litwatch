@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import Any, LiteralString
 
 from psycopg.types.json import Jsonb
 
@@ -25,6 +25,7 @@ COLUMNS = """
 @dataclass
 class Upserted:
     inserted: int = 0
+    # Stored papers whose row changed; one that resolved to what was stored is not counted.
     updated: int = 0
     # Ids whose title or abstract was rewritten: what was said about the old text is stale.
     rewritten: list[str] = field(default_factory=list)
@@ -53,7 +54,7 @@ def row_to_paper(row: dict[str, Any]) -> Paper:
     )
 
 
-def fingerprint(table: str) -> str:
+def fingerprint(table: LiteralString) -> LiteralString:
     """SQL for a fingerprint of a row's title and abstract, blind to whitespace: what an owner's
     correction is keyed on (the text arXiv sent when it was made)."""
     return f"md5(regexp_replace({table}.title || ' ' || {table}.abstract, '\\s+', ' ', 'g'))"
@@ -68,6 +69,55 @@ _BY_DAY = ("oai", ARCHIVE)
 # The owner's correction stands: arXiv sent the very text it fixed.
 _KEPT = f"papers.corrected_from = {fingerprint('EXCLUDED')}"
 
+# What a replacement writes, column by column: the upsert's SET, and what it compares with the
+# stored row, so a record that resolves to the stored values (most of each night's three-day
+# overlap) leaves the row alone: no rewrite, no `updated` count, no event.
+_REPLACED: dict[LiteralString, LiteralString] = {
+    # Canonical metadata (Atom never updates) dates the first listing; a feed's date stands
+    # only until it does. A day read from the version history is never replaced by a guessed
+    # one, and corrects any day.
+    "announced": """CASE WHEN EXCLUDED.announced_known OR NOT papers.announced_known
+                         THEN coalesce(EXCLUDED.announced, papers.announced)
+                         ELSE papers.announced END""",
+    "announced_known": "EXCLUDED.announced_known OR papers.announced_known",
+    # The owner's correction stands while arXiv sends the text it fixed.
+    "title": f"CASE WHEN {_KEPT} THEN papers.title ELSE EXCLUDED.title END",
+    "abstract": f"CASE WHEN {_KEPT} THEN papers.abstract ELSE EXCLUDED.abstract END",
+    "corrected_at": f"CASE WHEN {_KEPT} THEN papers.corrected_at END",
+    "corrected_from": f"CASE WHEN {_KEPT} THEN papers.corrected_from END",
+    "authors": "EXCLUDED.authors",
+    "categories": "EXCLUDED.categories",
+    "primary_category": "coalesce(EXCLUDED.primary_category, papers.primary_category)",
+    "published": "least(papers.published, EXCLUDED.published)",
+    "updated": """CASE WHEN %(by_day)s AND papers.updated::date = EXCLUDED.updated::date
+                       THEN papers.updated ELSE EXCLUDED.updated END""",
+    "url": "EXCLUDED.url",
+    "metadata_source": "EXCLUDED.metadata_source",
+    "version": """CASE WHEN EXCLUDED.version IS NOT NULL THEN EXCLUDED.version
+                       WHEN EXCLUDED.updated IS NOT NULL AND (papers.updated IS NULL
+                            OR EXCLUDED.updated > papers.updated) THEN NULL
+                       ELSE papers.version END""",
+    "version_history": """CASE
+                       WHEN EXCLUDED.version_history <> '[]'::jsonb THEN EXCLUDED.version_history
+                       WHEN EXCLUDED.version IS NULL AND EXCLUDED.updated IS NOT NULL
+                            AND (papers.updated IS NULL OR EXCLUDED.updated > papers.updated)
+                            THEN '[]'::jsonb
+                       ELSE papers.version_history END""",
+    "doi": "coalesce(EXCLUDED.doi, papers.doi)",
+    "journal_ref": "coalesce(EXCLUDED.journal_ref, papers.journal_ref)",
+    "license": "coalesce(EXCLUDED.license, papers.license)",
+    "comments": "coalesce(EXCLUDED.comments, papers.comments)",
+    # Withdrawn as its version history says, kept while the history is not known, as the
+    # history is.
+    "withdrawn_at": """CASE WHEN EXCLUDED.version_history <> '[]'::jsonb
+                            THEN EXCLUDED.withdrawn_at ELSE papers.withdrawn_at END""",
+}
+_SET = ",\n".join(f"{column} = {value}" for column, value in _REPLACED.items())
+_CHANGED = (
+    f"({', '.join(f'papers.{column}' for column in _REPLACED)})"
+    f" IS DISTINCT FROM ({', '.join(_REPLACED.values())})"
+)
+
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
@@ -81,7 +131,8 @@ async def upsert(
     listed: Mapping[str, date] | None = None,
 ) -> Upserted:
     """Insert new papers and refresh metadata on replacements, emitting `paper.added` and
-    `paper.revised` with the `source` in their payload.
+    `paper.revised` with the `source` in their payload. A replacement that would store what
+    is already stored writes nothing and is not counted as updated.
 
     A revision counts as rewritten only when its title or abstract changed beyond a touch-up
     (`core.rewritten`); only then is the paper judged again. Atom metadata can insert a paper
@@ -125,54 +176,10 @@ async def upsert(
                         %(primary_category)s, %(published)s, %(updated)s, %(url)s, %(source)s,
                         %(version)s, %(version_history)s, %(doi)s, %(journal_ref)s, %(license)s,
                         %(comments)s, %(announced)s, %(known)s, %(withdrawn_at)s)
-                ON CONFLICT (id) DO UPDATE SET
-                    -- Canonical metadata (Atom never updates) dates the first listing;
-                    -- a feed's date stands only until it does. A day read from the
-                    -- version history is never replaced by a guessed one, and corrects
-                    -- any day.
-                    announced = CASE WHEN EXCLUDED.announced_known
-                                          OR NOT papers.announced_known
-                                     THEN coalesce(EXCLUDED.announced, papers.announced)
-                                     ELSE papers.announced END,
-                    announced_known = EXCLUDED.announced_known OR papers.announced_known,
-                    -- The owner's correction stands while arXiv sends the text it fixed.
-                    title = CASE WHEN {_KEPT}
-                                 THEN papers.title ELSE EXCLUDED.title END,
-                    abstract = CASE WHEN {_KEPT}
-                                    THEN papers.abstract ELSE EXCLUDED.abstract END,
-                    corrected_at = CASE WHEN {_KEPT}
-                                        THEN papers.corrected_at END,
-                    corrected_from = CASE WHEN {_KEPT}
-                                          THEN papers.corrected_from END,
-                    authors = EXCLUDED.authors, categories = EXCLUDED.categories,
-                    primary_category = coalesce(EXCLUDED.primary_category,
-                                                papers.primary_category),
-                    published = least(papers.published, EXCLUDED.published),
-                    updated = CASE WHEN %(by_day)s
-                                   AND papers.updated::date = EXCLUDED.updated::date
-                                   THEN papers.updated ELSE EXCLUDED.updated END,
-                    url = EXCLUDED.url, metadata_source = EXCLUDED.metadata_source,
-                    version = CASE WHEN EXCLUDED.version IS NOT NULL THEN EXCLUDED.version
-                        WHEN EXCLUDED.updated IS NOT NULL AND (papers.updated IS NULL
-                             OR EXCLUDED.updated > papers.updated) THEN NULL
-                        ELSE papers.version END,
-                    version_history = CASE
-                        WHEN EXCLUDED.version_history <> '[]'::jsonb
-                             THEN EXCLUDED.version_history
-                        WHEN EXCLUDED.version IS NULL AND EXCLUDED.updated IS NOT NULL
-                             AND (papers.updated IS NULL OR EXCLUDED.updated > papers.updated)
-                             THEN '[]'::jsonb
-                        ELSE papers.version_history END,
-                    doi = coalesce(EXCLUDED.doi,papers.doi),
-                    journal_ref = coalesce(EXCLUDED.journal_ref,papers.journal_ref),
-                    license = coalesce(EXCLUDED.license,papers.license),
-                    comments = coalesce(EXCLUDED.comments, papers.comments),
-                    -- Withdrawn as its version history says, kept while the history is not
-                    -- known, as the history is.
-                    withdrawn_at = CASE WHEN EXCLUDED.version_history <> '[]'::jsonb
-                                        THEN EXCLUDED.withdrawn_at
-                                        ELSE papers.withdrawn_at END
+                ON CONFLICT (id) DO UPDATE SET {_SET}
                 WHERE %(source)s <> 'atom'
+                  -- A record that resolves to what is stored rewrites nothing.
+                  AND {_CHANGED}
                   AND (papers.version IS NULL OR EXCLUDED.version IS NULL
                        OR EXCLUDED.version >= papers.version)
                   AND (NOT %(by_day)s OR papers.updated IS NULL

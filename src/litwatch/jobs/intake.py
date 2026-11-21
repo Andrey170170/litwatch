@@ -51,12 +51,13 @@ async def run(db: DatabaseGate, config: Config, days: int | None = None) -> inta
         )
         _record(record, result)
     log.info(
-        "run %s intake %s: %s papers (%s new, %s updated)",
+        "run %s intake %s: %s papers (%s new, %s updated, %s unchanged)",
         record.run_id,
         result.details["status"],
         result.fetched,
         result.inserted,
         result.updated,
+        result.unchanged,
     )
     return result
 
@@ -108,10 +109,11 @@ async def from_archive(
         )
         _record(record, result)
     log.info(
-        "run %s intake from the archive: %s papers (%s new, %s updated)",
+        "run %s intake from the archive: %s papers (%s new, %s updated, %s unchanged)",
         record.run_id,
         result.fetched,
         result.inserted,
         result.updated,
+        result.unchanged,
     )
     return result
