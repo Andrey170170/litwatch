@@ -31,7 +31,7 @@ from litwatch.llm import Gateway, Request
 from litwatch.llm.types import DecisionRequest, Predicate
 from litwatch.store import runs
 from tests.fakes import BatchingProvider, ScriptedProvider
-from tests.sessions import Bridge, BridgeError
+from tests.sessions import Bridge, BridgeError, Session
 
 LOG = "litwatch.gates.database"
 WAIT = 10.0  # how long a test waits on something that must happen; a deadlock ends it sooner
@@ -44,7 +44,7 @@ DEEP_WORKER = (0, 7213915, 1)
 
 
 @pytest.fixture
-async def probe(conn):
+async def probe(conn: Session):
     """A table to read and write."""
     await conn.execute("CREATE TABLE probe (id int PRIMARY KEY)")
 
@@ -65,7 +65,7 @@ async def count(unit) -> int:
     return (await (await unit.execute("SELECT count(*) AS n FROM probe")).fetchone())["n"]
 
 
-async def keyed(conn, key: int, arg: str | int) -> tuple[int, int, int]:
+async def keyed(conn: Session, key: int, arg: str | int) -> tuple[int, int, int]:
     """A two-key lock as `pg_locks` shows it; a text argument is hashed as Postgres does."""
     if isinstance(arg, int):
         return (key, arg, 2)
@@ -75,11 +75,11 @@ async def keyed(conn, key: int, arg: str | int) -> tuple[int, int, int]:
     return (key, row["h"], 2)
 
 
-async def paper_key(conn, paper_id: str) -> tuple[int, int, int]:
+async def paper_key(conn: Session, paper_id: str) -> tuple[int, int, int]:
     return await keyed(conn, 7213912, paper_id)
 
 
-async def hold_paper(conn, paper_id: str) -> None:
+async def hold_paper(conn: Session, paper_id: str) -> None:
     """Take the paper's lock in `conn`'s open transaction, by its key written out: a holder the
     gate does not know."""
     await conn.execute("SELECT pg_advisory_xact_lock(7213912, hashtext(%s))", (paper_id,))
@@ -92,7 +92,7 @@ ADVISORY = (
 )
 
 
-async def waiters(conn, key: tuple[int, int, int], count: int = 1) -> list[int]:
+async def waiters(conn: Session, key: tuple[int, int, int], count: int = 1) -> list[int]:
     """The backends waiting on the lock `key`, once `count` of them do."""
     query = ADVISORY + " AND NOT l.granted AND (l.classid, l.objid, l.objsubid) = (%s, %s, %s)"
     async with asyncio.timeout(WAIT):
@@ -103,7 +103,7 @@ async def waiters(conn, key: tuple[int, int, int], count: int = 1) -> list[int]:
             await asyncio.sleep(0.02)
 
 
-async def granted(conn, pid: int) -> dict[tuple[int, int, int], str]:
+async def granted(conn: Session, pid: int) -> dict[tuple[int, int, int], str]:
     """The advisory locks backend `pid` holds, with their modes."""
     rows = await (await conn.execute(ADVISORY + " AND l.granted AND l.pid = %s", (pid,))).fetchall()
     return {(r["classid"], r["objid"], r["objsubid"]): r["mode"] for r in rows}
@@ -153,7 +153,7 @@ class Held:
 # -- V1: units -------------------------------------------------------------------------------------
 
 
-async def test_a_read_unit_reads_one_snapshot(db, conn, probe):
+async def test_a_read_unit_reads_one_snapshot(db, conn: Session, probe):
     async with db.read("snapshot") as unit:
         assert await count(unit) == 0
         await conn.execute("INSERT INTO probe VALUES (1)")  # committed, on another connection
@@ -162,21 +162,21 @@ async def test_a_read_unit_reads_one_snapshot(db, conn, probe):
         assert await count(unit) == 1
 
 
-async def test_a_read_unit_refuses_a_write(db, conn, probe):
+async def test_a_read_unit_refuses_a_write(db, conn: Session, probe):
     with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
         async with db.read("reader") as unit:
             await unit.execute("INSERT INTO probe VALUES (1)")
     assert await count(conn) == 0
 
 
-async def test_a_write_unit_commits_when_its_block_ends(db, conn, probe):
+async def test_a_write_unit_commits_when_its_block_ends(db, conn: Session, probe):
     async with db.write("writer") as unit:
         await unit.execute("INSERT INTO probe VALUES (1)")
         assert await count(conn) == 0  # not before
     assert await count(conn) == 1
 
 
-async def test_a_write_unit_rolls_back_when_its_block_raises(db, conn, probe):
+async def test_a_write_unit_rolls_back_when_its_block_raises(db, conn: Session, probe):
     with pytest.raises(LookupError):
         async with db.write("writer") as unit:
             await unit.execute("INSERT INTO probe VALUES (1)")
@@ -184,7 +184,7 @@ async def test_a_write_unit_rolls_back_when_its_block_raises(db, conn, probe):
     assert await count(conn) == 0
 
 
-async def test_a_unit_speaks_the_connections_language(db, conn, probe):
+async def test_a_unit_speaks_the_connections_language(db, conn: Session, probe):
     async with db.write("writer") as unit:
         await unit.executemany("INSERT INTO probe VALUES (%s)", [(1,), (2,)])
         async with unit.copy("COPY probe (id) FROM STDIN") as copy:
@@ -212,7 +212,9 @@ async def test_a_unit_inside_a_unit_raises_when_strict(db, outer, inner):
         pass
 
 
-async def test_a_unit_inside_a_unit_is_logged_when_lenient(db, conn, probe, monkeypatch, caplog):
+async def test_a_unit_inside_a_unit_is_logged_when_lenient(
+    db, conn: Session, probe, monkeypatch, caplog
+):
     monkeypatch.delenv(STRICT_ENV)
     with caplog.at_level(logging.ERROR, logger=LOG):
         async with db.write("the outer"):
@@ -311,7 +313,7 @@ async def test_the_model_gateway_inside_a_unit_is_logged_when_lenient(db, monkey
 # -- V2: locks -------------------------------------------------------------------------------------
 
 
-async def test_locks_are_taken_taxonomy_then_papers_by_id_then_the_rest(db, conn, papers):
+async def test_locks_are_taken_taxonomy_then_papers_by_id_then_the_rest(db, conn: Session, papers):
     a, b, c = papers("a", "b", "c")
     topic = uuid4().hex
     key_a, key_b, key_c = [await paper_key(conn, p) for p in (a, b, c)]
@@ -338,7 +340,7 @@ async def test_locks_are_taken_taxonomy_then_papers_by_id_then_the_rest(db, conn
     assert await granted(conn, pid) == {}  # let go at commit
 
 
-async def test_the_other_locks_are_taken_in_the_registrys_order(db, conn):
+async def test_the_other_locks_are_taken_in_the_registrys_order(db, conn: Session):
     topic = uuid4().hex
     async with conn.transaction():
         # The re-run lock, held as the code before the gate took it.
@@ -360,7 +362,7 @@ async def test_the_other_locks_are_taken_in_the_registrys_order(db, conn):
         ("pg_advisory_xact_lock_shared", "shared", False),
     ],
 )
-async def test_the_taxonomy_lock_is_todays(db, conn, held_today, unit_takes, waits):
+async def test_the_taxonomy_lock_is_todays(db, conn: Session, held_today, unit_takes, waits):
     async with conn.transaction():
         await conn.execute(f"SELECT {held_today}(7213913)")
         held = Held(db.write("u", taxonomy=unit_takes))
@@ -374,7 +376,7 @@ async def test_the_taxonomy_lock_is_todays(db, conn, held_today, unit_takes, wai
     await held.leave()
 
 
-async def test_a_lock_asked_for_late_raises(db, conn, papers):
+async def test_a_lock_asked_for_late_raises(db, conn: Session, papers):
     a, b = papers("a", "b")
     for taxonomy, named in (("shared", [a]), (None, [])):
         async with db.write("late", taxonomy=taxonomy, papers=named) as unit:
@@ -384,7 +386,7 @@ async def test_a_lock_asked_for_late_raises(db, conn, papers):
             assert unit.papers == set(named)
 
 
-async def test_papers_may_be_added_under_the_exclusive_taxonomy_lock(db, conn, papers):
+async def test_papers_may_be_added_under_the_exclusive_taxonomy_lock(db, conn: Session, papers):
     a, b, c = papers("a", "b", "c")
     keys = {await paper_key(conn, p) for p in (a, b, c)}
     async with db.write("edit", taxonomy="exclusive", papers=[a]) as unit:
@@ -395,7 +397,9 @@ async def test_papers_may_be_added_under_the_exclusive_taxonomy_lock(db, conn, p
     assert await granted(conn, pid) == {}
 
 
-async def test_two_units_on_overlapping_papers_named_in_reverse_order_both_finish(db, conn, papers):
+async def test_two_units_on_overlapping_papers_named_in_reverse_order_both_finish(
+    db, conn: Session, papers
+):
     """Staged so that, taken as named, the two would deadlock: the unit naming (a, b) queues on
     `a` first, the one naming (b, a) second, holding `b` if it took `b` first. Postgres ends a
     deadlock with an error after a second, which fails the test before its timeout."""
@@ -437,7 +441,7 @@ async def test_a_write_unit_refuses_locks_it_cannot_take(db, named, error):
 # -- V2: session locks -----------------------------------------------------------------------------
 
 
-async def test_a_session_lock_held_by_one_gate_is_busy_for_another(db, conn):
+async def test_a_session_lock_held_by_one_gate_is_busy_for_another(db, conn: Session):
     async with DatabaseGate(conn.test_dsn, conn.test_schema) as other:
         async with db.held("run") as mine:
             with pytest.raises(BusyError, match="the run lock is held by another session"):
@@ -456,7 +460,7 @@ async def test_a_session_lock_held_by_one_gate_is_busy_for_another(db, conn):
             assert await db.held_elsewhere("run")
 
 
-async def holders(conn, key: tuple[int, int, int]) -> list[int]:
+async def holders(conn: Session, key: tuple[int, int, int]) -> list[int]:
     query = ADVISORY + " AND l.granted AND (l.classid, l.objid, l.objsubid) = (%s, %s, %s)"
     return [r["pid"] for r in await (await conn.execute(query, key)).fetchall()]
 
@@ -477,20 +481,20 @@ SESSION = {
 }
 
 
-async def todays(conn, name: str) -> bool:
+async def todays(conn: Session, name: str) -> bool:
     """Take a session lock on `conn` as the code before the gate did; whether it got it."""
     key, arg = SESSION[name]
     query = f"SELECT pg_try_advisory_lock({key}) AS ok"
     return (await (await conn.execute(query, (arg,) if arg else None)).fetchone())["ok"]
 
 
-async def let_go(conn, name: str) -> None:
+async def let_go(conn: Session, name: str) -> None:
     key, arg = SESSION[name]
     await conn.execute(f"SELECT pg_advisory_unlock({key})", (arg,) if arg else None)
 
 
 @pytest.mark.parametrize("name", SESSION)
-async def test_the_session_locks_are_todays(db, conn, name):
+async def test_the_session_locks_are_todays(db, conn: Session, name):
     arg = SESSION[name][1]
     assert await todays(conn, name)
     with pytest.raises(BusyError):
@@ -503,7 +507,7 @@ async def test_the_session_locks_are_todays(db, conn, name):
     await let_go(conn, name)
 
 
-async def test_the_migration_lock_is_todays_and_waits_for_its_holder(db, conn):
+async def test_the_migration_lock_is_todays_and_waits_for_its_holder(db, conn: Session):
     await conn.execute("SELECT pg_advisory_lock(7213910)")
     held = asyncio.Event()
 
@@ -523,7 +527,7 @@ async def test_the_migration_lock_is_todays_and_waits_for_its_holder(db, conn):
             pass
 
 
-async def test_the_migrations_run_on_the_migration_locks_own_session(db, conn):
+async def test_the_migrations_run_on_the_migration_locks_own_session(db, conn: Session):
     """So they cannot outlive the lock: its session dropped, they stop with it."""
     async with db.startup("migration") as session:
         assert await holders(conn, (0, 7213910, 1)) == [session.info.backend_pid]
@@ -566,7 +570,7 @@ async def test_only_the_listed_session_locks_are_held_across_calls(db):
         await db.held_elsewhere("schedule")
 
 
-async def test_a_session_lock_lost_with_its_connection_is_logged(db, conn, caplog):
+async def test_a_session_lock_lost_with_its_connection_is_logged(db, conn: Session, caplog):
     with caplog.at_level(logging.ERROR, logger=LOG):
         async with db.held("deep-worker"):
             (pid,) = await holders(conn, DEEP_WORKER)
@@ -582,7 +586,7 @@ async def test_a_session_lock_lost_with_its_connection_is_logged(db, conn, caplo
 # -- the bridge, the pool, slow units --------------------------------------------------------------
 
 
-async def test_the_bridge_runs_units_on_the_given_connection(conn, probe):
+async def test_the_bridge_runs_units_on_the_given_connection(conn: Session, probe):
     db = Bridge(conn)
     async with db.write("bridged") as unit:
         assert await backend(unit) == conn.info.backend_pid
@@ -598,7 +602,7 @@ async def test_the_bridge_runs_units_on_the_given_connection(conn, probe):
     assert await count(conn) == 1
 
 
-async def test_the_bridge_refuses_a_connection_in_a_transaction(conn, probe):
+async def test_the_bridge_refuses_a_connection_in_a_transaction(conn: Session, probe):
     db = Bridge(conn)
     async with conn.transaction():
         with pytest.raises(BridgeError, match="not idle"):
@@ -619,7 +623,7 @@ async def test_a_gate_that_cannot_reach_its_database_fails_to_open():
         await gate.open()
 
 
-async def test_a_unit_that_gets_no_connection_fails_naming_itself(conn):
+async def test_a_unit_that_gets_no_connection_fails_naming_itself(conn: Session):
     async with DatabaseGate(conn.test_dsn, conn.test_schema, max_size=1, timeout=0.2) as db:
         holder = Held(db.write("the holder"))
         await holder.opened()
@@ -647,14 +651,25 @@ async def test_a_slow_unit_is_logged_with_its_name_and_duration(db, monkeypatch,
 # -- the presence session --------------------------------------------------------------------------
 
 
-async def alive(conn, run_id: int) -> bool:
+async def alive(conn: Session, run_id: int) -> bool:
     row = await (
         await conn.execute(f"SELECT {runs.ALIVE} AS alive FROM runs r WHERE id = %s", (run_id,))
     ).fetchone()
     return row["alive"]
 
 
-async def test_a_run_stays_alive_while_its_pool_connections_are_replaced(conn):
+async def ended(conn: Session, run_id: int, timeout: float = 5.0) -> bool:
+    """Whether the run stops counting as alive within `timeout`. A closed or terminated session's
+    backend leaves `pg_stat_activity` a moment after the client sees it gone."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while await alive(conn, run_id):
+        if asyncio.get_running_loop().time() > deadline:
+            return False
+        await asyncio.sleep(0.05)
+    return True
+
+
+async def test_a_run_stays_alive_while_its_pool_connections_are_replaced(conn: Session):
     async with DatabaseGate(conn.test_dsn, conn.test_schema, max_size=2) as db:
         me = await db.identity()
         async with db.write("open a run") as unit:
@@ -664,10 +679,12 @@ async def test_a_run_stays_alive_while_its_pool_connections_are_replaced(conn):
         assert await alive(conn, run_id)
         assert await db.identity() == me
     # The gate closed, its presence with it: the run is over.
-    assert not await alive(conn, run_id)
+    assert await ended(conn, run_id)
 
 
-async def test_a_presence_session_that_ended_is_opened_again_with_a_new_identity(conn, caplog):
+async def test_a_presence_session_that_ended_is_opened_again_with_a_new_identity(
+    conn: Session, caplog
+):
     async with DatabaseGate(conn.test_dsn, conn.test_schema) as db:
         me = await db.identity()
         async with db.write("open a run") as unit:
@@ -679,9 +696,9 @@ async def test_a_presence_session_that_ended_is_opened_again_with_a_new_identity
         assert [r.getMessage() for r in logged(caplog)] == [
             f"the presence session (backend {me.pid}) ended; opening another"
         ]
-        assert not await alive(conn, run_id)  # what was claimed in the old one's name is over
+        assert await ended(conn, run_id)  # what was claimed in the old one's name is over
 
 
-async def test_a_bridged_gates_presence_is_its_connection(conn):
+async def test_a_bridged_gates_presence_is_its_connection(conn: Session):
     me = await Bridge(conn).identity()
     assert me.pid == conn.info.backend_pid

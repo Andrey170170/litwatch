@@ -9,6 +9,7 @@ from litwatch.store import feedback as feedback_store
 from litwatch.store import papers as papers_store
 from tests import settling
 from tests.conftest import FAITH, TREE, AppClient, paper
+from tests.sessions import Session, in_read, in_write
 
 TOKEN = "s3cret"
 
@@ -17,9 +18,9 @@ READ_TOKEN = "r3ad"
 
 
 @pytest.fixture
-async def client(conn):
+async def client(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [paper("2609.1"), paper("2609.2"), paper("2609.3")])
+    await in_write(conn, papers_store.upsert, [paper("2609.1"), paper("2609.2"), paper("2609.3")])
     # The app's gate opens its own connections; point them at the test schema.
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, read_token=READ_TOKEN)
@@ -68,13 +69,15 @@ async def test_everything_but_the_health_check_needs_the_token(client):
     assert (await client.get("/api/summary", headers=AUTH)).status_code == 200
 
 
-async def test_an_old_style_arxiv_id_with_a_slash_can_be_labelled(client, conn):
-    await papers_store.upsert(conn, [paper("cs/9901001")])
+async def test_an_old_style_arxiv_id_with_a_slash_can_be_labelled(client, conn: Session):
+    await in_write(conn, papers_store.upsert, [paper("cs/9901001")])
     url = f"/api/labels/{FAITH.slug}/cs/9901001"
     assert (await client.put(url, json={"value": "related"}, headers=AUTH)).status_code == 200
-    assert [label.paper_id for label in await feedback_store.labels(conn)] == ["cs/9901001"]
+    assert [label.paper_id for label in await in_read(conn, feedback_store.labels)] == [
+        "cs/9901001"
+    ]
     assert (await client.delete(url, headers=AUTH)).status_code == 200
-    assert await feedback_store.labels(conn) == []
+    assert await in_read(conn, feedback_store.labels) == []
 
 
 async def test_a_good_bearer_header_works_beside_a_stale_cookie(client):

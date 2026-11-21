@@ -18,6 +18,7 @@ from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
 from tests import settling
 from tests.conftest import FAITH, TREE, AppClient, paper
+from tests.sessions import Session, in_read, in_write
 
 TOKEN = "s3cret"
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation in CoT.")
@@ -28,9 +29,9 @@ STOPPED = ("awaiting_classification", "analysis_failed", "ungraded", "fulltext_f
 
 
 @pytest.fixture
-async def client(conn):
+async def client(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P, Q, R])
+    await in_write(conn, papers_store.upsert, [P, Q, R])
     await conn.execute(
         "INSERT INTO runs (kind, started_at, finished_at) VALUES ('nightly', now(), now())"
     )
@@ -41,21 +42,21 @@ async def client(conn):
         yield c
 
 
-async def stop(conn, p, step: str, topic: str = "") -> None:
+async def stop(conn: Session, p, step: str, topic: str = "") -> None:
     """Three unusable answers in a row: the step waits for the owner."""
     for _ in range(FAILED_RUNS):
-        await failures.failed(conn, p, step, "unusable", counts=True, topic=topic)
+        await in_write(conn, failures.failed, p, step, "unusable", counts=True, topic=topic)
 
 
-async def fail_pass(conn, pass_id: int) -> None:
+async def fail_pass(conn: Session, pass_id: int) -> None:
     """The pass fails three runs, as the worker records them."""
     for _ in range(FAILED_RUNS):
         await conn.execute("UPDATE fulltext_passes SET state = 'ready' WHERE id = %s", (pass_id,))
-        (claimed,) = await fulltext_store.claim(conn, timedelta(minutes=5))
-        await fulltext_store.failed(conn, claimed, "no text to be had", counts=True)
+        (claimed,) = await in_write(conn, fulltext_store.claim, timedelta(minutes=5))
+        await in_write(conn, fulltext_store.failed, claimed, "no text to be had", counts=True)
 
 
-async def stop_pass(conn) -> int:
+async def stop_pass(conn: Session) -> int:
     """R central on the Focus topic gets a Brief pass, which fails three runs."""
     await conn.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
@@ -66,7 +67,7 @@ async def stop_pass(conn) -> int:
         paper_id=R.id, topic=FAITH.slug, topic_version="v", fit=Fit.CENTRAL, reason="r",
         opinions={},
     )  # fmt: skip
-    await verdicts.add(conn, central)
+    await in_write(conn, verdicts.add, central)
     await settling.settle(conn, R.id, cause=Cause.VERDICT)
     (row,) = await (
         await conn.execute("SELECT id FROM fulltext_passes WHERE kind = 'brief'")
@@ -75,12 +76,12 @@ async def stop_pass(conn) -> int:
     return row["id"]
 
 
-async def fail_digest(conn, day: date = DAY) -> int:
+async def fail_digest(conn: Session, day: date = DAY) -> int:
     o = digests_store.Outcome(FAITH.slug, DigestPeriod.DAY, day, DigestState.FAILED, error="x")
-    return await digests_store.record(conn, o, None)
+    return await in_write(conn, digests_store.record, o, None)
 
 
-async def everything(conn) -> tuple[int, int]:
+async def everything(conn: Session) -> tuple[int, int]:
     """One item in each red group of Needs you: the pass's and the digest's ids."""
     await stop(conn, P, "classification")
     await stop(conn, Q, "analysis")
@@ -122,7 +123,7 @@ async def status(client) -> dict:
     return (await client.get("/api/summary")).json()["status"]
 
 
-async def test_acknowledge_per_group_then_all_clears_the_run_status(client, conn):
+async def test_acknowledge_per_group_then_all_clears_the_run_status(client, conn: Session):
     await everything(conn)
     before = await status(client)
     assert before["state"] == "attention"
@@ -164,7 +165,7 @@ async def test_acknowledge_per_group_then_all_clears_the_run_status(client, conn
     assert all(len(night[k]) == 1 and night[k][0]["acknowledged_at"] for k in ALL)
 
 
-async def test_a_withdrawn_papers_failed_pass_leaves_needs_you(client, conn):
+async def test_a_withdrawn_papers_failed_pass_leaves_needs_you(client, conn: Session):
     """arXiv has no text for a withdrawal, so a pass on its new version fails: once intake
     learns the paper is withdrawn, it is dropped, and its failure is no longer the owner's."""
     await stop_pass(conn)
@@ -174,7 +175,7 @@ async def test_a_withdrawn_papers_failed_pass_leaves_needs_you(client, conn):
     assert (await shown(client, "fulltext"))["passes"] == []
 
 
-async def test_only_what_still_waits_as_shown_is_acknowledged(client, conn):
+async def test_only_what_still_waits_as_shown_is_acknowledged(client, conn: Session):
     await stop(conn, P, "analysis")
     (seen,) = (await shown(client, "analysis_failed"))["steps"]
     # Named for another revision (the text changed under the page), or a step never stopped.
@@ -186,7 +187,7 @@ async def test_only_what_still_waits_as_shown_is_acknowledged(client, conn):
     assert row["acknowledged_at"] is None
 
 
-async def test_a_page_older_than_the_failure_acknowledges_nothing(client, conn):
+async def test_a_page_older_than_the_failure_acknowledges_nothing(client, conn: Session):
     """The page showed a failure; meanwhile it was tried again and failed again. Acknowledge
     from that page names the earlier failure, and marks nothing: the owner has not seen this
     one. Nor is a failed digest of a topic no longer active marked."""
@@ -208,7 +209,7 @@ async def test_a_page_older_than_the_failure_acknowledges_nothing(client, conn):
     assert (back["analysis_failed"], back["fulltext_failed"]) == (1, 1)
 
 
-async def test_an_item_that_recovers_and_fails_again_comes_back(client, conn):
+async def test_an_item_that_recovers_and_fails_again_comes_back(client, conn: Session):
     pass_id, digest_id = await everything(conn)
     await ack(client, await shown(client, *ALL))
     assert (await status(client))["state"] == "quiet"
@@ -218,7 +219,7 @@ async def test_an_item_that_recovers_and_fails_again_comes_back(client, conn):
     assert retried.status_code == 204
     await stop(conn, Q, "analysis")
     # Grade it now forgets the count (`failures.reset`); the grading fails three more runs.
-    await failures.reset(conn, Q.id, "grading", FAITH.slug)
+    await in_write(conn, failures.reset, Q.id, "grading", FAITH.slug)
     await stop(conn, Q, "grading", FAITH.slug)
     # Run it now on the pass, which fails three more runs.
     assert (await client.post(f"/api/settings/fulltext/{pass_id}/now")).status_code == 204
@@ -234,14 +235,14 @@ async def test_an_item_that_recovers_and_fails_again_comes_back(client, conn):
     assert await fail_digest(conn) == digest_id
     assert (await status(client))["digests_failed"] == 0
     written = digests_store.Outcome(FAITH.slug, DigestPeriod.DAY, DAY, DigestState.NOTHING_NEW)
-    await digests_store.record(conn, written, None)
-    row = await digests_store.get(conn, digest_id)
+    await in_write(conn, digests_store.record, written, None)
+    row = await in_read(conn, digests_store.get, digest_id)
     assert (row["state"], row["acknowledged_at"]) == ("nothing_new", None)
     await fail_digest(conn, DAY + timedelta(days=1))
     assert (await status(client))["digests_failed"] == 1
 
 
-async def test_a_failed_nightly_run_is_not_acknowledged(client, conn):
+async def test_a_failed_nightly_run_is_not_acknowledged(client, conn: Session):
     await stop(conn, P, "analysis")
     await conn.execute(
         "INSERT INTO runs (kind, started_at, finished_at, error) "
@@ -256,7 +257,7 @@ async def test_a_failed_nightly_run_is_not_acknowledged(client, conn):
     )
 
 
-async def test_a_new_text_or_a_text_that_arrives_brings_a_failure_back(client, conn):
+async def test_a_new_text_or_a_text_that_arrives_brings_a_failure_back(client, conn: Session):
     """No owner's retry in between: a rewrite fails classification afresh, and a pass that
     waited for its text over a week gets it and then fails three runs."""
     await stop(conn, P, "classification")
@@ -270,7 +271,7 @@ async def test_a_new_text_or_a_text_that_arrives_brings_a_failure_back(client, c
     assert (await status(client))["state"] == "quiet"
 
     rewritten = paper(P.id, title=P.title, abstract="A wholly new abstract.", version=2)
-    await papers_store.upsert(conn, [rewritten])
+    await in_write(conn, papers_store.upsert, [rewritten])
     await stop(conn, rewritten.model_copy(update={"revision": 2}), "classification")
     await fail_pass(conn, pass_id)
     back = await status(client)
@@ -281,15 +282,26 @@ NOTE = {"kind": "access", "source": "service", "note": "A fetch was refused: not
 CARD = {"key_claim": "Probes find hidden steps.", "limitations": ["Two models only, both small."]}
 
 
-async def write_card(conn, p, notes: list | None = None) -> None:
+async def write_card(conn: Session, p, notes: list | None = None) -> None:
     """Deep writes `p`'s card, again if it had one, with process notes when given."""
     card = CARD | ({"process_notes": notes} if notes is not None else {})
-    await cards.put_card(
-        conn, p.id, card, "m", {}, revision=1, version=1, source="latex", pass_id=None
+    await in_write(
+        conn,
+        cards.put_card,
+        p.id,
+        card,
+        "m",
+        {},
+        revision=1,
+        version=1,
+        source="latex",
+        pass_id=None,
     )
 
 
-async def test_deep_notes_count_nowhere_and_are_acknowledged_for_the_card_shown(client, conn):
+async def test_deep_notes_count_nowhere_and_are_acknowledged_for_the_card_shown(
+    client, conn: Session
+):
     before = await status(client)
     await write_card(conn, P, [NOTE, NOTE | {"kind": "budget", "note": "The budget ran out."}])
     await write_card(conn, Q)  # no notes
@@ -340,7 +352,7 @@ async def test_deep_notes_count_nowhere_and_are_acknowledged_for_the_card_shown(
     )
 
     # A card that fails to be written again keeps its notes and their mark; a remade one clears it.
-    await cards.card_failed(conn, P.id, "the model stopped without submitting")
+    await in_write(conn, cards.card_failed, P.id, "the model stopped without submitting")
     (row,) = (await client.get("/api/settings/quality")).json()["night"]["deep_notes"]
     assert row["acknowledged_at"] == first
     await write_card(conn, P, [NOTE])

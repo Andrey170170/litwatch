@@ -13,6 +13,7 @@ from litwatch.config import Config, Schedule
 from litwatch.gates.database import BusyError
 from litwatch.jobs import scheduler, worker
 from tests.conftest import gate_on
+from tests.sessions import Session
 
 DAY = datetime(2026, 10, 12, tzinfo=UTC)  # a Monday
 
@@ -84,7 +85,7 @@ def test_the_next_fire_steps_through_a_fall_back_in_the_zone():
     assert scheduler.next_fire("0 7 * * 1", at(7, 1)) == at(7, 0, days=7)
 
 
-async def test_a_job_another_scheduler_is_deciding_on_is_left_to_it(conn, db):
+async def test_a_job_another_scheduler_is_deciding_on_is_left_to_it(conn: Session, db):
     ran = []
 
     async def run(db):

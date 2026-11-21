@@ -27,8 +27,9 @@ from litwatch.store.calls import CallJournal
 from tests import settling
 from tests.conftest import FAITH, TREE, AppClient, gate_on, paper, started
 from tests.fakes import BatchingProvider
-from tests.test_reruns import COST, Costed, Priced, charged, work_out
-from tests.test_steps import CONFIG, Scripted, decision, rows
+from tests.priced import COST, Costed, Priced, charged, work_out
+from tests.scripted import CONFIG, Scripted, decision, rows
+from tests.sessions import Bridge, Session, in_read, in_write
 
 LABELS = Path(__file__).parent.parent / "evals" / "labels"
 TOPIC = FAITH.slug
@@ -142,21 +143,21 @@ LABELLED = [
 
 
 @pytest.fixture
-async def models(conn):
+async def models(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [A, B, C])
+    await in_write(conn, papers_store.upsert, [A, B, C])
     return Scripted()
 
 
-async def start(conn, models, labels=LABELLED, config=CONFIG) -> replay.Replay:
-    r = await replay.prepare(conn, labels)
-    await replay.start(conn, config, r, {})
+async def start(conn: Session, models, labels=LABELLED, config=CONFIG) -> replay.Replay:
+    r = await in_read(conn, replay.prepare, labels)
+    await in_write(conn, replay.start, config, r, {})
     async with gate_on(conn) as db:
         await replay.run(db, config, r, gateway=models.gateway)
     return r
 
 
-async def contents(conn) -> dict[str, str]:
+async def contents(conn: Session) -> dict[str, str]:
     """A digest of every table's rows, so a change of any row shows, not only of their count."""
     tables = await rows(
         conn,
@@ -174,40 +175,44 @@ async def contents(conn) -> dict[str, str]:
     return found
 
 
-async def test_a_replay_writes_only_to_the_evaluation_tables(conn, models):
+async def test_a_replay_writes_only_to_the_evaluation_tables(conn: Session, models):
     # A miss: the owner's word, a `miss` membership and a Save, all before the replay.
-    await misses_feedback.report(conn, C.id, TOPIC, Fit.CENTRAL)
+    async with Bridge(conn).write("report", taxonomy="shared", papers=[C.id]) as unit:
+        await misses_feedback.report(unit, C.id, TOPIC, Fit.CENTRAL)
     before = await contents(conn)
-    r = await start(conn, models, [*LABELLED, *await replay.misses(conn)])
+    r = await start(conn, models, [*LABELLED, *await in_read(conn, replay.misses)])
     after = await contents(conn)
     changed = {t for t in before if before[t] != after[t]}
     # The run record and its call journal carry the cost; nothing of the pipeline moves, nor
     # what the status document reads of the providers.
     assert changed == {"eval_runs", "eval_labels", "eval_results", "runs", "inference_calls"}
-    run = await evaluation.get(conn, r.eval_run_id)
+    run = await in_read(conn, evaluation.get, r.eval_run_id)
     assert run["finished_at"] is not None and float(run["cost"]) > 0
     # An attempt killed before its run record was finished still counts what it spent.
     await conn.execute("UPDATE runs SET cost = 0")  # what a killed attempt leaves
-    assert (await evaluation.get(conn, r.eval_run_id))["cost"] == run["cost"]
+    assert (await in_read(conn, evaluation.get, r.eval_run_id))["cost"] == run["cost"]
 
 
 async def test_the_owners_memberships_never_count_and_grading_runs_whatever_classification_said(
-    conn, models
+    conn: Session, models
 ):
     # C is reported missed (a `miss` membership) and labelled a member by the owner; the
     # classifier puts it nowhere near the topic.
-    await misses_feedback.report(conn, C.id, TOPIC, Fit.CENTRAL)
-    await classifications_store.put_owner(conn, C, TOPIC, True, TREE.get(TOPIC).version)
-    assert {m.source for m in await classifications_store.memberships(conn, C.id)} == {
+    async with Bridge(conn).write("report", taxonomy="shared", papers=[C.id]) as unit:
+        await misses_feedback.report(unit, C.id, TOPIC, Fit.CENTRAL)
+    await in_write(conn, classifications_store.put_owner, C, TOPIC, True, TREE.get(TOPIC).version)
+    assert {m.source for m in await in_read(conn, classifications_store.memberships, C.id)} == {
         Source.MISS,
         Source.OWNER,
     }
     models.decisions[A.title] = decision("cot-faithfulness")  # the classifier's member
     models.decisions[C.title] = decision("other")
     models.fits[("judge", C.title)] = {"reason": "Its subject.", "fit": "central"}
-    r = await start(conn, models, [*LABELLED, *await replay.misses(conn)])
+    r = await start(conn, models, [*LABELLED, *await in_read(conn, replay.misses)])
     assert ("judge", C.title) in models.asked and ("check", C.title) in models.asked
-    found = {(o.cohort, o.paper_id): o for o in await evaluation.outcomes(conn, r.eval_run_id)}
+    found = {
+        (o.cohort, o.paper_id): o for o in await in_read(conn, evaluation.outcomes, r.eval_run_id)
+    }
     miss = found[("miss", C.id)]
     assert (miss.classifier, miss.uncertain, miss.keyword, miss.member) == (
         False,
@@ -228,39 +233,41 @@ async def test_the_owners_memberships_never_count_and_grading_runs_whatever_clas
     assert (by_cohort["owner"].positives, by_cohort["owner"].membership.hits) == (2, 2)
 
 
-async def test_a_failed_grading_is_a_miss_and_a_resume_redoes_only_what_failed(conn, db, models):
+async def test_a_failed_grading_is_a_miss_and_a_resume_redoes_only_what_failed(
+    conn: Session, db, models
+):
     models.decisions[A.title] = decision("cot-faithfulness")
     models.fits[("judge", A.title)] = {"fit": "not a fit"}  # invalid: unusable
     models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
     r = await start(conn, models)
-    (line, _) = recall(await evaluation.outcomes(conn, r.eval_run_id))
+    (line, _) = recall(await in_read(conn, evaluation.outcomes, r.eval_run_id))
     assert (line.grading.hits, line.grading.n, line.grading_failed) == (0, 2, 2)
-    stored = {x["paper_id"]: x for x in await evaluation.results(conn, r.eval_run_id)}
+    stored = {x["paper_id"]: x for x in await in_read(conn, evaluation.results, r.eval_run_id)}
     assert stored[A.id]["fit"] is None and "invalid" in stored[A.id]["grade_error"]
     assert stored[C.id]["fit"] == "related" and stored[C.id]["judge"]["fit"] == "related"
 
     del models.fits[("judge", A.title)], models.fits[("check", B.title)]
     models.asked.clear()
-    again = await replay.resume(conn, CONFIG, r.eval_run_id)
+    again = await in_read(conn, replay.resume, CONFIG, r.eval_run_id)
     assert again.to_classify == [] and set(again.to_grade) == {(A.id, TOPIC), (B.id, TOPIC)}
     await replay.run(db, CONFIG, again, gateway=models.gateway)
     assert {step for step, _ in models.asked} == {"judge", "check"}
     assert {title for _, title in models.asked} == {A.title, B.title}
-    (line, _) = recall(await evaluation.outcomes(conn, r.eval_run_id))
+    (line, _) = recall(await in_read(conn, evaluation.outcomes, r.eval_run_id))
     assert (line.grading.hits, line.end_to_end.hits, line.grading_failed) == (2, 2, 0)
-    run = await evaluation.get(conn, r.eval_run_id)
+    run = await in_read(conn, evaluation.get, r.eval_run_id)
     assert len(run["run_ids"]) == 2  # its cost is both runs'
 
 
-async def test_a_replay_resumes_only_under_the_same_configuration(conn, models):
+async def test_a_replay_resumes_only_under_the_same_configuration(conn: Session, models):
     r = await start(conn, models)
     stricter = CONFIG.model_copy(update={"classification": Classification(focus_threshold=0.6)})
     with pytest.raises(ValueError, match="another configuration"):
-        await replay.resume(conn, stricter, r.eval_run_id)
-    assert (await replay.resume(conn, CONFIG, r.eval_run_id)).to_grade == []
+        await in_read(conn, replay.resume, stricter, r.eval_run_id)
+    assert (await in_read(conn, replay.resume, CONFIG, r.eval_run_id)).to_grade == []
 
 
-async def test_a_routing_change_refuses_a_resume(conn, models):
+async def test_a_routing_change_refuses_a_resume(conn: Session, models):
     # An Area topic under the Focus topic, draft when the run starts: once active, a classifier
     # membership of its class would grade there instead, so finished and unfinished papers
     # would be routed differently.
@@ -275,10 +282,12 @@ async def test_a_routing_change_refuses_a_resume(conn, models):
     active = probes.model_copy(update={"status": Status.ACTIVE})
     await settling.save_tree(conn, Taxonomy(classes=drafted.classes, topics=[*TREE.topics, active]))
     with pytest.raises(ValueError, match="another configuration"):
-        await replay.resume(conn, CONFIG, r.eval_run_id)
+        await in_read(conn, replay.resume, CONFIG, r.eval_run_id)
 
 
-async def test_a_classifier_member_through_a_followed_class_below_is_the_classifiers(conn, models):
+async def test_a_classifier_member_through_a_followed_class_below_is_the_classifiers(
+    conn: Session, models
+):
     """Membership is inherited: a paper the classifier puts in a class under the Focus topic is
     the topic's member, even when a followed Area there would grade it instead."""
     subject = "Probes that read hidden reasoning steps from a model's activations."
@@ -294,82 +303,88 @@ async def test_a_classifier_member_through_a_followed_class_below_is_the_classif
         "primary_class": {"option": child.name, "probability": 0.9}
     }
     r = await start(conn, models)
-    found = {(o.cohort, o.paper_id): o for o in await evaluation.outcomes(conn, r.eval_run_id)}
+    found = {
+        (o.cohort, o.paper_id): o for o in await in_read(conn, evaluation.outcomes, r.eval_run_id)
+    }
     assert found[("owner", A.id)].classifier is True
 
 
-async def test_a_prompt_change_refuses_a_resume(conn, models, monkeypatch):
+async def test_a_prompt_change_refuses_a_resume(conn: Session, models, monkeypatch):
     r = await start(conn, models)
     monkeypatch.setattr(grading, "SYSTEM", grading.SYSTEM + " Answer briefly.")
     with pytest.raises(ValueError, match="another configuration"):
-        await replay.resume(conn, CONFIG, r.eval_run_id)
+        await in_read(conn, replay.resume, CONFIG, r.eval_run_id)
 
 
-async def test_a_change_to_the_default_routing_refuses_a_resume(conn, models, monkeypatch):
+async def test_a_change_to_the_default_routing_refuses_a_resume(conn: Session, models, monkeypatch):
     r = await start(conn, models)
     monkeypatch.setitem(replay.DEFAULT_ROUTING, CONFIG.models.check.model, ("another-provider",))
     with pytest.raises(ValueError, match="another configuration"):
-        await replay.resume(conn, CONFIG, r.eval_run_id)
+        await in_read(conn, replay.resume, CONFIG, r.eval_run_id)
 
 
-async def test_a_code_change_refuses_a_resume(conn, models, monkeypatch):
+async def test_a_code_change_refuses_a_resume(conn: Session, models, monkeypatch):
     r = await start(conn, models)
     monkeypatch.setattr(replay, "_code", lambda: "another")
     with pytest.raises(ValueError, match="another configuration"):
-        await replay.resume(conn, CONFIG, r.eval_run_id)
+        await in_read(conn, replay.resume, CONFIG, r.eval_run_id)
 
 
 async def test_a_paper_whose_text_changed_is_classified_and_graded_again_on_resume(
-    conn, db, models
+    conn: Session, db, models
 ):
     # Classified on its first text, its grading failed; then its abstract was rewritten.
     models.decisions[A.title] = decision("cot-faithfulness")
     models.fits[("judge", A.title)] = {"fit": "not a fit"}
     r = await start(conn, models)
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(conn, [rewritten])
+    await in_write(conn, papers_store.upsert, [rewritten])
     del models.fits[("judge", A.title)]
     models.decisions[A.title] = decision("other")
     models.users.clear()
 
-    again = await replay.resume(conn, CONFIG, r.eval_run_id)
+    again = await in_read(conn, replay.resume, CONFIG, r.eval_run_id)
     assert again.stale == {A.id}
     assert [p.id for p in again.to_classify] == [A.id] and again.to_grade == [(A.id, TOPIC)]
     await replay.run(db, CONFIG, again, gateway=models.gateway)
     # Both stages read the new text, and the row says which.
     asked = [u for u in models.users if A.title in u]
     assert len(asked) == 3 and all(rewritten.abstract in u for u in asked)  # classify, judge, check
-    (row,) = [x for x in await evaluation.results(conn, r.eval_run_id) if x["paper_id"] == A.id]
+    (row,) = [
+        x for x in await in_read(conn, evaluation.results, r.eval_run_id) if x["paper_id"] == A.id
+    ]
     assert (row["paper_revision"], row["classifier"], row["fit"]) == (2, False, "related")
-    assert (await replay.resume(conn, CONFIG, r.eval_run_id)).stale == set()
+    assert (await in_read(conn, replay.resume, CONFIG, r.eval_run_id)).stale == set()
 
 
-async def test_the_estimate_goes_by_the_journal_and_counts_what_is_left(conn, models):
-    r = await replay.prepare(conn, LABELLED)
+async def test_the_estimate_goes_by_the_journal_and_counts_what_is_left(conn: Session, models):
+    r = await in_read(conn, replay.prepare, LABELLED)
     assert (len(r.to_classify), len(r.to_grade)) == (3, 3)
-    first = await replay.estimate(conn, CONFIG, r)
+    first = await in_read(conn, replay.estimate, CONFIG, r)
     assert first == pytest.approx(
         {"classification": 3 * 0.0006, "grading": 3 * (0.003 + 0.0006)}
     )  # no calls yet to go by
     await start(conn, models)
-    again = await replay.estimate(conn, CONFIG, r)  # every scripted call cost $0.001
+    again = await in_read(conn, replay.estimate, CONFIG, r)  # every scripted call cost $0.001
     assert again == pytest.approx({"classification": 3 * 0.001, "grading": 3 * 0.002})
     # Calls under another effort cost differently: the judge at high has none to go by yet.
     judge = CONFIG.models.judge.model_copy(update={"effort": "high"})
     harder = CONFIG.model_copy(update={"models": CONFIG.models.model_copy(update={"judge": judge})})
-    assert (await replay.estimate(conn, harder, r))["grading"] == pytest.approx(3 * (0.003 + 0.001))
+    assert (await in_read(conn, replay.estimate, harder, r))["grading"] == pytest.approx(
+        3 * (0.003 + 0.001)
+    )
     # A call a batch did not answer, sent normally on its row, is a normal call to go by.
     await conn.execute("UPDATE inference_calls SET batch_id = 'msgbatch_1'")
-    assert await replay.estimate(conn, CONFIG, r) == pytest.approx(again)
+    assert await in_read(conn, replay.estimate, CONFIG, r) == pytest.approx(again)
     # Calls answered in a batch, at half price, are not what a replay's normal calls go by.
     await conn.execute('UPDATE inference_calls SET usage = usage || \'{"service_tier": "batch"}\'')
-    assert await replay.estimate(conn, CONFIG, r) == pytest.approx(first)
+    assert await in_read(conn, replay.estimate, CONFIG, r) == pytest.approx(first)
 
 
 async def test_quality_shows_recall_from_the_latest_replay_and_the_report_names_the_losses(
-    conn, models
+    conn: Session, models
 ):
-    assert await quality.replay_recall(conn) is None
+    assert await in_read(conn, quality.replay_recall) is None
     models.decisions[A.title] = decision("cot-faithfulness")
     models.fits[("judge", B.title)] = {"reason": "Off.", "fit": "none"}
     models.fits[("check", B.title)] = {"reason": "Off.", "fit": "adjacent"}
@@ -388,10 +403,10 @@ async def test_quality_shows_recall_from_the_latest_replay_and_the_report_names_
     assert (owner["topic"], owner["positives"]) == (TOPIC, 2)
     assert owner["end_to_end"] == {"hits": 1, "n": 2}
 
-    run = await evaluation.get(conn, r.eval_run_id)
-    outcomes = await evaluation.outcomes(conn, r.eval_run_id)
+    run = await in_read(conn, evaluation.get, r.eval_run_id)
+    outcomes = await in_read(conn, evaluation.outcomes, r.eval_run_id)
     text = replay.report(
-        run, recall(outcomes), outcomes, await evaluation.results(conn, r.eval_run_id)
+        run, recall(outcomes), outcomes, await in_read(conn, evaluation.results, r.eval_run_id)
     )
     assert "| owner | cot-faithfulness | 2 | 0.50 (1/2) | 1.00 (2/2) | 0.50 (1/2) |" in text
     assert "a member; graded adjacent (judge none, check adjacent)" in text
@@ -420,12 +435,12 @@ def labels(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-async def priced(conn, monkeypatch, labels):
+async def priced(conn: Session, monkeypatch, labels):
     """The taxonomy, the three papers, and every replay role with a price bound: the Anthropic
     judge at a listed price, the OpenRouter classifier and check by their charged history. Each
     call costs `test_reruns.COST`."""
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [A, B, C])
+    await in_write(conn, papers_store.upsert, [A, B, C])
     monkeypatch.setitem(prices.ANTHROPIC, "test-judge", (1.0, 2.0, 0.1))
     for model in ("test/decider", "test/check"):
         await charged(conn, model, cost=0.0003, tokens_in=1000, tokens_out=1000)
@@ -433,7 +448,7 @@ async def priced(conn, monkeypatch, labels):
 
 
 @asynccontextmanager
-async def api(conn, config=SCHEDULED):
+async def api(conn: Session, config=SCHEDULED):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, "t", config)
     headers = {"authorization": "Bearer t"}
@@ -441,7 +456,7 @@ async def api(conn, config=SCHEDULED):
         yield c
 
 
-async def run_replay(conn, ceiling: float = 5.0, config=SCHEDULED) -> dict:
+async def run_replay(conn: Session, ceiling: float = 5.0, config=SCHEDULED) -> dict:
     """Run replay from Overview: the job it queued or answered with."""
     async with api(conn, config) as http:
         answer = await http.post("/api/jobs/replays", json={"ceiling": ceiling})
@@ -450,8 +465,11 @@ async def run_replay(conn, ceiling: float = 5.0, config=SCHEDULED) -> dict:
     return job
 
 
-async def test_a_replay_job_from_overview_writes_only_to_the_evaluation_tables(conn, db, priced):
-    await misses_feedback.report(conn, C.id, TOPIC, Fit.CENTRAL)
+async def test_a_replay_job_from_overview_writes_only_to_the_evaluation_tables(
+    conn: Session, db, priced
+):
+    async with Bridge(conn).write("report", taxonomy="shared", papers=[C.id]) as unit:
+        await misses_feedback.report(unit, C.id, TOPIC, Fit.CENTRAL)
     before = await contents(conn)
     async with api(conn) as http:
         offer = (await http.get("/api/jobs/replays/offer")).json()
@@ -471,9 +489,9 @@ async def test_a_replay_job_from_overview_writes_only_to_the_evaluation_tables(c
     # included, nor what the status document reads of the providers.
     evaluated = {"eval_runs", "eval_labels", "eval_results", "runs", "inference_calls"}
     assert changed == evaluated | {"jobs"}
-    done = await jobs_store.get(conn, job["id"])
+    done = await in_read(conn, jobs_store.get, job["id"])
     assert (done["state"], done["done"], done["counts"]["graded"]) == ("done", 3, 3)
-    shown = await quality.replay_recall(conn)
+    shown = await in_read(conn, quality.replay_recall)
     assert shown["eval_run"] == done["scope"]["eval_run"] and shown["finished_at"] is not None
     owner = next(x for x in shown["recall"] if x.cohort == "owner")
     assert (owner.positives, owner.grading.n) == (2, 2)
@@ -482,7 +500,7 @@ async def test_a_replay_job_from_overview_writes_only_to_the_evaluation_tables(c
 
 
 async def test_a_replay_job_taken_back_goes_on_without_redoing_what_it_concluded(
-    conn, db, priced, monkeypatch
+    conn: Session, db, priced, monkeypatch
 ):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await run_replay(conn)
@@ -490,7 +508,7 @@ async def test_a_replay_job_taken_back_goes_on_without_redoing_what_it_concluded
     await dead.open()
     gone = worker.Worker(dead, SCHEDULED, priced.gateway)
     assert await gone.step(AFTERNOON)  # A's chunk, then its process dies
-    pid = (await jobs_store.get(conn, job["id"]))["backend_pid"]
+    pid = (await in_read(conn, jobs_store.get, job["id"]))["backend_pid"]
     await dead.close()
     await gone.close(RuntimeError("killed"))
     for _ in range(200):  # the server ends the session soon after its connection closes
@@ -499,40 +517,46 @@ async def test_a_replay_job_taken_back_goes_on_without_redoing_what_it_concluded
         await asyncio.sleep(0.05)
 
     await work_out(worker.Worker(db, SCHEDULED, priced.gateway))
-    done = await jobs_store.get(conn, job["id"])
+    done = await in_read(conn, jobs_store.get, job["id"])
     assert (done["state"], done["done"]) == ("done", 3)
     assert sorted(priced.sent("classify")) == sorted([A.title, B.title, C.title])
     assert sorted(priced.sent("judge")) == sorted([A.title, B.title, C.title])
-    run = await evaluation.get(conn, done["scope"]["eval_run"])
+    run = await in_read(conn, evaluation.get, done["scope"]["eval_run"])
     assert len(run["run_ids"]) == 2 and run["finished_at"] is not None  # both runs' cost
 
 
-async def test_a_replay_job_stops_at_its_ceiling_and_run_replay_goes_on_with_it(conn, db, priced):
+async def test_a_replay_job_stops_at_its_ceiling_and_run_replay_goes_on_with_it(
+    conn: Session, db, priced
+):
     """No call fits under a ceiling of a millionth of a dollar: none is sent, nothing is
     recorded as concluded, and the job waits under Not run saying where. Run replay goes on
     with it under a new ceiling, and concludes every paper."""
     job = await run_replay(conn, ceiling=1e-6)
     await work_out(worker.Worker(db, SCHEDULED, priced.gateway))
-    stopped = await jobs_store.get(conn, job["id"])
+    stopped = await in_read(conn, jobs_store.get, job["id"])
     assert stopped["state"] == "stopped"
     assert stopped["error"] == "stopped at the ceiling after 0 of 3"
     assert priced.sent("classify") == [] and priced.sent("judge") == []
     eval_run = stopped["scope"]["eval_run"]
-    assert await evaluation.results(conn, eval_run) == []
+    assert await in_read(conn, evaluation.results, eval_run) == []
 
     async with api(conn) as http:
         offer = (await http.get("/api/jobs/replays/offer")).json()
     assert (offer["continues"], offer["papers"], offer["pairs"]) == (job["id"], 3, 3)
     assert (await run_replay(conn, ceiling=5.0))["id"] == job["id"]
     await work_out(worker.Worker(db, SCHEDULED, priced.gateway))
-    done = await jobs_store.get(conn, job["id"])
+    done = await in_read(conn, jobs_store.get, job["id"])
     assert (done["state"], done["error"], float(done["ceiling"])) == ("done", None, 5.0)
     assert done["scope"]["eval_run"] == eval_run
     assert sorted(priced.sent("classify")) == sorted([A.title, B.title, C.title])
-    assert await jobs_store.spent(conn, job["id"]) == pytest.approx(9 * COST)  # 3 papers, 3 calls
+    assert await in_read(conn, jobs_store.spent, job["id"]) == pytest.approx(
+        9 * COST
+    )  # 3 papers, 3 calls
 
 
-async def test_a_stopped_replay_that_no_longer_resumes_gives_way_to_a_new_one(conn, db, priced):
+async def test_a_stopped_replay_that_no_longer_resumes_gives_way_to_a_new_one(
+    conn: Session, db, priced
+):
     job = await run_replay(conn, ceiling=1e-6)
     await work_out(worker.Worker(db, SCHEDULED, priced.gateway))
     stricter = SCHEDULED.model_copy(update={"classification": Classification(focus_threshold=0.6)})
@@ -540,17 +564,17 @@ async def test_a_stopped_replay_that_no_longer_resumes_gives_way_to_a_new_one(co
         assert (await http.get("/api/jobs/replays/offer")).json()["continues"] is None
     made = await run_replay(conn, ceiling=5.0, config=stricter)
     assert made["id"] != job["id"]
-    assert (await jobs_store.get(conn, job["id"]))["state"] == "discarded"
+    assert (await in_read(conn, jobs_store.get, job["id"]))["state"] == "discarded"
 
 
-async def test_run_replay_needs_the_worker(conn, priced):
+async def test_run_replay_needs_the_worker(conn: Session, priced):
     async with api(conn, CONFIG) as http:
         off = await http.post("/api/jobs/replays", json={"ceiling": 5.0})
     assert off.status_code == 409 and "schedule is off" in off.json()["detail"]
     assert await rows(conn, "SELECT id FROM jobs") == []
 
 
-async def test_try_again_on_a_failed_replay_waits_while_another_is_under_way(conn, priced):
+async def test_try_again_on_a_failed_replay_waits_while_another_is_under_way(conn: Session, priced):
     first = await run_replay(conn)
     await conn.execute("UPDATE jobs SET state = 'failed' WHERE id = %s", (first["id"],))
     second = await run_replay(conn)
@@ -563,21 +587,21 @@ async def test_try_again_on_a_failed_replay_waits_while_another_is_under_way(con
 
 
 async def test_a_paper_revised_between_chunks_is_replayed_on_its_new_text(
-    conn, db, priced, monkeypatch
+    conn: Session, db, priced, monkeypatch
 ):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await run_replay(conn)
     w = worker.Worker(db, SCHEDULED, priced.gateway)
     assert await w.step(AFTERNOON)  # A's chunk
     revised = A.model_copy(update={"abstract": "Sparse autoencoders on activations."})
-    await papers_store.upsert(conn, [revised])
+    await in_write(conn, papers_store.upsert, [revised])
     await work_out(w)
-    done = await jobs_store.get(conn, job["id"])
+    done = await in_read(conn, jobs_store.get, job["id"])
     assert (done["state"], done["done"]) == ("done", 3)
     assert priced.sent("classify").count(A.title) == 2
 
 
-async def test_a_replay_leaves_a_dead_nightlys_batch_alone(conn, db, priced):
+async def test_a_replay_leaves_a_dead_nightlys_batch_alone(conn: Session, db, priced):
     """A batch a nightly left when its process died is the next run's to account for, not a
     replay's: a dry run neither cancels it nor answers from it."""
     role = SCHEDULED.models.judge
@@ -594,7 +618,7 @@ async def test_a_replay_leaves_a_dead_nightlys_batch_alone(conn, db, priced):
     journal = CallJournal(db, nightly)
     call = await journal.start("judge", role.model, key, A.id, role.provider)
     await journal.batched([call], batch, role.provider)
-    await runs.finish(conn, nightly, error="process died")
+    await in_write(conn, runs.finish, nightly, error="process died")
 
     await run_replay(conn)
     await work_out(worker.Worker(db, SCHEDULED, gateway))

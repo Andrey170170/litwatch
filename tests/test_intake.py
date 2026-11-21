@@ -11,15 +11,12 @@ from litwatch.intake.http import SourceError
 from litwatch.store import papers
 from tests import settling
 from tests.conftest import started
-from tests.sessions import Bridge
-from tests.test_intake_atom import entry, feed
+from tests.fakes import unavailable
+from tests.feeds import entry, feed
+from tests.sessions import Bridge, Session, in_write
 
 NOW = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=1)
 SINCE = NOW - timedelta(days=3)
-
-
-def unavailable(*args, **kwargs):
-    raise SourceError("upstream unavailable")
 
 
 def snapshot(*entries):
@@ -43,18 +40,18 @@ def canonical(id="2609.11934"):
     )
 
 
-async def collect(conn, categories=("cs.CL",)):
+async def collect(conn: Session, categories=("cs.CL",)):
     run_id = await started(conn, "intake", SINCE, NOW)
     return run_id, await intake.collect(
         Bridge(conn), categories, SINCE, run_id, rules=settling.RULES
     )
 
 
-async def rows(conn, table):
+async def rows(conn: Session, table):
     return await (await conn.execute(f"SELECT * FROM {table}")).fetchall()
 
 
-async def test_fallback_archive_replay_then_canonical_reconciliation(conn, monkeypatch):
+async def test_fallback_archive_replay_then_canonical_reconciliation(conn: Session, monkeypatch):
     announced = snapshot(entry(), entry("2609.11935v2", "replace"))
     monkeypatch.setattr(atom, "fetch_category", lambda *args: announced)
     monkeypatch.setattr(oai, "fetch_category", unavailable)
@@ -93,7 +90,7 @@ async def test_fallback_archive_replay_then_canonical_reconciliation(conn, monke
     assert (await rows(conn, "papers"))[0] == stored
 
 
-async def test_category_failure_does_not_discard_successful_category(conn, monkeypatch):
+async def test_category_failure_does_not_discard_successful_category(conn: Session, monkeypatch):
     monkeypatch.setattr(atom, "fetch_category", unavailable)
 
     def harvest(category, *args, **kwargs):
@@ -111,7 +108,9 @@ async def test_category_failure_does_not_discard_successful_category(conn, monke
     assert checkpoints == {"cs.AI": None, "cs.CL": NOW.date()}
 
 
-async def test_a_checkpoint_failure_keeps_the_category_open_to_be_read_again(conn, monkeypatch):
+async def test_a_checkpoint_failure_keeps_the_category_open_to_be_read_again(
+    conn: Session, monkeypatch
+):
     monkeypatch.setattr(atom, "fetch_category", lambda *args: snapshot(entry()))
     monkeypatch.setattr(
         oai,
@@ -135,7 +134,7 @@ async def test_a_checkpoint_failure_keeps_the_category_open_to_be_read_again(con
     assert [e["type"] for e in await rows(conn, "outbox")] == ["paper.added"]
 
 
-async def test_paper_failure_rolls_back_other_papers_and_checkpoint(conn, monkeypatch):
+async def test_paper_failure_rolls_back_other_papers_and_checkpoint(conn: Session, monkeypatch):
     monkeypatch.setattr(atom, "fetch_category", unavailable)
     monkeypatch.setattr(
         oai,
@@ -149,7 +148,9 @@ async def test_paper_failure_rolls_back_other_papers_and_checkpoint(conn, monkey
     assert (await rows(conn, "intake_checkpoints"))[0]["checkpoint"] is None
 
 
-async def test_old_unknown_changed_paper_is_admitted_without_daily_announcement(conn, monkeypatch):
+async def test_old_unknown_changed_paper_is_admitted_without_daily_announcement(
+    conn: Session, monkeypatch
+):
     # An old paper newly cross-listed today is discoverable only via OAI after Atom rotates.
     paper = canonical("2001.00001").model_copy(update={"published": "2020-01-01T00:00:00+00:00"})
     monkeypatch.setattr(atom, "fetch_category", unavailable)
@@ -162,9 +163,9 @@ async def test_old_unknown_changed_paper_is_admitted_without_daily_announcement(
     assert stored["published"] == datetime(2020, 1, 1, tzinfo=UTC)
 
 
-async def test_older_oai_metadata_cannot_downgrade_existing_paper(conn, monkeypatch):
+async def test_older_oai_metadata_cannot_downgrade_existing_paper(conn: Session, monkeypatch):
     paper = canonical()
-    await papers.upsert(conn, [paper])
+    await in_write(conn, papers.upsert, [paper])
     (before,) = await rows(conn, "papers")
     stale = paper.model_copy(
         update={
@@ -182,26 +183,30 @@ async def test_older_oai_metadata_cannot_downgrade_existing_paper(conn, monkeypa
     assert (await rows(conn, "intake_checkpoints"))[0]["checkpoint"] == NOW.date()
 
 
-async def events(conn):
+async def events(conn: Session):
     found = await rows(conn, "outbox ORDER BY id")
     return [(e["type"], e["paper_id"], e["payload"]) for e in found]
 
 
-async def test_revision_keeps_the_first_posting_and_is_rewritten_only_when_the_text_changed(conn):
+async def test_revision_keeps_the_first_posting_and_is_rewritten_only_when_the_text_changed(
+    conn: Session,
+):
     paper = canonical().model_copy(update={"version": 1})
-    await papers.upsert(conn, [paper], source="oai")
+    await in_write(conn, papers.upsert, [paper], source="oai")
     first = (await rows(conn, "papers"))[0]["published"]
     revised = paper.model_copy(
         update={"version": 2, "published": NOW.isoformat(), "abstract": "Canonical abstract."}
     )
-    touched = await papers.upsert(conn, [revised], source="oai")
+    touched = await in_write(conn, papers.upsert, [revised], source="oai")
     (stored,) = await rows(conn, "papers")
     assert stored["published"] == first and stored["version"] == 2
     assert touched.updated == 1 and touched.rewritten == []
     rewrite = revised.model_copy(update={"version": 3, "abstract": "Something else entirely."})
-    assert (await papers.upsert(conn, [rewrite], source="oai")).rewritten == [paper.id]
+    assert (await in_write(conn, papers.upsert, [rewrite], source="oai")).rewritten == [paper.id]
     # A refresh that changes neither the version nor the text is not a revision.
-    await papers.upsert(conn, [rewrite.model_copy(update={"doi": "10.1/x"})], source="oai")
+    await in_write(
+        conn, papers.upsert, [rewrite.model_copy(update={"doi": "10.1/x"})], source="oai"
+    )
     assert await events(conn) == [
         ("paper.added", paper.id, {"version": 1, "source": "oai"}),
         ("paper.revised", paper.id, {**revision(2, 1), "rewritten": False}),
@@ -209,7 +214,7 @@ async def test_revision_keeps_the_first_posting_and_is_rewritten_only_when_the_t
     ]
 
 
-async def test_a_withdrawal_drops_the_paper_until_a_real_version_follows(conn):
+async def test_a_withdrawal_drops_the_paper_until_a_real_version_follows(conn: Session):
     """arXiv withdraws with an empty version (0kb), its comments the reason: the paper is
     withdrawn, so dropped, as of that version; metadata without a version history keeps that,
     and a later real version brings the paper back. Either change is settled (`intake.batch`)."""
@@ -224,20 +229,20 @@ async def test_a_withdrawal_drops_the_paper_until_a_real_version_follows(conn):
         ).fetchone()
         return found["withdrawn_at"], found["dropped"], found["comments"]
 
-    await papers.upsert(conn, [paper], source="oai")
+    await in_write(conn, papers.upsert, [paper], source="oai")
     assert await stored() == (None, False, None)
     pulled = paper.model_copy(
         update={"version": 2, "version_history": [v1, v2], "comments": "The proof is wrong"}
     )
-    assert (await papers.upsert(conn, [pulled], source="oai")).withdrawn == [paper.id]
+    assert (await in_write(conn, papers.upsert, [pulled], source="oai")).withdrawn == [paper.id]
     withdrawn = (datetime(2026, 10, 21, 6, 28, 10, tzinfo=UTC), True, "The proof is wrong")
     assert await stored() == withdrawn
     later = (NOW + timedelta(days=1)).isoformat()
     unknown = pulled.model_copy(update={"version": None, "version_history": [], "updated": later})
-    assert (await papers.upsert(conn, [unknown], source="oai")).withdrawn == []
+    assert (await in_write(conn, papers.upsert, [unknown], source="oai")).withdrawn == []
     assert await stored() == withdrawn
     back = unknown.model_copy(update={"version": 3, "version_history": [v1, v2, v3]})
-    assert (await papers.upsert(conn, [back], source="oai")).withdrawn == [paper.id]
+    assert (await in_write(conn, papers.upsert, [back], source="oai")).withdrawn == [paper.id]
     assert await stored() == (None, False, "The proof is wrong")
 
 
@@ -245,7 +250,9 @@ def revision(version, previous, source="oai"):
     return {"version": version, "previous_version": previous, "source": source}
 
 
-async def test_canonical_text_replacing_a_feed_abstract_counts_as_rewritten(conn, monkeypatch):
+async def test_canonical_text_replacing_a_feed_abstract_counts_as_rewritten(
+    conn: Session, monkeypatch
+):
     calls = []
 
     def harvest(*args, **kwargs):
@@ -253,7 +260,7 @@ async def test_canonical_text_replacing_a_feed_abstract_counts_as_rewritten(conn
         return oai.OaiBatch([canonical()], NOW)
 
     fallback = canonical().model_copy(update={"abstract": "A short feed abstract."})
-    await papers.upsert(conn, [fallback], source="atom")
+    await in_write(conn, papers.upsert, [fallback], source="atom")
     monkeypatch.setattr(atom, "fetch_category", unavailable)
     monkeypatch.setattr(oai, "fetch_category", harvest)
     _, result = await collect(conn)
@@ -262,7 +269,7 @@ async def test_canonical_text_replacing_a_feed_abstract_counts_as_rewritten(conn
     assert calls == [{"include_versions": True}]
 
 
-async def versions(conn):
+async def versions(conn: Session):
     """Each stored paper's row version (`xmin`), which any write to the row moves."""
     found = await (await conn.execute("SELECT id, xmin::text AS v FROM papers")).fetchall()
     return {r["id"]: r["v"] for r in found}
@@ -275,7 +282,9 @@ def listed(id, **update):
     return paper.model_copy(update=update)
 
 
-async def test_reading_the_overlap_again_rewrites_no_row_and_emits_nothing(conn, monkeypatch):
+async def test_reading_the_overlap_again_rewrites_no_row_and_emits_nothing(
+    conn: Session, monkeypatch
+):
     """Each night reads three days again: a paper whose record resolves to what is stored is
     left alone, counted as unchanged, not updated."""
     page = [listed("2609.11934"), listed("2609.11935", doi="10.1/x")]
@@ -292,7 +301,7 @@ async def test_reading_the_overlap_again_rewrites_no_row_and_emits_nothing(conn,
     assert await events(conn) == sent
 
 
-async def test_a_changed_paper_on_the_overlap_is_the_only_row_updated(conn, monkeypatch):
+async def test_a_changed_paper_on_the_overlap_is_the_only_row_updated(conn: Session, monkeypatch):
     """One paper of the page comes back as a new version with a rewritten abstract: only its
     row is written, and it is revised, rewritten and settled as before; the others stay as
     they were."""

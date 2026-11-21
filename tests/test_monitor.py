@@ -22,6 +22,7 @@ from litwatch.store.calls import CallJournal
 from tests import sessions, settling
 from tests.conftest import FAITH, INTERP, TREE, AppClient, paper, started
 from tests.fakes import ScriptedProvider
+from tests.sessions import Session, in_read, in_write
 
 STOPPED = {
     "awaiting_classification": 0,
@@ -41,7 +42,7 @@ def keys(monkeypatch):
 
 
 @pytest.fixture
-async def monitor(conn):
+async def monitor(conn: Session):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, "t0ken")
     async with AppClient(create_monitor(app), of=app, base_url="http://m") as c:
@@ -65,9 +66,9 @@ def component(document: dict, id_: str) -> dict:
     return next(c for c in document["components"] if c["id"] == id_)
 
 
-async def test_a_finished_nightly_is_measured_from_its_record(conn, monitor):
+async def test_a_finished_nightly_is_measured_from_its_record(conn: Session, monitor):
     run_id = await started(conn, "nightly")
-    await runs.finish(conn, run_id, counts={"classified": 42})
+    await in_write(conn, runs.finish, run_id, counts={"classified": 42})
 
     text = (await monitor.get("/metrics")).text
     assert sample(text, "homelab_job_last_items") == 42
@@ -79,14 +80,14 @@ async def test_a_finished_nightly_is_measured_from_its_record(conn, monitor):
         text, "homelab_job_last_run_timestamp_seconds"
     )
     assert sample(text, "homelab_job_last_run_timestamp_seconds", "litwatch/publications") is None
-    began = (await runs.latest(conn, "nightly"))["started_at"].timestamp()
+    began = (await in_read(conn, runs.latest, "nightly"))["started_at"].timestamp()
     assert sample(text, "homelab_job_last_run_timestamp_seconds") == pytest.approx(began, abs=1e-3)
     status = (await monitor.get("/status")).json()
     assert status["schema"] == "homelab.status/v1"
     assert component(status, "nightly")["status"] == "healthy"
 
 
-async def test_a_nightly_whose_process_died_reads_failed_not_running(conn, monitor):
+async def test_a_nightly_whose_process_died_reads_failed_not_running(conn: Session, monitor):
     # A process that opens its run and is killed: its session ends, the record stays open.
     other = await sessions.sibling(conn)
     await started(other, "nightly")
@@ -104,9 +105,9 @@ async def test_a_nightly_whose_process_died_reads_failed_not_running(conn, monit
     assert "ended without closing it" in nightly["reason"]
 
 
-async def test_a_run_that_raised_reads_failed_with_its_error(conn, monitor):
+async def test_a_run_that_raised_reads_failed_with_its_error(conn: Session, monitor):
     run_id = await started(conn, "nightly")
-    await runs.finish(conn, run_id, error="RuntimeError: boom")
+    await in_write(conn, runs.finish, run_id, error="RuntimeError: boom")
     # Before the first success, last success is 0, so a first failure alerts as one.
     text = (await monitor.get("/metrics")).text
     assert sample(text, "homelab_job_last_success_timestamp_seconds") == 0
@@ -115,7 +116,9 @@ async def test_a_run_that_raised_reads_failed_with_its_error(conn, monitor):
     assert "boom" in nightly["reason"] and "expected" in nightly["reason"]
 
 
-async def test_what_the_owner_acknowledged_still_reaches_the_status_document(conn, monitor):
+async def test_what_the_owner_acknowledged_still_reaches_the_status_document(
+    conn: Session, monitor
+):
     # Acknowledge on Needs you clears the app's run status only (DESIGN.md, Needs you).
     await settling.save_tree(conn, TREE)
     await conn.execute(
@@ -123,7 +126,7 @@ async def test_what_the_owner_acknowledged_still_reaches_the_status_document(con
         "VALUES (%s, 'day', '2026-10-18', 'failed', now())",
         (FAITH.slug,),
     )
-    assert (await reading.status(conn))["digests_failed"] == 0
+    assert (await in_read(conn, reading.status))["digests_failed"] == 0
     assert parsed((await monitor.get("/metrics")).text)[("litwatch_digests_failed", ())] == 1
     assert component((await monitor.get("/status")).json(), "digests")["status"] == "degraded"
 
@@ -240,13 +243,13 @@ def test_more_papers_stopped_at_one_step_than_two_percent_of_the_night_turn_pipe
 PAPERS = [paper(f"2610.{n:05d}") for n in range(1, 9)]
 
 
-async def stop(conn, p, step: str = "grading", topic: str = FAITH.slug) -> None:
+async def stop(conn: Session, p, step: str = "grading", topic: str = FAITH.slug) -> None:
     """Unusable answers `FAILED_RUNS` runs in a row: the step waits for the owner."""
     for _ in range(FAILED_RUNS):
-        await failures.failed(conn, p, step, "unusable", counts=True, topic=topic)
+        await in_write(conn, failures.failed, p, step, "unusable", counts=True, topic=topic)
 
 
-async def night(conn, classified: int = 100) -> int:
+async def night(conn: Session, classified: int = 100) -> int:
     """A nightly that started an hour ago and ends now."""
     row = await (
         await conn.execute(
@@ -258,9 +261,9 @@ async def night(conn, classified: int = 100) -> int:
     return row["id"]
 
 
-async def test_a_single_stuck_paper_leaves_pipeline_healthy(conn, monitor):
+async def test_a_single_stuck_paper_leaves_pipeline_healthy(conn: Session, monitor):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, PAPERS)
+    await in_write(conn, papers_store.upsert, PAPERS)
     await stop(conn, PAPERS[0])
     await night(conn)
     assert component((await monitor.get("/status")).json(), "pipeline")["status"] == "healthy"
@@ -269,9 +272,11 @@ async def test_a_single_stuck_paper_leaves_pipeline_healthy(conn, monitor):
     assert parsed((await monitor.get("/metrics")).text)[grading] == 1
 
 
-async def test_many_papers_stopped_at_one_step_in_the_night_turn_pipeline_degraded(conn, monitor):
+async def test_many_papers_stopped_at_one_step_in_the_night_turn_pipeline_degraded(
+    conn: Session, monitor
+):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, PAPERS)
+    await in_write(conn, papers_store.upsert, PAPERS)
     for p in PAPERS[:5]:  # five papers, each on two topics: five
         await stop(conn, p)
         await stop(conn, p, topic=INTERP.slug)
@@ -280,7 +285,9 @@ async def test_many_papers_stopped_at_one_step_in_the_night_turn_pipeline_degrad
         "UPDATE step_failures SET failed_at = now() - interval '1 day' WHERE paper_id = %s",
         (PAPERS[5].id,),
     )
-    await failures.failed(conn, PAPERS[6], "grading", "unusable", counts=True, topic=FAITH.slug)
+    await in_write(
+        conn, failures.failed, PAPERS[6], "grading", "unusable", counts=True, topic=FAITH.slug
+    )
     run = await night(conn)  # one failed run is not stopped
     assert component((await monitor.get("/status")).json(), "pipeline")["status"] == "healthy"
 
@@ -294,8 +301,10 @@ async def test_many_papers_stopped_at_one_step_in_the_night_turn_pipeline_degrad
     )
 
 
-async def test_brief_and_weight_passes_count_when_they_stop_and_deep_passes_do_not(conn, monitor):
-    await papers_store.upsert(conn, PAPERS)
+async def test_brief_and_weight_passes_count_when_they_stop_and_deep_passes_do_not(
+    conn: Session, monitor
+):
+    await in_write(conn, papers_store.upsert, PAPERS)
     kinds = [(p, "deep") for p in PAPERS[:6]] + [
         (p, ("brief", "weight")[i % 2]) for i, p in enumerate(PAPERS[:6])
     ]
@@ -306,16 +315,16 @@ async def test_brief_and_weight_passes_count_when_they_stop_and_deep_passes_do_n
             (p.id, kind, FAILED_RUNS - 1),
         )
     # Every try claimed before the night started, each failing a third time in it.
-    text = await fulltext_store.claim(conn, timedelta(hours=1), limit=20)
-    deep = await fulltext_store.claim(conn, timedelta(hours=1), limit=20, deep=True)
+    text = await in_write(conn, fulltext_store.claim, timedelta(hours=1), limit=20)
+    deep = await in_write(conn, fulltext_store.claim, timedelta(hours=1), limit=20, deep=True)
     await conn.execute("UPDATE fulltext_passes SET tried_at = now() - interval '1 day'")
     assert (len(text), len(deep)) == (6, 6)  # `deep` has the Deep passes' service failures
     for t in deep + text[:5]:
-        await fulltext_store.failed(conn, t, "no text to be had", counts=True)
+        await in_write(conn, fulltext_store.failed, t, "no text to be had", counts=True)
     run = await night(conn)
     assert component((await monitor.get("/status")).json(), "pipeline")["status"] == "healthy"
 
-    await fulltext_store.failed(conn, text[5], "no text to be had", counts=True)
+    await in_write(conn, fulltext_store.failed, text[5], "no text to be had", counts=True)
     await conn.execute("UPDATE runs SET finished_at = now() WHERE id = %s", (run,))
     pipeline = component((await monitor.get("/status")).json(), "pipeline")
     assert "6 at the Brief and Weight passes" in pipeline["reason"]
@@ -352,7 +361,9 @@ def gateway(gate, run: int) -> Gateway:
     return Gateway(models, providers, CallJournal(gate, run), retry_delays=(0.0,))
 
 
-async def test_an_account_error_fails_its_provider_until_its_next_reply(conn, gate, monitor):
+async def test_an_account_error_fails_its_provider_until_its_next_reply(
+    conn: Session, gate, monitor
+):
     gw = gateway(gate, await started(conn, "nightly"))
 
     async def anthropic() -> dict:
@@ -376,7 +387,9 @@ async def test_an_account_error_fails_its_provider_until_its_next_reply(conn, ga
     assert (await anthropic())["status"] == "healthy"
 
 
-async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(conn, gate, monitor):
+async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(
+    conn: Session, gate, monitor
+):
     run = await started(conn, "nightly")
     gw = gateway(gate, run)
     await gw.ask("brief", question("fine"))  # before the night: reused in it
@@ -394,7 +407,7 @@ async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(c
 
     # Still running: the night is not over.
     assert provider((await monitor.get("/status")).json(), "openrouter")["status"] == "healthy"
-    await runs.finish(conn, run)
+    await in_write(conn, runs.finish, run)
     document = (await monitor.get("/status")).json()
     assert provider(document, "anthropic")["status"] == "healthy"
     openrouter = provider(document, "openrouter")

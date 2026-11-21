@@ -9,6 +9,7 @@ from litwatch.core.taxonomy import Depth, Taxonomy
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE
+from tests.sessions import Session, in_read
 
 
 def spec(*, topics=(), deep=False, **overrides):
@@ -115,14 +116,14 @@ REWORDED = "Whether a trace leaves out what the model did."
 # -- in the database -------------------------------------------------------------------------------
 
 
-async def _versions(conn, table: str) -> list[tuple[str, int]]:
+async def _versions(conn: Session, table: str) -> list[tuple[str, int]]:
     rows = await (
         await conn.execute(f"SELECT class, revision FROM {table} ORDER BY 1, 2")
     ).fetchall()
     return [(r["class"], r["revision"]) for r in rows]
 
 
-async def _revision(conn, table: str, slug: str) -> int:
+async def _revision(conn: Session, table: str, slug: str) -> int:
     key = "slug" if table == "classes" else "class"
     row = await (
         await conn.execute(f"SELECT revision FROM {table} WHERE {key} = %s", (slug,))
@@ -130,21 +131,21 @@ async def _revision(conn, table: str, slug: str) -> int:
     return row["revision"]
 
 
-async def test_the_seed_round_trips_through_the_database_and_its_yaml(conn):
-    assert await taxonomy_store.load(conn) is None
+async def test_the_seed_round_trips_through_the_database_and_its_yaml(conn: Session):
+    assert await in_read(conn, taxonomy_store.load) is None
     tree = seeds.taxonomy()
     saved = await settling.save_tree(conn, tree)
     assert saved.revised_classes == [c.slug for c in tree.classes]
     assert saved.revised_topics == [t.slug for t in tree.topics]
     assert saved.changed_topics == sorted(t.slug for t in tree.topics)
-    assert await taxonomy_store.load(conn) == tree
-    exported = seeds.dump_taxonomy(await taxonomy_store.load(conn))
+    assert await in_read(conn, taxonomy_store.load) == tree
+    exported = seeds.dump_taxonomy(await in_read(conn, taxonomy_store.load))
     assert seeds.taxonomy_from_spec(yaml.safe_load(exported)) == tree
     assert len(await _versions(conn, "class_versions")) == len(tree.classes)
     assert await _versions(conn, "topic_versions") == sorted((t.slug, 1) for t in tree.topics)
 
 
-async def test_a_revision_moves_only_when_its_hash_changes(conn):
+async def test_a_revision_moves_only_when_its_hash_changes(conn: Session):
     await settling.save_tree(conn, TREE)
     again = await settling.save_tree(conn, TREE)
     assert again == taxonomy_store.Saved()
@@ -156,12 +157,14 @@ async def test_a_revision_moves_only_when_its_hash_changes(conn):
     assert await settling.save_tree(conn, tree) == taxonomy_store.Saved(
         reordered=True, changed_topics=[FAITH.slug]
     )
-    assert [t.slug for t in await taxonomy_store.topics(conn)] == [
+    assert [t.slug for t in await in_read(conn, taxonomy_store.topics)] == [
         INTERP.slug,
         FAITH.slug,
         "agents",
     ]
-    assert [t.slug for t in await taxonomy_store.topics(conn, Status.PAUSED)] == [FAITH.slug]
+    assert [t.slug for t in await in_read(conn, taxonomy_store.topics, Status.PAUSED)] == [
+        FAITH.slug
+    ]
 
     # A new rubric revises the topic; a new subject revises the topic and its class.
     saved = await settling.save_tree(
@@ -177,7 +180,7 @@ async def test_a_revision_moves_only_when_its_hash_changes(conn):
     assert await _revision(conn, "classes", FAITH.slug) == 2
 
     # A class's threshold is part of its version.
-    current = await taxonomy_store.load(conn)
+    current = await in_read(conn, taxonomy_store.load)
     classes = [
         c.model_copy(update={"threshold": 0.7}) if c.slug == "agents" else c
         for c in current.classes
@@ -192,7 +195,7 @@ async def test_a_revision_moves_only_when_its_hash_changes(conn):
     assert content["content"]["threshold"] == 0.7
 
 
-async def test_a_class_left_out_is_retired_and_a_topic_left_out_unfollowed(conn):
+async def test_a_class_left_out_is_retired_and_a_topic_left_out_unfollowed(conn: Session):
     await settling.save_tree(conn, TREE)
     smaller = Taxonomy(
         classes=[c for c in TREE.classes if c.slug != FAITH.slug],
@@ -201,7 +204,7 @@ async def test_a_class_left_out_is_retired_and_a_topic_left_out_unfollowed(conn)
     saved = await settling.save_tree(conn, smaller)
     assert (saved.retired_classes, saved.unfollowed_topics) == ([FAITH.slug], [FAITH.slug])
     assert saved.changed_topics == [FAITH.slug]
-    assert await taxonomy_store.load(conn) == smaller
+    assert await in_read(conn, taxonomy_store.load) == smaller
     # The rows a record may name stay: the class (retired) and every version of both.
     row = await (
         await conn.execute("SELECT retired_at FROM classes WHERE slug = %s", (FAITH.slug,))
@@ -213,7 +216,7 @@ async def test_a_class_left_out_is_retired_and_a_topic_left_out_unfollowed(conn)
     saved = await settling.save_tree(conn, TREE)
     assert (saved.revised_classes, saved.revised_topics) == ([], [])
     assert saved.changed_topics == [FAITH.slug]
-    assert await taxonomy_store.load(conn) == TREE
+    assert await in_read(conn, taxonomy_store.load) == TREE
     assert await _revision(conn, "topics", FAITH.slug) == 1
 
     # Unfollowed and followed again with another rubric, it goes on from its last revision.
@@ -224,10 +227,10 @@ async def test_a_class_left_out_is_retired_and_a_topic_left_out_unfollowed(conn)
     assert await _revision(conn, "topics", FAITH.slug) == 2
 
 
-async def test_the_owners_order_names_every_topic_once(conn):
+async def test_the_owners_order_names_every_topic_once(conn: Session):
     await settling.save_tree(conn, TREE)
     await settling.set_order(conn, ["agents", FAITH.slug, INTERP.slug])
-    assert [t.slug for t in (await taxonomy_store.load(conn)).topics] == [
+    assert [t.slug for t in (await in_read(conn, taxonomy_store.load)).topics] == [
         "agents",
         FAITH.slug,
         INTERP.slug,

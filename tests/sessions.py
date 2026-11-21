@@ -1,12 +1,14 @@
-"""The tests' own sessions: a connection to a test's schema, a second one beside it, and a gate
-whose units run on a given connection (`Bridge`). Only tests hold a connection; the code reaches
-the database through the Database gate's pool (`gates.database`)."""
+"""The tests' own sessions: a connection to a test's schema, a second one beside it, a gate
+whose units run on a given connection (`Bridge`), and a store function called in a unit of its
+own on one (`in_read`, `in_write`). Only tests hold a connection; the code reaches the database
+through the Database gate's pool (`gates.database`)."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import sys
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any, Concatenate
 from uuid import uuid4
 
 import psycopg
@@ -20,18 +22,47 @@ from litwatch.gates.database import (
     Connection,
     DatabaseGate,
     Identity,
+    ReadUnit,
     WriteUnit,
     identity_of,
     outside_unit,
 )
 
 
+class SessionInStoreError(RuntimeError):
+    """A store function was handed a test's session where it takes a unit."""
+
+
+def _not_from_store() -> None:
+    """Refuse SQL a store function runs on a test's session: it takes a unit (`in_read`,
+    `in_write`), whatever name the session went by. Migrations take a connection."""
+    caller = sys._getframe(2).f_globals.get("__name__", "")
+    if caller.startswith("litwatch.store.") and caller != "litwatch.store.db":
+        raise SessionInStoreError(f"{caller} ran SQL on a test's session; hand it a unit")
+
+
 class Session(psycopg.AsyncConnection[dict[str, Any]]):
     """A test's connection. One made by `schema` names its database and schema, for the gates
-    a test opens on them."""
+    a test opens on them. A store function handed one raises (`SessionInStoreError`). Typed so
+    that ty checks what a test hands to litwatch, and not the SQL a test checks the database
+    with itself, whose rows it reads as it knows them."""
 
     test_dsn: str
     test_schema: str
+
+    if TYPE_CHECKING:
+
+        async def execute(self, query: Any, params: Any = None, **kwargs: Any) -> Any: ...
+
+    else:
+
+        def execute(self, *args, **kwargs):
+            _not_from_store()
+            return super().execute(*args, **kwargs)
+
+        def cursor(self, *args, **kwargs):
+            _not_from_store()
+            return super().cursor(*args, **kwargs)
 
 
 async def connect(dsn: str, schema: str | None = None) -> Session:
@@ -63,7 +94,7 @@ def _dsn(conn: Connection) -> str:
     return make_conninfo(conn.info.dsn, password=conn.info.password)
 
 
-async def sibling(conn: Connection) -> Connection:
+async def sibling(conn: Connection) -> Session:
     """A second session on `conn`'s database and schema, as another process's: for work that
     runs alongside, or a lock held elsewhere."""
     other = await connect(_dsn(conn))
@@ -125,3 +156,34 @@ class Bridge(DatabaseGate):
         del name  # every unit's connection is the one given
         _idle(self._conn)
         yield self._conn
+
+
+# A test's seeds and checks through `store`: one store function, called in a unit of its own on
+# the test's connection, committed before the next statement. A seed of several calls that
+# must stand or fall together opens `Bridge(conn).write(...)` itself.
+
+
+async def in_read[**P, T](
+    conn: Connection,
+    read: Callable[Concatenate[ReadUnit, P], Awaitable[T]],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> T:
+    """`read(unit, *args, **kwargs)` in a read unit on `conn`."""
+    async with Bridge(conn).read(_name(read)) as unit:
+        return await read(unit, *args, **kwargs)
+
+
+async def in_write[**P, T](
+    conn: Connection,
+    write: Callable[Concatenate[WriteUnit, P], Awaitable[T]],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> T:
+    """`write(unit, *args, **kwargs)` in a write unit on `conn`, which takes no lock."""
+    async with Bridge(conn).write(_name(write)) as unit:
+        return await write(unit, *args, **kwargs)
+
+
+def _name(function: object) -> str:
+    return getattr(function, "__qualname__", "test")

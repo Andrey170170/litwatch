@@ -22,12 +22,13 @@ from litwatch.store import word as word_store
 from tests import settling
 from tests.conftest import INTERP, TREE, deliver, paper, start
 from tests.fakes_http import FakeArchive, mock
+from tests.sessions import Session, in_write
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=3)
 
 
 @pytest.fixture
-async def world(conn):
+async def world(conn: Session):
     await settling.save_tree(conn, TREE)
     return conn
 
@@ -171,12 +172,12 @@ def archive(fake: FakeArchive) -> Archive:
     )
 
 
-async def test_every_new_paper_is_registered_with_its_pdf_and_source(world, db):
+async def test_every_new_paper_is_registered_with_its_pdf_and_source(world: Session, db):
     conn, fake = world, FakeArchive()
     a = archive(fake)
     await start(db, a)
     unknown = paper("2610.00002")  # no arXiv version, and none the archive knows
-    await papers_store.upsert(conn, [P, unknown])
+    await in_write(conn, papers_store.upsert, [P, unknown])
     await deliver(db, a)
 
     assert fake.records[P.id]["latest_version"] == 3
@@ -188,30 +189,38 @@ async def test_every_new_paper_is_registered_with_its_pdf_and_source(world, db):
     assert unknown.id in fake.records  # its metadata, and nothing to fetch yet
 
 
-async def _graded(conn, paper_id: str, topic: str, grade: Grade) -> None:
+async def _graded(conn: Session, paper_id: str, topic: str, grade: Grade) -> None:
     """The paper's effective grade on `topic` changes to `grade`, with its event."""
     fit = Fit.CENTRAL if grade != Grade.NONE else Fit.NONE
-    await word_store.set_effective(
-        conn, paper_id, topic, Effective(fit=fit, grade=grade, rarity=Rarity.RARE)
+    await in_write(
+        conn,
+        word_store.set_effective,
+        paper_id,
+        topic,
+        Effective(fit=fit, grade=grade, rarity=Rarity.RARE),
     )
-    await outbox.emit(conn, events.GRADE_CHANGED, paper_id, topic=topic, after=grade.value)
+    await in_write(
+        conn, outbox.emit, events.GRADE_CHANGED, paper_id, topic=topic, after=grade.value
+    )
 
 
-async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_papers(world, db):
+async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_papers(
+    world: Session, db
+):
     conn, fake = world, FakeArchive()
     a = archive(fake)
     others = [paper(f"2610.0001{i}", version=1) for i in range(5)]
-    await papers_store.upsert(conn, [P, *others])
+    await in_write(conn, papers_store.upsert, [P, *others])
     await start(db, a)
     relevant, adjacent, saved, gone, paused = others
     await _graded(conn, P.id, "cot-faithfulness", Grade.MUST_READ)
     await _graded(conn, relevant.id, "agents", Grade.RELEVANT)
     await _graded(conn, adjacent.id, "interpretability", Grade.ADJACENT)
-    await word_store.set_saved(conn, saved.id, True)
-    await outbox.emit(conn, events.PAPER_SAVED, saved.id)
+    await in_write(conn, word_store.set_saved, saved.id, True)
+    await in_write(conn, outbox.emit, events.PAPER_SAVED, saved.id)
     # Graded relevant, then down again before the event is handled: nothing is asked for.
     await _graded(conn, gone.id, "agents", Grade.RELEVANT)
-    await word_store.set_effective(conn, gone.id, "agents", None)
+    await in_write(conn, word_store.set_effective, gone.id, "agents", None)
     # A paused topic makes no new judgements but keeps its grades, and their PDFs.
     await settling.save_tree(
         conn,
@@ -237,16 +246,16 @@ async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_paper
     assert WANTED < BACKGROUND  # an archive under `pdfs wanted` holds background PDFs only
 
 
-async def test_a_kept_paper_s_revision_asks_for_its_new_pdf_above_background(world, db):
+async def test_a_kept_paper_s_revision_asks_for_its_new_pdf_above_background(world: Session, db):
     conn, fake = world, FakeArchive()
     a = archive(fake)
     await start(db, a)
-    await papers_store.upsert(conn, [paper(P.id, version=2)])
-    await word_store.set_saved(conn, P.id, True)
+    await in_write(conn, papers_store.upsert, [paper(P.id, version=2)])
+    await in_write(conn, word_store.set_saved, P.id, True)
     await deliver(db, a)
     fake.jobs.clear()
     # Still saved, so no event says so again: the revision itself asks.
-    await papers_store.upsert(conn, [P])
+    await in_write(conn, papers_store.upsert, [P])
     await deliver(db, a)
 
     assert [(j["paper_id"], j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [
@@ -255,16 +264,16 @@ async def test_a_kept_paper_s_revision_asks_for_its_new_pdf_above_background(wor
     ]
     # A revision read from the archive is not registered again, but its PDF is still asked for.
     fake.jobs.clear()
-    await papers_store.upsert(conn, [paper(P.id, version=4)], source=papers_store.ARCHIVE)
+    await in_write(conn, papers_store.upsert, [paper(P.id, version=4)], source=papers_store.ARCHIVE)
     await deliver(db, a)
     assert [(j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [(4, "pdf", WANTED)]
 
 
-async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world, db):
+async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world: Session, db):
     conn, fake = world, FakeArchive()
     a = archive(fake)
     await start(db, a)
-    await papers_store.upsert(conn, [paper(P.id, version=2)])
+    await in_write(conn, papers_store.upsert, [paper(P.id, version=2)])
     await _graded(conn, P.id, INTERP.slug, Grade.RELEVANT)
     await deliver(db, a)
     fake.jobs.clear()
@@ -273,7 +282,7 @@ async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world, db)
     ]
     await settling.save_tree(conn, TREE.model_copy(update={"topics": paused}))
     # Revised while paused: resuming emits nothing, so the revision asks for the PDF now.
-    await papers_store.upsert(conn, [P])
+    await in_write(conn, papers_store.upsert, [P])
     await deliver(db, a)
 
     assert [(j["version"], j["kind"], j["priority"]) for j in fake.jobs] == [
@@ -282,7 +291,7 @@ async def test_pausing_a_topic_keeps_the_pdfs_of_its_graded_up_papers(world, db)
     ]
 
 
-async def test_an_archive_that_does_not_register_only_answers_searches(world, db, secrets):
+async def test_an_archive_that_does_not_register_only_answers_searches(world: Session, db, secrets):
     with pytest.raises(IntegrationError, match="register must be true or false"):
         integrations.load(
             Config(integrations={"archive": {"url": "http://a.test", "register": "no"}})
@@ -296,9 +305,9 @@ async def test_an_archive_that_does_not_register_only_answers_searches(world, db
     a = archive(fake)
     a.register = False
     await start(db, a)
-    await papers_store.upsert(conn, [P])
-    await word_store.set_saved(conn, P.id, True)
-    await outbox.emit(conn, events.PAPER_SAVED, P.id)
+    await in_write(conn, papers_store.upsert, [P])
+    await in_write(conn, word_store.set_saved, P.id, True)
+    await in_write(conn, outbox.emit, events.PAPER_SAVED, P.id)
     await deliver(db, a)
     assert fake.records == {} and fake.jobs == []
     fake.search_items = [{"id": "2401.00001", "title": "First", "authors": "", "published": ""}]
@@ -331,7 +340,7 @@ async def test_the_archive_answers_searches_by_arxiv_id_in_its_order():
 # -- webhook ---------------------------------------------------------------------------------------
 
 
-async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(conn, db):
+async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(conn: Session, db):
     received, status = [], [500]
 
     def receive(req: httpx.Request) -> httpx.Response:
@@ -342,13 +351,13 @@ async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(con
         "http://n8n.test/hook", patterns=("paper.*",), secret="s3cret", http=mock(receive)
     )
     await start(db, hook)
-    await papers_store.upsert(conn, [P])
-    saved = await outbox.emit(conn, events.PAPER_SAVED, P.id)
+    await in_write(conn, papers_store.upsert, [P])
+    saved = await in_write(conn, outbox.emit, events.PAPER_SAVED, P.id)
     await deliver(db, hook)
-    assert (await outbox.cursor(conn, hook.name)).failing is not None  # the 500
+    assert (await in_write(conn, outbox.cursor, hook.name)).failing is not None  # the 500
 
     status[0] = 204
-    await outbox.retry(conn, hook.name)
+    await in_write(conn, outbox.retry, hook.name)
     await deliver(db, hook)
     assert [json.loads(r.content)["type"] for r in received] == ["paper.added"] * 2 + [
         "paper.saved"

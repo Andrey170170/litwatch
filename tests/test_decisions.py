@@ -12,8 +12,14 @@ from litwatch.llm.anthropic import AnthropicProvider
 from litwatch.llm.decisions import Chosen
 from litwatch.llm.openrouter import DECISIONS_URL, OpenRouterProvider
 from litwatch.llm.types import Choice, DecisionRequest, Predicate
-from tests.fakes import SdkClient, anthropic_message, decisions_reply
-from tests.test_llm import _status, calls, journal  # noqa: F401
+from tests.conftest import calls
+from tests.fakes import (
+    SdkClient,
+    anthropic_message,
+    decisions_reply,
+    status_error,
+)
+from tests.sessions import Session
 
 REQUEST = DecisionRequest(
     "Title: Circuits in a small transformer",
@@ -108,13 +114,15 @@ async def test_a_missing_or_malformed_decisions_reply_is_invalid(answers):
 
 
 async def test_a_decisions_endpoint_declining_the_content_is_a_refusal():
-    client = SdkClient(_status(openai, 403, {"code": 403, "metadata": {"error_type": "refusal"}}))
+    client = SdkClient(
+        status_error(openai, 403, {"code": 403, "metadata": {"error_type": "refusal"}})
+    )
     with pytest.raises(CallError) as caught:
         await gateway(JEV, client).decide("classify", REQUEST)
     assert (caught.value.kind, str(caught.value)) == ("refused", "refused: refusal")
 
 
-async def test_a_decision_is_journalled_and_reused(conn, journal):  # noqa: F811
+async def test_a_decision_is_journalled_and_reused(conn: Session, journal):
     client = SdkClient(anthropic_message(json.dumps(CHAT)))
     gw = gateway(HAIKU, client, journal)
     first = await gw.decide("classify", REQUEST, paper_id="2609.1")
@@ -124,7 +132,9 @@ async def test_a_decision_is_journalled_and_reused(conn, journal):  # noqa: F811
     assert len(await calls(conn)) == 1
 
 
-async def test_in_debug_mode_a_decisions_reply_is_kept_as_the_endpoint_sent_it(conn, journal):  # noqa: F811
+async def test_in_debug_mode_a_decisions_reply_is_kept_as_the_endpoint_sent_it(
+    conn: Session, journal
+):
     sent = decisions_reply(["not", "an", "object"])
     gw = gateway(JEV, SdkClient(sent), journal)
     gw.debug = True

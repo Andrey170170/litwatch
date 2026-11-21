@@ -20,6 +20,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
 from tests import settling
 from tests.conftest import AppClient, gate_on, paper
+from tests.sessions import Session, in_read, in_write
 
 TOKEN = "s3cret"
 NIPS = Publication(
@@ -155,8 +156,8 @@ class Source:
 
 
 @pytest.fixture
-async def db(conn):
-    await papers_store.upsert(conn, [P, Q])
+async def db(conn: Session):
+    await in_write(conn, papers_store.upsert, [P, Q])
     for p in (P, Q):
         await settling.toggle(conn, p.id, Hand.SAVE)
     return conn
@@ -168,35 +169,35 @@ async def run(gate, source, limit: int = lookups.LIMIT) -> dict[str, int]:
         return await lookups.run(gate, source, limit)
 
 
-async def events(conn):
+async def events(conn: Session):
     rows = await (
         await conn.execute("SELECT paper_id FROM outbox WHERE type = 'publication.found'")
     ).fetchall()
     return [r["paper_id"] for r in rows]
 
 
-async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db, gate):
+async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db: Session, gate):
     source = Source({P.id: NIPS})
     counts = await run(gate, source)
     assert counts == {"looked_up": 2, "found": 1, "failed": 0}
     assert await events(db) == [P.id]
     # Nothing is due until a month has passed, and a found record is never looked up again.
-    assert await store.due(db, 10) == []
+    assert await in_read(db, store.due, 10) == []
     await db.execute("UPDATE publications SET checked_at = now() - interval '31 days'")
-    assert await store.due(db, 10) == [Q.id]
+    assert await in_read(db, store.due, 10) == [Q.id]
     # Two years after the first look and the save, an unpublished paper is left alone.
     await db.execute("UPDATE publications SET first_checked_at = now() - interval '731 days'")
     await db.execute("UPDATE library SET saved_at = now() - interval '731 days'")
-    assert await store.due(db, 10) == []
+    assert await in_read(db, store.due, 10) == []
     # Saved again years later, it is looked up at once, and monthly from that save.
     await db.execute("UPDATE library SET saved_at = now() WHERE paper_id = %s", (Q.id,))
-    assert await store.due(db, 10) == [Q.id]
+    assert await in_read(db, store.due, 10) == [Q.id]
     # The same record found again is no new event.
     await lookups.look_up(gate, source, P.id)
     assert await events(db) == [P.id]
 
 
-async def test_runs_never_overlap(db, gate):
+async def test_runs_never_overlap(db: Session, gate):
     # Each run takes its due papers once: one beside another could die unseen (monitoring).
     source = Source()
     (job,) = [j for j in scheduler.jobs(Config(), source=source) if j.kind == "publications"]
@@ -211,7 +212,7 @@ async def test_runs_never_overlap(db, gate):
     assert len(source.asked) == 2
 
 
-async def test_a_run_stops_when_dblp_keeps_failing(db, gate, monkeypatch):
+async def test_a_run_stops_when_dblp_keeps_failing(db: Session, gate, monkeypatch):
     monkeypatch.setattr(lookups, "GIVE_UP_AFTER", 2)
     source = Source()
     source.down = True
@@ -219,10 +220,10 @@ async def test_a_run_stops_when_dblp_keeps_failing(db, gate, monkeypatch):
     assert counts["failed"] == 2
     rec = await (await db.execute("SELECT error FROM runs WHERE kind = 'publications'")).fetchone()
     assert "stopped after 2 failures" in rec["error"]
-    assert set(await store.due(db, 10)) == {P.id, Q.id}  # still due: nothing was stored
+    assert set(await in_read(db, store.due, 10)) == {P.id, Q.id}  # still due: nothing was stored
 
 
-async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db, gate):
+async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db: Session, gate):
     other = NIPS.model_copy(update={"dblp_key": "conf/iclr/Other18", "venue": "ICLR"})
     source = Source({P.id: NIPS, Q.id: other})
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
@@ -244,7 +245,7 @@ async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db, ga
         await lookups.look_up(gate, source, Q.id)
         page = (await c.get(f"/api/papers/{Q.id}")).json()
         assert page["publication"]["venue"] == "NIPS" and page["publication_by_owner"]
-        assert await store.due(db, 10) == []
+        assert await in_read(db, store.due, 10) == []
         # "None" is a choice too.
         r = await c.put(f"/api/papers/{Q.id}/publication", json={"none": True})
         assert r.status_code == 200 and r.json() is None
@@ -257,7 +258,7 @@ async def test_the_owners_choice_is_kept_and_copy_looks_up_only_one_paper(db, ga
     assert (await events(db)).count(Q.id) == 1
 
 
-async def test_two_first_lookups_at_once_announce_the_record_once(db, gate):
+async def test_two_first_lookups_at_once_announce_the_record_once(db: Session, gate):
     async with gate_on(db) as other:  # another process's
         await asyncio.gather(
             lookups.store_record(gate, P.id, NIPS), lookups.store_record(other, P.id, NIPS)
@@ -265,7 +266,7 @@ async def test_two_first_lookups_at_once_announce_the_record_once(db, gate):
     assert await events(db) == [P.id]
 
 
-async def test_copy_gives_what_is_stored_when_dblp_is_slow(db, gate, monkeypatch):
+async def test_copy_gives_what_is_stored_when_dblp_is_slow(db: Session, gate, monkeypatch):
     monkeypatch.setattr(lookups, "COPY_DEADLINE", 0.05)
 
     class Stalled(Source):
@@ -274,4 +275,4 @@ async def test_copy_gives_what_is_stored_when_dblp_is_slow(db, gate, monkeypatch
 
     async with asyncio.timeout(1):  # far short of the stalled lookup
         assert await lookups.for_copy(gate, Stalled(), P.id) is None  # nothing stored: arXiv
-    assert await store.get(db, P.id) is None  # an unanswered lookup stores nothing
+    assert await in_read(db, store.get, P.id) is None  # an unanswered lookup stores nothing

@@ -13,9 +13,15 @@ from litwatch.config import ROLES, Models, RoleConfig
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.openrouter import OpenRouterProvider
-from litwatch.store.calls import CallJournal
-from tests.conftest import started
-from tests.fakes import ScriptedProvider, SdkClient, anthropic_message, openrouter_completion
+from tests.conftest import calls
+from tests.fakes import (
+    ScriptedProvider,
+    SdkClient,
+    anthropic_message,
+    openrouter_completion,
+    status_error,
+)
+from tests.sessions import Session
 
 
 class Answer(BaseModel):
@@ -180,25 +186,15 @@ async def test_a_connection_that_never_opened_is_tried_again_and_a_read_timeout_
     assert len(client.sent) == 1
 
 
-def _status(sdk, code: int, body: dict | None = None) -> Exception:
-    """The SDK's error for an HTTP status, as it raises one; `body` is the response's `error`."""
-    http = sys.modules[type(sdk.DefaultAsyncHttpxClient()).__mro__[1].__module__.split(".")[0]]
-    request = http.Request("POST", "https://api.example.org")
-    client = sdk.AsyncAnthropic(api_key="k") if sdk is anthropic else sdk.AsyncOpenAI(api_key="k")
-    response = http.Response(code, request=request)
-    body = None if body is None else {"error": body}
-    return client._make_status_error(f"status {code}", body=body, response=response)
-
-
 @pytest.mark.parametrize("code", [401, 402, 403])
 @pytest.mark.parametrize(
     ("sdk", "provider", "role"),
     [(anthropic, "anthropic", "writer"), (openai, "openrouter", "check")],
 )
 async def test_an_account_error_is_never_retried_and_journalled_as_its_kind(
-    conn, journal, sdk, provider, role, code
+    conn: Session, journal, sdk, provider, role, code
 ):
-    client = SdkClient(_status(sdk, code), anthropic_message(GOOD))
+    client = SdkClient(status_error(sdk, code), anthropic_message(GOOD))
     gw = gateway(MODELS, **{provider: client}, journal=journal)
     with pytest.raises(CallError) as caught:
         await gw.ask(role, REQUEST, paper_id=None)
@@ -225,9 +221,9 @@ DECLINED = {
 
 @pytest.mark.parametrize("category", list(DECLINED))
 async def test_an_openrouter_403_about_the_request_is_a_refusal_that_goes_down_the_list(
-    conn, journal, category
+    conn: Session, journal, category
 ):
-    openrouter = SdkClient(_status(openai, 403, _forbidden(DECLINED[category])))
+    openrouter = SdkClient(status_error(openai, 403, _forbidden(DECLINED[category])))
     anthropic = SdkClient(anthropic_message(GOOD))
     models = Models(writer=MUSE.model_copy(update={"fallbacks": (HAIKU,)}))
     answer = await gateway(models, anthropic, openrouter, journal=journal).ask("writer", REQUEST)
@@ -246,8 +242,10 @@ async def test_an_openrouter_403_about_the_request_is_a_refusal_that_goes_down_t
     ],
     ids=["budget", "permission", "unknown"],
 )
-async def test_any_other_openrouter_403_is_the_account_and_stops_the_list(conn, journal, metadata):
-    openrouter = SdkClient(_status(openai, 403, _forbidden(metadata)))
+async def test_any_other_openrouter_403_is_the_account_and_stops_the_list(
+    conn: Session, journal, metadata
+):
+    openrouter = SdkClient(status_error(openai, 403, _forbidden(metadata)))
     anthropic = SdkClient(anthropic_message(GOOD))
     models = Models(writer=MUSE.model_copy(update={"fallbacks": (HAIKU,)}))
     with pytest.raises(CallError) as caught:
@@ -262,16 +260,9 @@ async def test_a_role_without_credentials_fails_as_a_call_error():
         await gateway(MODELS, SdkClient(anthropic_message(GOOD))).ask("check", REQUEST)
 
 
-@pytest.fixture
-async def journal(conn, db):
-    return CallJournal(db, await started(conn, "test"))
-
-
-async def calls(conn):
-    return await (await conn.execute("SELECT * FROM inference_calls ORDER BY id")).fetchall()
-
-
-async def test_calls_are_journalled_and_an_identical_call_is_reused_for_free(conn, journal):
+async def test_calls_are_journalled_and_an_identical_call_is_reused_for_free(
+    conn: Session, journal
+):
     client = SdkClient(anthropic_message(GOOD))
     gw = gateway(MODELS, client, journal=journal)
     first = await gw.ask("writer", REQUEST, paper_id="2609.1")
@@ -285,7 +276,9 @@ async def test_calls_are_journalled_and_an_identical_call_is_reused_for_free(con
     assert await journal.total() == pytest.approx(first.usage.cost)
 
 
-async def test_reuse_is_keyed_by_who_answers_so_judge_and_check_never_share_a_reply(conn, journal):
+async def test_reuse_is_keyed_by_who_answers_so_judge_and_check_never_share_a_reply(
+    conn: Session, journal
+):
     said = []
 
     def respond(role, request):
@@ -309,7 +302,7 @@ async def test_reuse_is_keyed_by_who_answers_so_judge_and_check_never_share_a_re
     assert len(said) == 5 and len(set(said)) == 4
 
 
-async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn, journal):
+async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn: Session, journal):
     client = SdkClient(anthropic_message("", stop_reason="refusal", category="bio"))
     gw = gateway(MODELS, client, journal=journal)
     for _ in range(2):
@@ -356,7 +349,9 @@ def refusal(model: str, category: str = "bio") -> Reply:
     return Reply("", Stop.REFUSED, Usage(model=model, cost=0.001), refusal=category)
 
 
-async def test_a_refusal_goes_down_the_list_in_order_each_journalled_under_the_role(conn, journal):
+async def test_a_refusal_goes_down_the_list_in_order_each_journalled_under_the_role(
+    conn: Session, journal
+):
     said: list[str] = []
     script = {OPUS.model: refusal(OPUS.model), SONNET.model: refusal(SONNET.model, "cyber")}
     gw = Gateway(LISTED, listed(script, said), journal, retry_delays=())
@@ -378,7 +373,7 @@ async def test_a_refusal_goes_down_the_list_in_order_each_journalled_under_the_r
     assert said[3] == OPUS.model
 
 
-async def test_every_model_refusing_stops_at_once_with_the_last_refusal(conn, journal):
+async def test_every_model_refusing_stops_at_once_with_the_last_refusal(conn: Session, journal):
     said: list[str] = []
     script = {m.model: refusal(m.model) for m in LISTED.brief.models}
     gw = Gateway(LISTED, listed(script, said), journal, retry_delays=())
@@ -516,7 +511,7 @@ def test_the_default_lists_are_the_replays():
     assert labels["classify"] == labels["area_check"] == ["openrouter:typesafe/jev-1.13"]
 
 
-async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, journal):
+async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn: Session, journal):
     client = SdkClient(anthropic_message(json.dumps({"yes": True, "why": "it\x00 says so"})))
     answer = await gateway(MODELS, client, journal=journal).ask("writer", REQUEST)
     assert answer.value.why == "it says so"
@@ -533,7 +528,7 @@ async def test_a_nul_in_a_reply_is_dropped_so_the_journal_can_store_it(conn, jou
 INVALID = '{"yes": "maybe"}'
 
 
-async def test_in_debug_mode_a_failed_reply_is_kept(conn, journal):
+async def test_in_debug_mode_a_failed_reply_is_kept(conn: Session, journal):
     gw = gateway(MODELS, SdkClient(anthropic_message(INVALID)), journal=journal, debug=True)
     with pytest.raises(CallError) as raised:
         await gw.ask("writer", REQUEST)
@@ -552,14 +547,18 @@ async def test_in_debug_mode_a_failed_reply_is_kept(conn, journal):
     assert (await calls(conn))[-1]["reply"] == cut
 
 
-async def test_in_debug_mode_an_openrouter_refusal_keeps_what_the_model_said(conn, journal):
+async def test_in_debug_mode_an_openrouter_refusal_keeps_what_the_model_said(
+    conn: Session, journal
+):
     refused = SdkClient(openrouter_completion("", refusal="I cannot help with that"))
     with pytest.raises(CallError, match="refused: unspecified"):
         await gateway(MODELS, openrouter=refused, journal=journal, debug=True).ask("check", REQUEST)
     assert (await calls(conn))[-1]["reply"] == "I cannot help with that"
 
 
-async def test_out_of_debug_mode_a_failed_reply_is_not_kept_but_what_was_wrong_is(conn, journal):
+async def test_out_of_debug_mode_a_failed_reply_is_not_kept_but_what_was_wrong_is(
+    conn: Session, journal
+):
     with pytest.raises(CallError) as raised:
         await gateway(MODELS, SdkClient(anthropic_message(INVALID)), journal=journal).ask(
             "writer", REQUEST
@@ -569,7 +568,7 @@ async def test_out_of_debug_mode_a_failed_reply_is_not_kept_but_what_was_wrong_i
     assert "yes: Input should be a valid boolean" in row["error"]
 
 
-async def test_in_debug_mode_a_kept_failed_reply_is_still_never_reused(conn, journal):
+async def test_in_debug_mode_a_kept_failed_reply_is_still_never_reused(conn: Session, journal):
     client = SdkClient(anthropic_message(INVALID), anthropic_message(GOOD))
     gw = gateway(MODELS, client, journal=journal, debug=True)
     with pytest.raises(CallError):

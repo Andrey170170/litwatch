@@ -10,22 +10,17 @@ import httpx
 import pytest
 
 from litwatch import fulltext
-from litwatch.api import create_app
-from litwatch.archive import URGENT, ArchiveClient, PaperText, PdfText
+from litwatch.archive import URGENT, PaperText, PdfText
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import (
     FAILED_RUNS,
-    Analysis,
     Cause,
-    Contribution,
-    Facets,
     Fit,
     Label,
     LabelOrigin,
     LabelValue,
     Status,
     Verdict,
-    Weight,
 )
 from litwatch.core.fulltext import (
     LEASE,
@@ -49,61 +44,36 @@ from litwatch.store import papers as papers_store
 from litwatch.store import runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
 from tests import sessions, settling
-from tests.conftest import FAITH, INTERP, TREE, AppClient, gate_on, paper
-from tests.fakes import ScriptedProvider
-from tests.fakes_http import FakeArchive, mock
-from tests.sessions import Bridge
-from tests.test_steps import refusal
-
-P = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes.", version=1)
-BODY = "\\section{Method} We train a linear probe on every layer and read hidden steps. " * 40
-GIST = (
-    "Linear probes on every layer recover hidden reasoning steps, and traces omit about a third "
-    "of them on four tasks."
+from tests.briefs import (
+    ANSWER,
+    BODY,
+    BRIEF,
+    BRIEF_ROLE,
+    CONFIG,
+    GIST,
+    P,
+    Writer,
+    analysed,
+    archive,
+    client,
+    graded,
+    passes,
+    ready,
+    work,
 )
-BRIEF = " ".join(["Probes trained on every layer recover the hidden steps of a computation."] * 11)
-ANSWER = {
-    "overstatement": None,
-    "brief": BRIEF,
-    "gist": GIST,
-    "weight_reason": "A careful analysis with a fair comparison.",
-    "weight": "landmark",
-}
-BRIEF_ROLE = RoleConfig(provider="anthropic", model="test-brief")
-CONFIG = Config(models=Models(brief=BRIEF_ROLE))
-TOKEN = "t"
-
-
-class Writer:
-    """The `brief` role, scripted: `answers` in turn (an exception is raised), then ANSWER."""
-
-    def __init__(self) -> None:
-        self.answers: list[dict | Exception | str] = []
-        self.asked: list[str] = []  # each request's user message
-
-    def respond(self, role: RoleConfig, request) -> str:
-        assert role.model == BRIEF_ROLE.model
-        self.asked.append(request.user)
-        answer = self.answers.pop(0) if self.answers else ANSWER
-        if isinstance(answer, Exception):
-            raise answer
-        return answer if isinstance(answer, str) else json.dumps(answer)
-
-    def gateway(self, config: Config, journal) -> Gateway:
-        providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
-
-
-def archive(fake: FakeArchive) -> ArchiveClient:
-    return ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
+from tests.conftest import FAITH, INTERP, TREE, paper
+from tests.fakes import ScriptedProvider
+from tests.fakes_http import FakeArchive
+from tests.scripted import refusal
+from tests.sessions import Bridge, Session, in_read, in_write
 
 
 @pytest.fixture
-async def db(conn):
+async def db(conn: Session):
     """P classified, its primary class Interpretability (an Area, over the CoT faithfulness
     Focus topic)."""
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P])
+    await in_write(conn, papers_store.upsert, [P])
     await conn.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
         "primary_class, model) VALUES (%s, 1, 'x', 'interpretability', 'm')",
@@ -112,52 +82,7 @@ async def db(conn):
     return conn
 
 
-def client(conn) -> tuple:
-    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, TOKEN, CONFIG)
-    http = AppClient(
-        app,
-        base_url="http://test",
-        headers={"Authorization": f"Bearer {TOKEN}"},
-    )
-    return app, http
-
-
-async def graded(conn, fit: str, topic: str = FAITH.slug) -> None:
-    await verdicts.add(
-        conn,
-        Verdict(
-            paper_id=P.id, topic=topic, topic_version="v", fit=Fit(fit), reason="r", opinions={}
-        ),
-    )
-    await settling.settle(conn, P.id, cause=Cause.VERDICT)
-
-
-async def analysed(conn, weight: str, paper_id: str = P.id) -> None:
-    found = Analysis(
-        gist="An abstract Gist of the paper.",
-        weight=Weight(weight),
-        weight_reason="From the abstract.",
-        facets=Facets(
-            contribution=Contribution.ANALYSIS, releases_code=False, releases_weights=False
-        ),
-    )
-    current = await papers_store.get(conn, paper_id)
-    await analyses_store.add(conn, current, "interpretability", found, "m")
-    await settling.settle(conn, paper_id, cause=Cause.VERDICT)
-
-
-async def passes(conn) -> list[dict]:
-    """P's text passes; its Deep card passes are tests/test_deep.py's."""
-    return await (
-        await conn.execute(
-            "SELECT * FROM fulltext_passes WHERE paper_id = %s AND kind <> 'deep' ORDER BY id",
-            (P.id,),
-        )
-    ).fetchall()
-
-
-async def events(conn, *types: str) -> list[dict]:
+async def events(conn: Session, *types: str) -> list[dict]:
     rows = await (
         await conn.execute(
             "SELECT type, payload FROM outbox WHERE type = ANY(%s) ORDER BY id", (list(types),)
@@ -166,28 +91,18 @@ async def events(conn, *types: str) -> list[dict]:
     return [{"type": r["type"], **r["payload"]} for r in rows]
 
 
-async def work(conn, fake: FakeArchive, writer: Writer, **kwargs):
-    async with gate_on(conn) as db:
-        return await fulltext.work(db, CONFIG, archive(fake), gateway=writer.gateway, **kwargs)
-
-
-async def retry_failed(conn) -> int:
+async def retry_failed(conn: Session) -> int:
     """`store.fulltext.retry_failed` in a unit of its own, as the nightly calls it."""
     async with Bridge(conn).write("retry failed", taxonomy="shared") as unit:
         return await fulltext_store.retry_failed(unit, FAILED_RUNS)
 
 
-async def record(conn, attempt: fulltext.Attempt) -> bool:
+async def record(conn: Session, attempt: fulltext.Attempt) -> bool:
     """Record a pass's attempt as the worker does, in a change of its paper."""
     return await fulltext.record_in_change(Bridge(conn), attempt, settling.RULES)
 
 
-def ready(fake: FakeArchive, version: int = 1) -> FakeArchive:
-    fake.texts[P.id] = (version, BODY)
-    return fake
-
-
-async def current_gist(conn) -> str | None:
+async def current_gist(conn: Session) -> str | None:
     found = await conn.execute(
         f"SELECT {analyses_store.CURRENT_GIST} AS gist FROM papers p WHERE p.id = %s", (P.id,)
     )
@@ -217,7 +132,7 @@ def test_the_pass_a_paper_wants_and_when_it_is_queued_again():
     assert not to_relabel((PassKind.WEIGHT, "area"), area)
 
 
-async def test_a_focus_paper_at_central_or_related_gets_a_brief_and_adjacent_none(db):
+async def test_a_focus_paper_at_central_or_related_gets_a_brief_and_adjacent_none(db: Session):
     await graded(db, "adjacent")
     assert await passes(db) == []
     await graded(db, "related")
@@ -232,7 +147,7 @@ async def test_a_focus_paper_at_central_or_related_gets_a_brief_and_adjacent_non
     assert len(await passes(db)) == 1  # still the one pass
 
 
-async def test_an_area_must_read_gets_a_weight_re_check(db):
+async def test_an_area_must_read_gets_a_weight_re_check(db: Session):
     await analysed(db, "incremental")
     await graded(db, "central", INTERP.slug)  # central and incremental: relevant
     assert await passes(db) == []
@@ -244,7 +159,7 @@ async def test_an_area_must_read_gets_a_weight_re_check(db):
     assert (row["kind"], row["reason"]) == ("brief", "focus")
 
 
-async def test_the_owners_word_queues_a_pass_and_takes_back_one_not_started(db):
+async def test_the_owners_word_queues_a_pass_and_takes_back_one_not_started(db: Session):
     await graded(db, "adjacent")
     said = Label(
         paper_id=P.id, topic=FAITH.slug, value=LabelValue.CENTRAL, origin=LabelOrigin.READER
@@ -255,10 +170,10 @@ async def test_the_owners_word_queues_a_pass_and_takes_back_one_not_started(db):
     assert await passes(db) == []  # not started and no longer wanted: dropped
 
 
-async def test_a_paused_topic_queues_nothing_and_drops_its_pass(db):
+async def test_a_paused_topic_queues_nothing_and_drops_its_pass(db: Session):
     await graded(db, "related")  # relevant: the Area above would not pick it
     assert len(await passes(db)) == 1
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)
     await settling.save_taxonomy(
         db, tree.following(faith.model_copy(update={"status": Status.PAUSED}))
@@ -266,9 +181,9 @@ async def test_a_paused_topic_queues_nothing_and_drops_its_pass(db):
     assert await passes(db) == []
 
 
-async def test_an_area_counts_a_must_read_its_descendant_graded(db):
+async def test_an_area_counts_a_must_read_its_descendant_graded(db: Session):
     async def status(slug: str, value: Status) -> None:
-        tree = await taxonomy_store.load(db)
+        tree = await in_read(db, taxonomy_store.load)
         topic = next(t for t in tree.topics if t.slug == slug)
         await settling.save_taxonomy(db, tree.following(topic.model_copy(update={"status": value})))
 
@@ -282,7 +197,7 @@ async def test_an_area_counts_a_must_read_its_descendant_graded(db):
     await status(INTERP.slug, Status.ACTIVE)  # the Area's own papers include its subtree's
     assert [(r["kind"], r["reason"]) for r in await passes(db)] == [("weight", "area")]
     # Moved out from under the Area, the class's papers are no longer its pick candidates.
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     moved = [
         c.model_copy(update={"parent": None}) if c.slug == FAITH.slug else c for c in tree.classes
     ]
@@ -295,10 +210,12 @@ async def test_an_area_counts_a_must_read_its_descendant_graded(db):
     [{"waiting": True}, {"error": "no text", "counts": True}],
     ids=["still-fetching", "failed"],
 )
-async def test_a_pass_running_when_its_topic_is_paused_is_dropped_once_it_stops(db, attempt):
+async def test_a_pass_running_when_its_topic_is_paused_is_dropped_once_it_stops(
+    db: Session, attempt
+):
     await graded(db, "related")
-    (claimed,) = await fulltext_store.claim(db, LEASE)
-    tree = await taxonomy_store.load(db)
+    (claimed,) = await in_write(db, fulltext_store.claim, LEASE)
+    tree = await in_read(db, taxonomy_store.load)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)
     await settling.save_taxonomy(
         db, tree.following(faith.model_copy(update={"status": Status.PAUSED}))
@@ -311,7 +228,7 @@ async def test_a_pass_running_when_its_topic_is_paused_is_dropped_once_it_stops(
 # -- working a pass --------------------------------------------------------------------------------
 
 
-async def test_a_pass_awaits_its_text_then_writes_brief_gist_and_weight(db):
+async def test_a_pass_awaits_its_text_then_writes_brief_gist_and_weight(db: Session):
     await graded(db, "related")  # related and solid (no Weight yet): relevant
     fake, writer = FakeArchive(status="pending"), Writer()
     assert await work(db, fake, writer) == {"awaiting_text": 1}
@@ -336,7 +253,7 @@ async def test_a_pass_awaits_its_text_then_writes_brief_gist_and_weight(db):
         row["id"],
     )
     # The full text's Gist and Weight are the current ones, and the grade followed the Weight.
-    assert (await analyses_store.weight_of(db, P.id))["source"] == "full_text"
+    assert (await in_read(db, analyses_store.weight_of, P.id))["source"] == "full_text"
     assert await current_gist(db) == GIST
     (grade,) = await (await db.execute("SELECT grade FROM effective_grades")).fetchall()
     assert grade["grade"] == "must_read"  # related and landmark
@@ -350,16 +267,16 @@ async def test_a_pass_awaits_its_text_then_writes_brief_gist_and_weight(db):
     assert run["counts"]["briefs_written"] == 1 and run["finished_at"] is not None
 
 
-async def test_an_abstract_gist_written_later_does_not_replace_the_full_texts(db):
+async def test_an_abstract_gist_written_later_does_not_replace_the_full_texts(db: Session):
     await graded(db, "central")
     await work(db, ready(FakeArchive()), Writer())
     await analysed(db, "incremental")  # an analysis that ran late: stored, not current
-    assert (await analyses_store.weight_of(db, P.id))["weight"] == "landmark"
+    assert (await in_read(db, analyses_store.weight_of, P.id))["weight"] == "landmark"
     assert await current_gist(db) == GIST
     assert [e["source"] for e in await events(db, "gist.written")] == ["full_text"]
 
 
-async def test_failures_count_only_without_text_or_a_usable_answer(db):
+async def test_failures_count_only_without_text_or_a_usable_answer(db: Session):
     await graded(db, "central")
     fake, writer = FakeArchive(status="failed"), Writer()
     assert await work(db, fake, writer) == {"fulltext_failed": 1}
@@ -381,13 +298,13 @@ async def test_failures_count_only_without_text_or_a_usable_answer(db):
     assert (await passes(db))[0]["failed_runs"] == 2
 
 
-async def test_a_pass_tried_again_has_the_archive_try_again_what_it_gave_up_on(db):
+async def test_a_pass_tried_again_has_the_archive_try_again_what_it_gave_up_on(db: Session):
     await graded(db, "central")
     fake = FakeArchive(status="failed")
     assert await work(db, fake, Writer()) == {"fulltext_failed": 1}
     assert fake.retried == []  # a first try takes the archive's word
     await retry_failed(db)
-    await fulltext_store.claim(db, LEASE)  # taken by a worker that died before reading
+    await in_write(db, fulltext_store.claim, LEASE)  # taken by a worker that died before reading
     await db.execute(
         "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' WHERE kind <> 'deep'"
     )
@@ -400,7 +317,7 @@ async def test_a_pass_tried_again_has_the_archive_try_again_what_it_gave_up_on(d
     assert (row["failed_runs"], row["retry_text"]) == (2, False)
 
 
-async def test_a_retry_covers_the_pdf_when_the_source_has_no_latex(db):
+async def test_a_retry_covers_the_pdf_when_the_source_has_no_latex(db: Session):
     await graded(db, "central")
     fake = FakeArchive()  # the source is downloaded, but has no LaTeX text
     fake.statuses["pdf"] = "failed"
@@ -410,7 +327,7 @@ async def test_a_retry_covers_the_pdf_when_the_source_has_no_latex(db):
     assert [fake.jobs[i - 1]["kind"] for i in fake.retried] == ["pdf"]
 
 
-async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_now(db):
+async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_now(db: Session):
     await graded(db, "central")
     fake, writer = FakeArchive(status="failed"), Writer()
     for _ in range(FAILED_RUNS):
@@ -443,7 +360,9 @@ async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_n
     assert (await passes(db))[0]["state"] == "done"
 
 
-async def test_a_pass_every_brief_model_refused_stops_at_once_and_runs_again_from_the_top(db, gate):
+async def test_a_pass_every_brief_model_refused_stops_at_once_and_runs_again_from_the_top(
+    db: Session, gate
+):
     # models.md, roles: a refusal goes down the list at once; the whole list refusing stops it.
     fallback = RoleConfig(provider="openrouter", model="test-brief-2")
     listed = Config(models=Models(brief=BRIEF_ROLE.model_copy(update={"fallbacks": (fallback,)})))
@@ -487,7 +406,7 @@ async def test_a_pass_every_brief_model_refused_stops_at_once_and_runs_again_fro
     assert asked == [BRIEF_ROLE.model]  # the owner's run starts from the role's own model
 
 
-async def test_only_an_unusable_answer_starts_the_next_try_further_down_the_list(db, gate):
+async def test_only_an_unusable_answer_starts_the_next_try_further_down_the_list(db: Session, gate):
     # models.md, roles: a run that found no text counts, but asked no model.
     fallback = RoleConfig(provider="openrouter", model="test-brief-2")
     listed = Config(models=Models(brief=BRIEF_ROLE.model_copy(update={"fallbacks": (fallback,)})))
@@ -519,7 +438,9 @@ async def test_only_an_unusable_answer_starts_the_next_try_further_down_the_list
     assert asked == [BRIEF_ROLE.model, fallback.model]
 
 
-async def test_use_the_pdf_runs_a_pass_waiting_for_the_owner_on_the_papers_pdf(db, monkeypatch):
+async def test_use_the_pdf_runs_a_pass_waiting_for_the_owner_on_the_papers_pdf(
+    db: Session, monkeypatch
+):
     # DESIGN.md, Needs you: "Try again, Use the PDF" on a full-text failure.
     read = PdfText("From the PDF. " * 40, ((0, 560),))
     monkeypatch.setattr("litwatch.archive.text.read_pdf", lambda pdf: read)
@@ -542,22 +463,24 @@ async def test_use_the_pdf_runs_a_pass_waiting_for_the_owner_on_the_papers_pdf(d
     assert {j["kind"] for j in fake.jobs} == {"pdf"}  # its source never asked for
     (row,) = await passes(db)
     assert (row["state"], row["text_source"]) == ("done", "pdf")
-    brief = await fulltext_store.brief_for(db, P.id)
+    brief = await in_read(db, fulltext_store.brief_for, P.id)
     assert brief["source"] == "pdf"
 
 
-async def test_a_pass_awaiting_text_over_a_week_waits_for_the_owner(db):
+async def test_a_pass_awaiting_text_over_a_week_waits_for_the_owner(db: Session):
     await graded(db, "central")
-    assert await fulltext_store.count_stuck(db, FAILED_RUNS) == 0
+    assert await in_read(db, fulltext_store.count_stuck, FAILED_RUNS) == 0
     await db.execute(
         "UPDATE fulltext_passes SET queued_at = now() - interval '8 days' WHERE kind <> 'deep'"
     )
-    (listed,) = await fulltext_store.stuck(db, FAILED_RUNS)
+    (listed,) = await in_read(db, fulltext_store.stuck, FAILED_RUNS)
     assert listed["state"] == "awaiting_text"
-    assert await fulltext_store.count_stuck(db, FAILED_RUNS) == 1
+    assert await in_read(db, fulltext_store.count_stuck, FAILED_RUNS) == 1
 
 
-async def test_the_nightly_run_retries_failed_passes_and_works_the_queue(db, gate, monkeypatch):
+async def test_the_nightly_run_retries_failed_passes_and_works_the_queue(
+    db: Session, gate, monkeypatch
+):
     await analysed(db, "solid")  # nothing left for the night's other steps
     await graded(db, "central")
     await db.execute(
@@ -566,13 +489,13 @@ async def test_the_nightly_run_retries_failed_passes_and_works_the_queue(db, gat
     fake = ready(FakeArchive())
     monkeypatch.setattr(fulltext, "archive_for", lambda config: archive(fake))
     run_id = await nightly.run(gate, CONFIG, fetch=False, gateway=Writer().gateway)
-    counts = (await runs.get(db, run_id))["counts"]
+    counts = (await in_read(db, runs.get, run_id))["counts"]
     assert (counts["fulltext_retried"], counts["briefs_written"]) == (1, 1)
     assert counts["calls"]["brief"]["calls"] == 1  # on the nightly run
     assert (await passes(db))[0]["state"] == "done"
 
 
-async def test_failed_passes_are_retried_only_after_a_taxonomy_save_in_flight(db):
+async def test_failed_passes_are_retried_only_after_a_taxonomy_save_in_flight(db: Session):
     await graded(db, "central")
     await db.execute(
         "UPDATE fulltext_passes SET state = 'failed', failed_runs = 1 WHERE kind <> 'deep'"
@@ -590,7 +513,9 @@ async def test_failed_passes_are_retried_only_after_a_taxonomy_save_in_flight(db
 # -- the backstop: the database, not the triggers, decides -----------------------------------------
 
 
-async def test_a_pass_its_paper_stopped_qualifying_for_is_dropped_at_claim_with_no_call(db):
+async def test_a_pass_its_paper_stopped_qualifying_for_is_dropped_at_claim_with_no_call(
+    db: Session,
+):
     await graded(db, "central")
     await db.execute("UPDATE verdicts SET fit = 'none'")  # by a route that settles nothing
     fake, writer = ready(FakeArchive()), Writer()
@@ -598,7 +523,7 @@ async def test_a_pass_its_paper_stopped_qualifying_for_is_dropped_at_claim_with_
     assert (writer.asked, fake.jobs, await passes(db)) == ([], [], [])
 
 
-async def test_a_pass_wanted_for_another_reason_at_claim_runs_on_its_next_claim(db):
+async def test_a_pass_wanted_for_another_reason_at_claim_runs_on_its_next_claim(db: Session):
     await analysed(db, "solid")
     await graded(db, "central")
     await graded(db, "central", INTERP.slug)  # must read in the Area too
@@ -611,7 +536,7 @@ async def test_a_pass_wanted_for_another_reason_at_claim_runs_on_its_next_claim(
     assert await work(db, fake, writer) == {"briefs_written": 1}
 
 
-async def test_a_claimed_pass_settles_its_paper_once_in_each_unit(db, monkeypatch):
+async def test_a_claimed_pass_settles_its_paper_once_in_each_unit(db: Session, monkeypatch):
     # The claim's judgement settles the paper itself, and its change leaves it settled.
     await graded(db, "central")
     settles: Counter[tuple[int, str]] = Counter()
@@ -632,13 +557,13 @@ async def test_a_claimed_pass_settles_its_paper_once_in_each_unit(db, monkeypatc
     assert max(settles.values()) == 1
 
 
-async def test_a_paper_dismissed_after_its_pass_is_claimed_spends_nothing(db, monkeypatch):
+async def test_a_paper_dismissed_after_its_pass_is_claimed_spends_nothing(db: Session, monkeypatch):
     await graded(db, "central")
     claim = fulltext_store.claim
 
-    async def claim_then_dismiss(conn, *args, **kwargs):
-        claimed = await claim(conn, *args, **kwargs)
-        await papers_store.dismiss(conn, P.id)
+    async def claim_then_dismiss(unit, *args, **kwargs):
+        claimed = await claim(unit, *args, **kwargs)
+        await papers_store.dismiss(unit, P.id)
         return claimed
 
     monkeypatch.setattr(fulltext_store, "claim", claim_then_dismiss)
@@ -649,14 +574,16 @@ async def test_a_paper_dismissed_after_its_pass_is_claimed_spends_nothing(db, mo
     assert row["state"] == "awaiting_text"  # left for the owner's word, as `record` leaves it
 
 
-async def test_a_pass_whose_paper_was_rewritten_after_its_claim_is_dropped_unread(db, monkeypatch):
+async def test_a_pass_whose_paper_was_rewritten_after_its_claim_is_dropped_unread(
+    db: Session, monkeypatch
+):
     await graded(db, "central")
     judge = fulltext.still_wanted
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
 
     async def rewritten_then_judged(*args):  # rewritten once claimed, before it is judged
         await settling.settle_all(
-            db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
+            db, (await in_write(db, papers_store.upsert, [rewrite])).rewritten, cause=Cause.VERDICT
         )
         return await judge(*args)
 
@@ -667,28 +594,28 @@ async def test_a_pass_whose_paper_was_rewritten_after_its_claim_is_dropped_unrea
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
 
 
-async def test_the_reconcile_leaves_out_a_paper_its_area_grades_below_must_read(db):
+async def test_the_reconcile_leaves_out_a_paper_its_area_grades_below_must_read(db: Session):
     await analysed(db, "solid")
     await graded(db, "central")  # must read in the Focus topic
     await graded(db, "adjacent", INTERP.slug)  # the Area's own grade stands over it
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)
     await settling.save_taxonomy(
         db, tree.following(faith.model_copy(update={"status": Status.PAUSED}))
     )
     assert await passes(db) == []
     await db.execute("UPDATE verdicts SET recorded_at = now() - interval '3 days'")
-    assert await fulltext_store.candidates(db, RECONCILE_LOOKBACK) == []
+    assert await in_read(db, fulltext_store.candidates, RECONCILE_LOOKBACK) == []
 
 
 async def test_a_paper_that_came_to_qualify_by_no_trigger_gets_its_pass_on_the_nightly_run(
-    db, gate, monkeypatch
+    db: Session, gate, monkeypatch
 ):
     await analysed(db, "solid")  # nothing left for the night's other steps
     found = Verdict(
         paper_id=P.id, topic=FAITH.slug, topic_version="v", fit=Fit.CENTRAL, reason="r", opinions={}
     )
-    await verdicts.add(db, found)  # and no settle
+    await in_write(db, verdicts.add, found)  # and no settle
     assert await passes(db) == []
     monkeypatch.setattr(fulltext, "archive_for", lambda config: None)  # queued, not worked
     await nightly.run(gate, CONFIG, fetch=False, gateway=Writer().gateway)
@@ -696,13 +623,13 @@ async def test_a_paper_that_came_to_qualify_by_no_trigger_gets_its_pass_on_the_n
     assert (row["kind"], row["reason"], row["state"]) == ("brief", "focus", "awaiting_text")
 
 
-async def test_the_nightly_reconcile_is_not_cut_short_by_the_limit(db, gate, monkeypatch):
+async def test_the_nightly_reconcile_is_not_cut_short_by_the_limit(db: Session, gate, monkeypatch):
     await analysed(db, "solid")
     await graded(db, "central")
     stuck = "UPDATE fulltext_passes SET state = 'failed', failed_runs = %s WHERE kind <> 'deep'"
     await db.execute(stuck, (FAILED_RUNS,))
     other = paper("2610.00002", version=1)  # after P, which waits for the owner
-    await papers_store.upsert(db, [other])
+    await in_write(db, papers_store.upsert, [other])
     await db.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
         "primary_class, model) SELECT %s, paper_revision, taxonomy_revision, primary_class, model "
@@ -718,7 +645,7 @@ async def test_the_nightly_reconcile_is_not_cut_short_by_the_limit(db, gate, mon
         reason="r",
         opinions={},
     )
-    await verdicts.add(db, found)  # and no settle
+    await in_write(db, verdicts.add, found)  # and no settle
     monkeypatch.setattr(fulltext, "archive_for", lambda config: None)
     await nightly.run(gate, CONFIG, fetch=False, limit=1, gateway=Writer().gateway)
     (row,) = await (
@@ -732,24 +659,24 @@ async def test_the_nightly_reconcile_is_not_cut_short_by_the_limit(db, gate, mon
 # -- the lease and the limit -----------------------------------------------------------------------
 
 
-async def test_a_lease_holds_a_pass_until_it_runs_out(db):
+async def test_a_lease_holds_a_pass_until_it_runs_out(db: Session):
     await graded(db, "central")
-    (held,) = await fulltext_store.claim(db, LEASE)
-    assert await fulltext_store.claim(db, LEASE) == []  # held
+    (held,) = await in_write(db, fulltext_store.claim, LEASE)
+    assert await in_write(db, fulltext_store.claim, LEASE) == []  # held
     await db.execute(
         "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' WHERE kind <> 'deep'"
     )
-    (again,) = await fulltext_store.claim(db, LEASE)  # its worker died: tried again
+    (again,) = await in_write(db, fulltext_store.claim, LEASE)  # its worker died: tried again
     assert again.id == held.id
     # The first worker, back late, records nothing over the second's.
     assert await record(db, fulltext.Attempt(held, error="late", counts=True)) is False
     assert (await passes(db))[0]["failed_runs"] == 0
 
 
-async def test_the_limit_is_taken_in_sql_least_recently_tried_first(db):
+async def test_the_limit_is_taken_in_sql_least_recently_tried_first(db: Session):
     await graded(db, "central")
     other = paper("2610.00002", version=1)
-    await papers_store.upsert(db, [other])
+    await in_write(db, papers_store.upsert, [other])
     found = Verdict(
         paper_id=other.id,
         topic=FAITH.slug,
@@ -758,7 +685,7 @@ async def test_the_limit_is_taken_in_sql_least_recently_tried_first(db):
         reason="r",
         opinions={},
     )
-    await verdicts.add(db, found)
+    await in_write(db, verdicts.add, found)
     await settling.settle(db, other.id, cause=Cause.VERDICT)
     fake = FakeArchive(status="pending")
     assert await work(db, fake, Writer(), limit=1) == {"awaiting_text": 1}
@@ -766,10 +693,12 @@ async def test_the_limit_is_taken_in_sql_least_recently_tried_first(db):
     assert [j["paper_id"] for j in fake.jobs] == [P.id, other.id]  # each in turn
 
 
-async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(db, gate, monkeypatch):
+async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(
+    db: Session, gate, monkeypatch
+):
     await graded(db, "central")  # P's text is still being fetched
     others = [paper(f"2610.0000{n}", title=f"Paper {n}", version=1) for n in (2, 3, 4)]
-    await papers_store.upsert(db, others)
+    await in_write(db, papers_store.upsert, others)
     for other in others:
         found = Verdict(
             paper_id=other.id,
@@ -779,7 +708,7 @@ async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(db, gate, m
             reason="r",
             opinions={},
         )
-        await verdicts.add(db, found)
+        await in_write(db, verdicts.add, found)
         await settling.settle(db, other.id, cause=Cause.VERDICT)
 
     class Fetching(FakeArchive):
@@ -801,13 +730,17 @@ async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(db, gate, m
 # -- revisions -------------------------------------------------------------------------------------
 
 
-async def test_a_new_arxiv_version_is_read_again_by_the_next_nightly_run(db, gate, monkeypatch):
+async def test_a_new_arxiv_version_is_read_again_by_the_next_nightly_run(
+    db: Session, gate, monkeypatch
+):
     await analysed(db, "solid")  # nothing left for the night's other steps
     await graded(db, "central")
     await work(db, ready(FakeArchive()), Writer())
     # Stored by an intake that settles nothing after it: found from the database.
-    assert (await papers_store.upsert(db, [P.model_copy(update={"version": 2})])).rewritten == []
-    assert await fulltext_store.outdated(db) == [P.id]
+    assert (
+        await in_write(db, papers_store.upsert, [P.model_copy(update={"version": 2})])
+    ).rewritten == []
+    assert await in_read(db, fulltext_store.outdated) == [P.id]
     fake = ready(FakeArchive(), version=2)
     monkeypatch.setattr(fulltext, "archive_for", lambda config: archive(fake))
     await nightly.run(gate, CONFIG, fetch=False, gateway=Writer().gateway)
@@ -818,16 +751,16 @@ async def test_a_new_arxiv_version_is_read_again_by_the_next_nightly_run(db, gat
         1,
         2,
     )
-    assert await fulltext_store.outdated(db) == []
+    assert await in_read(db, fulltext_store.outdated) == []
 
 
 @pytest.mark.parametrize("changed", [False, True])
-async def test_a_new_version_with_the_same_text_is_answered_from_the_journal(db, changed):
+async def test_a_new_version_with_the_same_text_is_answered_from_the_journal(db: Session, changed):
     await graded(db, "central")
     writer = Writer()
     await work(db, ready(FakeArchive()), writer)
-    await papers_store.upsert(db, [P.model_copy(update={"version": 2})])
-    await settling.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
+    await in_write(db, papers_store.upsert, [P.model_copy(update={"version": 2})])
+    await settling.settle_all(db, await in_read(db, fulltext_store.outdated), cause=Cause.VERDICT)
     fake = FakeArchive()
     fake.texts[P.id] = (2, BODY + " Revised." if changed else BODY)
     await work(db, fake, writer)
@@ -839,34 +772,34 @@ async def test_a_new_version_with_the_same_text_is_answered_from_the_journal(db,
     assert calls["n"] == (2 if changed else 1)
 
 
-async def test_a_new_update_of_unknown_version_is_read_again_once(db):
+async def test_a_new_update_of_unknown_version_is_read_again_once(db: Session):
     await graded(db, "central")
     await work(db, ready(FakeArchive()), Writer())
     # Its raw history missing, intake knows an update came but not its version.
     later = P.model_copy(update={"version": None, "updated": "2026-10-20T00:00:00+00:00"})
-    assert (await papers_store.upsert(db, [later])).rewritten == []
-    assert await fulltext_store.outdated(db) == [P.id]
-    await settling.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
+    assert (await in_write(db, papers_store.upsert, [later])).rewritten == []
+    assert await in_read(db, fulltext_store.outdated) == [P.id]
+    await settling.settle_all(db, await in_read(db, fulltext_store.outdated), cause=Cause.VERDICT)
     assert [r["state"] for r in await passes(db)] == ["done", "awaiting_text"]
     fake = FakeArchive()
     fake.texts[P.id] = (None, BODY)  # the archive cannot say either: its historical LaTeX
     assert await work(db, fake, Writer()) == {"briefs_written": 1}
-    assert await fulltext_store.outdated(db) == []  # once, not again
+    assert await in_read(db, fulltext_store.outdated) == []  # once, not again
     await settling.settle(db, P.id, cause=Cause.VERDICT)
     assert len(await passes(db)) == 2
     # The archive then says which version it was: the version the first pass read, not the
     # one the last pass read, which is unknown, so it is read again.
     known = later.model_copy(update={"version": 1})
-    await papers_store.upsert(db, [known], source="archive")
-    assert await fulltext_store.outdated(db) == [P.id]
+    await in_write(db, papers_store.upsert, [known], source="archive")
+    assert await in_read(db, fulltext_store.outdated) == [P.id]
 
 
-async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revision(db):
+async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revision(db: Session):
     await graded(db, "central")
-    (claimed,) = await fulltext_store.claim(db, LEASE)
+    (claimed,) = await in_write(db, fulltext_store.claim, LEASE)
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
     await settling.settle_all(
-        db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
+        db, (await in_write(db, papers_store.upsert, [rewrite])).rewritten, cause=Cause.VERDICT
     )
     # The running pass is kept; the old verdict still stands, so revision 2 has one queued.
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [
@@ -880,7 +813,7 @@ async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revisi
     assert await record(db, done)
     (b,) = await (await db.execute("SELECT paper_revision FROM briefs")).fetchall()
     assert b["paper_revision"] == 1
-    assert await analyses_store.weight_of(db, P.id) is None  # not revision 2's Weight
+    assert await in_read(db, analyses_store.weight_of, P.id) is None  # not revision 2's Weight
     assert await current_gist(db) is None
     assert await events(db, "gist.written") == []  # not the current text's
     assert [e["revision"] for e in await events(db, "brief.written")] == [1]
@@ -890,55 +823,55 @@ async def test_a_pass_that_finishes_after_a_rewrite_is_kept_under_the_old_revisi
     ]
 
 
-async def test_a_rewrite_whose_settle_was_cut_short_is_settled_by_the_nightly_sweep(db):
+async def test_a_rewrite_whose_settle_was_cut_short_is_settled_by_the_nightly_sweep(db: Session):
     await graded(db, "central")  # its first pass awaits text
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
-    assert (await papers_store.upsert(db, [rewrite])).rewritten == [P.id]  # and no settle
-    assert await fulltext_store.outdated(db) == [P.id]
-    await settling.settle_all(db, await fulltext_store.outdated(db), cause=Cause.VERDICT)
+    assert (await in_write(db, papers_store.upsert, [rewrite])).rewritten == [P.id]  # and no settle
+    assert await in_read(db, fulltext_store.outdated) == [P.id]
+    await settling.settle_all(db, await in_read(db, fulltext_store.outdated), cause=Cause.VERDICT)
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
-    assert await fulltext_store.outdated(db) == []
+    assert await in_read(db, fulltext_store.outdated) == []
 
 
-async def test_an_owners_fetch_over_an_older_version_settles_its_rewrite(db):
+async def test_an_owners_fetch_over_an_older_version_settles_its_rewrite(db: Session):
     # Process or a miss fetched a newer version than litwatch holds (it stored the paper
     # meanwhile): stored as intake stores it, and its rewrite settled with it (L5-2, #66).
     await graded(db, "central")
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
     stored, inserted = await settling.keep(db, P.id, rewrite)
     assert (stored.version, stored.title, inserted) == (2, rewrite.title, False)
-    assert await fulltext_store.outdated(db) == []
+    assert await in_read(db, fulltext_store.outdated) == []
     assert [(r["paper_revision"], r["state"]) for r in await passes(db)] == [(2, "awaiting_text")]
 
 
-async def test_a_pass_that_finishes_after_its_paper_is_dismissed_writes_nothing(db):
+async def test_a_pass_that_finishes_after_its_paper_is_dismissed_writes_nothing(db: Session):
     await graded(db, "central")
-    (claimed,) = await fulltext_store.claim(db, LEASE)
-    assert await papers_store.dismiss(db, P.id)
+    (claimed,) = await in_write(db, fulltext_store.claim, LEASE)
+    assert await in_write(db, papers_store.dismiss, P.id)
     answer = brief.Output.model_validate(ANSWER)
     text = PaperText(BODY, 1, "latex")
     done = fulltext.Attempt(claimed, text=text, output=answer, model="test-brief")
     assert await record(db, done)
     assert await (await db.execute("SELECT * FROM briefs")).fetchall() == []
-    assert await analyses_store.weight_of(db, P.id) is None
+    assert await in_read(db, analyses_store.weight_of, P.id) is None
     assert await events(db, "brief.written", "gist.written") == []
     (row,) = await passes(db)
     assert (row["state"], row["failed_runs"]) == ("awaiting_text", 0)  # left for the owner's word
-    assert await fulltext_store.claim(db, LEASE) == []
+    assert await in_write(db, fulltext_store.claim, LEASE) == []
 
 
-async def test_a_pass_not_started_before_a_rewrite_is_dropped(db):
+async def test_a_pass_not_started_before_a_rewrite_is_dropped(db: Session):
     await graded(db, "central")
     rewrite = P.model_copy(update={"version": 2, "title": "Entirely different words now"})
     await settling.settle_all(
-        db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
+        db, (await in_write(db, papers_store.upsert, [rewrite])).rewritten, cause=Cause.VERDICT
     )
     # The pass for revision 1 is gone; the old verdict still stands, so revision 2 has one.
     (row,) = await passes(db)
     assert row["paper_revision"] == 2
 
 
-async def test_the_paper_page_shows_the_brief_labelled_with_its_revision(db):
+async def test_the_paper_page_shows_the_brief_labelled_with_its_revision(db: Session):
     await graded(db, "central")
     await work(db, ready(FakeArchive()), Writer())
     _, http = client(db)

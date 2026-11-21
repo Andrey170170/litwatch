@@ -1,0 +1,95 @@
+"""Models with known costs: every call priced at `COST`, a billed call in the journal
+(`charged`), and a worker worked out on an afternoon of a scheduled configuration, when no
+nightly is due."""
+
+import json
+from datetime import datetime
+
+from litwatch.config import Config, Models, RoleConfig, Schedule
+from litwatch.jobs import worker
+from litwatch.llm import Gateway, Reply, Request
+from litwatch.store import runs
+from tests.briefs import ANSWER
+from tests.conftest import started
+from tests.fakes import ScriptedProvider
+from tests.scripted import ROLES, Scripted
+from tests.sessions import Session, in_write
+
+BRIEF = RoleConfig(provider="anthropic", model="test-brief")
+CONFIG = Config(models=Models(**ROLES, brief=BRIEF), schedule=Schedule(enabled=True))
+ZONE = CONFIG.schedule.zone
+AFTERNOON = datetime(2026, 10, 22, 14, 0, tzinfo=ZONE)  # the nightly (02:00) neither due nor run
+COST = 0.01  # what every call costs
+
+
+class Costed(ScriptedProvider):
+    """A scripted provider whose every reply costs `COST`, keeping the limits each call was sent
+    with (`max_price`)."""
+
+    def __init__(self, name: str, respond) -> None:
+        super().__init__(name, respond)
+        self.limits: list[dict | None] = []
+
+    async def complete(self, role: RoleConfig, request: Request, *, max_price=None) -> Reply:
+        self.limits.append(max_price)
+        reply = await super().complete(role, request)
+        reply.usage.cost = COST
+        return reply
+
+
+class Priced:
+    """The graders (`Scripted`) and `brief`, each call costing `COST`."""
+
+    def __init__(self) -> None:
+        self.scripted = Scripted()
+        self.providers: dict[str, Costed] = {}
+
+    def respond(self, role: RoleConfig, request) -> str | Reply:
+        if role.model == BRIEF.model:
+            return json.dumps(ANSWER)
+        return self.scripted.respond(role, request)
+
+    def gateway(self, config: Config, journal) -> Gateway:
+        self.providers = {n: Costed(n, self.respond) for n in ("anthropic", "openrouter")}
+        return Gateway(config.models, self.providers, journal, retry_delays=(0.0,))
+
+    def sent(self, role: str) -> list[str]:
+        """The titles `role` was asked about."""
+        return [title for r, title in self.scripted.asked if r == role]
+
+
+async def charged(
+    conn: Session,
+    model: str,
+    *,
+    cost: float,
+    tokens_in: int,
+    tokens_out: int,
+    cached: int = 0,
+    by="X",
+    job: int | None = None,
+) -> None:
+    """A billed OpenRouter call of `model` in the journal, on a run that is not a nightly's (the
+    `job`'s, when given)."""
+    run_id = await started(conn, "job" if job else "fulltext", None, None, job)
+    usage = {
+        "model": model,
+        "via": "openrouter",
+        "prompt_tokens": tokens_in,
+        "completion_tokens": tokens_out,
+        "cached_tokens": cached,
+        "cost": cost,
+        "provider": by,
+    }
+    await conn.execute(
+        "INSERT INTO inference_calls (run_id, operation, usage) VALUES (%s, 'check', %s)",
+        (run_id, json.dumps(usage)),
+    )
+    await in_write(conn, runs.finish, run_id)
+
+
+async def work_out(w: worker.Worker, now: datetime = AFTERNOON, most: int = 20) -> int:
+    for n in range(most):
+        if not await w.step(now):
+            return n
+    raise AssertionError("the worker never ran out of work")

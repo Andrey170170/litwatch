@@ -16,7 +16,7 @@ from litwatch.integrations import archive as archive_integration
 from tests import settling
 from tests.conftest import started
 from tests.fakes_http import FakeArchive, mock
-from tests.sessions import Bridge
+from tests.sessions import Bridge, Session
 
 NOW = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=1)
 TODAY = NOW.date()
@@ -71,14 +71,14 @@ def archive(fake: FakeArchive) -> ArchiveClient:
     return ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
 
 
-async def checkpoint(conn) -> date | None:
+async def checkpoint(conn: Session) -> date | None:
     row = await (
         await conn.execute("SELECT checkpoint FROM intake_checkpoints WHERE category='*'")
     ).fetchone()
     return row and row["checkpoint"]
 
 
-async def collect(conn, fake: FakeArchive, categories=("cs.CL",)):
+async def collect(conn: Session, fake: FakeArchive, categories=("cs.CL",)):
     run_id = await started(conn, "intake", SINCE, NOW)
     return await intake.collect(
         Bridge(conn),
@@ -90,7 +90,7 @@ async def collect(conn, fake: FakeArchive, categories=("cs.CL",)):
     )
 
 
-async def walk(conn, arxiv: Arxiv, fake: FakeArchive, since: date):
+async def walk(conn: Session, arxiv: Arxiv, fake: FakeArchive, since: date):
     run_id = await started(conn, "intake", SINCE, NOW)
     with XmlClient() as client:
         return await catalog.run(
@@ -104,7 +104,7 @@ async def walk(conn, arxiv: Arxiv, fake: FakeArchive, since: date):
         )
 
 
-async def test_registers_the_rest_of_arxiv_as_metadata_only(conn, monkeypatch):
+async def test_registers_the_rest_of_arxiv_as_metadata_only(conn: Session, monkeypatch):
     ours = paper("2610.00001", ["cs.CL"])
     vision = paper("2610.00002", ["cs.CV"], version=2)
     cross = paper("2610.00003", ["cs.CV", "cs.CL"])
@@ -138,7 +138,7 @@ async def test_registers_the_rest_of_arxiv_as_metadata_only(conn, monkeypatch):
     assert arxiv.windows[-1] == (TODAY, None)
 
 
-async def test_a_backfill_walks_weeks_and_moves_the_checkpoint_after_each(conn):
+async def test_a_backfill_walks_weeks_and_moves_the_checkpoint_after_each(conn: Session):
     start = TODAY - timedelta(days=16)
     days = {start + timedelta(days=i): [paper(f"2609.{i:05d}", ["cs.CV"])] for i in range(17)}
     arxiv = Arxiv(days=days)
@@ -156,7 +156,7 @@ async def test_a_backfill_walks_weeks_and_moves_the_checkpoint_after_each(conn):
     assert await checkpoint(conn) == TODAY
 
 
-async def test_a_failed_registration_keeps_its_window_open(conn):
+async def test_a_failed_registration_keeps_its_window_open(conn: Session):
     start = TODAY - timedelta(days=10)
     days = {start + timedelta(days=i): [paper(f"2609.{i:05d}", ["cs.CV"])] for i in range(11)}
     fake = FakeArchive()
@@ -182,7 +182,7 @@ async def test_a_failed_registration_keeps_its_window_open(conn):
     assert await checkpoint(conn) is None
 
 
-async def test_a_window_over_budget_is_halved(conn):
+async def test_a_window_over_budget_is_halved(conn: Session):
     start = TODAY - timedelta(days=13)
     arxiv = Arxiv(budget=3)
     await catalog.lower(Bridge(conn), start)
@@ -199,7 +199,7 @@ async def test_a_window_over_budget_is_halved(conn):
     assert all(((u or TODAY) - s).days < 3 for s, u in arxiv.windows[1:])
 
 
-async def test_a_day_with_unresolved_versions_stops_the_pass_before_it(conn):
+async def test_a_day_with_unresolved_versions_stops_the_pass_before_it(conn: Session):
     start = TODAY - timedelta(days=6)
     bad = start + timedelta(days=4)
     days = {start + timedelta(days=i): [paper(f"2609.{i:05d}", ["cs.CV"])] for i in range(7)}
@@ -215,7 +215,9 @@ async def test_a_day_with_unresolved_versions_stops_the_pass_before_it(conn):
 
 
 @pytest.mark.parametrize("categories", [("cs.CL",), ("cs.AI", "cs.CL")])
-async def test_a_failed_pass_leaves_intake_as_its_categories_made_it(conn, monkeypatch, categories):
+async def test_a_failed_pass_leaves_intake_as_its_categories_made_it(
+    conn: Session, monkeypatch, categories
+):
     def harvest(category, *args, **kwargs):
         if category == oai.ALL:
             raise SourceError("upstream unavailable")
@@ -256,7 +258,9 @@ def test_harvest_must_be_true_or_false(monkeypatch):
         archive_integration.load("archive", {"url": "http://a", "harvest": "yes"}, Config())
 
 
-async def test_an_archive_client_that_cannot_be_made_fails_only_the_pass(conn, monkeypatch):
+async def test_an_archive_client_that_cannot_be_made_fails_only_the_pass(
+    conn: Session, monkeypatch
+):
     monkeypatch.setattr(atom, "fetch_category", unavailable)
     monkeypatch.setattr(
         oai, "fetch_category", Arxiv(listed=[paper("2610.00001", ["cs.CL"])]).fetch_category

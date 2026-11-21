@@ -24,8 +24,9 @@ from litwatch.store import papers as papers_store
 from tests import settling
 from tests.conftest import TREE, paper
 from tests.fakes_http import FakeArchive, mock
-from tests.test_archive_text import pages_pdf
-from tests.test_mcp import Flaky, _app, call, ok, rpc, serving
+from tests.mcp_client import Flaky, call, mcp_app, ok, rpc, serving
+from tests.pdfs import pages_pdf
+from tests.sessions import Session, in_write
 
 PAGE = mcp_reading.PAGE_CHARS
 MATH = (
@@ -79,13 +80,13 @@ def quick_polls(monkeypatch):
 
 
 @pytest.fixture
-async def shelf(conn):
+async def shelf(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [HELD, PDF_ONLY])
+    await in_write(conn, papers_store.upsert, [HELD, PDF_ONLY])
 
 
-def reading_app(conn, fake: FakeArchive, seen: list | None = None, wait: float = 5.0):
-    app = _app(conn, fake, seen)
+def reading_app(conn: Session, fake: FakeArchive, seen: list | None = None, wait: float = 5.0):
+    app = mcp_app(conn, fake, seen)
     app.state.mcp_wait = wait  # read at each call: seconds, not the 30 a real call waits
     return app
 
@@ -112,7 +113,7 @@ def entries(outline: str) -> list[tuple[str, int, str, int]]:
 
 
 async def pass_using_pdf(
-    conn, paper_id: str, use_pdf: bool, *, kind: str = "brief", revision: int = 1
+    conn: Session, paper_id: str, use_pdf: bool, *, kind: str = "brief", revision: int = 1
 ) -> None:
     await conn.execute(
         "INSERT INTO fulltext_passes (paper_id, paper_revision, kind, reason, state, priority, "
@@ -124,7 +125,9 @@ async def pass_using_pdf(
 # -- V5: outline first, then a part, whole ---------------------------------------------------------
 
 
-async def test_the_outline_lists_latex_sections_and_reads_them_whole_a_page_at_a_time(conn, shelf):
+async def test_the_outline_lists_latex_sections_and_reads_them_whole_a_page_at_a_time(
+    conn: Session, shelf
+):
     fake = FakeArchive()
     fake.texts[HELD.id] = (2, LATEX)
     async with serving(reading_app(conn, fake)) as http:
@@ -178,7 +181,9 @@ async def test_the_outline_lists_latex_sections_and_reads_them_whole_a_page_at_a
     assert "characters 170000–170500 of" in ranged
 
 
-async def test_reading_follows_the_owners_use_the_pdf_on_the_papers_text(conn, shelf, monkeypatch):
+async def test_reading_follows_the_owners_use_the_pdf_on_the_papers_text(
+    conn: Session, shelf, monkeypatch
+):
     monkeypatch.setitem(sys.modules, "pymupdf4llm", None)
     fake = FakeArchive()
     fake.texts[HELD.id] = (2, LATEX)
@@ -198,7 +203,9 @@ async def test_reading_follows_the_owners_use_the_pdf_on_the_papers_text(conn, s
     assert "its LaTeX source" in latex and "1. Introduction" in latex
 
 
-async def test_a_pdfs_text_is_outlined_by_page_as_the_pdf_numbers_them(conn, shelf, monkeypatch):
+async def test_a_pdfs_text_is_outlined_by_page_as_the_pdf_numbers_them(
+    conn: Session, shelf, monkeypatch
+):
     monkeypatch.setitem(sys.modules, "pymupdf4llm", None)
     fake = FakeArchive()
     fake.statuses["source"] = "unavailable"
@@ -216,7 +223,7 @@ async def test_a_pdfs_text_is_outlined_by_page_as_the_pdf_numbers_them(conn, she
     assert chunk(blank) == "(blank)" and blank.endswith("[The end of 2. Page 2.]")
 
 
-async def test_paragraphs_are_outlined_below_subsubsections(conn, shelf):
+async def test_paragraphs_are_outlined_below_subsubsections(conn: Session, shelf):
     method = (
         "\\section{Method}\nWe train.\n\\paragraph{Training setup}\nAdam.\n"
         "\\subparagraph*{Batch size}\n512.\n\\paragraph{Evaluation}\nThree tasks.\n"
@@ -238,7 +245,7 @@ async def test_paragraphs_are_outlined_below_subsubsections(conn, shelf):
     assert chunk(whole) == method  # a section holds its paragraphs
 
 
-async def test_an_optional_argument_may_hold_a_bracket_inside_braces(conn, shelf):
+async def test_an_optional_argument_may_hold_a_bracket_inside_braces(conn: Session, shelf):
     fake = FakeArchive()
     fake.texts[HELD.id] = (
         2,
@@ -251,7 +258,7 @@ async def test_an_optional_argument_may_hold_a_bracket_inside_braces(conn, shelf
     assert [title for _, _, title, _ in entries(outline)] == ["Setup", "Method", "Lemma"]
 
 
-async def test_a_heading_in_verbatim_text_is_an_example_not_a_heading(conn, shelf):
+async def test_a_heading_in_verbatim_text_is_an_example_not_a_heading(conn: Session, shelf):
     method = (
         "\\section{Method}\nWe run:\n\\begin{verbatim}\n\\section{Results}\n% not a comment\n"
         "\\end{verbatim}\nand \\verb|\\section{Inline}| too.\n"
@@ -277,7 +284,9 @@ async def _component(app) -> tuple[dict, str]:
         return next(c for c in found if c["id"] == "mcp"), (await m.get("/metrics")).text
 
 
-async def test_a_paper_not_fetched_is_asked_for_urgently_and_waited_on_a_bounded_time(conn, shelf):
+async def test_a_paper_not_fetched_is_asked_for_urgently_and_waited_on_a_bounded_time(
+    conn: Session, shelf
+):
     slow = Delayed(polls=None)  # the archive never finishes, within the wait
     slow.texts[HELD.id] = (2, LATEX)
     app = reading_app(conn, slow, wait=0.3)
@@ -314,7 +323,9 @@ async def test_a_paper_not_fetched_is_asked_for_urgently_and_waited_on_a_bounded
     assert [c["type"] for c in page["content"]] == ["text", "image"]
 
 
-async def test_a_paper_the_archive_cannot_get_says_so_and_an_outage_is_an_error(conn, shelf):
+async def test_a_paper_the_archive_cannot_get_says_so_and_an_outage_is_an_error(
+    conn: Session, shelf
+):
     gone = FakeArchive(status="failed")  # its source and its PDF given up on
     flaky = Flaky()
     flaky.down = True
@@ -353,7 +364,7 @@ async def test_a_paper_the_archive_cannot_get_says_so_and_an_outage_is_an_error(
 
 
 async def test_an_archive_that_stops_answering_after_pending_is_an_error_not_fetching(
-    conn, shelf, monkeypatch
+    conn: Session, shelf, monkeypatch
 ):
     """Only the wait's end after a pending answer says "fetching": a request that hangs past
     the bound, after pending or after the fetch is done, is an error the monitor sees."""
@@ -387,7 +398,7 @@ async def test_an_archive_that_stops_answering_after_pending_is_an_error_not_fet
     assert 'outcome="fetching"} 0' in metrics and 'outcome="fetching"} 1' not in metrics
 
 
-async def test_a_complete_pdf_job_with_no_pdf_served_is_an_error(conn, shelf):
+async def test_a_complete_pdf_job_with_no_pdf_served_is_an_error(conn: Session, shelf):
     """The archive's inconsistency, not a paper without text: it degrades the component."""
 
     class NoFile(FakeArchive):
@@ -409,7 +420,7 @@ async def test_a_complete_pdf_job_with_no_pdf_served_is_an_error(conn, shelf):
     assert 'litwatch_mcp_calls_total{tool="read_paper",outcome="error"} 1' in metrics
 
 
-async def test_a_job_answer_of_no_known_status_is_an_error_not_fetching(conn, shelf):
+async def test_a_job_answer_of_no_known_status_is_an_error_not_fetching(conn: Session, shelf):
     """Only the archive's own waiting states are "fetching"; an answer without one says nothing
     of the file, so it is an error the monitor sees."""
 
@@ -443,7 +454,7 @@ def _image(result: dict) -> tuple[str, Image.Image, bytes]:
 
 
 async def test_a_page_renders_by_number_and_by_caption_without_the_agpl_extra(
-    conn, shelf, monkeypatch
+    conn: Session, shelf, monkeypatch
 ):
     for name in ("pymupdf4llm", "pymupdf"):  # importing either fails, as without the extra
         monkeypatch.setitem(sys.modules, name, None)
@@ -482,7 +493,7 @@ async def test_a_page_renders_by_number_and_by_caption_without_the_agpl_extra(
     assert threads and all(t.startswith("mcp-pdf") for t in threads)  # off the default pool
 
 
-async def test_a_pdfs_text_is_read_in_the_mcps_own_executor(conn, shelf, monkeypatch):
+async def test_a_pdfs_text_is_read_in_the_mcps_own_executor(conn: Session, shelf, monkeypatch):
     threads = []
     read = text_module.read_pdf
 
@@ -503,7 +514,7 @@ async def test_a_pdfs_text_is_read_in_the_mcps_own_executor(conn, shelf, monkeyp
 # -- the arguments ---------------------------------------------------------------------------------
 
 
-async def test_reading_arguments_out_of_bounds_are_refused_and_not_counted(conn, shelf):
+async def test_reading_arguments_out_of_bounds_are_refused_and_not_counted(conn: Session, shelf):
     fake = FakeArchive()
     fake.texts[HELD.id] = (2, LATEX)
     app = reading_app(conn, fake)
@@ -534,7 +545,7 @@ async def test_reading_arguments_out_of_bounds_are_refused_and_not_counted(conn,
     assert chunk(at_end) == "(blank)" and at_end.endswith("[The end of the text.]")
 
 
-async def test_an_appendix_or_supplement_caption_renders_dotted_or_not(conn, shelf):
+async def test_an_appendix_or_supplement_caption_renders_dotted_or_not(conn: Session, shelf):
     fake = FakeArchive()
     fake.pdfs[PDF_ONLY.id] = pages_pdf(
         ["Body text; Table A.1 and Figure A2 are in the appendix."],
@@ -559,7 +570,9 @@ LONG_TITLE = r": a bound on $\sum_{i=1}^{n} \alpha_i \|W_\ell x\|_2 \le \sigma_{
 
 
 @pytest.mark.parametrize("title", ["", LONG_TITLE], ids=["short titles", "long titles"])
-async def test_a_long_outline_is_listed_in_parts_each_saying_where_to_go_on(conn, shelf, title):
+async def test_a_long_outline_is_listed_in_parts_each_saying_where_to_go_on(
+    conn: Session, shelf, title
+):
     """By at most 300 entries an answer, and no more than 40,000 characters: with long titles,
     the characters end a part before the count does."""
     many = "Front matter.\n" + "".join(
@@ -590,7 +603,7 @@ async def test_a_long_outline_is_listed_in_parts_each_saying_where_to_go_on(conn
     assert component["status"] == "healthy"
 
 
-async def test_a_caption_line_wins_however_its_label_is_set_off(conn, shelf):
+async def test_a_caption_line_wins_however_its_label_is_set_off(conn: Session, shelf):
     fake = FakeArchive()
     fake.pdfs[PDF_ONLY.id] = pages_pdf(
         ["As Figure 2 shows, and Figure 3 too."],
@@ -604,7 +617,7 @@ async def test_a_caption_line_wins_however_its_label_is_set_off(conn, shelf):
     assert three.endswith("page 3 of 3: Figure 3's caption is on it")
 
 
-async def test_roman_and_single_letter_captions_match_whole(conn, shelf):
+async def test_roman_and_single_letter_captions_match_whole(conn: Session, shelf):
     fake = FakeArchive()
     fake.pdfs[PDF_ONLY.id] = pages_pdf(
         ["Tables I, II and IV are below; see Figure A."],
