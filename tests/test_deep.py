@@ -67,32 +67,16 @@ from tests.conftest import (
     paper,
     sent_figure,
 )
+from tests.deep_service import CARD, DONE, USAGE, Q, make
+from tests.digesting import MON, TUE, Writer, area, day, listed, week
 from tests.fakes_http import FakeArchive, FakeDeep, mock
-from tests.sessions import Bridge
-from tests.test_digests import MON, TUE, Writer, area, day, listed, week
-from tests.test_reading import analyse, classify
-from tests.test_reading import grade as verdict
+from tests.seed import analyse, classify
+from tests.seed import grade as verdict
+from tests.sessions import Bridge, Session, in_read, in_write
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=2)
-Q = paper("2610.00002", title="Probes for hidden steps", abstract="Linear probes.", version=1)
 BODY = "\\section{Method} We read hidden steps off the residual stream. " * 40
-USAGE = {"turns": 7, "input": 41000, "output": 2300, "list_cost": 0.42, "cells": 4}
-CARD = {
-    "summary": "S.",
-    "key_claim": "K.",
-    "among_collection": [
-        {"arxiv_id": Q.id, "title": "Probes", "relation": "extends", "note": "Same probes."},
-        {"arxiv_id": "2501.00009", "title": "Elsewhere", "relation": "agrees"},
-        {"arxiv_id": "2501.00010", "title": "Unknown kind", "relation": "cites"},
-    ],
-}
-DONE = {"result": CARD, "stats": USAGE, "model": "deep-model", "trace": []}
 TOKEN = "t"
-
-
-def make(fake: FakeDeep, **kw) -> Deep:
-    client = DeepClient("http://deep.test", http=mock(fake.handle), poll_seconds=0)
-    return Deep(client, **kw)
 
 
 def archive(fake: FakeArchive) -> ArchiveClient:
@@ -107,16 +91,17 @@ def with_text(*papers) -> FakeArchive:
 
 
 @pytest.fixture
-async def db(conn):
+async def db(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P, Q])
+    await in_write(conn, papers_store.upsert, [P, Q])
     return conn
 
 
-async def grade(conn, fit: Fit, pid: str = P.id) -> None:
+async def grade(conn: Session, fit: Fit, pid: str = P.id) -> None:
     """A Focus verdict; with no Weight yet (solid), central is must read."""
-    await verdicts.add(
+    await in_write(
         conn,
+        verdicts.add,
         Verdict(
             paper_id=pid,
             topic=FAITH.slug,
@@ -129,7 +114,7 @@ async def grade(conn, fit: Fit, pid: str = P.id) -> None:
     await settling.settle(conn, pid, cause=Cause.VERDICT)
 
 
-async def deep_rows(conn, pid: str = P.id) -> list[dict]:
+async def deep_rows(conn: Session, pid: str = P.id) -> list[dict]:
     return await (
         await conn.execute(
             "SELECT * FROM fulltext_passes WHERE paper_id = %s AND kind = 'deep' ORDER BY id",
@@ -138,28 +123,28 @@ async def deep_rows(conn, pid: str = P.id) -> list[dict]:
     ).fetchall()
 
 
-async def attempts(conn) -> list[dict]:
+async def attempts(conn: Session) -> list[dict]:
     return await (await conn.execute("SELECT * FROM deep_attempts ORDER BY id")).fetchall()
 
 
-async def work(conn, fake: FakeArchive, d: Deep, **kw):
+async def work(conn: Session, fake: FakeArchive, d: Deep, **kw):
     async with gate_on(conn) as db:
         return await deep_passes.work(db, archive(fake), d, rules=settling.RULES, **kw)
 
 
-async def retry_failed(conn) -> int:
+async def retry_failed(conn: Session) -> int:
     """`store.fulltext.retry_failed` in a unit of its own, as the nightly calls it."""
     async with Bridge(conn).write("retry failed", taxonomy="shared") as unit:
         return await fulltext_store.retry_failed(unit, FAILED_RUNS)
 
 
-async def ask(conn, paper_id: str) -> int | None:
+async def ask(conn: Session, paper_id: str) -> int | None:
     """The owner asks for the paper's Deep card (`deep.request`), in a change of the paper."""
     async with settling.change(conn, paper_id, cause=Cause.OWNER) as change:
         return await deep_passes.request(change.unit, paper_id)
 
 
-async def unpause(conn) -> None:
+async def unpause(conn: Session) -> None:
     """As if the queue's pause after the last service failure were over."""
     await conn.execute(
         "UPDATE deep_attempts SET service_failed_at = service_failed_at - %s",
@@ -167,7 +152,7 @@ async def unpause(conn) -> None:
     )
 
 
-async def outbox_of(conn, kind: str) -> list[dict]:
+async def outbox_of(conn: Session, kind: str) -> list[dict]:
     rows = await (
         await conn.execute("SELECT paper_id, payload FROM outbox WHERE type = %s", (kind,))
     ).fetchall()
@@ -195,7 +180,9 @@ def test_an_automatic_card_needs_a_must_read_or_a_pick_not_unsaved_and_a_request
 # -- which papers get one --------------------------------------------------------------------------
 
 
-async def test_a_saved_focus_must_read_gets_one_deep_pass_and_unsave_or_a_pause_cancels_it(db):
+async def test_a_saved_focus_must_read_gets_one_deep_pass_and_unsave_or_a_pause_cancels_it(
+    db: Session,
+):
     await grade(db, Fit.RELATED)  # relevant: no card
     assert await deep_rows(db) == []
     await grade(db, Fit.CENTRAL)  # must read, and so saved
@@ -209,7 +196,7 @@ async def test_a_saved_focus_must_read_gets_one_deep_pass_and_unsave_or_a_pause_
     await settling.toggle(db, P.id, Hand.SAVE)
     assert len(await deep_rows(db)) == 1
 
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     faith = next(t for t in tree.topics if t.slug == FAITH.slug)
     await settling.save_taxonomy(
         db, tree.following(faith.model_copy(update={"status": Status.PAUSED}))
@@ -217,7 +204,9 @@ async def test_a_saved_focus_must_read_gets_one_deep_pass_and_unsave_or_a_pause_
     assert await deep_rows(db) == []
 
 
-async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_queued_is_dropped(db):
+async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_queued_is_dropped(
+    db: Session,
+):
     await grade(db, Fit.CENTRAL)
     (queued,) = await deep_rows(db)
     request = await ask(db, Q.id)
@@ -270,7 +259,9 @@ def test_the_cli_commands_that_settle_take_their_rules_from_the_configuration(
     assert seen == [word.Rules(automatic_deep=True)]
 
 
-async def test_the_owners_request_takes_over_an_automatic_pass_and_no_unsave_cancels_it(db):
+async def test_the_owners_request_takes_over_an_automatic_pass_and_no_unsave_cancels_it(
+    db: Session,
+):
     await grade(db, Fit.CENTRAL)
     (automatic,) = await deep_rows(db)
     assert await ask(db, P.id) == automatic["id"]
@@ -290,9 +281,10 @@ async def test_the_owners_request_takes_over_an_automatic_pass_and_no_unsave_can
     assert await ask(db, Q.id) is None
 
 
-async def test_a_must_read_whose_settle_was_missed_gets_its_pass_on_the_nightly_sweep(db):
-    await verdicts.add(
+async def test_a_must_read_whose_settle_was_missed_gets_its_pass_on_the_nightly_sweep(db: Session):
+    await in_write(
         db,
+        verdicts.add,
         Verdict(
             paper_id=P.id,
             topic=FAITH.slug,
@@ -304,18 +296,19 @@ async def test_a_must_read_whose_settle_was_missed_gets_its_pass_on_the_nightly_
     )  # and no settle
     assert await deep_rows(db) == []
     await settling.settle_all(
-        db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK), cause=Cause.VERDICT
+        db, await in_read(db, fulltext_store.candidates, RECONCILE_LOOKBACK), cause=Cause.VERDICT
     )
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
 
 
-async def test_a_missed_settle_is_swept_up_though_the_paper_has_its_brief(db):
+async def test_a_missed_settle_is_swept_up_though_the_paper_has_its_brief(db: Session):
     await grade(db, Fit.RELATED)  # relevant, with its Brief pass, done
     await db.execute(
         "UPDATE fulltext_passes SET state = 'done', arxiv_version = 2 WHERE kind = 'brief'"
     )
-    await verdicts.add(
+    await in_write(
         db,
+        verdicts.add,
         Verdict(
             paper_id=P.id,
             topic=FAITH.slug,
@@ -326,12 +319,12 @@ async def test_a_missed_settle_is_swept_up_though_the_paper_has_its_brief(db):
         ),
     )  # and no settle
     await settling.settle_all(
-        db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK), cause=Cause.VERDICT
+        db, await in_read(db, fulltext_store.candidates, RECONCILE_LOOKBACK), cause=Cause.VERDICT
     )
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
 
 
-async def test_a_missed_settle_of_an_unsure_label_is_swept_up(db):
+async def test_a_missed_settle_of_an_unsure_label_is_swept_up(db: Session):
     await grade(db, Fit.CENTRAL)  # must read, with its Deep pass and its Brief pass, done
     await db.execute(
         "UPDATE fulltext_passes SET state = 'done', arxiv_version = 2 WHERE kind = 'brief'"
@@ -343,9 +336,11 @@ async def test_a_missed_settle_of_an_unsure_label_is_swept_up(db):
     await settling.label(db, said)  # relevant: the pass is dropped
     assert await deep_rows(db) == []
     unsure = said.model_copy(update={"value": LabelValue.UNSURE})
-    await feedback_store.set_label(db, unsure)  # the central verdict counts again; no settle
+    await in_write(
+        db, feedback_store.set_label, unsure
+    )  # the central verdict counts again; no settle
     await settling.settle_all(
-        db, await fulltext_store.candidates(db, RECONCILE_LOOKBACK), cause=Cause.VERDICT
+        db, await in_read(db, fulltext_store.candidates, RECONCILE_LOOKBACK), cause=Cause.VERDICT
     )
     assert [r["reason"] for r in await deep_rows(db)] == ["focus"]
 
@@ -353,7 +348,7 @@ async def test_a_missed_settle_of_an_unsure_label_is_swept_up(db):
 # -- working one -----------------------------------------------------------------------------------
 
 
-async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db):
+async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     d = make(fake)
@@ -366,7 +361,7 @@ async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db):
     assert sent["paper"]["body_version"] == 2  # the text's arXiv version, for its figures
     assert sent["extensions"] == ["faithfulness"]
     assert [s["name"] for s in sent["selections"]] == ["Chain-of-thought faithfulness"]
-    stored = await cards.card(db, P.id)
+    stored = await in_read(db, cards.card, P.id)
     assert (stored["card"], stored["model"]) == (CARD, "deep-model")
     assert (stored["revision"], stored["arxiv_version"], stored["source"]) == (1, 2, "latex")
     (attempt,) = await attempts(db)
@@ -381,12 +376,12 @@ async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db):
     assert len(await deep_rows(db)) == 1
 
 
-async def field(conn, p, fit: str) -> None:
+async def field(conn: Session, p, fit: str) -> None:
     """A member of the Field topic's class, graded there at `fit`, grading finished."""
     await classify(conn, p, AGENTS.slug)
     await analyse(conn, p)
     await verdict(conn, p, fit, AGENTS)
-    await verdicts.passed(conn, [(p.id, 1)])
+    await in_write(conn, verdicts.passed, [(p.id, 1)])
 
 
 @pytest.mark.parametrize(
@@ -400,7 +395,7 @@ async def field(conn, p, fit: str) -> None:
     ids=["graded-nowhere", "graded-none", "area-not-picked", "field"],
 )
 async def test_a_requested_card_is_written_for_the_topics_that_graded_the_paper(
-    db, graded, selections
+    db: Session, graded, selections
 ):
     """Not for every Focus topic: a paper no topic graded gets no topic context, and one
     graded only outside the CoT topics gets no CoT extension."""
@@ -415,7 +410,7 @@ async def test_a_requested_card_is_written_for_the_topics_that_graded_the_paper(
     assert sent["extensions"] == []
 
 
-async def test_a_failed_job_records_its_usage_and_waits_for_the_owner_after_three_runs(db):
+async def test_a_failed_job_records_its_usage_and_waits_for_the_owner_after_three_runs(db: Session):
     await grade(db, Fit.CENTRAL)
     failed = {"error": "cell budget exhausted", "failure": "paper", "stats": USAGE, "trace": []}
     fake = FakeDeep(failed)
@@ -429,15 +424,15 @@ async def test_a_failed_job_records_its_usage_and_waits_for_the_owner_after_thre
     ] * FAILED_RUNS
     (row,) = await deep_rows(db)
     assert (row["state"], row["failed_runs"]) == ("failed", FAILED_RUNS)
-    assert (await cards.card(db, P.id))["error"] == "cell budget exhausted"
-    (stuck,) = await fulltext_store.stuck(db, FAILED_RUNS)
+    assert (await in_read(db, cards.card, P.id))["error"] == "cell budget exhausted"
+    (stuck,) = await in_read(db, fulltext_store.stuck, FAILED_RUNS)
     assert (stuck["id"], stuck["kind"]) == (row["id"], "deep")
-    assert await fulltext_store.run_now(db, row["id"], FAILED_RUNS)
+    assert await in_write(db, fulltext_store.run_now, row["id"], FAILED_RUNS)
     (row,) = await deep_rows(db)  # the owner's now: first in line
     assert (row["state"], row["reason"], row["priority"]) == ("ready", "request", 0)
 
 
-async def test_the_owners_request_tries_a_failed_pass_again(db):
+async def test_the_owners_request_tries_a_failed_pass_again(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep({"error": "cell budget exhausted", "stats": USAGE, "trace": []})
     d = make(fake)
@@ -450,7 +445,7 @@ async def test_the_owners_request_tries_a_failed_pass_again(db):
     assert await work(db, with_text(P), d) == {"cards_written": 1}
 
 
-async def test_a_job_the_service_lost_has_its_usage_unknown_and_counts_against_nothing(db):
+async def test_a_job_the_service_lost_has_its_usage_unknown_and_counts_against_nothing(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.vanish = True
@@ -464,7 +459,7 @@ async def test_a_job_the_service_lost_has_its_usage_unknown_and_counts_against_n
     fake.vanish = False
     await unpause(db)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
-    month = await cards.usage_since(db, lost["at"])
+    month = await in_read(db, cards.usage_since, lost["at"])
     assert month == {"attempts": 2, "list_cost": USAGE["list_cost"], "unknown": 1}
 
 
@@ -473,7 +468,7 @@ def trace(text: str) -> list[dict]:
     return [{"t": 0, "type": "assistant", "text": text, "thinking": "", "stop": "stop"}]
 
 
-async def test_each_attempt_keeps_its_own_trace_and_a_job_without_one_keeps_none(db):
+async def test_each_attempt_keeps_its_own_trace_and_a_job_without_one_keeps_none(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.vanish = True
@@ -516,7 +511,7 @@ NOTE = {"kind": "access", "source": "model", "note": "The repository could not b
 
 
 async def test_the_deep_commands_read_each_attempts_trace_and_the_cards_notes(
-    db, tmp_path, monkeypatch
+    db: Session, tmp_path, monkeypatch
 ):
     from typer.testing import CliRunner  # noqa: PLC0415
 
@@ -630,19 +625,21 @@ REVIEWS = [
 WROTE_READ = DONE | {"result": READ, "figures": FIGURES, "reviews": REVIEWS}
 
 
-async def figures(conn, pid: str = P.id) -> dict[str, tuple[str, bytes]]:
+async def figures(conn: Session, pid: str = P.id) -> dict[str, tuple[str, bytes]]:
     rows = await (
         await conn.execute("SELECT name, mime, data FROM deep_figures WHERE paper_id = %s", (pid,))
     ).fetchall()
     return {r["name"]: (r["mime"], bytes(r["data"])) for r in rows}
 
 
-async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_replaces_them(db):
+async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_replaces_them(
+    db: Session,
+):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(WROTE_READ)
     d = make(fake)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
-    stored = await cards.card(db, P.id)
+    stored = await in_read(db, cards.card, P.id)
     assert stored["card"] == READ and stored["card"]["format"] == "read"
     assert await figures(db) == {
         "methodology_by_step": ("image/webp", BLUE),
@@ -670,7 +667,7 @@ async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_repla
     fake.outcome = DONE
     await ask(db, P.id)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
-    assert (await cards.card(db, P.id))["card"] == CARD and await figures(db) == {}
+    assert (await in_read(db, cards.card, P.id))["card"] == CARD and await figures(db) == {}
     assert (await attempts(db))[-1]["reviews"] is None
 
 
@@ -694,14 +691,14 @@ async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_repla
     ],
 )  # fmt: skip
 async def test_a_result_litwatch_cannot_store_is_the_services_failure_and_stores_nothing(
-    db, sent, said
+    db: Session, sent, said
 ):
     """An unknown format, or figures and reviews that are not the contract's: an error with
     the job's usage and trace kept, never a card with something missing (P14)."""
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(WROTE_READ | {"trace": trace("wrote")} | sent)
     assert await work(db, with_text(P), make(fake)) == {"card_service_failed": 1}
-    stored = await cards.card(db, P.id)
+    stored = await in_read(db, cards.card, P.id)
     assert stored["card"] is None and said in stored["error"]
     assert await figures(db) == {} and await outbox_of(db, events.CARD_READY) == []
     (attempt,) = await attempts(db)
@@ -710,10 +707,10 @@ async def test_a_result_litwatch_cannot_store_is_the_services_failure_and_stores
     # The service's failure counts against nothing: the pass is back in the queue, which pauses.
     (row,) = await deep_rows(db)
     assert (row["state"], row["failed_runs"]) == ("ready", 0)
-    assert await cards.paused_until(db, deep_passes.PAUSE) is not None
+    assert await in_read(db, cards.paused_until, deep_passes.PAUSE) is not None
 
 
-async def test_a_failed_read_keeps_the_figures_of_the_read_before_it(db):
+async def test_a_failed_read_keeps_the_figures_of_the_read_before_it(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(WROTE_READ)
     d = make(fake)
@@ -722,15 +719,17 @@ async def test_a_failed_read_keeps_the_figures_of_the_read_before_it(db):
     fake.outcome["reviews"] = REVIEWS[:1]
     await ask(db, P.id)
     assert await work(db, with_text(P), d) == {"card_failed": 1}
-    assert (await cards.card(db, P.id))["card"] == READ and len(await figures(db)) == len(FIGURES)
+    assert (await in_read(db, cards.card, P.id))["card"] == READ and len(await figures(db)) == len(
+        FIGURES
+    )
     assert (await attempts(db))[-1]["reviews"] == REVIEWS[:1]  # what ran is kept with the failure
 
 
-async def test_a_text_of_unknown_version_is_submitted_as_such(db):
+async def test_a_text_of_unknown_version_is_submitted_as_such(db: Session):
     """A paper of no known arXiv version is read from the archive's historical LaTeX, of no
     known version either: the submission says so, and the service takes the latest figures."""
     old = paper("2610.00003", title="A paper of no known version", version=None)
-    await papers_store.upsert(db, [old])
+    await in_write(db, papers_store.upsert, [old])
     await ask(db, old.id)
     held = FakeArchive()
     held.texts[old.id] = (None, BODY)
@@ -740,7 +739,7 @@ async def test_a_text_of_unknown_version_is_submitted_as_such(db):
     assert "body_version" in sent["paper"] and sent["paper"]["body_version"] is None
 
 
-async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(db):
+async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(WROTE_READ)
     d = make(fake)
@@ -797,7 +796,7 @@ async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(d
         assert (await http.get(f"{base}/pdf", headers=read_token)).status_code == 403
 
 
-async def test_the_read_token_fetches_a_papers_pdf(db):
+async def test_the_read_token_fetches_a_papers_pdf(db: Session):
     """The deep service cuts a PDF-only paper's figures from its pages (plans/deep-read.md, D2)."""
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     fake = FakeArchive(records={P.id: 2})
@@ -831,7 +830,7 @@ REVIEW_NOTE = {
 
 
 async def test_deep_trace_prints_the_review_rounds_and_needs_you_shows_the_review_note(
-    db, tmp_path, monkeypatch
+    db: Session, tmp_path, monkeypatch
 ):
     from typer.testing import CliRunner  # noqa: PLC0415
 
@@ -885,7 +884,7 @@ async def test_deep_trace_prints_the_review_rounds_and_needs_you_shows_the_revie
         assert [c["paper_id"] for c in marked.json()["cards"]] == [P.id]
 
 
-async def test_an_attempt_no_review_ran_for_prints_none(db, tmp_path, monkeypatch):
+async def test_an_attempt_no_review_ran_for_prints_none(db: Session, tmp_path, monkeypatch):
     from typer.testing import CliRunner  # noqa: PLC0415
 
     from litwatch import cli  # noqa: PLC0415
@@ -906,7 +905,7 @@ async def test_an_attempt_no_review_ran_for_prints_none(db, tmp_path, monkeypatc
     assert result.exit_code == 0 and "Reviews" not in result.output
 
 
-async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_queue(db):
+async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_queue(db: Session):
     await grade(db, Fit.CENTRAL)
     await grade(db, Fit.CENTRAL, Q.id)
     signed_out = {"error": "not running on the ChatGPT subscription", "failure": "service"}
@@ -928,12 +927,12 @@ async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_que
     assert fake.requests[1]["paper"]["id"] != tried_first  # the failed one went to the back
 
 
-async def deep_status(conn, d: Deep) -> dict:
+async def deep_status(conn: Session, d: Deep) -> dict:
     found = await monitor.facts(Bridge(conn), Config(), [d], None)
     return next(c for c in monitor.components(found, Config()) if c["id"] == "deep")
 
 
-async def test_the_deep_component_reads_the_sign_in_and_a_service_failure_until_a_card(db):
+async def test_the_deep_component_reads_the_sign_in_and_a_service_failure_until_a_card(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep({"error": "usage limit reached", "failure": "service", "trace": []})
     d = make(fake)
@@ -957,7 +956,7 @@ async def test_the_deep_component_reads_the_sign_in_and_a_service_failure_until_
     assert (await deep_status(db, d))["status"] == "healthy"
 
 
-async def test_a_service_failure_the_job_outlived_is_not_told_with_the_papers_error(db):
+async def test_a_service_failure_the_job_outlived_is_not_told_with_the_papers_error(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep({"error": "no valid card", "failure": "paper", "stats": USAGE, "trace": []})
     fake.fail_polls = 1  # following the job fails once; the job goes on
@@ -972,7 +971,7 @@ async def test_a_service_failure_the_job_outlived_is_not_told_with_the_papers_er
     assert "service failure at" in status["reason"] and "no valid card" not in status["reason"]
 
 
-async def test_a_submission_whose_answer_was_lost_is_found_by_its_key_after_the_pause(db):
+async def test_a_submission_whose_answer_was_lost_is_found_by_its_key_after_the_pause(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.lose_answers = 1  # the service took the job; its answer never came
@@ -993,7 +992,9 @@ async def test_a_submission_whose_answer_was_lost_is_found_by_its_key_after_the_
     assert fake.started == 1 and followed["at"] == attempt["at"]  # still when it was submitted
 
 
-async def test_a_lost_submission_the_service_never_ran_ends_and_the_pass_is_tried_afresh(db):
+async def test_a_lost_submission_the_service_never_ran_ends_and_the_pass_is_tried_afresh(
+    db: Session,
+):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.lose_answers = 1
@@ -1014,7 +1015,7 @@ async def test_a_lost_submission_the_service_never_ran_ends_and_the_pass_is_trie
     assert row["text_hash"] != first["text_hash"]  # the card's label is what was sent
 
 
-async def test_a_lost_submission_with_no_job_waits_for_text_and_unsave_as_a_first_try(db):
+async def test_a_lost_submission_with_no_job_waits_for_text_and_unsave_as_a_first_try(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.fail_submits = 1  # never reached the service
@@ -1030,7 +1031,7 @@ async def test_a_lost_submission_with_no_job_waits_for_text_and_unsave_as_a_firs
     assert await deep_rows(db) == [] and fake.started == 0
 
 
-async def test_a_submission_the_service_refused_is_tried_again_after_the_pause(db):
+async def test_a_submission_the_service_refused_is_tried_again_after_the_pause(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.fail_submits = 1
@@ -1055,7 +1056,7 @@ async def test_a_submission_the_service_refused_is_tried_again_after_the_pause(d
     ],
 )
 async def test_a_submission_the_service_turns_down_for_what_it_is_counts_and_pauses_nothing(
-    db, status, said
+    db: Session, status, said
 ):
     await grade(db, Fit.CENTRAL)
     await grade(db, Fit.CENTRAL, Q.id)
@@ -1063,13 +1064,13 @@ async def test_a_submission_the_service_turns_down_for_what_it_is_counts_and_pau
     fake.answer_submits = (status, said)
     # Not paused: the next paper is tried in the same run, and turned down as well.
     assert await work(db, with_text(P, Q), make(fake)) == {"card_failed": 2}
-    assert await cards.paused_until(db, deep_passes.PAUSE) is None
+    assert await in_read(db, cards.paused_until, deep_passes.PAUSE) is None
     first, _ = await attempts(db)
     assert (first["failure"], first["service_failed_at"]) == ("paper", None)
     assert first["ended_at"] is not None and f"{status} {said}" in first["error"]
     # Nothing ran: its usage is known, and zero, not unknown.
     assert first["usage"] == deep_passes.NOTHING_RAN
-    month = await cards.usage_since(db, first["at"])
+    month = await in_read(db, cards.usage_since, first["at"])
     assert (month["attempts"], month["unknown"], month["list_cost"]) == (2, 0, 0.0)
     (row,) = await deep_rows(db)
     assert (row["state"], row["failed_runs"]) == ("failed", 1)
@@ -1077,13 +1078,15 @@ async def test_a_submission_the_service_turns_down_for_what_it_is_counts_and_pau
 
 
 @pytest.mark.parametrize("status", [503, 500, 429, 408, 404])
-async def test_a_submission_failing_on_the_service_pauses_the_queue_and_counts_nothing(db, status):
+async def test_a_submission_failing_on_the_service_pauses_the_queue_and_counts_nothing(
+    db: Session, status
+):
     await grade(db, Fit.CENTRAL)
     await grade(db, Fit.CENTRAL, Q.id)
     fake = FakeDeep(DONE)
     fake.answer_submits = (status, "not now")
     assert await work(db, with_text(P, Q), make(fake)) == {"card_service_failed": 1}
-    assert await cards.paused_until(db, deep_passes.PAUSE) is not None
+    assert await in_read(db, cards.paused_until, deep_passes.PAUSE) is not None
     (attempt,) = await attempts(db)
     assert attempt["failure"] is None and attempt["service_failed_at"] is not None
     assert attempt["ended_at"] is None  # its key is looked up after the pause
@@ -1091,7 +1094,7 @@ async def test_a_submission_failing_on_the_service_pauses_the_queue_and_counts_n
     assert (row["state"], row["failed_runs"]) == ("running", 0)
 
 
-async def test_a_job_left_by_a_dead_worker_is_followed_not_paid_for_twice(db):
+async def test_a_job_left_by_a_dead_worker_is_followed_not_paid_for_twice(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.hold = True
@@ -1112,7 +1115,7 @@ async def test_a_job_left_by_a_dead_worker_is_followed_not_paid_for_twice(db):
     assert len(fake.requests) == 1 and len(await attempts(db)) == 1
 
 
-async def test_a_failed_poll_lets_the_pass_go_and_its_next_claim_follows_the_job(db):
+async def test_a_failed_poll_lets_the_pass_go_and_its_next_claim_follows_the_job(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.fail_polls = 1
@@ -1128,7 +1131,7 @@ async def test_a_failed_poll_lets_the_pass_go_and_its_next_claim_follows_the_job
     assert len(fake.requests) == 1
 
 
-async def test_a_submitted_job_is_followed_past_a_dismissal(db):
+async def test_a_submitted_job_is_followed_past_a_dismissal(db: Session):
     await ask(db, Q.id)
     fake = FakeDeep(DONE)
     fake.fail_polls = 1
@@ -1142,7 +1145,7 @@ async def test_a_submitted_job_is_followed_past_a_dismissal(db):
 
 
 async def test_a_request_that_takes_over_a_claimed_pass_makes_the_attempt_the_owners(
-    db, monkeypatch
+    db: Session, monkeypatch
 ):
     await grade(db, Fit.CENTRAL)
     reading = deep_passes.read
@@ -1158,7 +1161,9 @@ async def test_a_request_that_takes_over_a_claimed_pass_makes_the_attempt_the_ow
     assert [a["automatic"] for a in await attempts(db)] == [False]
 
 
-async def test_a_paper_dismissed_or_unsaved_during_the_read_is_never_submitted(db, monkeypatch):
+async def test_a_paper_dismissed_or_unsaved_during_the_read_is_never_submitted(
+    db: Session, monkeypatch
+):
     reading = deep_passes.read
     meanwhile = []
 
@@ -1187,7 +1192,7 @@ async def test_a_paper_dismissed_or_unsaved_during_the_read_is_never_submitted(d
     assert (fake.requests, await attempts(db)) == ([], [])
 
 
-async def test_a_job_unreachable_past_its_deadline_is_kept_until_the_service_answers(db):
+async def test_a_job_unreachable_past_its_deadline_is_kept_until_the_service_answers(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.fail_polls = 1
@@ -1216,7 +1221,9 @@ def hurried(fake: FakeDeep) -> Deep:
     return Deep(client)
 
 
-async def test_a_job_given_up_on_at_its_deadline_is_kept_and_its_card_taken_once_it_ends(db):
+async def test_a_job_given_up_on_at_its_deadline_is_kept_and_its_card_taken_once_it_ends(
+    db: Session,
+):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.hold = True
@@ -1235,7 +1242,7 @@ async def test_a_job_given_up_on_at_its_deadline_is_kept_and_its_card_taken_once
     assert made["usage"] == USAGE and fake.started == 1
 
 
-async def test_a_job_running_past_its_deadline_by_the_services_clock_is_given_up_on(db):
+async def test_a_job_running_past_its_deadline_by_the_services_clock_is_given_up_on(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.hold = True
@@ -1248,7 +1255,7 @@ async def test_a_job_running_past_its_deadline_by_the_services_clock_is_given_up
     assert (row["state"], row["failed_runs"]) == ("ready", 0)  # uncounted, tried afresh
 
 
-async def test_a_job_queued_past_its_deadline_is_kept_however_often_it_is_followed(db):
+async def test_a_job_queued_past_its_deadline_is_kept_however_often_it_is_followed(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     fake.queued = True  # behind another job: its own clock has not started
@@ -1263,7 +1270,7 @@ async def test_a_job_queued_past_its_deadline_is_kept_however_often_it_is_follow
     assert fake.started == 1 and len(await attempts(db)) == 1
 
 
-async def test_one_worker_at_a_time_works_the_deep_passes(db):
+async def test_one_worker_at_a_time_works_the_deep_passes(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     async with gate_on(db) as other, other.held("deep-worker"):  # another process's worker
@@ -1272,7 +1279,7 @@ async def test_one_worker_at_a_time_works_the_deep_passes(db):
     assert await work(db, with_text(P), make(fake)) == {"cards_written": 1}
 
 
-async def test_a_pass_no_longer_wanted_at_claim_spends_nothing(db):
+async def test_a_pass_no_longer_wanted_at_claim_spends_nothing(db: Session):
     await grade(db, Fit.CENTRAL)
     # Unsaved by a write that missed its settle: the claim settles it first.
     await db.execute(
@@ -1283,30 +1290,30 @@ async def test_a_pass_no_longer_wanted_at_claim_spends_nothing(db):
     assert fake.requests == [] and await deep_rows(db) == []
 
 
-async def test_every_due_automatic_pass_is_worked_however_many_cards_were_made_today(db):
+async def test_every_due_automatic_pass_is_worked_however_many_cards_were_made_today(db: Session):
     for _ in range(10):  # what the old daily cap allowed in 24 hours
-        await cards.add_attempt(db, Q.id, None, automatic=True)
+        await in_write(db, cards.add_attempt, Q.id, None, automatic=True)
     await grade(db, Fit.CENTRAL)
     await grade(db, Fit.CENTRAL, Q.id)
     d = make(FakeDeep(DONE))
     assert await work(db, with_text(P, Q), d) == {"cards_written": 2}
 
 
-async def test_a_card_says_the_revision_it_read_and_is_remade_only_on_request(db):
+async def test_a_card_says_the_revision_it_read_and_is_remade_only_on_request(db: Session):
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(DONE)
     d = make(fake)
     await work(db, with_text(P), d)
     rewrite = P.model_copy(update={"version": 3, "title": "Entirely different words now"})
     await settling.settle_all(
-        db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
+        db, (await in_write(db, papers_store.upsert, [rewrite])).rewritten, cause=Cause.VERDICT
     )
     assert [r["state"] for r in await deep_rows(db)] == ["done"]  # nothing new by itself
-    assert (await cards.card(db, P.id))["revision"] == 1
+    assert (await in_read(db, cards.card, P.id))["revision"] == 1
 
     await ask(db, P.id)
     assert await work(db, with_text(rewrite), d) == {"cards_written": 1}
-    stored = await cards.card(db, P.id)
+    stored = await in_read(db, cards.card, P.id)
     assert (stored["revision"], stored["arxiv_version"]) == (2, 3)
 
 
@@ -1315,7 +1322,7 @@ async def test_a_card_says_the_revision_it_read_and_is_remade_only_on_request(db
 R = paper("2610.00003", title="Tools that plan", abstract="Agents.", version=1)
 
 
-async def must_read_in_the_area(conn, p=P) -> None:
+async def must_read_in_the_area(conn: Session, p=P) -> None:
     """Graded must read in the Area from its abstract, its Weight re-check done: a pick
     candidate."""
     await area(conn, p, "central")
@@ -1326,14 +1333,14 @@ async def must_read_in_the_area(conn, p=P) -> None:
     )
 
 
-async def picked(conn) -> None:
+async def picked(conn: Session) -> None:
     """P picked in the Area's published daily digest of Tuesday."""
     await must_read_in_the_area(conn)
     await listed(conn, TUE, P)
     await day(conn, Writer(), TUE)
 
 
-async def roles(conn, topic: str, period: str) -> dict[str, str]:
+async def roles(conn: Session, topic: str, period: str) -> dict[str, str]:
     rows = await (
         await conn.execute(
             "SELECT dp.paper_id, dp.role FROM digest_papers dp "
@@ -1344,7 +1351,9 @@ async def roles(conn, topic: str, period: str) -> dict[str, str]:
     return {r["paper_id"]: r["role"] for r in rows}
 
 
-async def test_an_area_pick_gets_its_deep_card_when_its_digest_is_published_and_is_not_saved(db):
+async def test_an_area_pick_gets_its_deep_card_when_its_digest_is_published_and_is_not_saved(
+    db: Session,
+):
     await must_read_in_the_area(db)
     await area(db, Q, "related")  # relevant: listed, not a pick candidate
     await listed(db, TUE, P, Q)
@@ -1374,16 +1383,16 @@ async def test_an_area_pick_gets_its_deep_card_when_its_digest_is_published_and_
     assert [r["state"] for r in await deep_rows(db)] == ["done"]
 
 
-async def test_weekly_area_picks_get_cards_and_field_picks_do_not(db):
+async def test_weekly_area_picks_get_cards_and_field_picks_do_not(db: Session):
     """Q, only listed in Tuesday's daily digest, is picked in the Area's weekly one; R, picked
     in the Field's weekly digest, is not an Area pick."""
-    await papers_store.upsert(db, [R])
+    await in_write(db, papers_store.upsert, [R])
     await must_read_in_the_area(db)
     await area(db, Q, "related")
     await classify(db, R, AGENTS.slug)
     await analyse(db, R)
     await verdict(db, R, "related", AGENTS)
-    await verdicts.passed(db, [(R.id, 1)])
+    await in_write(db, verdicts.passed, [(R.id, 1)])
     await listed(db, TUE, P, Q, R)
     w = Writer()
     await day(db, w, TUE)
@@ -1403,7 +1412,9 @@ async def test_weekly_area_picks_get_cards_and_field_picks_do_not(db):
     ],
     ids=["digest-not-published", "area-paused"],
 )
-async def test_a_pick_pass_is_judged_again_at_claim_and_spends_nothing_unwanted(db, missed):
+async def test_a_pick_pass_is_judged_again_at_claim_and_spends_nothing_unwanted(
+    db: Session, missed
+):
     await picked(db)
     await db.execute(missed)  # with no settle
     fake = FakeDeep(DONE)
@@ -1411,15 +1422,15 @@ async def test_a_pick_pass_is_judged_again_at_claim_and_spends_nothing_unwanted(
     assert fake.requests == [] and await deep_rows(db) == []
 
 
-async def test_an_unsave_a_pause_or_a_rewrite_drops_a_pick_pass_not_started(db):
+async def test_an_unsave_a_pause_or_a_rewrite_drops_a_pick_pass_not_started(db: Session):
     await picked(db)
     await settling.toggle(db, P.id, Hand.UNSAVE)
     assert await deep_rows(db) == []
-    assert P.id not in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)
+    assert P.id not in await in_read(db, fulltext_store.candidates, RECONCILE_LOOKBACK)
     await settling.toggle(db, P.id, Hand.SAVE)  # the owner's Save: the pick wants its card again
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     interp = next(t for t in tree.topics if t.slug == INTERP.slug)
     paused = tree.following(interp.model_copy(update={"status": Status.PAUSED}))
     await settling.save_taxonomy(db, paused)
@@ -1430,44 +1441,46 @@ async def test_an_unsave_a_pause_or_a_rewrite_drops_a_pick_pass_not_started(db):
     # A rewrite: the pick judged text that no longer exists.
     rewrite = P.model_copy(update={"version": 3, "title": "Entirely different words now"})
     await settling.settle_all(
-        db, (await papers_store.upsert(db, [rewrite])).rewritten, cause=Cause.VERDICT
+        db, (await in_write(db, papers_store.upsert, [rewrite])).rewritten, cause=Cause.VERDICT
     )
     assert await deep_rows(db) == []
 
 
-async def test_a_dismissed_pick_is_never_worked(db):
+async def test_a_dismissed_pick_is_never_worked(db: Session):
     await picked(db)
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
-    await papers_store.dismiss(db, P.id)
+    await in_write(db, papers_store.dismiss, P.id)
     fake = FakeDeep(DONE)
     assert await work(db, with_text(P), make(fake)) == {}
     assert fake.requests == []
-    assert P.id not in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)
+    assert P.id not in await in_read(db, fulltext_store.candidates, RECONCILE_LOOKBACK)
 
 
-async def test_a_pick_pass_once_for_a_focus_must_read_says_it_is_for_the_pick(db):
+async def test_a_pick_pass_once_for_a_focus_must_read_says_it_is_for_the_pick(db: Session):
     await picked(db)
     await db.execute("UPDATE fulltext_passes SET reason = 'focus' WHERE kind = 'deep'")
     await settling.settle(db, P.id, cause=Cause.VERDICT)
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 
 
-async def test_a_pick_whose_settle_was_missed_is_swept_up_whatever_the_limit(db, gate):
+async def test_a_pick_whose_settle_was_missed_is_swept_up_whatever_the_limit(db: Session, gate):
     await picked(db)
     await db.execute("DELETE FROM fulltext_passes WHERE kind = 'deep'")  # its settle missed
-    assert P.id in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)
+    assert P.id in await in_read(db, fulltext_store.candidates, RECONCILE_LOOKBACK)
     async with model_run(gate, Config(), "nightly", gateway=Writer().gateway) as run:
         await nightly.text_passes(gate, Config(), run, limit=0)  # no archive: it only reconciles
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 
     await work(db, with_text(P), make(FakeDeep(DONE)))
-    assert P.id not in await fulltext_store.candidates(db, RECONCILE_LOOKBACK)  # it has its card
+    assert P.id not in await in_read(
+        db, fulltext_store.candidates, RECONCILE_LOOKBACK
+    )  # it has its card
 
 
 # -- what the owner sees ---------------------------------------------------------------------------
 
 
-def client(conn, integrations, config: Config | None = None) -> tuple:
+def client(conn: Session, integrations, config: Config | None = None) -> tuple:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, config or Config(), integrations=integrations)
     http = AppClient(
@@ -1478,7 +1491,7 @@ def client(conn, integrations, config: Config | None = None) -> tuple:
     return app, http
 
 
-async def test_the_owner_may_ask_for_a_card_an_automatic_pass_waits_for(db):
+async def test_the_owner_may_ask_for_a_card_an_automatic_pass_waits_for(db: Session):
     """While the automatic pass waits its turn, asking takes it over."""
     await grade(db, Fit.CENTRAL)
     _, http = client(db, [make(FakeDeep(DONE))])
@@ -1491,7 +1504,7 @@ async def test_the_owner_may_ask_for_a_card_an_automatic_pass_waits_for(db):
     assert (after["card_pass"]["reason"], after["card_requestable"]) == ("request", False)
 
 
-async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypatch):
+async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db: Session, monkeypatch):
     """Deep read outside the collection: an archive paper not fetched yet is fetched as
     Process fetches it, then its card is asked for and its Process job queued; arXiv lacking it
     is a 404."""
@@ -1521,25 +1534,25 @@ async def test_deep_read_on_a_paper_litwatch_lacks_fetches_it_first(db, monkeypa
     assert (page["stored"], page["in_collection"]) == (True, False)
     assert page["card_pass"]["reason"] == "request" and missing.status_code == 404
     assert page["process"]["state"] == "queued"  # outside the collection, processed now too
-    assert await papers_store.get(db, "2610.08888") is None
+    assert await in_read(db, papers_store.get, "2610.08888") is None
 
 
-async def test_deep_read_asked_again_while_its_process_job_runs_changes_nothing(db):
+async def test_deep_read_asked_again_while_its_process_job_runs_changes_nothing(db: Session):
     """A retry of Deep read while the Process job it started runs: the same pass answers, and
     the job is not asked again, so it ends done, not queued."""
     scheduled = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
     _, http = client(db, [make(FakeDeep(DONE))], scheduled)
     async with http:
         asked = await http.post(f"/api/papers/{P.id}/card")
-        job = (await jobs_store.claim(db, me=await identity_of(db)))["id"]
+        job = (await in_write(db, jobs_store.claim, me=await identity_of(db)))["id"]
         again = await http.post(f"/api/papers/{P.id}/card")
     assert again.status_code == 202 and again.json() == asked.json()
-    await jobs_store.finish(db, job, "done", me=await identity_of(db))
-    assert (await jobs_store.get(db, job))["state"] == "done"
+    await in_write(db, jobs_store.finish, job, "done", me=await identity_of(db))
+    assert (await in_read(db, jobs_store.get, job))["state"] == "done"
 
 
 async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_again(
-    db, monkeypatch, slow_arxiv
+    db: Session, monkeypatch, slow_arxiv
 ):
     await db.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
@@ -1590,7 +1603,7 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
     assert quality["deep"] == {"attempts": 1, "list_cost": USAGE["list_cost"], "unknown": 0}
 
 
-async def test_the_deep_worker_runs_a_requested_card_as_soon_as_it_is_woken(db, gate):
+async def test_the_deep_worker_runs_a_requested_card_as_soon_as_it_is_woken(db: Session, gate):
     fake = FakeDeep(DONE)
     d = make(fake)
     wake = asyncio.Event()
@@ -1601,16 +1614,16 @@ async def test_the_deep_worker_runs_a_requested_card_as_soon_as_it_is_woken(db, 
         await ask(db, P.id)
         wake.set()
         for _ in range(200):
-            if (await cards.card(db, P.id) or {}).get("card"):
+            if (await in_read(db, cards.card, P.id) or {}).get("card"):
                 break
             await asyncio.sleep(0.05)
     finally:
         worker.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await worker
-    assert (await cards.card(db, P.id))["card"] == CARD
+    assert (await in_read(db, cards.card, P.id))["card"] == CARD
 
 
-async def test_connect_reaches_the_test_schema(db):
+async def test_connect_reaches_the_test_schema(db: Session):
     async with await sessions.connect(f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"):
         pass

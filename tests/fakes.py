@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from typing import Any
 
+import anthropic
+
 from litwatch.config import RoleConfig
+from litwatch.intake.http import SourceError
 from litwatch.llm import ProviderError, Reply, Request, Stop, Usage
 
 
@@ -164,3 +168,20 @@ class BatchingProvider(ScriptedProvider):
 
 
 __all__ = ["BatchingProvider", "ProviderError", "ScriptedProvider", "SdkClient"]
+
+
+def unavailable(*args, **kwargs):
+    raise SourceError("upstream unavailable")
+
+
+FAST = {"quiet": 0.02, "poll": 0.01}  # the batcher's timings in tests
+
+
+def status_error(sdk, code: int, body: dict | None = None) -> Exception:
+    """The SDK's error for an HTTP status, as it raises one; `body` is the response's `error`."""
+    http = sys.modules[type(sdk.DefaultAsyncHttpxClient()).__mro__[1].__module__.split(".")[0]]
+    request = http.Request("POST", "https://api.example.org")
+    client = sdk.AsyncAnthropic(api_key="k") if sdk is anthropic else sdk.AsyncOpenAI(api_key="k")
+    response = http.Response(code, request=request)
+    body = None if body is None else {"error": body}
+    return client._make_status_error(f"status {code}", body=body, response=response)

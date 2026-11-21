@@ -18,10 +18,10 @@ from litwatch.quality import ladders
 from litwatch.store import papers as papers_store
 from tests import settling
 from tests.conftest import FAITH, INTERP, TREE, paper
+from tests.digesting import TUE, Writer, day, focus, listed
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, mock
-from tests.sessions import Bridge
-from tests.test_digests import TUE, Writer, day, focus, listed
+from tests.sessions import Bridge, Session, in_read, in_write
 
 LADDERS = """
 [judge]
@@ -328,14 +328,14 @@ async def test_a_failing_run_ends_every_call_before_letting_go_and_a_cut_off_rec
     assert [r.candidate for r in ladders.rows(out)] == ["own", "other"]
 
 
-async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
+async def test_each_case_is_asked_as_the_pipeline_asks_it(conn: Session, tmp_path):
     """Graders, `analyse` and `brief` from the pipeline's own builders, a paper the database
     lacks from the archive's catalog, a text only as the archive holds it, and a published
     daily digest rebuilt as it was written, when nothing changed since."""
 
     await settling.save_tree(conn, TREE)
     first = paper("2610.00031", title="Traces that hide steps", version=1)
-    await papers_store.upsert(conn, [first])
+    await in_write(conn, papers_store.upsert, [first])
     w = Writer()
     await focus(conn, first, "central")
     await listed(conn, TUE, first)
@@ -351,7 +351,7 @@ async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
     fake.texts[first.id] = (1, "\\section{Method} Probes. " * 20)
     fake.texts[elsewhere["id"]] = (2, "\\section{Setup} Two. " * 20)
     unversioned = paper("2610.00032", title="No version known")
-    await papers_store.upsert(conn, [unversioned])
+    await in_write(conn, papers_store.upsert, [unversioned])
     archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
     chosen = [
         ladders.Case(set="quality", role="judge", paper=first.id, subject=FAITH.slug),
@@ -364,7 +364,7 @@ async def test_each_case_is_asked_as_the_pipeline_asks_it(conn, tmp_path):
         ladders.Case(set="quality", role="judge", paper="2610.00404", subject=FAITH.slug),
     ]
     built = await ladders.requests(Bridge(conn), archive, chosen)
-    stored = (await papers_store.get_many(conn, [first.id]))[0]
+    stored = (await in_read(conn, papers_store.get_many, [first.id]))[0]
     keys = [c.key for c in chosen]
     faith_name, interp_name = TREE.get(FAITH.slug).name, TREE.get(INTERP.slug).name
     assert built[keys[0]] == grading.request(stored, FAITH, faith_name)

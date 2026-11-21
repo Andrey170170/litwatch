@@ -51,7 +51,7 @@ from tests.conftest import (
     settled,
 )
 from tests.fakes_http import FakeNotion, mock
-from tests.sessions import Bridge
+from tests.sessions import Bridge, Session, in_write
 
 PARENT = "11111111-1111-1111-1111-111111111111"
 OTHER = "22222222-2222-2222-2222-222222222222"
@@ -106,9 +106,9 @@ INTERNAL = re.compile(r"\b(central|Fit|Weight|verdict)\b|for you|required readin
 
 
 @pytest.fixture
-async def world(conn):
+async def world(conn: Session):
     await settling.save_tree(conn, TOPICS)
-    await papers_store.upsert(conn, [A, B, C])
+    await in_write(conn, papers_store.upsert, [A, B, C])
     return conn
 
 
@@ -130,12 +130,13 @@ async def start(db, integration, now=None) -> bool:
     return await dispatch.start(db, integration, now)
 
 
-async def grade(conn, p, topic: str, g: str) -> None:
+async def grade(conn: Session, p, topic: str, g: str) -> None:
     """A verdict whose grade, with no Weight yet, is `g`."""
     fit = {"must_read": Fit.CENTRAL, "relevant": Fit.RELATED}.get(g) or Fit(g)
     opinion = Opinion(fit=fit, reason="r", model="anthropic:x")
-    await verdicts.add(
+    await in_write(
         conn,
+        verdicts.add,
         Verdict(
             paper_id=p.id,
             topic=topic,
@@ -148,12 +149,12 @@ async def grade(conn, p, topic: str, g: str) -> None:
     await settling.settle(conn, p.id, cause=Cause.VERDICT)
 
 
-async def say(conn, p, topic: str, value: LabelValue) -> None:
+async def say(conn: Session, p, topic: str, value: LabelValue) -> None:
     label = Label(paper_id=p.id, topic=topic, value=value, origin=LabelOrigin.READER)
     await settling.label(conn, label)
 
 
-async def texts(conn, p, gist: str | None = None, brief: str | None = None) -> None:
+async def texts(conn: Session, p, gist: str | None = None, brief: str | None = None) -> None:
     """Store a Gist and a Brief for the paper's first revision."""
     if gist:
         await conn.execute(
@@ -191,7 +192,7 @@ def created(fake: FakeNotion, arxiv_id: str) -> dict:
     return body
 
 
-async def last_day(conn) -> str:
+async def last_day(conn: Session) -> str:
     """The day of the newest `grade.changed`, as Why lines write it."""
     row = await (
         await conn.execute(
@@ -290,9 +291,9 @@ LABEL = {"revision": 1, "version": 1, "source": "latex", "pass_id": None}
 CARD_AS_BEFORE = "2226698b82fad0d5eaf8e23d073acaba"
 
 
-async def deep_read(conn, db, fake: FakeNotion, card: dict) -> list[dict]:
+async def deep_read(conn: Session, db, fake: FakeNotion, card: dict) -> list[dict]:
     """What the page of A, a must read with `card`, holds under its Deep read heading."""
-    await integrations_store.put_card(conn, A.id, card, "deep", {}, **LABEL)
+    await in_write(conn, integrations_store.put_card, A.id, card, "deep", {}, **LABEL)
     await grade(conn, A, FAITH.slug, "must_read")
     assert await start(db, notion(fake))
     body = created(fake, A.id)["children"]

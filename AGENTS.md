@@ -40,7 +40,8 @@ production since 2026-10-17, in place of release 0.14.
   `db` opens its own units; one that takes a unit runs inside it and never commits; units do not nest, and no
   model call runs inside one (tests raise on it, `LITWATCH_STRICT_GATES=1`). No advisory-lock SQL outside the
   gate and no `AsyncConnection` outside `gates/` and `store/` (`tests/test_database_home.py`); only tests hold a
-  connection of their own (`tests/sessions.py`).
+  connection of their own (`tests/sessions.py`), and they too hand `store` a unit (`in_read`, `in_write`), with
+  `conn` typed so `ty` sees it (`tests/test_database_home.py`).
 - Which role may import which, and no cycle between Services, is checked (`lint-imports`, `tests/test_roles.py`)
   against the roles in `docs/specs/architecture.md`. Their lists of today's violations only shrink.
 

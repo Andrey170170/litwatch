@@ -22,18 +22,18 @@ from litwatch.store import papers as papers_store
 from litwatch.store import verdicts
 from tests import settling
 from tests.conftest import AGENTS, FAITH, TREE, AppClient, paper
-from tests.sessions import Bridge
+from tests.sessions import Bridge, Session, in_read, in_write
 
 ABOVE = [paper(f"2610.0010{i}") for i in range(3)]
 BELOW = [paper(f"2610.0020{i}") for i in range(3)]
 
 
 @pytest.fixture
-async def db(conn):
+async def db(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, ABOVE + BELOW)
+    await in_write(conn, papers_store.upsert, ABOVE + BELOW)
     for p, fit in [(p, "related") for p in ABOVE] + [(p, "none") for p in BELOW]:
-        await verdicts.add(conn, verdict(p.id, Fit(fit)))
+        await in_write(conn, verdicts.add, verdict(p.id, Fit(fit)))
         await settling.settle(conn, p.id, cause=Cause.VERDICT)
     return conn
 
@@ -49,15 +49,15 @@ def verdict(paper_id: str, fit: Fit, **opinions: Fit) -> Verdict:
     )
 
 
-async def answer(conn, session_id: int, position: int, given: Answer) -> None:
+async def answer(conn: Session, session_id: int, position: int, given: Answer) -> None:
     await calibrate.answer(Bridge(conn), session_id, position, given, rules=settling.RULES)
 
 
-async def items(conn, session_id):
-    return (await calibrate.session(conn, session_id))["items"]
+async def items(conn: Session, session_id):
+    return (await in_read(conn, calibrate.session, session_id))["items"]
 
 
-async def test_a_draw_is_even_across_groups_seeded_and_skips_labelled_papers(db):
+async def test_a_draw_is_even_across_groups_seeded_and_skips_labelled_papers(db: Session):
     await settling.label(
         db,
         Label(
@@ -74,15 +74,15 @@ async def test_a_draw_is_even_across_groups_seeded_and_skips_labelled_papers(db)
     assert [i["paper_id"] for i in again] == [i["paper_id"] for i in first]
 
 
-async def test_a_draw_skips_a_verdict_on_text_since_rewritten(db):
+async def test_a_draw_skips_a_verdict_on_text_since_rewritten(db: Session):
     rewritten = ABOVE[0].model_copy(update={"abstract": "An entirely different abstract."})
-    await papers_store.upsert(db, [rewritten])
+    await in_write(db, papers_store.upsert, [rewritten])
     drawn = await items(db, await calibrate.draw(Bridge(db), seed=7, size=6))
     assert ABOVE[0].id not in {i["paper_id"] for i in drawn}
     assert sorted(i["why"] for i in drawn) == ["above", "above", "below", "below", "below"]
 
 
-async def test_answers_become_labels_and_appraisals(db):
+async def test_answers_become_labels_and_appraisals(db: Session):
     session_id = await calibrate.draw(Bridge(db), seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     assert item["verdict"] == "related"  # the pipeline's side, for the review
@@ -106,11 +106,11 @@ async def test_answers_become_labels_and_appraisals(db):
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     assert item["answer"] == "none" and item["answered_at"] is not None
     # It matters but fits no Focus topic: a missing topic or a narrow rubric.
-    (listed,) = await calibrate.matters_no_topic(db)
+    (listed,) = await in_read(db, calibrate.matters_no_topic)
     assert (listed["paper_id"], listed["note"]) == (item["paper_id"], "about steering, not traces")
 
 
-async def test_a_fit_moved_between_topics_keeps_the_paper_in_the_library_throughout(db):
+async def test_a_fit_moved_between_topics_keeps_the_paper_in_the_library_throughout(db: Session):
     """An item's labels are written together and settled once: moving its Fit from one Focus
     topic to another emits no unsave and save between them."""
     second = AGENTS.model_copy(update={"depth": Depth.FOCUS, "rubric": "Tool use, end to end."})
@@ -126,7 +126,7 @@ async def test_a_fit_moved_between_topics_keeps_the_paper_in_the_library_through
     assert await library_events(db, item["paper_id"]) == before
 
 
-async def library_events(conn, paper_id: str) -> list[str]:
+async def library_events(conn: Session, paper_id: str) -> list[str]:
     rows = await (
         await conn.execute(
             "SELECT type FROM outbox WHERE paper_id = %s AND type IN ('paper.saved', "
@@ -137,7 +137,7 @@ async def library_events(conn, paper_id: str) -> list[str]:
     return [r["type"] for r in rows]
 
 
-async def test_precision_judges_the_drawn_verdict_and_ignores_the_unanswered(db):
+async def test_precision_judges_the_drawn_verdict_and_ignores_the_unanswered(db: Session):
     session_id = await calibrate.draw(Bridge(db), seed=3, size=6)
     above = [i for i in await items(db, session_id) if i["why"] == "above"]
     below = [i for i in await items(db, session_id) if i["why"] == "below"]
@@ -149,16 +149,17 @@ async def test_precision_judges_the_drawn_verdict_and_ignores_the_unanswered(db)
     )
     await answer(db, session_id, above[1]["position"], Answer(fit={FAITH.slug: LabelValue.NONE}))
     await answer(db, session_id, below[0]["position"], Answer(fit={FAITH.slug: LabelValue.UNSURE}))
-    (row,) = await calibrate.precision(db)
+    (row,) = await in_read(db, calibrate.precision)
     assert (row["precision"], row["precision_n"]) == (0.5, 2)
     assert (row["dropped"], row["dropped_n"]) == (None, 0)
 
 
-async def test_more_takes_in_straddling_splits_and_thumbed_papers_once(db):
+async def test_more_takes_in_straddling_splits_and_thumbed_papers_once(db: Session):
     extra = paper("2610.00300")
-    await papers_store.upsert(db, [extra])
-    await verdicts.add(
+    await in_write(db, papers_store.upsert, [extra])
+    await in_write(
         db,
+        verdicts.add,
         verdict(extra.id, Fit.RELATED, judge=Fit.RELATED, check=Fit.NONE).model_copy(
             update={"split": True}
         ),
@@ -181,7 +182,7 @@ async def test_more_takes_in_straddling_splits_and_thumbed_papers_once(db):
     assert await calibrate.more(Bridge(db), session_id) == 0
 
 
-async def test_an_answer_counts_even_when_the_paper_had_a_label_since_the_draw(db):
+async def test_an_answer_counts_even_when_the_paper_had_a_label_since_the_draw(db: Session):
     session_id = await calibrate.draw(Bridge(db), seed=3, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     await settling.label(
@@ -199,13 +200,13 @@ async def test_an_answer_counts_even_when_the_paper_had_a_label_since_the_draw(d
         item["position"],
         Answer(fit={FAITH.slug: LabelValue.RELATED}),
     )
-    (row,) = await calibrate.precision(db)
+    (row,) = await in_read(db, calibrate.precision)
     assert (row["precision"], row["precision_n"]) == (1.0, 1)
 
 
-async def test_more_takes_in_an_unmarked_miss_for_a_focus_topic_only(db):
+async def test_more_takes_in_an_unmarked_miss_for_a_focus_topic_only(db: Session):
     missed, elsewhere = paper("2610.00400"), paper("2610.00401")
-    await papers_store.upsert(db, [missed, elsewhere])
+    await in_write(db, papers_store.upsert, [missed, elsewhere])
     await db.execute(
         "INSERT INTO misses (paper_id, topic) VALUES (%s, %s), (%s, 'interpretability')",
         (missed.id, FAITH.slug, elsewhere.id),
@@ -217,7 +218,7 @@ async def test_more_takes_in_an_unmarked_miss_for_a_focus_topic_only(db):
     assert (elsewhere.id, "miss") not in taken  # no label can be given for an Area topic
 
 
-async def test_a_miss_keeps_the_verdict_standing_when_it_joins(db):
+async def test_a_miss_keeps_the_verdict_standing_when_it_joins(db: Session):
     """A past review shows what the pipeline said when the paper joined the session, not a
     later regrade."""
     missed = ABOVE[0]
@@ -226,12 +227,12 @@ async def test_a_miss_keeps_the_verdict_standing_when_it_joins(db):
     )
     session_id = await calibrate.draw(Bridge(db), seed=5, size=0)
     await calibrate.more(Bridge(db), session_id)
-    await verdicts.add(db, verdict(missed.id, Fit.CENTRAL))  # regraded after the session
+    await in_write(db, verdicts.add, verdict(missed.id, Fit.CENTRAL))  # regraded after the session
     (item,) = [i for i in await items(db, session_id) if i["why"] == "miss"]
     assert item["verdict"] == "related"
 
 
-async def test_an_answer_does_not_renew_a_label_it_leaves_as_it_was(db):
+async def test_an_answer_does_not_renew_a_label_it_leaves_as_it_was(db: Session):
     """Editing only the appraisal sends the drawn Fit again; the label keeps its time, so a
     reaction given since still outranks it."""
     session_id = await calibrate.draw(Bridge(db), seed=1, size=2)
@@ -245,7 +246,7 @@ async def test_an_answer_does_not_renew_a_label_it_leaves_as_it_was(db):
     assert after["labelled_at"] == before["labelled_at"]
 
 
-async def test_an_appraisal_edit_after_the_first_answer_writes_no_label(db):
+async def test_an_appraisal_edit_after_the_first_answer_writes_no_label(db: Session):
     """The drawn topic's Fit is required on the first answer only. An edit of the appraisal
     alone leaves the Fit out, so a label the owner has since taken back is not recreated from
     the recorded answer; the answer stands as recorded."""
@@ -265,7 +266,7 @@ async def test_an_appraisal_edit_after_the_first_answer_writes_no_label(db):
     assert (item["answer"], item["fit"], item["appraisal"]["value"]) == ("none", {}, "matters")
 
 
-async def test_fit_names_only_focus_topics(db):
+async def test_fit_names_only_focus_topics(db: Session):
     session_id = await calibrate.draw(Bridge(db), seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     fit = {FAITH.slug: LabelValue.NONE, "interpretability": LabelValue.NONE}
@@ -273,20 +274,20 @@ async def test_fit_names_only_focus_topics(db):
         await answer(db, session_id, item["position"], Answer(fit=fit))
 
 
-async def test_an_appraisal_can_be_cleared(db):
+async def test_an_appraisal_can_be_cleared(db: Session):
     session_id = await calibrate.draw(Bridge(db), seed=1, size=2)
     (item,) = [i for i in await items(db, session_id) if i["why"] == "above"]
     fit = {FAITH.slug: LabelValue.NONE}
     await answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
     await answer(db, session_id, item["position"], Answer(fit=fit, value="matters"))
-    assert len(await calibrate.matters_no_topic(db)) == 1
+    assert len(await in_read(db, calibrate.matters_no_topic)) == 1
     await answer(db, session_id, item["position"], Answer(fit=fit))
-    assert await calibrate.matters_no_topic(db) == []
+    assert await in_read(db, calibrate.matters_no_topic) == []
     rows = await (await db.execute("SELECT count(*) AS n FROM appraisals")).fetchone()
     assert rows["n"] == 2  # matters once, then cleared
 
 
-async def test_the_sessions_list_counts_answers_that_differ_from_the_verdict(db):
+async def test_the_sessions_list_counts_answers_that_differ_from_the_verdict(db: Session):
     """The past-session rows say how many answers differ from the pipeline's Fit: another Fit
     than the verdict's, as the review marks them. Unsure never differs."""
 
@@ -316,7 +317,7 @@ PROBES = FAITH.model_copy(update={"slug": "probes", "monogram": "PR", "keywords"
 SHARED = [paper(f"2610.0030{i}") for i in range(8)]
 
 
-async def test_a_seeded_draw_reads_each_pool_once_and_draws_as_it_did(conn, monkeypatch):
+async def test_a_seeded_draw_reads_each_pool_once_and_draws_as_it_did(conn: Session, monkeypatch):
     tree = TREE.model_copy(
         update={
             "classes": [
@@ -332,11 +333,13 @@ async def test_a_seeded_draw_reads_each_pool_once_and_draws_as_it_did(conn, monk
         }
     )
     await settling.save_tree(conn, tree)
-    await papers_store.upsert(conn, SHARED)
+    await in_write(conn, papers_store.upsert, SHARED)
     fits = ["central", "related", "adjacent", "none"]
     for i, p in enumerate(SHARED):
         for topic, fit in [(FAITH.slug, fits[i % 4]), (PROBES.slug, fits[(i + 1) % 4])]:
-            await verdicts.add(conn, verdict(p.id, Fit(fit)).model_copy(update={"topic": topic}))
+            await in_write(
+                conn, verdicts.add, verdict(p.id, Fit(fit)).model_copy(update={"topic": topic})
+            )
         await settling.settle(conn, p.id, cause=Cause.VERDICT)
     reads = []
     pool = calibrate.store.pool
@@ -361,7 +364,7 @@ async def test_a_seeded_draw_reads_each_pool_once_and_draws_as_it_did(conn, monk
     ]
 
 
-async def test_a_session_answers_in_the_shape_its_schema_names(db):
+async def test_a_session_answers_in_the_shape_its_schema_names(db: Session):
     """A session's page, through the API: each item as the store reads it, in the shape the
     OpenAPI schema declares for the web app's client."""
     from litwatch.api import create_app
@@ -391,7 +394,7 @@ async def test_a_session_answers_in_the_shape_its_schema_names(db):
     assert all(set(i) == set(schemas["SessionItem"]["properties"]) for i in found["items"])
 
 
-async def test_a_session_keeps_a_paper_whose_authors_are_null(db):
+async def test_a_session_keeps_a_paper_whose_authors_are_null(db: Session):
     """A paper stored with JSON-null authors answers as it is stored, null, and does not take
     the whole session down with it."""
     from litwatch.api import create_app

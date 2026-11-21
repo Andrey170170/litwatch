@@ -19,7 +19,7 @@ from litwatch.store import papers
 from tests import settling
 from tests.conftest import paper, started
 from tests.fakes_http import FakeArchive, mock
-from tests.sessions import Bridge
+from tests.sessions import Bridge, Session, in_read, in_write
 
 SINCE, UNTIL = date(2026, 10, 1), date(2026, 10, 14)
 
@@ -78,19 +78,19 @@ async def test_a_malformed_listing_is_an_archive_error():
             [page async for page in fake.papers(SINCE, UNTIL)]
 
 
-async def outbox(conn) -> list[tuple[str, str, dict]]:
+async def outbox(conn: Session) -> list[tuple[str, str, dict]]:
     rows = await (await conn.execute("SELECT * FROM outbox ORDER BY id")).fetchall()
     return [(r["type"], r["paper_id"], r["payload"]) for r in rows]
 
 
-async def test_the_source_stores_new_papers_and_applies_revisions(conn):
+async def test_the_source_stores_new_papers_and_applies_revisions(conn: Session):
     fake = FakeArchive()
     fake.listing = [item(1), item(2, abstract=None)]
     result = await archive_intake.collect(
         Bridge(conn), client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
     )
     assert (result.fetched, result.inserted, result.details["skipped"]) == (1, 1, ["2610.00002"])
-    stored = await papers.get(conn, "2610.00001")
+    stored = await in_read(conn, papers.get, "2610.00001")
     assert stored.published == "2026-10-02T00:00:00+00:00" and stored.version == 1
     row = await (await conn.execute("SELECT metadata_source FROM papers")).fetchone()
     assert row["metadata_source"] == "archive"
@@ -114,10 +114,10 @@ async def test_the_source_stores_new_papers_and_applies_revisions(conn):
     ]
 
 
-async def test_the_archive_never_rolls_back_what_arxiv_sent(conn):
+async def test_the_archive_never_rolls_back_what_arxiv_sent(conn: Session):
     at = datetime(2026, 10, 9, 15, 30, tzinfo=UTC).isoformat()
     oai = paper("2610.00001", version=2, abstract="Current.", published=at, updated=at)
-    await papers.upsert(conn, [oai], source="oai")
+    await in_write(conn, papers.upsert, [oai], source="oai")
     fake = FakeArchive()
     unproven = [
         item(1, abstract="Stale.", updated="2026-10-02"),  # an older version on an older day
@@ -130,7 +130,7 @@ async def test_the_archive_never_rolls_back_what_arxiv_sent(conn):
             Bridge(conn), client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
         )
         assert result.updated == 0, listed
-    stored = await papers.get(conn, oai.id)
+    stored = await in_read(conn, papers.get, oai.id)
     assert (stored.abstract, stored.version, stored.updated) == ("Current.", 2, at)
 
     fake.listing = [item(1, version=2, title=oai.title, abstract="Fixed.", updated="2026-10-10")]
@@ -138,11 +138,11 @@ async def test_the_archive_never_rolls_back_what_arxiv_sent(conn):
         Bridge(conn), client(fake), ["cs.CL"], SINCE, UNTIL, rules=settling.RULES
     )
     assert later.updated == 1
-    stored = await papers.get(conn, oai.id)
+    stored = await in_read(conn, papers.get, oai.id)
     assert (stored.abstract, stored.updated) == ("Fixed.", "2026-10-10T00:00:00+00:00")
 
 
-async def test_the_job_records_its_run_and_arxiv_intake_does_not_go_on_from_it(conn, db):
+async def test_the_job_records_its_run_and_arxiv_intake_does_not_go_on_from_it(conn: Session, db):
     fake = FakeArchive()
     fake.listing = [item(1), item(2)]
     config = Config(intake=Intake(categories=("cs.CL", "cs.AI")))
@@ -176,7 +176,7 @@ class Stalling:
         await asyncio.Event().wait()
 
 
-async def test_a_cancelled_intake_records_its_run_as_finished(conn, db):
+async def test_a_cancelled_intake_records_its_run_as_finished(conn: Session, db):
     archive = Stalling([paper("2610.00001")])
     config = Config(intake=Intake(categories=("cs.CL",)))
     job = asyncio.create_task(intake_job.from_archive(db, config, archive, SINCE, UNTIL))
@@ -186,7 +186,7 @@ async def test_a_cancelled_intake_records_its_run_as_finished(conn, db):
         await job
     run = await (await conn.execute("SELECT * FROM runs")).fetchone()
     assert run["finished_at"] is not None and run["error"].startswith("CancelledError")
-    assert await papers.get(conn, "2610.00001")  # the page read before it stays stored
+    assert await in_read(conn, papers.get, "2610.00001")  # the page read before it stays stored
 
 
 def test_the_archive_integration_skips_papers_read_from_it():

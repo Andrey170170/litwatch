@@ -15,13 +15,13 @@ import pytest
 from litwatch import fulltext
 from litwatch.api import create_app
 from litwatch.archive import ArchiveClient
-from litwatch.config import Config, Models, RoleConfig, Schedule
+from litwatch.config import Models, RoleConfig, Schedule
 from litwatch.core import Cause, Depth, Fit, Label, LabelOrigin, LabelValue, Status, Verdict
 from litwatch.core.fulltext import BACKGROUND_PRIORITY, TEXT_REQUEST_PRIORITY
 from litwatch.fulltext import deep as deep_passes
 from litwatch.gates.database import identity_of
 from litwatch.jobs import reruns, worker
-from litwatch.llm import CallError, Gateway, Reply, Request, Usage, prices
+from litwatch.llm import CallError, Gateway, Request, Usage, prices
 from litwatch.llm import ceiling as ceilings
 from litwatch.llm.openrouter import OpenRouterProvider
 from litwatch.store import fulltext as fulltext_store
@@ -31,19 +31,16 @@ from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests import settling
+from tests.briefs import BODY, analysed
 from tests.conftest import AGENTS, FAITH, TREE, AppClient, paper, started
-from tests.fakes import ScriptedProvider, SdkClient, openrouter_completion
+from tests.deep_service import DONE, make
+from tests.fakes import SdkClient, openrouter_completion
 from tests.fakes_http import FakeArchive, FakeDeep, mock
-from tests.test_deep import DONE, make
-from tests.test_fulltext import ANSWER, BODY, analysed
-from tests.test_steps import LISTS, ROLES, Scripted, refusal
+from tests.priced import AFTERNOON, CONFIG, COST, ZONE, Priced, charged, work_out
+from tests.scripted import LISTS, ROLES, refusal
+from tests.sessions import Session, in_read, in_write
 
-BRIEF = RoleConfig(provider="anthropic", model="test-brief")
-CONFIG = Config(models=Models(**ROLES, brief=BRIEF), schedule=Schedule(enabled=True))
-ZONE = CONFIG.schedule.zone
-AFTERNOON = datetime(2026, 10, 22, 14, 0, tzinfo=ZONE)  # the nightly (02:00) neither due nor run
 NIGHT = datetime(2026, 10, 22, 2, 5, tzinfo=ZONE)  # five minutes after it was due
-COST = 0.01  # what every call costs
 TOKEN = "s3cret"
 
 A = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes on activations.")
@@ -51,48 +48,12 @@ B = paper("2610.00002", title="Is the chain of thought faithful?", abstract="We 
 C = paper("2610.00003", title="Agents that plan", abstract="Tool use over many steps.")
 
 
-class Costed(ScriptedProvider):
-    """A scripted provider whose every reply costs `COST`, keeping the limits each call was sent
-    with (`max_price`)."""
-
-    def __init__(self, name: str, respond) -> None:
-        super().__init__(name, respond)
-        self.limits: list[dict | None] = []
-
-    async def complete(self, role: RoleConfig, request: Request, *, max_price=None) -> Reply:
-        self.limits.append(max_price)
-        reply = await super().complete(role, request)
-        reply.usage.cost = COST
-        return reply
-
-
-class Priced:
-    """The graders (`Scripted`) and `brief`, each call costing `COST`."""
-
-    def __init__(self) -> None:
-        self.scripted = Scripted()
-        self.providers: dict[str, Costed] = {}
-
-    def respond(self, role: RoleConfig, request) -> str | Reply:
-        if role.model == BRIEF.model:
-            return json.dumps(ANSWER)
-        return self.scripted.respond(role, request)
-
-    def gateway(self, config: Config, journal) -> Gateway:
-        self.providers = {n: Costed(n, self.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, self.providers, journal, retry_delays=(0.0,))
-
-    def sent(self, role: str) -> list[str]:
-        """The titles `role` was asked about."""
-        return [title for r, title in self.scripted.asked if r == role]
-
-
 @pytest.fixture
-async def models(conn, monkeypatch):
+async def models(conn: Session, monkeypatch):
     """The taxonomy, three papers, prices for the test models on Anthropic, and history that
     bounds those on OpenRouter."""
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [A, B, C])
+    await in_write(conn, papers_store.upsert, [A, B, C])
     for model in ("test-judge", "test-field", "test-brief", "test-analyse"):
         monkeypatch.setitem(prices.ANTHROPIC, model, (1.0, 2.0, 0.1))
     for model in ("test/check", "test/area-check"):
@@ -100,39 +61,11 @@ async def models(conn, monkeypatch):
     return Priced()
 
 
-async def charged(
-    conn,
-    model: str,
-    *,
-    cost: float,
-    tokens_in: int,
-    tokens_out: int,
-    cached: int = 0,
-    by="X",
-    job: int | None = None,
-) -> None:
-    """A billed OpenRouter call of `model` in the journal, on a run that is not a nightly's (the
-    `job`'s, when given)."""
-    run_id = await started(conn, "job" if job else "fulltext", None, None, job)
-    usage = {
-        "model": model,
-        "via": "openrouter",
-        "prompt_tokens": tokens_in,
-        "completion_tokens": tokens_out,
-        "cached_tokens": cached,
-        "cost": cost,
-        "provider": by,
-    }
-    await conn.execute(
-        "INSERT INTO inference_calls (run_id, operation, usage) VALUES (%s, 'check', %s)",
-        (run_id, json.dumps(usage)),
-    )
-    await runs.finish(conn, run_id)
-
-
-async def rerun(conn, topic: str, ids: list[str], ceiling: float, state: str = "queued") -> int:
+async def rerun(
+    conn: Session, topic: str, ids: list[str], ceiling: float, state: str = "queued"
+) -> int:
     scope = {"topic": topic, "revision": 1, "scopes": ["members"], "papers": ids}
-    return await jobs_store.create(conn, "rerun", scope, len(ids), state, ceiling=ceiling)
+    return await in_write(conn, jobs_store.create, "rerun", scope, len(ids), state, ceiling=ceiling)
 
 
 def archive(fake: FakeArchive) -> ArchiveClient:
@@ -146,18 +79,11 @@ def with_text(*papers) -> FakeArchive:
     return fake
 
 
-async def work_out(w: worker.Worker, now: datetime = AFTERNOON, most: int = 20) -> int:
-    for n in range(most):
-        if not await w.step(now):
-            return n
-    raise AssertionError("the worker never ran out of work")
-
-
-async def rows(conn, query: str, *params) -> list[dict]:
+async def rows(conn: Session, query: str, *params) -> list[dict]:
     return await (await conn.execute(query, params)).fetchall()
 
 
-async def job_calls(conn, job_id: int) -> list[dict]:
+async def job_calls(conn: Session, job_id: int) -> list[dict]:
     return await rows(
         conn,
         "SELECT c.* FROM inference_calls c JOIN runs r ON r.id = c.run_id WHERE r.job_id = %s "
@@ -166,18 +92,18 @@ async def job_calls(conn, job_id: int) -> list[dict]:
     )
 
 
-async def graded_before(conn, p, topic: str, version: str, fit: str = "related") -> None:
+async def graded_before(conn: Session, p, topic: str, version: str, fit: str = "related") -> None:
     """A verdict recorded under an earlier version of the topic, settled."""
     v = Verdict(
         paper_id=p.id, topic=topic, topic_version=version, fit=Fit(fit), reason="r", opinions={}
     )
-    await verdicts_store.add(conn, v)
+    await in_write(conn, verdicts_store.add, v)
     await settling.settle(conn, p.id, cause=Cause.VERDICT)
 
 
-async def edited(conn, topic, **change) -> str:
+async def edited(conn: Session, topic, **change) -> str:
     """Save the topic edited; its new version."""
-    tree = await taxonomy_store.load(conn)
+    tree = await in_read(conn, taxonomy_store.load)
     changed = tree.topic(topic.slug).model_copy(update=change)
     await settling.save_taxonomy(conn, tree.following(changed))
     return changed.version
@@ -194,7 +120,7 @@ def most(request: Request) -> float:
 
 
 async def test_a_rerun_grades_its_scope_under_the_topics_new_version_and_no_other_paper(
-    conn, db, models
+    conn: Session, db, models
 ):
     """A and B carry current verdicts under the old version, which `grading.due` would leave
     alone: the re-run of A alone grades A again under the new one, settles it, and touches
@@ -228,36 +154,42 @@ async def test_a_rerun_grades_its_scope_under_the_topics_new_version_and_no_othe
         (A.id, "central"),
     }
     assert set(models.sent("judge")) == {A.title} and set(models.sent("check")) == {A.title}
-    done = await jobs_store.get(conn, job)
+    done = await in_read(conn, jobs_store.get, job)
     assert (done["state"], done["done"], done["counts"]["graded"]) == ("done", 1, 1)
 
 
-async def test_a_paper_dismissed_before_its_rerun_is_not_counted_as_graded(conn, db, models):
+async def test_a_paper_dismissed_before_its_rerun_is_not_counted_as_graded(
+    conn: Session, db, models
+):
     job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
     await conn.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (B.id,))
     await work_out(worker.Worker(db, CONFIG, models.gateway))
-    done = await jobs_store.get(conn, job)
+    done = await in_read(conn, jobs_store.get, job)
     assert (done["state"], done["counts"]["graded"]) == ("done", 1)
 
 
-async def test_a_paper_graded_under_the_current_version_is_not_graded_again(conn, db, models):
+async def test_a_paper_graded_under_the_current_version_is_not_graded_again(
+    conn: Session, db, models
+):
     """Taken back, or continued, a re-run grades only what has no verdict under the version."""
     await graded_before(conn, A, AGENTS.slug, AGENTS.version)
     job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
     await work_out(worker.Worker(db, CONFIG, models.gateway))
     assert models.sent("field_grade") == [B.title]
-    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert (await in_read(conn, jobs_store.get, job))["state"] == "done"
 
 
-async def test_a_topic_edited_back_grades_again_what_the_version_between_decided(conn, models):
+async def test_a_topic_edited_back_grades_again_what_the_version_between_decided(
+    conn: Session, models
+):
     """Under v1 then v2, A's verdict is v2's: a re-run after the edit back to v1 has A to do."""
     await graded_before(conn, A, AGENTS.slug, "v1", fit="central")
     await graded_before(conn, A, AGENTS.slug, "v2", fit="none")
-    assert await verdicts_store.ungraded_under(conn, AGENTS.slug, "v1", [A.id]) == [A.id]
-    assert await verdicts_store.ungraded_under(conn, AGENTS.slug, "v2", [A.id]) == []
+    assert await in_read(conn, verdicts_store.ungraded_under, AGENTS.slug, "v1", [A.id]) == [A.id]
+    assert await in_read(conn, verdicts_store.ungraded_under, AGENTS.slug, "v2", [A.id]) == []
 
 
-async def test_the_members_scope_is_the_topics_page_graded_papers_included(conn, models):
+async def test_the_members_scope_is_the_topics_page_graded_papers_included(conn: Session, models):
     """B has no membership but a grade for the topic (a keyword hit): its page shows it."""
     await conn.execute(
         "INSERT INTO memberships (paper_id, class, source, probability, class_version, "
@@ -265,10 +197,10 @@ async def test_the_members_scope_is_the_topics_page_graded_papers_included(conn,
         (A.id, AGENTS.slug),
     )
     await graded_before(conn, B, AGENTS.slug, AGENTS.version)
-    assert await jobs_store.members(conn, [AGENTS.slug]) == [A.id, B.id]
+    assert await in_read(conn, jobs_store.members, [AGENTS.slug]) == [A.id, B.id]
 
 
-async def test_a_rerun_is_adopted_only_for_the_version_it_grades_under(conn, db, models):
+async def test_a_rerun_is_adopted_only_for_the_version_it_grades_under(conn: Session, db, models):
     """Two versions read as the same revision (an edit between the reads): not the same re-run."""
     scope = {"topic": AGENTS.slug, "revision": 5, "version": "a", "scopes": ["members"]}
     async with db.write("re-run", locks=[("rerun", AGENTS.slug)]) as unit:
@@ -281,37 +213,37 @@ async def test_a_rerun_is_adopted_only_for_the_version_it_grades_under(conn, db,
         assert (await jobs_store.open_rerun(unit, scope))["state"] == "offered"
 
 
-async def test_a_rerun_whose_topic_was_paused_fails_and_says_why(conn, db, models):
+async def test_a_rerun_whose_topic_was_paused_fails_and_says_why(conn: Session, db, models):
     job = await rerun(conn, AGENTS.slug, [A.id], ceiling=1.0)
     await edited(conn, AGENTS, status=Status.PAUSED)
     await work_out(worker.Worker(db, CONFIG, models.gateway))
-    stopped = await jobs_store.get(conn, job)
+    stopped = await in_read(conn, jobs_store.get, job)
     assert stopped["state"] == "failed" and "no longer followed and active" in stopped["error"]
     assert models.sent("field_grade") == []
 
 
 async def test_a_grading_that_fails_fails_the_rerun_and_try_again_does_what_is_left(
-    conn, db, models
+    conn: Session, db, models
 ):
     models.scripted.fits[("field_grade", B.title)] = {"fit": "nowhere"}
     job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
     await work_out(worker.Worker(db, CONFIG, models.gateway))
-    failed = await jobs_store.get(conn, job)
+    failed = await in_read(conn, jobs_store.get, job)
     assert (failed["state"], failed["error"]) == ("failed", "grading failed on 1")
     # Recorded on the job, not as the paper's failure: no nightly takes it up.
     assert await rows(conn, "SELECT * FROM step_failures") == []
 
     del models.scripted.fits[("field_grade", B.title)]
-    await jobs_store.move(conn, job, ("failed",), "queued")
+    await in_write(conn, jobs_store.move, job, ("failed",), "queued")
     await work_out(worker.Worker(db, CONFIG, models.gateway))
-    done = await jobs_store.get(conn, job)
+    done = await in_read(conn, jobs_store.get, job)
     # Both count as graded, A by the first try: the count is of the verdicts themselves.
     assert (done["state"], done["counts"]["graded"]) == ("done", 2)
     assert models.sent("field_grade").count(A.title) == 1  # graded once, not again
 
 
 async def test_try_again_starts_a_grading_one_model_further_down_after_an_unusable_answer(
-    conn, db, models, monkeypatch
+    conn: Session, db, models, monkeypatch
 ):
     """D4 in a re-run: an unusable answer from the first model moves the next try down the
     role's list, as a nightly's failed runs would."""
@@ -324,15 +256,15 @@ async def test_try_again_starts_a_grading_one_model_further_down_after_an_unusab
     models.scripted.said[(first, B.title)] = {"fit": "nowhere"}  # unusable
     job = await rerun(conn, AGENTS.slug, [B.id], ceiling=1.0)
     await work_out(worker.Worker(db, listed, models.gateway))
-    assert (await jobs_store.get(conn, job))["state"] == "failed"
-    await jobs_store.move(conn, job, ("failed",), "queued")
+    assert (await in_read(conn, jobs_store.get, job))["state"] == "failed"
+    await in_write(conn, jobs_store.move, job, ("failed",), "queued")
     await work_out(worker.Worker(db, listed, models.gateway))
-    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert (await in_read(conn, jobs_store.get, job))["state"] == "done"
     assert [m for m, t in models.scripted.models_asked if t == B.title] == [first, second]
 
 
 async def test_new_text_starts_a_reruns_grading_at_the_top_of_its_list(
-    conn, db, models, monkeypatch
+    conn: Session, db, models, monkeypatch
 ):
     listed = CONFIG.model_copy(
         update={"models": CONFIG.models.model_copy(update={"field_grade": LISTS["field_grade"]})}
@@ -345,26 +277,26 @@ async def test_new_text_starts_a_reruns_grading_at_the_top_of_its_list(
     await work_out(worker.Worker(db, listed, models.gateway))
     await conn.execute("UPDATE papers SET revision = revision + 1 WHERE id = %s", (B.id,))
     del models.scripted.said[(first, B.title)]
-    await jobs_store.move(conn, job, ("failed",), "queued")
+    await in_write(conn, jobs_store.move, job, ("failed",), "queued")
     await work_out(worker.Worker(db, listed, models.gateway))
-    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert (await in_read(conn, jobs_store.get, job))["state"] == "done"
     assert [m for m, t in models.scripted.models_asked if t == B.title] == [first, first]
 
 
-async def test_try_again_after_both_focus_sides_refused_asks_both_again(conn, db, models):
+async def test_try_again_after_both_focus_sides_refused_asks_both_again(conn: Session, db, models):
     for role in ("judge", "check"):
         models.scripted.said[(ROLES[role].model, A.title)] = refusal(ROLES[role].model)
     job = await rerun(conn, FAITH.slug, [A.id], ceiling=1.0)
     await work_out(worker.Worker(db, CONFIG, models.gateway))
-    assert (await jobs_store.get(conn, job))["error"] == "grading failed on 1"
-    await jobs_store.move(conn, job, ("failed",), "queued")
+    assert (await in_read(conn, jobs_store.get, job))["error"] == "grading failed on 1"
+    await in_write(conn, jobs_store.move, job, ("failed",), "queued")
     await work_out(worker.Worker(db, CONFIG, models.gateway))
-    again = await jobs_store.get(conn, job)
+    again = await in_read(conn, jobs_store.get, job)
     assert (again["state"], again["error"]) == ("failed", "grading failed on 1")
 
 
 async def test_a_grading_its_papers_text_change_left_unrecorded_fails_the_rerun(
-    conn, db, models, monkeypatch
+    conn: Session, db, models, monkeypatch
 ):
     """B's text changed while it was graded: its verdict is not recorded, so the job does not
     end done without it; Try again grades B's current text."""
@@ -376,18 +308,21 @@ async def test_a_grading_its_papers_text_change_left_unrecorded_fails_the_rerun(
     monkeypatch.setattr(papers_store, "still_current", changed)
     job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
     await work_out(worker.Worker(db, CONFIG, models.gateway))
-    failed = await jobs_store.get(conn, job)
+    failed = await in_read(conn, jobs_store.get, job)
     assert (failed["state"], failed["error"]) == ("failed", "grading failed on 1")
 
     monkeypatch.setattr(papers_store, "still_current", current)
-    await jobs_store.move(conn, job, ("failed",), "queued")
+    await in_write(conn, jobs_store.move, job, ("failed",), "queued")
     await work_out(worker.Worker(db, CONFIG, models.gateway))
-    assert (await jobs_store.get(conn, job))["state"] == "done"
-    assert await verdicts_store.ungraded_under(conn, AGENTS.slug, AGENTS.version, [B.id]) == []
+    assert (await in_read(conn, jobs_store.get, job))["state"] == "done"
+    assert (
+        await in_read(conn, verdicts_store.ungraded_under, AGENTS.slug, AGENTS.version, [B.id])
+        == []
+    )
 
 
 async def test_a_topic_edited_before_its_rerun_has_graded_all_fails_it(
-    conn, db, models, monkeypatch
+    conn: Session, db, models, monkeypatch
 ):
     """One paper a chunk; the topic is edited after A: B would be graded under another version
     than A, so the job fails and says why. Its editor offers the new version's re-run."""
@@ -406,7 +341,7 @@ async def test_a_topic_edited_before_its_rerun_has_graded_all_fails_it(
     assert await w.step(AFTERNOON)
     await edited(conn, AGENTS, depth=Depth.AREA)
     await work_out(w)
-    failed = await jobs_store.get(conn, job["id"])
+    failed = await in_read(conn, jobs_store.get, job["id"])
     assert (failed["state"], failed["error"]) == (
         "failed",
         "the topic was edited since; re-run it from there",
@@ -418,7 +353,7 @@ async def test_a_topic_edited_before_its_rerun_has_graded_all_fails_it(
 
 
 async def test_the_ceiling_is_never_passed_and_a_call_that_does_not_fit_is_not_sent(
-    conn, db, models
+    conn: Session, db, models
 ):
     """Each call may cost at most `most` and costs `COST`: under `most + 1.5 * COST`, two calls
     fit (the second once the first has settled), the third does not, with nothing in flight to
@@ -432,7 +367,7 @@ async def test_the_ceiling_is_never_passed_and_a_call_that_does_not_fit_is_not_s
 
     await work_out(worker.Worker(db, CONFIG, models.gateway))
 
-    stopped = await jobs_store.get(conn, job)
+    stopped = await in_read(conn, jobs_store.get, job)
     assert stopped["state"] == "stopped"
     assert stopped["error"] == "stopped at the ceiling after 2 of 3"
     assert len(models.sent("field_grade")) == 2  # the third was never sent
@@ -440,7 +375,7 @@ async def test_the_ceiling_is_never_passed_and_a_call_that_does_not_fit_is_not_s
     spent = sum(c["usage"]["cost"] or 0 for c in calls)
     assert spent == pytest.approx(2 * COST) and spent <= limit
     assert [c["error"].split(":")[0] for c in calls if c["error"]] == ["ceiling"]
-    assert await jobs_store.spent(conn, job) == pytest.approx(2 * COST)
+    assert await in_read(conn, jobs_store.spent, job) == pytest.approx(2 * COST)
 
     async with api(conn) as http:
         # Not above what it spent: refused, and it stays where it is.
@@ -448,10 +383,10 @@ async def test_the_ceiling_is_never_passed_and_a_call_that_does_not_fit_is_not_s
         assert low.status_code == 409 and "above what it spent" in low.json()["detail"]
         assert (await http.post(f"/api/jobs/{job}/run", json={"ceiling": 1.0})).status_code == 200
     await work_out(worker.Worker(db, CONFIG, models.gateway))
-    done = await jobs_store.get(conn, job)
+    done = await in_read(conn, jobs_store.get, job)
     assert (done["state"], done["error"], float(done["ceiling"])) == ("done", None, 1.0)
     assert sorted(models.sent("field_grade")) == sorted([A.title, B.title, C.title])
-    assert await jobs_store.spent(conn, job) == pytest.approx(3 * COST)
+    assert await in_read(conn, jobs_store.spent, job) == pytest.approx(3 * COST)
 
 
 async def test_a_call_waits_for_room_and_the_ceiling_counts_retries():
@@ -518,7 +453,7 @@ async def test_a_charge_an_error_reports_counts_against_the_ceiling():
     assert gateway.ceiling.spent == pytest.approx(0.25 + 0.0021)
 
 
-async def test_an_openrouter_route_is_bound_by_what_its_calls_were_charged(conn):
+async def test_an_openrouter_route_is_bound_by_what_its_calls_were_charged(conn: Session):
     """Per serving provider, a call's charge over its tokens bounds each price, and the tightest
     holds; across providers, the highest. P charges $0.2/M in and $0.1/M out, Q $0.5/M and
     $0.05/M: the bound is Q's input and P's output, above each. A call with cached input is
@@ -529,21 +464,23 @@ async def test_an_openrouter_route_is_bound_by_what_its_calls_were_charged(conn)
     await charged(conn, "m/x", cost=0.0000718, tokens_in=1000, tokens_out=500, cached=900, by="P")
     await charged(conn, "m/x", cost=0.00055, tokens_in=1000, tokens_out=1000, by="Q")
     await charged(conn, "m/x", cost=0.00025, tokens_in=100, tokens_out=4000, by="Q")
-    chat = await reruns.bound(conn, RoleConfig(provider="openrouter", model="m/x"))
+    chat = await in_read(conn, reruns.bound, RoleConfig(provider="openrouter", model="m/x"))
     assert chat.max_price == pytest.approx({"prompt": 0.55, "completion": 0.11})
     assert (chat.input, chat.output) == (pytest.approx(0.55e-6), pytest.approx(0.11e-6))
     assert chat.max_output == 16000
     decide = RoleConfig(provider="openrouter", model="m/x", decisions=True)
-    found = await reruns.bound(conn, decide)
+    found = await in_read(conn, reruns.bound, decide)
     assert found.max_price == pytest.approx({"prompt": 0.55, "completion": 0})
     assert found.output == 0
-    assert await reruns.bound(conn, RoleConfig(provider="openrouter", model="m/none")) is None
+    assert (
+        await in_read(conn, reruns.bound, RoleConfig(provider="openrouter", model="m/none")) is None
+    )
 
 
 # -- V4b: its passes, in the job, under the ceiling, never while a nightly waits -----------------
 
 
-async def focus_rerun(conn, models, ceiling: float) -> int:
+async def focus_rerun(conn: Session, models, ceiling: float) -> int:
     """A re-run of the Focus topic over A, which grades it central: its Brief pass and its Deep
     card follow."""
     for role in ("judge", "check"):
@@ -551,13 +488,13 @@ async def focus_rerun(conn, models, ceiling: float) -> int:
     return await rerun(conn, FAITH.slug, [A.id], ceiling=ceiling)
 
 
-async def text_pass(conn) -> dict:
+async def text_pass(conn: Session) -> dict:
     (found,) = await rows(conn, "SELECT * FROM fulltext_passes WHERE kind <> 'deep'")
     return found
 
 
 async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_else(
-    conn, db, models
+    conn: Session, db, models
 ):
     """A's abstract Weight is incremental, so central makes it relevant: no Deep card until its
     Brief finds it a landmark, and that settle is the job's too."""
@@ -567,7 +504,7 @@ async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_
     assert await w.step(AFTERNOON)  # the grading
     queued = await text_pass(conn)
     assert (queued["job_id"], queued["priority"]) == (job, BACKGROUND_PRIORITY)
-    assert (await jobs_store.get(conn, job))["state"] == "running"
+    assert (await in_read(conn, jobs_store.get, job))["state"] == "running"
     assert await rows(conn, "SELECT * FROM fulltext_passes WHERE kind = 'deep'") == []
 
     # The full-text worker, and a nightly's, leave it to the job.
@@ -576,7 +513,7 @@ async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_
 
     await work_out(w)
     assert (await text_pass(conn))["state"] == "done"
-    done = await jobs_store.get(conn, job)
+    done = await in_read(conn, jobs_store.get, job)
     assert (done["state"], done["counts"]["briefs_written"]) == ("done", 1)
     (ran,) = await rows(conn, "SELECT counts FROM runs WHERE job_id = %s", job)
     assert ran["counts"]["briefs_written"] == 1  # counted once on its run too
@@ -587,7 +524,7 @@ async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_
 
 
 async def test_a_text_pass_that_does_not_fit_stops_the_rerun_and_waits_for_run_now(
-    conn, db, models
+    conn: Session, db, models
 ):
     """Two grading calls fit; the Brief's reservation does not: the pass goes back unworked and
     stays the job's, which stops saying what is left."""
@@ -603,44 +540,50 @@ async def test_a_text_pass_that_does_not_fit_stops_the_rerun_and_waits_for_run_n
     job = await focus_rerun(conn, models, ceiling=judge + 0.01 + 1e-6)
     w = worker.Worker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
     await work_out(w)
-    stopped = await jobs_store.get(conn, job)
+    stopped = await in_read(conn, jobs_store.get, job)
     assert stopped["state"] == "stopped"
     assert stopped["error"] == "stopped at the ceiling with 1 full-text passes left"
     pass_ = await text_pass(conn)
     assert (pass_["state"], pass_["job_id"], pass_["failed_runs"]) == ("ready", job, 0)
     assert models.sent("judge") == [A.title]
 
-    await jobs_store.move(conn, job, jobs_store.NOT_RUN, "queued", 1.0)
+    await in_write(conn, jobs_store.move, job, jobs_store.NOT_RUN, "queued", 1.0)
     await work_out(w)
-    assert (await jobs_store.get(conn, job))["state"] == "done"
+    assert (await in_read(conn, jobs_store.get, job))["state"] == "done"
     assert (await text_pass(conn))["state"] == "done"
 
 
 async def test_the_owners_run_it_now_takes_a_stopped_reruns_pass_to_the_regular_queue(
-    conn, db, models
+    conn: Session, db, models
 ):
     job = await focus_rerun(conn, models, ceiling=1.0)
     assert await worker.Worker(db, CONFIG, models.gateway).step(AFTERNOON)  # no archive
-    await jobs_store.finish(conn, job, "stopped", "stopped at the ceiling", me=await db.identity())
+    await in_write(
+        conn, jobs_store.finish, job, "stopped", "stopped at the ceiling", me=await db.identity()
+    )
     pass_ = await text_pass(conn)
     await conn.execute(
         "UPDATE fulltext_passes SET state = 'failed', failed_runs = 3 WHERE id = %s", (pass_["id"],)
     )
-    assert await fulltext_store.run_now(conn, pass_["id"], 3)
+    assert await in_write(conn, fulltext_store.run_now, pass_["id"], 3)
     assert (await text_pass(conn))["job_id"] is None
     assert await fulltext.work(db, CONFIG, archive(with_text(A)), gateway=models.gateway) == {
         "briefs_written": 1
     }
 
 
-async def test_a_pass_the_rerun_queues_for_a_paper_being_processed_is_the_owners(conn, db, models):
+async def test_a_pass_the_rerun_queues_for_a_paper_being_processed_is_the_owners(
+    conn: Session, db, models
+):
     """A's Process job is under way (on tonight's run): the Brief its re-run grading queues goes
     as the owner's requests do, in the regular queue, which works it even once the re-run
     stopped."""
-    await jobs_store.create(conn, "process", {"papers": [A.id]}, 1, "tonight")
+    await in_write(conn, jobs_store.create, "process", {"papers": [A.id]}, 1, "tonight")
     job = await focus_rerun(conn, models, ceiling=1.0)
     assert await worker.Worker(db, CONFIG, models.gateway).step(AFTERNOON)  # the grading
-    await jobs_store.finish(conn, job, "stopped", "stopped at the ceiling", me=await db.identity())
+    await in_write(
+        conn, jobs_store.finish, job, "stopped", "stopped at the ceiling", me=await db.identity()
+    )
     queued = await text_pass(conn)
     assert (queued["job_id"], queued["priority"]) == (None, TEXT_REQUEST_PRIORITY)
     assert await fulltext.work(db, CONFIG, archive(with_text(A)), gateway=models.gateway) == {
@@ -648,7 +591,7 @@ async def test_a_pass_the_rerun_queues_for_a_paper_being_processed_is_the_owners
     }
 
 
-async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn, db, models):
+async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn: Session, db, models):
     job = await focus_rerun(conn, models, ceiling=1.0)
     w = worker.Worker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
     assert await w.step(AFTERNOON)  # graded; its passes queued
@@ -665,15 +608,19 @@ async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn, d
         == {}
     )
     assert service.requests == []
-    await runs.finish(conn, nightly)
+    await in_write(conn, runs.finish, nightly)
     done = await deep_passes.work(
         db, archive(with_text(A)), make(service), rules=settling.RULES, config=CONFIG
     )
     assert done == {"cards_written": 1} and len(service.requests) == 1
-    assert (await jobs_store.get(conn, job))["state"] == "running"  # its text pass still waits
+    assert (await in_read(conn, jobs_store.get, job))[
+        "state"
+    ] == "running"  # its text pass still waits
 
 
-async def test_with_the_schedule_off_a_due_nightly_holds_no_reruns_deep_pass(conn, db, models):
+async def test_with_the_schedule_off_a_due_nightly_holds_no_reruns_deep_pass(
+    conn: Session, db, models
+):
     """`litwatch fulltext --deep` with the schedule off: no scheduler starts the nightly its
     cron says is due, so the re-run's card is made."""
     every_minute = Schedule(enabled=False, nightly="* * * * *")  # always due, never started
@@ -687,22 +634,22 @@ async def test_with_the_schedule_off_a_due_nightly_holds_no_reruns_deep_pass(con
     assert done == {"cards_written": 1} and len(service.requests) == 1
 
 
-async def test_a_nightly_digest_does_not_wait_for_a_reruns_passes(conn, db, models):
+async def test_a_nightly_digest_does_not_wait_for_a_reruns_passes(conn: Session, db, models):
     from litwatch.store import digests  # noqa: PLC0415
 
     since = datetime.now(UTC)
     await focus_rerun(conn, models, ceiling=1.0)
     assert await worker.Worker(db, CONFIG, models.gateway).step(AFTERNOON)
     assert (await text_pass(conn))["reason"] == "focus"
-    assert await digests.waiting_passes(conn, since) == 0
+    assert await in_read(conn, digests.waiting_passes, since) == 0
 
 
 async def test_a_rerun_with_no_archive_stops_keeping_its_passes_and_a_discarded_one_lets_go(
-    conn, db, models
+    conn: Session, db, models
 ):
     job = await focus_rerun(conn, models, ceiling=1.0)
     await work_out(worker.Worker(db, CONFIG, models.gateway))  # no archive: nothing reads text
-    stopped = await jobs_store.get(conn, job)
+    stopped = await in_read(conn, jobs_store.get, job)
     assert (stopped["state"], stopped["error"]) == (
         "stopped",
         "stopped with 1 full-text passes left: no archive",
@@ -714,7 +661,7 @@ async def test_a_rerun_with_no_archive_stops_keeping_its_passes_and_a_discarded_
 
 
 async def test_a_rerun_taken_back_before_its_owner_ends_it_keeps_its_passes(
-    conn, db, models, monkeypatch
+    conn: Session, db, models, monkeypatch
 ):
     """The stale owner's end leaves alone a re-run a peer put back in the queue meanwhile, and
     its passes with it: let go, the ordinary queue would work them outside its ceiling."""
@@ -733,12 +680,12 @@ async def test_a_rerun_taken_back_before_its_owner_ends_it_keeps_its_passes(
 
     monkeypatch.setattr(reruns, "work", taken_back)
     assert await w.step(AFTERNOON)
-    assert (await jobs_store.get(conn, job))["state"] == "queued"
+    assert (await in_read(conn, jobs_store.get, job))["state"] == "queued"
     assert (await text_pass(conn))["job_id"] == job
 
 
 async def test_a_worker_holding_its_most_runs_open_starts_only_process_jobs(
-    conn, db, models, monkeypatch
+    conn: Session, db, models, monkeypatch
 ):
     """A re-run whose passes await their text keeps its run, and that run's connection, open;
     past `OPEN_MOST` such runs no other re-run starts, but a Process job does."""
@@ -752,17 +699,17 @@ async def test_a_worker_holding_its_most_runs_open_starts_only_process_jobs(
     )
     second = await rerun(conn, AGENTS.slug, [C.id], ceiling=1.0)
     assert not await w.step(AFTERNOON)
-    assert (await jobs_store.get(conn, second))["state"] == "queued"
-    process = await jobs_store.create(conn, "process", {"papers": [B.id]}, 1, "queued")
+    assert (await in_read(conn, jobs_store.get, second))["state"] == "queued"
+    process = await in_write(conn, jobs_store.create, "process", {"papers": [B.id]}, 1, "queued")
     me = await identity_of(conn)
-    assert (await jobs_store.claim(conn, me=me, fresh=False))["id"] == process
+    assert (await in_write(conn, jobs_store.claim, me=me, fresh=False))["id"] == process
 
 
 # -- the offer -----------------------------------------------------------------------------------
 
 
 @asynccontextmanager
-async def api(conn, config=CONFIG):
+async def api(conn: Session, config=CONFIG):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, config)
     headers = {"authorization": f"Bearer {TOKEN}"}
@@ -770,15 +717,19 @@ async def api(conn, config=CONFIG):
         yield c
 
 
-async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_rerun(conn, models):
+async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_rerun(
+    conn: Session, models
+):
     """Labelled or missed, members, keyword matches over 90 days, a date range; the chosen ones
     together count a paper once. Without calls to estimate by, no estimate, and it says so."""
     from datetime import timedelta  # noqa: PLC0415
 
     now = datetime.now(UTC)
     for p, days in ((A, 1), (B, 10), (C, 200)):
-        await papers_store.upsert(
-            conn, [p.model_copy(update={"published": (now - timedelta(days)).isoformat()})]
+        await in_write(
+            conn,
+            papers_store.upsert,
+            [p.model_copy(update={"published": (now - timedelta(days)).isoformat()})],
         )
     label = Label(
         paper_id=C.id, topic=AGENTS.slug, value=LabelValue.RELATED, origin=LabelOrigin.READER
@@ -872,14 +823,16 @@ async def test_the_offer_counts_and_estimates_each_scope_and_starts_or_keeps_a_r
         assert off.status_code == 409 and "schedule is off" in off.json()["detail"]
 
 
-async def test_the_offer_estimates_from_the_roles_calls_and_names_unpriced_models(conn, models):
+async def test_the_offer_estimates_from_the_roles_calls_and_names_unpriced_models(
+    conn: Session, models
+):
     run_id = await started(conn, "fulltext", None, None)
     usage = Usage(model="test-field", via="anthropic", cost=0.002)
     await conn.execute(
         "INSERT INTO inference_calls (run_id, operation, usage) VALUES (%s, 'field_grade', %s)",
         (run_id, usage.model_dump_json()),
     )
-    await papers_store.upsert(conn, [])
+    await in_write(conn, papers_store.upsert, [])
     for p in (A, B):
         await conn.execute(
             "INSERT INTO memberships (paper_id, class, source, probability, class_version, "

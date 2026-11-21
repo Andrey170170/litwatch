@@ -19,7 +19,7 @@ from litwatch.store import outbox
 from litwatch.store import papers as papers_store
 from tests import sessions, settling
 from tests.conftest import TREE, AppClient, deliver, paper, settled, start
-from tests.sessions import Bridge, staged
+from tests.sessions import Bridge, Session, in_write, staged
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
@@ -82,9 +82,9 @@ def hit(pid: str, day: int) -> SearchHit:
 
 
 @pytest.fixture
-async def make(conn):
+async def make(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P])
+    await in_write(conn, papers_store.upsert, [P])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     clients = []
 
@@ -101,13 +101,15 @@ async def make(conn):
         await c.aclose()
 
 
-async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_on(conn, db, make):
+async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_on(
+    conn: Session, db, make
+):
     carder = Carder()
     config = Config(integrations={"carder": {"use": "x.y"}, "old": {"enabled": False}})
     client = await make([carder, Shelf("shelf")], config)
     await start(db, carder)
-    first = await outbox.emit(conn, events.CARD_REQUESTED, P.id)
-    await outbox.emit(conn, events.PAPER_SAVED, P.id)
+    first = await in_write(conn, outbox.emit, events.CARD_REQUESTED, P.id)
+    await in_write(conn, outbox.emit, events.PAPER_SAVED, P.id)
     carder.fail = {first}
     await deliver(db, carder)
 
@@ -129,7 +131,7 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
 
     # Retry: the backoff is waived. Skip: the cursor moves past it.
     assert (await client.post("/api/settings/integrations/carder/retry")).status_code == 204
-    assert (await outbox.cursor(conn, "carder")).retry_at is None
+    assert (await in_write(conn, outbox.cursor, "carder")).retry_at is None
     # A skip confirmed for another event skips nothing.
     stale = await client.post(
         "/api/settings/integrations/carder/skip", params={"event_id": first + 1000}
@@ -147,10 +149,10 @@ async def test_settings_show_each_integration_with_its_lag_and_what_it_is_stuck_
     assert cards["carder"]["failing"] is None and cards["carder"]["skipped"] == 1
 
 
-async def test_an_integration_that_reacts_to_no_event_is_never_shown_behind(conn, make):
+async def test_an_integration_that_reacts_to_no_event_is_never_shown_behind(conn: Session, make):
     # A cursor deep kept from when the dispatcher ran it, with events written since.
-    await outbox.cursor(conn, "deep")
-    await outbox.emit(conn, events.PAPER_SAVED, P.id)
+    await in_write(conn, outbox.cursor, "deep")
+    await in_write(conn, outbox.emit, events.PAPER_SAVED, P.id)
     await settled(conn)
     healthy = httpx.MockTransport(lambda r: httpx.Response(200, json={"auth": {"state": "ok"}}))
     deep = Deep(DeepClient("http://deep.test", http=httpx.AsyncClient(transport=healthy)))
@@ -162,7 +164,7 @@ async def test_an_integration_that_reacts_to_no_event_is_never_shown_behind(conn
     await deep.aclose()
 
 
-async def test_a_card_request_needs_an_integration_that_answers_it(conn, make):
+async def test_a_card_request_needs_an_integration_that_answers_it(conn: Session, make):
     # Webhooks pass card requests on, even one filtered to them; neither makes a card.
     bare = await make(
         [Webhook("http://hook.test"), Webhook("http://h.test", name="cards", patterns=("card.*",))]
@@ -178,13 +180,15 @@ async def test_a_card_request_needs_an_integration_that_answers_it(conn, make):
     assert (await marked.get(f"/api/papers/{P.id}")).json()["card_requestable"] is False
 
     # A stored card shows, integration or not.
-    await state.put_card(conn, P.id, {"key_claim": "K."}, "deep-model", {}, **LABEL, pass_id=None)
+    await in_write(
+        conn, state.put_card, P.id, {"key_claim": "K."}, "deep-model", {}, **LABEL, pass_id=None
+    )
     shown = (await bare.get(f"/api/papers/{P.id}")).json()
     assert shown["card"]["card"] == {"key_claim": "K."} and shown["card"]["model"] == "deep-model"
     assert shown["card_requestable"] is False
 
 
-async def test_search_adds_what_providers_find_outside_the_collection(conn, make):
+async def test_search_adds_what_providers_find_outside_the_collection(conn: Session, make):
     archive = Shelf("archive", [hit("2609.00002", 2), hit(P.id, 3), hit("2609.00003", 9)])
     slow = Shelf("slow", [hit("2609.00004", 4)], delay=0.5)
     broken = Shelf("broken", error=RuntimeError("index is rebuilding"))
@@ -254,7 +258,9 @@ async def test_the_search_box_names_the_archives_size(make):
         assert (await client.get("/api/search/scope")).json() == {"archive_papers": None}
 
 
-async def test_the_changes_feed_reads_on_from_a_position_and_misses_no_late_commit(conn, make):
+async def test_the_changes_feed_reads_on_from_a_position_and_misses_no_late_commit(
+    conn: Session, make
+):
     client = await make()
     await settled(conn)
     first = (await client.get("/api/events")).json()
@@ -263,7 +269,7 @@ async def test_the_changes_feed_reads_on_from_a_position_and_misses_no_late_comm
     try:
         async with other.transaction():
             early = await outbox.emit(staged(other), events.PAPER_SAVED, P.id)  # not yet committed
-            late = await outbox.emit(conn, events.PAPER_UNSAVED, P.id)
+            late = await in_write(conn, outbox.emit, events.PAPER_UNSAVED, P.id)
             held = (await client.get("/api/events", params={"after": first["next"]})).json()
             assert held == {"events": [], "next": first["next"]}
     finally:

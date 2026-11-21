@@ -29,7 +29,7 @@ from litwatch.store import papers as papers_store
 from tests import settling
 from tests.conftest import FAITH, TREE, deliver, fixture_read, paper, start
 from tests.fakes_http import PDF, FakeArxiv, FakeDAV, FakeZotero, mock
-from tests.sessions import Bridge
+from tests.sessions import Bridge, Session, in_write
 
 P = paper(
     "2610.00001",
@@ -62,17 +62,18 @@ CARD = {
 
 
 @pytest.fixture
-async def world(conn):
+async def world(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P])
+    await in_write(conn, papers_store.upsert, [P])
     return conn
 
 
-async def grade(conn, g: str) -> None:
+async def grade(conn: Session, g: str) -> None:
     """A verdict whose grade, with no Weight yet (solid), is `g`."""
     fit = {"must_read": Fit.CENTRAL, "relevant": Fit.RELATED}.get(g) or Fit(g)
-    await verdicts.add(
+    await in_write(
         conn,
+        verdicts.add,
         Verdict(
             paper_id=P.id,
             topic=FAITH.slug,
@@ -85,7 +86,7 @@ async def grade(conn, g: str) -> None:
     await settling.settle(conn, P.id, cause=Cause.VERDICT)
 
 
-async def say(conn, value: LabelValue) -> None:
+async def say(conn: Session, value: LabelValue) -> None:
     await settling.label(
         conn, Label(paper_id=P.id, topic=FAITH.slug, value=value, origin=LabelOrigin.READER)
     )

@@ -32,6 +32,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import verdicts
 from tests import sessions, settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, paper
+from tests.sessions import Session, in_read, in_write
 
 P = paper("2610.00001")
 
@@ -63,7 +64,7 @@ def test_a_reason_must_go_with_its_thumb():
         thumb("overrated", "up")
 
 
-async def classified(conn, revision: int = 1, paper_id: str = P.id) -> None:
+async def classified(conn: Session, revision: int = 1, paper_id: str = P.id) -> None:
     await conn.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
         "primary_class, model) VALUES (%s, %s, 'x', 'other', 'm')",
@@ -72,10 +73,10 @@ async def classified(conn, revision: int = 1, paper_id: str = P.id) -> None:
 
 
 @pytest.fixture
-async def db(conn):
+async def db(conn: Session):
     """P classified: in the collection."""
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P])
+    await in_write(conn, papers_store.upsert, [P])
     await classified(conn)
     return conn
 
@@ -92,12 +93,12 @@ def verdict(fit: str, topic=FAITH.slug, paper_id: str = P.id, revision: int = 1)
     )
 
 
-async def graded(conn, fit: str, topic=FAITH.slug, paper_id: str = P.id) -> None:
-    await verdicts.add(conn, verdict(fit, topic, paper_id))
+async def graded(conn: Session, fit: str, topic=FAITH.slug, paper_id: str = P.id) -> None:
+    await in_write(conn, verdicts.add, verdict(fit, topic, paper_id))
     await settling.settle(conn, paper_id, cause=Cause.VERDICT)
 
 
-async def weighed(conn, weight: Weight) -> None:
+async def weighed(conn: Session, weight: Weight) -> None:
     analysis = Analysis(
         gist="g",
         weight=weight,
@@ -106,21 +107,22 @@ async def weighed(conn, weight: Weight) -> None:
             contribution=Contribution.METHOD, releases_code=False, releases_weights=False
         ),
     )
-    current = await papers_store.get(conn, P.id)
-    await analyses_store.add(conn, current, "other", analysis, "m")
+    current = await in_read(conn, papers_store.get, P.id)
+    await in_write(conn, analyses_store.add, current, "other", analysis, "m")
     await settling.settle(conn, P.id, cause=Cause.VERDICT)
 
 
-async def outbox(conn) -> list[tuple[str, dict]]:
+async def outbox(conn: Session) -> list[tuple[str, dict]]:
     rows = await (await conn.execute("SELECT type, payload FROM outbox ORDER BY id")).fetchall()
     return [(r["type"], r["payload"]) for r in rows if r["type"] != "paper.added"]
 
 
-async def stored(conn, table: str) -> list[dict]:
-    return await (await conn.execute(f"SELECT * FROM {table} ORDER BY 1, 2")).fetchall()
+async def stored(on, table: str) -> list[dict]:
+    """The table's rows, read on a test's connection or in a unit."""
+    return await (await on.execute(f"SELECT * FROM {table} ORDER BY 1, 2")).fetchall()
 
 
-async def test_a_central_verdict_saves_the_paper_and_says_so(db):
+async def test_a_central_verdict_saves_the_paper_and_says_so(db: Session):
     await graded(db, "central")
     assert await outbox(db) == [
         (
@@ -143,7 +145,7 @@ async def test_a_central_verdict_saves_the_paper_and_says_so(db):
     assert len(await outbox(db)) == 2
 
 
-async def test_weight_moves_the_grade_and_the_rarity(db):
+async def test_weight_moves_the_grade_and_the_rarity(db: Session):
     await graded(db, "related")
     # Related and solid: relevant.
     assert (await settling.settle(db, P.id, cause=Cause.VERDICT)).saved
@@ -159,7 +161,7 @@ async def test_weight_moves_the_grade_and_the_rarity(db):
     assert unsaved == ("paper.unsaved", {})
 
 
-async def test_area_and_field_topics_have_effective_grades_and_never_save(db):
+async def test_area_and_field_topics_have_effective_grades_and_never_save(db: Session):
     await graded(db, "central", topic=INTERP.slug)
     await graded(db, "central", topic=AGENTS.slug)
     rows = {r["topic"]: r for r in await stored(db, "effective_grades")}
@@ -173,35 +175,35 @@ async def test_area_and_field_topics_have_effective_grades_and_never_save(db):
     assert await stored(db, "library") == []
 
 
-async def test_a_paper_with_a_weight_alone_has_its_floor(db):
+async def test_a_paper_with_a_weight_alone_has_its_floor(db: Session):
     await weighed(db, Weight.LANDMARK)
     (rarity,) = await stored(db, "rarities")
     assert (rarity["level"], rarity["best_topic"]) == ("rare", None)
 
 
-async def test_a_rewrite_drops_the_old_weight_until_the_new_text_is_analysed(db):
+async def test_a_rewrite_drops_the_old_weight_until_the_new_text_is_analysed(db: Session):
     await graded(db, "related")
     await weighed(db, Weight.INCREMENTAL)
     rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(db, [rewritten])
-    assert (await papers_store.get(db, P.id)).revision == 2
+    await in_write(db, papers_store.upsert, [rewritten])
+    assert (await in_read(db, papers_store.get, P.id)).revision == 2
     await settling.settle(db, P.id, cause=Cause.VERDICT)
     (row,) = await stored(db, "effective_grades")
     # The old verdict stands until the new text is graded, but its Weight went with the text.
     assert (row["fit"], row["grade"]) == ("related", "relevant")
 
 
-async def test_only_a_paper_in_the_collection_has_a_rarity(db):
+async def test_only_a_paper_in_the_collection_has_a_rarity(db: Session):
     await settling.settle(db, P.id, cause=Cause.VERDICT)
     (rarity,) = await stored(db, "rarities")  # classified, nothing else: solid's floor
     assert (rarity["level"], rarity["best_topic"]) == ("uncommon", None)
     unprocessed = paper("2610.00009")
-    await papers_store.upsert(db, [unprocessed])
+    await in_write(db, papers_store.upsert, [unprocessed])
     await settling.settle(db, unprocessed.id, cause=Cause.VERDICT)
     assert [r["paper_id"] for r in await stored(db, "rarities")] == [P.id]
 
 
-async def test_a_new_order_of_the_topics_breaks_a_tie_for_the_best_topic(db):
+async def test_a_new_order_of_the_topics_breaks_a_tie_for_the_best_topic(db: Session):
     await graded(db, "central")
     await graded(db, "central", topic=INTERP.slug)  # both epic in a mixed list
     assert (await stored(db, "rarities"))[0]["best_topic"] == FAITH.slug  # first in order
@@ -211,7 +213,7 @@ async def test_a_new_order_of_the_topics_breaks_a_tie_for_the_best_topic(db):
     assert (await stored(db, "rarities"))[0]["best_topic"] == FAITH.slug
 
 
-async def test_wrong_topic_takes_the_paper_out_and_clearing_the_thumb_brings_it_back(db):
+async def test_wrong_topic_takes_the_paper_out_and_clearing_the_thumb_brings_it_back(db: Session):
     await graded(db, "central")
     _, change = await settling.react(db, thumb("wrong_topic"))
     settled = change.settled[P.id]
@@ -222,14 +224,14 @@ async def test_wrong_topic_takes_the_paper_out_and_clearing_the_thumb_brings_it_
     assert settled.saved is True
 
 
-async def test_a_great_find_lifts_an_adjacent_verdict_to_related(db):
+async def test_a_great_find_lifts_an_adjacent_verdict_to_related(db: Session):
     await graded(db, "adjacent")
     _, change = await settling.react(db, thumb("great_find", "up"))
     settled = change.settled[P.id]
     assert settled.grades == {FAITH.slug: (Grade.ADJACENT, Grade.RELEVANT)} and settled.saved
 
 
-async def test_reactions_that_carry_no_word_change_nothing(db):
+async def test_reactions_that_carry_no_word_change_nothing(db: Session):
     await graded(db, "related")
     await graded(db, "related", topic=INTERP.slug)
     for reaction in (
@@ -245,14 +247,14 @@ async def test_reactions_that_carry_no_word_change_nothing(db):
     assert settled.grades == {}
 
 
-async def test_a_label_is_the_owners_word_on_any_followed_topic(db):
+async def test_a_label_is_the_owners_word_on_any_followed_topic(db: Session):
     _, change = await settling.label(db, said("related", topic=INTERP.slug))
     settled = change.settled[P.id]
     assert settled.grades == {INTERP.slug: (None, Grade.RELEVANT)}
     assert settled.saved is False  # an Area paper is saved by hand
 
 
-async def test_the_owners_related_never_falls_below_relevant(db):
+async def test_the_owners_related_never_falls_below_relevant(db: Session):
     await weighed(db, Weight.INCREMENTAL)
     await graded(db, "none")
     _, change = await settling.label(db, said("related"))
@@ -260,7 +262,7 @@ async def test_the_owners_related_never_falls_below_relevant(db):
     assert settled.grades == {FAITH.slug: (Grade.NONE, Grade.RELEVANT)} and settled.saved
 
 
-async def test_a_label_after_a_thumb_decides_and_keeps_its_origin(db):
+async def test_a_label_after_a_thumb_decides_and_keeps_its_origin(db: Session):
     await graded(db, "related")
     await settling.react(db, thumb("wrong_topic"))
     first, change = await settling.label(db, said("central", origin=LabelOrigin.SAMPLE))
@@ -270,7 +272,7 @@ async def test_a_label_after_a_thumb_decides_and_keeps_its_origin(db):
     assert changed.origin == LabelOrigin.SAMPLE
 
 
-async def test_unsave_holds_against_a_later_regrade_until_saved_again(db):
+async def test_unsave_holds_against_a_later_regrade_until_saved_again(db: Session):
     await graded(db, "related")
     settled = (await settling.toggle(db, P.id, Hand.UNSAVE)).settled[P.id]
     assert (settled.was_saved, settled.saved) == (True, False)
@@ -281,18 +283,18 @@ async def test_unsave_holds_against_a_later_regrade_until_saved_again(db):
     assert types.count("paper.saved") == 2 and types.count("paper.unsaved") == 1
 
 
-async def test_a_paper_saved_by_hand_needs_no_topic(db):
+async def test_a_paper_saved_by_hand_needs_no_topic(db: Session):
     settled = (await settling.toggle(db, P.id, Hand.SAVE)).settled[P.id]
     assert settled.saved and settled.grades == {}
 
 
-async def test_sync_settles_what_was_written_around_it(db):
-    await verdicts.add(db, verdict("central"))
+async def test_sync_settles_what_was_written_around_it(db: Session):
+    await in_write(db, verdicts.add, verdict("central"))
     assert await settling.sync(db) == {"papers": 1, "grades_changed": 1, "saved": 1, "unsaved": 0}
     assert await settling.sync(db) == {"papers": 1, "grades_changed": 0, "saved": 0, "unsaved": 0}
 
 
-async def test_the_later_word_wins_inside_one_change(db):
+async def test_the_later_word_wins_inside_one_change(db: Session):
     async with settling.change(db, P.id, cause=Cause.OWNER) as change:
         await word.react(change.unit, thumb("wrong_topic"))
         await word.label(change.unit, said("central"))
@@ -303,7 +305,7 @@ async def test_the_later_word_wins_inside_one_change(db):
     assert change.settled[P.id].saved is False
 
 
-async def test_a_change_settles_its_papers_at_its_end_even_after_an_early_return(db):
+async def test_a_change_settles_its_papers_at_its_end_even_after_an_early_return(db: Session):
     async def leaves_early():
         async with settling.change(db, P.id, cause=Cause.OWNER) as change:
             await verdicts.add(change.unit, verdict("central"))  # written, not settled
@@ -315,7 +317,7 @@ async def test_a_change_settles_its_papers_at_its_end_even_after_an_early_return
     assert change.settled[P.id].saved
 
 
-async def test_a_change_that_fails_rolls_back_unsettled(db):
+async def test_a_change_that_fails_rolls_back_unsettled(db: Session):
     with pytest.raises(RuntimeError, match="the action failed"):
         async with settling.change(db, P.id, cause=Cause.OWNER) as change:
             await verdicts.add(change.unit, verdict("central"))
@@ -323,7 +325,7 @@ async def test_a_change_that_fails_rolls_back_unsettled(db):
     assert await stored(db, "verdicts") == [] and await outbox(db) == []
 
 
-async def test_words_inside_one_change_settle_once_at_its_end(db):
+async def test_words_inside_one_change_settle_once_at_its_end(db: Session):
     """Two words that cancel out leave no trace of the step between them."""
     await graded(db, "central")
     before = await outbox(db)
@@ -335,7 +337,7 @@ async def test_words_inside_one_change_settle_once_at_its_end(db):
     assert await outbox(db) == before
 
 
-async def test_a_rewrite_stored_inside_a_change_is_settled_once_by_it(db):
+async def test_a_rewrite_stored_inside_a_change_is_settled_once_by_it(db: Session):
     """A paper the owner's action fetches may arrive as a rewrite of one stored meanwhile: it
     is stored in the change's unit, which settles it once, so no step between shows."""
     await weighed(db, Weight.INCREMENTAL)
@@ -352,7 +354,7 @@ async def test_a_rewrite_stored_inside_a_change_is_settled_once_by_it(db):
     assert change.settled[P.id].saved and not change.settled[P.id].was_saved
 
 
-async def test_a_unit_settles_only_the_papers_it_locked(db):
+async def test_a_unit_settles_only_the_papers_it_locked(db: Session):
     other = paper("2610.00002")
     async with settling.change(db, P.id, cause=Cause.OWNER) as change:
         with pytest.raises(RuntimeError, match="did not lock"):
@@ -361,27 +363,27 @@ async def test_a_unit_settles_only_the_papers_it_locked(db):
             )
 
 
-async def others(conn, *numbers: int) -> list[str]:
+async def others(conn: Session, *numbers: int) -> list[str]:
     """More papers in the collection, beside P."""
     more = [paper(f"2610.0000{n}") for n in numbers]
-    await papers_store.upsert(conn, more)
+    await in_write(conn, papers_store.upsert, more)
     for p in more:
         await classified(conn, paper_id=p.id)
     return [p.id for p in more]
 
 
-async def test_changes_of_overlapping_papers_named_in_reverse_order_both_finish(db):
+async def test_changes_of_overlapping_papers_named_in_reverse_order_both_finish(db: Session):
     """A change takes its papers' locks in id order however they are named, so one that waits
     holds none a later paper's change needs, and two never wait on each other."""
     second, third = await others(db, 2, 3)
 
-    async def changing(conn, *ids: str) -> word.Change:
+    async def changing(conn: Session, *ids: str) -> word.Change:
         async with settling.change(conn, *ids, cause=Cause.OWNER) as change:
             for paper_id in ids:
                 await word.toggle(change.unit, paper_id, Hand.SAVE)
         return change
 
-    async def waits(conn, pid: int) -> bool:
+    async def waits(conn: Session, pid: int) -> bool:
         query = "SELECT 1 FROM pg_locks WHERE pid = %s AND NOT granted"
         return await (await conn.execute(query, (pid,))).fetchone() is not None
 
@@ -399,7 +401,7 @@ async def test_changes_of_overlapping_papers_named_in_reverse_order_both_finish(
     assert all(s.saved for s in done.settled.values())
 
 
-async def test_a_later_papers_failure_rolls_the_whole_change_back(db, monkeypatch):
+async def test_a_later_papers_failure_rolls_the_whole_change_back(db: Session, monkeypatch):
     (later,) = await others(db, 2)
     settle = word._settle
 
@@ -418,7 +420,7 @@ async def test_a_later_papers_failure_rolls_the_whole_change_back(db, monkeypatc
     assert await outbox(db) == before
 
 
-async def test_a_taxonomy_edit_settles_each_paper_it_reaches_once(db, monkeypatch):
+async def test_a_taxonomy_edit_settles_each_paper_it_reaches_once(db: Session, monkeypatch):
     """A paper under two changed topics, and one whose tie the new order breaks, is settled
     once by the edit, in id order."""
     (other,) = await others(db, 2)
@@ -441,7 +443,7 @@ async def test_a_taxonomy_edit_settles_each_paper_it_reaches_once(db, monkeypatc
     assert settled == [P.id, other]
 
 
-async def test_the_current_fits_are_those_of_the_current_verdicts(db):
+async def test_the_current_fits_are_those_of_the_current_verdicts(db: Session):
     """`verdicts.current_fits` picks in SQL what `current_verdict` picks from the history: the
     newest text's verdict, then the latest recorded."""
     for given in (
@@ -451,11 +453,11 @@ async def test_the_current_fits_are_those_of_the_current_verdicts(db):
         verdict("adjacent", topic=INTERP.slug),
         verdict("central", topic=AGENTS.slug),
     ):
-        await verdicts.add(db, given)
+        await in_write(db, verdicts.add, given)
     history: dict[str, list[Verdict]] = {}
     for row in await stored(db, "verdicts"):
         history.setdefault(row["topic"], []).append(verdicts._verdict(row))
-    fits = await verdicts.current_fits(db, [P.id, "2610.00009"])
+    fits = await in_read(db, verdicts.current_fits, [P.id, "2610.00009"])
     assert fits == {P.id: {t: current_verdict(vs).fit for t, vs in history.items()}}
     assert fits[P.id] == {
         FAITH.slug: Fit.RELATED,
@@ -465,7 +467,7 @@ async def test_the_current_fits_are_those_of_the_current_verdicts(db):
 
 
 @pytest.mark.parametrize("unfollow", [False, True])
-async def test_a_topic_no_longer_followed_at_focus_leaves_the_library(db, unfollow):
+async def test_a_topic_no_longer_followed_at_focus_leaves_the_library(db: Session, unfollow):
     await graded(db, "related")
     area = FAITH.model_copy(update={"depth": Depth.AREA, "rubric": None})
     tree = TREE.model_copy(update={"topics": [INTERP]}) if unfollow else TREE.following(area)
@@ -479,11 +481,11 @@ async def test_a_topic_no_longer_followed_at_focus_leaves_the_library(db, unfoll
         assert (after["topic"], after["before"], after["after"]) == (FAITH.slug, "relevant", None)
 
 
-async def causes(conn) -> list[str]:
+async def causes(conn: Session) -> list[str]:
     return [e["cause"] for t, e in await outbox(conn) if t == "grade.changed"]
 
 
-async def test_grade_changed_says_what_changed_the_grade(db):
+async def test_grade_changed_says_what_changed_the_grade(db: Session):
     """`verdict` for a new verdict, `weight` when only the Weight moved the grade (the Fit
     stayed), `owner` for the owner's word and for taking it back, though the grade it leaves
     is the verdict's."""
@@ -496,20 +498,20 @@ async def test_grade_changed_says_what_changed_the_grade(db):
     assert await causes(db) == ["verdict", "weight", "verdict", "owner", "owner", "owner"]
 
 
-async def test_a_topic_edit_is_the_cause_of_the_grades_it_moves(db):
+async def test_a_topic_edit_is_the_cause_of_the_grades_it_moves(db: Session):
     await graded(db, "related")
     await settling.save_taxonomy(db, TREE.model_copy(update={"topics": [INTERP]}))  # unfollowed
     assert await causes(db) == ["verdict", "taxonomy"]
 
 
-async def test_a_word_inside_a_change_settles_for_the_changes_cause(db):
+async def test_a_word_inside_a_change_settles_for_the_changes_cause(db: Session):
     await graded(db, "related")
     async with settling.change(db, P.id, cause=Cause.VERDICT) as change:
         await word.label(change.unit, said("central"))
     assert await causes(db) == ["verdict", "verdict"]
 
 
-async def test_the_owners_word_stays_the_cause_when_the_fit_does_not_move(db):
+async def test_the_owners_word_stays_the_cause_when_the_fit_does_not_move(db: Session):
     """A label that agrees with the verdict still moves the grade (the owner's word outweighs
     the Weight), and it is the owner's, not the Weight's."""
     await weighed(db, Weight.INCREMENTAL)

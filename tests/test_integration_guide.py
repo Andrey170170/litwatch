@@ -16,6 +16,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import verdicts
 from tests import settling
 from tests.conftest import FAITH, TREE, deliver, paper, start
+from tests.sessions import Session, in_write
 
 GUIDE = Path(__file__).parent.parent / "docs" / "integrations.md"
 P = paper("2610.00001", title="Traces that hide steps")
@@ -32,11 +33,12 @@ def example(tmp_path, monkeypatch):
     sys.modules.pop("my_litwatch_ntfy", None)
 
 
-async def grade(conn, g: str) -> None:
+async def grade(conn: Session, g: str) -> None:
     """A verdict whose grade, with no Weight yet (solid), is `g`."""
     fit = {"must_read": Fit.CENTRAL, "relevant": Fit.RELATED}.get(g) or Fit(g)
-    await verdicts.add(
+    await in_write(
         conn,
+        verdicts.add,
         Verdict(
             paper_id=P.id,
             topic=FAITH.slug,
@@ -49,9 +51,9 @@ async def grade(conn, g: str) -> None:
     await settling.settle(conn, P.id, cause=Cause.VERDICT)
 
 
-async def test_the_guides_example_loads_by_dotted_path_and_works(conn, db, example):
+async def test_the_guides_example_loads_by_dotted_path_and_works(conn: Session, db, example):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P])
+    await in_write(conn, papers_store.upsert, [P])
     config = Config(
         integrations={"phone": {"use": "my_litwatch_ntfy", "topic": "litwatch-must-read"}}
     )

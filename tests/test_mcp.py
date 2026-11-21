@@ -4,7 +4,6 @@ monitor sees. Every call goes through `create_app` over HTTP, as an agent's does
 
 import logging
 import re
-from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 
 import httpx
@@ -17,23 +16,33 @@ from litwatch.api import app as app_module
 from litwatch.api import create_app
 from litwatch.api import mcp as mcp_api
 from litwatch.api.monitor import MCP_WINDOW, McpCalls, create_monitor
-from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import Publication, Taxonomy
 from litwatch.core.digests import DigestPeriod, DigestRole, DigestState
-from litwatch.integrations.archive import Archive
 from litwatch.jobs import publications as lookups
 from litwatch.store import digests as digests_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import papers as papers_store
 from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, fixture_read, gate_on, paper
-from tests.fakes_http import FakeArchive, mock
-from tests.test_archive_text import a_pdf
-from tests.test_reading import P, Q, analyse, classify, grade
+from tests.fakes_http import FakeArchive
+from tests.mcp_client import (
+    HOST,
+    MCP_TOKEN,
+    READ_TOKEN,
+    TOKEN,
+    Flaky,
+    app_dsn,
+    call,
+    mcp_app,
+    ok,
+    rpc,
+    serving,
+)
+from tests.pdfs import a_pdf
+from tests.seed import P, Q, analyse, classify, grade
+from tests.sessions import Session, in_read, in_write
 
-TOKEN, READ_TOKEN, MCP_TOKEN = "s3cret", "r3ad", "m-token"
-HOST = "litwatch.andrei-homelab.com"  # production's name, which the SDK's host check must let in
 AUTH = {"authorization": f"Bearer {TOKEN}"}
 ONLY = paper("2610.07777", title="Hidden steps in the archive", authors=["Ada Lovelace"])
 TOOLS = [
@@ -47,75 +56,6 @@ INIT = {
 }
 
 
-class Flaky(FakeArchive):
-    """The fake archive, answering 503 to everything while `down`."""
-
-    down = False
-
-    def handle(self, req: httpx.Request) -> httpx.Response:
-        return httpx.Response(503) if self.down else super().handle(req)
-
-
-def _dsn(conn) -> str:
-    return f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-
-
-def _app(conn, fake: FakeArchive | None = None, seen: list | None = None):
-    """The app with /mcp served behind production's host name, and `fake` as the archive (its
-    client and its search provider), every request it gets recorded in `seen`."""
-    archive, integrations = None, []
-    if fake is not None:
-
-        def handle(req: httpx.Request) -> httpx.Response:
-            if seen is not None:
-                seen.append((req.method, req.url.path))
-            return fake.handle(req)
-
-        archive = ArchiveClient("http://archive.test", "archive-token", http=mock(handle))
-        search = httpx.Client(transport=httpx.MockTransport(handle))
-        integrations = [Archive(archive, search_http=search, register=False)]
-    return create_app(
-        _dsn(conn),
-        TOKEN,
-        Config(mcp={"allowed_hosts": [HOST]}),
-        read_token=READ_TOKEN,
-        archive=archive,
-        integrations=integrations,
-        mcp_token=MCP_TOKEN,
-    )
-
-
-@asynccontextmanager
-async def serving(app):
-    """The app running with its lifespan, and so the MCP's session manager, as `serve` runs it."""
-    async with app.router.lifespan_context(app):
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url=f"http://{HOST}") as http:
-            yield http
-
-
-async def rpc(http, method: str, params: dict | None = None, token: str | None = MCP_TOKEN, **h):
-    headers = {"accept": "application/json, text/event-stream", **h}
-    if token:
-        headers["authorization"] = f"Bearer {token}"
-    body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
-    return await http.post("/mcp", json=body, headers=headers)
-
-
-async def call(http, tool: str, **arguments) -> tuple[str, bool]:
-    """A tool's answer, and whether it is an error."""
-    answer = await rpc(http, "tools/call", {"name": tool, "arguments": arguments})
-    assert answer.status_code == 200, answer.text
-    result = answer.json()["result"]
-    return result["content"][0]["text"], result["isError"]
-
-
-async def ok(http, tool: str, **arguments) -> str:
-    text, failed = await call(http, tool, **arguments)
-    assert not failed, text
-    return text
-
-
 def ids(text: str) -> list[str]:
     return re.findall(r"arXiv:(\S+)", text)
 
@@ -123,10 +63,10 @@ def ids(text: str) -> list[str]:
 # -- V1: the token and the mount -------------------------------------------------------------------
 
 
-async def test_only_the_mcp_token_opens_mcp_and_it_opens_nothing_else(conn):
+async def test_only_the_mcp_token_opens_mcp_and_it_opens_nothing_else(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P])
-    async with serving(_app(conn)) as http:
+    await in_write(conn, papers_store.upsert, [P])
+    async with serving(mcp_app(conn)) as http:
         opened = await rpc(http, "initialize", INIT)
         assert opened.status_code == 200
         assert "before the web" in opened.json()["result"]["instructions"]
@@ -150,29 +90,29 @@ async def test_only_the_mcp_token_opens_mcp_and_it_opens_nothing_else(conn):
 
 
 async def test_mcp_is_not_shadowed_by_the_web_app_and_absent_without_its_token(
-    conn, tmp_path, monkeypatch
+    conn: Session, tmp_path, monkeypatch
 ):
     (tmp_path / "assets").mkdir()
     (tmp_path / "index.html").write_text("<p>shell</p>")
     monkeypatch.setattr(app_module, "WEB", tmp_path)
     await settling.save_tree(conn, TREE)
-    async with serving(_app(conn)) as http:
+    async with serving(mcp_app(conn)) as http:
         opened = (await rpc(http, "initialize", INIT)).json()
         assert opened["result"]["serverInfo"]["name"] == "litwatch"
         # The catch-all takes only GET: mounted after it, /mcp would serve the shell here.
         mcp = {"authorization": f"Bearer {MCP_TOKEN}"}
         assert (await http.get("/mcp", headers=mcp)).status_code == 405
         assert (await http.get("/papers")).text == "<p>shell</p>"
-    without = create_app(_dsn(conn), TOKEN, Config(mcp={"allowed_hosts": [HOST]}))
+    without = create_app(app_dsn(conn), TOKEN, Config(mcp={"allowed_hosts": [HOST]}))
     async with serving(without) as http:
         assert (await rpc(http, "initialize", INIT)).status_code == 405  # the web app's GET route
         assert (await http.get("/mcp")).text == "<p>shell</p>"
 
 
-async def test_the_sdks_own_client_initializes_lists_and_calls_through_create_app(conn):
+async def test_the_sdks_own_client_initializes_lists_and_calls_through_create_app(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P])
-    app = _app(conn)
+    await in_write(conn, papers_store.upsert, [P])
+    app = mcp_app(conn)
     headers = {"authorization": f"Bearer {MCP_TOKEN}"}
     async with app.router.lifespan_context(app):
         transport = httpx2.ASGITransport(app=app)
@@ -200,7 +140,7 @@ def test_the_mcp_token_must_be_its_own():
 
 
 @pytest.fixture
-async def shelves(conn):
+async def shelves(conn: Session):
     """A Focus must read (P), an Area must read on a landmark, a Field adjacent paper, one
     fetched but not processed, and one only the archive holds (`ONLY`), which the fake archive's
     search finds beside P."""
@@ -214,7 +154,7 @@ async def shelves(conn):
     agents = paper("2610.00005", title="Agents hide tools", abstract="Hidden tool use.")
     unread = paper("2610.00006", title="Hidden and not read yet", abstract="Pending.")
     early = P.model_copy(update={"published": "2026-09-20T00:00:00Z"})
-    await papers_store.upsert(conn, [early, Q, landmark, agents, unread])
+    await in_write(conn, papers_store.upsert, [early, Q, landmark, agents, unread])
     await classify(conn, P, FAITH.slug)
     await analyse(conn, P)
     await grade(conn, P, "central")
@@ -232,7 +172,7 @@ async def shelves(conn):
     return fake, landmark, agents, unread
 
 
-async def test_search_papers_answers_as_the_web_apps_search(conn, shelves):
+async def test_search_papers_answers_as_the_web_apps_search(conn: Session, shelves):
     fake, *_ = shelves
     cases = [
         ({"q": "hidden"}, {"query": "hidden"}),
@@ -240,7 +180,7 @@ async def test_search_papers_answers_as_the_web_apps_search(conn, shelves):
         ({"q": "hidden", "limit": 2, "offset": 2}, {"query": "hidden", "limit": 2, "offset": 2}),
         ({}, {}),
     ]
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         for web_params, arguments in cases:
             asked = {"limit": 20, **web_params}
             web = (await http.get("/api/papers", params=asked, headers=AUTH)).json()
@@ -253,9 +193,9 @@ async def test_search_papers_answers_as_the_web_apps_search(conn, shelves):
     assert found[-1] == ONLY.id and found.count(P.id) == 1 and len(found) == 5
 
 
-async def test_each_litwatch_filter_keeps_exactly_the_papers_it_names(conn, shelves):
+async def test_each_litwatch_filter_keeps_exactly_the_papers_it_names(conn: Session, shelves):
     fake, landmark, agents, _ = shelves
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         thumbs = [(landmark, {"topic": INTERP.slug, "value": "up"}), (agents, {"value": "down"})]
         for p, thumb in thumbs:
             answer = await http.put(f"/api/reactions/{p.id}", json=thumb, headers=AUTH)
@@ -286,12 +226,12 @@ async def test_each_litwatch_filter_keeps_exactly_the_papers_it_names(conn, shel
 # -- V3: nothing is written ------------------------------------------------------------------------
 
 
-async def _digest(conn, topic, period, day, papers=(), **fields) -> int:
+async def _digest(conn: Session, topic, period, day, papers=(), **fields) -> int:
     fields = {"gist": f"{topic.slug} gist.", "text": f"{topic.slug} text.", **fields}
     outcome = digests_store.Outcome(
         topic.slug, period, day, DigestState.WRITTEN, papers=list(papers), **fields
     )
-    return await digests_store.record(conn, outcome, None)
+    return await in_write(conn, digests_store.record, outcome, None)
 
 
 def _shown(p, role: DigestRole, *, why=None, version=None, fit="central", grade="must_read"):
@@ -312,7 +252,7 @@ def _shown(p, role: DigestRole, *, why=None, version=None, fit="central", grade=
     return digests_store.Shown(due=due, role=role, why=why)
 
 
-async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, shelves):
+async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn: Session, shelves):
     """V3, for all eight tools: the only effect is the archive's, asked for a paper's files."""
     fake, *_ = shelves
     fake.texts[P.id] = (None, "\\section{Probes} Hidden steps.")  # its historical LaTeX
@@ -321,13 +261,22 @@ async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, s
     digest = await _digest(
         conn, FAITH, DigestPeriod.DAY, date(2026, 10, 14), [_shown(P, DigestRole.PICK)]
     )
-    await integrations_store.put_card(
-        conn, P.id, READ, "deep-model", {}, revision=1, version=2, source="latex", pass_id=None
+    await in_write(
+        conn,
+        integrations_store.put_card,
+        P.id,
+        READ,
+        "deep-model",
+        {},
+        revision=1,
+        version=2,
+        source="latex",
+        pass_id=None,
     )
     outbox = "SELECT count(*) AS n, max(id) AS last FROM outbox"
     before = await (await conn.execute(outbox)).fetchone()
     seen: list[tuple[str, str]] = []
-    async with serving(_app(conn, fake, seen)) as http:
+    async with serving(mcp_app(conn, fake, seen)) as http:
         await ok(http, "search_papers", query="hidden")
         await ok(http, "get_paper", paper_id=P.id)
         await ok(http, "read_deep", paper_id=P.id, section="glance")
@@ -342,7 +291,7 @@ async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn, s
         shown = await rpc(http, "tools/call", {"name": "view_pdf_page", "arguments": arguments})
         assert not shown.json()["result"]["isError"]
     assert await (await conn.execute(outbox)).fetchone() == before
-    assert await papers_store.get(conn, ONLY.id) is None
+    assert await in_read(conn, papers_store.get, ONLY.id) is None
     assert ("GET", "/v1/search") in seen and ("GET", f"/v1/papers/{ONLY.id}") in seen
     assert {method for method, _ in seen[:found]} == {"GET"}  # the first five only read
     # Reading asks the archive for a paper's files, its one effect; no record is written.
@@ -363,7 +312,7 @@ CARD = {
 }
 
 
-async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, shelves):
+async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn: Session, shelves):
     fake, *_ = shelves
     done = await (
         await conn.execute(
@@ -377,8 +326,17 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
         "model) VALUES (%s, 1, %s, 'The Brief: probes on three tasks.', 'latex', 'h', 'm')",
         (P.id, done["id"]),
     )
-    await integrations_store.put_card(
-        conn, P.id, CARD, "deep-model", {}, revision=1, version=2, source="latex", pass_id=None
+    await in_write(
+        conn,
+        integrations_store.put_card,
+        P.id,
+        CARD,
+        "deep-model",
+        {},
+        revision=1,
+        version=2,
+        source="latex",
+        pass_id=None,
     )
     published = Publication(
         dblp_key="conf/nips/Smith26",
@@ -391,7 +349,7 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
     )
     async with gate_on(conn) as db:
         await lookups.store_record(db, P.id, published)
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         for path, body in [
             (f"/api/labels/{FAITH.slug}/{P.id}", {"value": "related"}),
             (f"/api/reactions/{P.id}", {"topic": FAITH.slug, "value": "up"}),
@@ -425,14 +383,14 @@ async def test_a_paper_carries_what_litwatch_made_of_it_and_its_citation(conn, s
     assert no_id[1] is False and "No arXiv id" in no_id[0]
 
 
-async def test_get_paper_says_arxiv_withdrew_it_and_why(conn, shelves):
+async def test_get_paper_says_arxiv_withdrew_it_and_why(conn: Session, shelves):
     fake, *_ = shelves
     await conn.execute(
         "UPDATE papers SET withdrawn_at = '2026-10-21T06:28:10Z', comments = 'The proof is wrong' "
         "WHERE id = %s",
         (P.id,),
     )
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         held = await ok(http, "get_paper", paper_id=P.id)
     assert (
         "Withdrawn on arXiv 2026-10-21: litwatch no longer processes it. "
@@ -440,13 +398,22 @@ async def test_get_paper_says_arxiv_withdrew_it_and_why(conn, shelves):
     ) in held
 
 
-async def test_a_deep_card_from_an_older_text_says_which_text_it_read(conn, shelves):
+async def test_a_deep_card_from_an_older_text_says_which_text_it_read(conn: Session, shelves):
     fake, *_ = shelves
     await conn.execute("UPDATE papers SET version = 1, revision = 1 WHERE id = %s", (P.id,))
-    await integrations_store.put_card(
-        conn, P.id, CARD, "deep-model", {}, revision=1, version=1, source="latex", pass_id=None
+    await in_write(
+        conn,
+        integrations_store.put_card,
+        P.id,
+        CARD,
+        "deep-model",
+        {},
+        revision=1,
+        version=1,
+        source="latex",
+        pass_id=None,
     )
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         current = await ok(http, "get_paper", paper_id=P.id)
         await conn.execute("UPDATE papers SET version = 3, revision = 2 WHERE id = %s", (P.id,))
         older = await ok(http, "get_paper", paper_id=P.id)
@@ -461,13 +428,24 @@ READ = fixture_read("scarce")
 REVIEW_NOTE = {"kind": "review", "source": "service", "note": "Still failing: clarity 3."}
 
 
-async def test_get_paper_gives_a_reads_glance_and_its_sections_with_their_takeaways(conn, shelves):
+async def test_get_paper_gives_a_reads_glance_and_its_sections_with_their_takeaways(
+    conn: Session, shelves
+):
     fake, *_ = shelves
     failed = READ | {"process_notes": [*READ["process_notes"], REVIEW_NOTE]}
-    await integrations_store.put_card(
-        conn, P.id, failed, "deep-model", {}, revision=1, version=2, source="latex", pass_id=None
+    await in_write(
+        conn,
+        integrations_store.put_card,
+        P.id,
+        failed,
+        "deep-model",
+        {},
+        revision=1,
+        version=2,
+        source="latex",
+        pass_id=None,
     )
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         held = await ok(http, "get_paper", paper_id=P.id)
     read = {s["id"]: s for s in READ["sections"]}
     assert "## Deep read (latex, read arXiv v2, revision 1" in held and "## Deep card" not in held
@@ -491,16 +469,36 @@ async def test_get_paper_gives_a_reads_glance_and_its_sections_with_their_takeaw
     assert f"Code: {READ['code_url']}" in deep
 
 
-async def test_read_deep_gives_one_section_as_text_with_its_tables_as_markdown(conn, shelves):
+async def test_read_deep_gives_one_section_as_text_with_its_tables_as_markdown(
+    conn: Session, shelves
+):
     fake, *_ = shelves
-    await integrations_store.put_card(
-        conn, P.id, READ, "deep-model", {}, revision=1, version=2, source="latex", pass_id=None
+    await in_write(
+        conn,
+        integrations_store.put_card,
+        P.id,
+        READ,
+        "deep-model",
+        {},
+        revision=1,
+        version=2,
+        source="latex",
+        pass_id=None,
     )
-    await integrations_store.put_card(
-        conn, Q.id, CARD, "deep-model", {}, revision=1, version=1, source="latex", pass_id=None
+    await in_write(
+        conn,
+        integrations_store.put_card,
+        Q.id,
+        CARD,
+        "deep-model",
+        {},
+        revision=1,
+        version=1,
+        source="latex",
+        pass_id=None,
     )
     read = {s["id"]: s for s in READ["sections"]}
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         taxonomy = await ok(http, "read_deep", paper_id=P.id, section="taxonomy")
         who = await ok(http, "read_deep", paper_id=f"https://arxiv.org/abs/{P.id}", section="who")
         env = await ok(http, "read_deep", paper_id=P.id, section="env")
@@ -563,9 +561,11 @@ def _owners(page: str) -> dict[str, list[str]]:
     }
 
 
-async def test_the_owners_records_on_a_topic_no_longer_followed_all_still_show(conn, shelves):
+async def test_the_owners_records_on_a_topic_no_longer_followed_all_still_show(
+    conn: Session, shelves
+):
     fake, landmark, _, _ = shelves
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         for method, path, body in [
             ("PUT", f"/api/reactions/{landmark.id}", {"topic": FAITH.slug, "value": "up",
                                                       "reason": "great_find"}),
@@ -577,7 +577,7 @@ async def test_the_owners_records_on_a_topic_no_longer_followed_all_still_show(c
             assert answer.status_code == 200, answer.text
         followed = _owners(await ok(http, "get_paper", paper_id=landmark.id))
     await settling.save_tree(conn, Taxonomy(classes=TREE.classes, topics=[INTERP, AGENTS]))
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         assert landmark.id in ids(await ok(http, "search_papers", reaction="up"))
         unfollowed = _owners(await ok(http, "get_paper", paper_id=landmark.id))
     records = ["labelled central", "reported as a miss", "thumb up (great find)"]
@@ -594,9 +594,9 @@ async def test_the_owners_records_on_a_topic_no_longer_followed_all_still_show(c
     }
 
 
-async def test_the_library_says_whether_the_owner_or_the_grades_chose(conn, shelves):
+async def test_the_library_says_whether_the_owner_or_the_grades_chose(conn: Session, shelves):
     fake, _, _, unread = shelves
-    async with serving(_app(conn, fake)) as http:
+    async with serving(mcp_app(conn, fake)) as http:
         by_grades = await ok(http, "get_paper", paper_id=P.id)
         for paper_id, saved in [(unread.id, True), (P.id, False)]:
             answer = await http.put(f"/api/library/{paper_id}", json={"saved": saved}, headers=AUTH)
@@ -613,16 +613,18 @@ async def test_the_library_says_whether_the_owner_or_the_grades_chose(conn, shel
     assert "library" not in only
 
 
-async def test_a_paper_the_archive_cannot_be_asked_for_is_an_error_not_a_missing_paper(conn):
+async def test_a_paper_the_archive_cannot_be_asked_for_is_an_error_not_a_missing_paper(
+    conn: Session,
+):
     await settling.save_tree(conn, TREE)
     flaky = Flaky()
     flaky.down = True
-    async with serving(_app(conn, flaky)) as http:
+    async with serving(mcp_app(conn, flaky)) as http:
         text, failed = await call(http, "get_paper", paper_id="2610.05555")
     assert failed and "The archive did not answer" in text
 
 
-async def test_digests_list_by_topic_and_read_in_full(conn, shelves):
+async def test_digests_list_by_topic_and_read_in_full(conn: Session, shelves):
     _, landmark, agents, _ = shelves
     day = date(2026, 10, 14)
     text = f"[{P.title}]({P.id}) shows the hidden steps."
@@ -638,7 +640,7 @@ async def test_digests_list_by_topic_and_read_in_full(conn, shelves):
     interp = await _digest(conn, INTERP, DigestPeriod.DAY, day, gist="Interpretability, today.")
     monday = day - timedelta(days=day.weekday())
     weekly = await _digest(conn, AGENTS, DigestPeriod.WEEK, monday, gist="Agents, this week.")
-    async with serving(_app(conn)) as http:
+    async with serving(mcp_app(conn)) as http:
         listed = await ok(
             http, "list_digests", topic=FAITH.slug, since="2026-10-01", until="2026-10-20"
         )
@@ -666,11 +668,13 @@ async def test_digests_list_by_topic_and_read_in_full(conn, shelves):
 # -- V9: what the monitor sees ---------------------------------------------------------------------
 
 
-async def test_the_monitor_counts_calls_and_degrades_mcp_only_while_calls_fail(conn, caplog):
+async def test_the_monitor_counts_calls_and_degrades_mcp_only_while_calls_fail(
+    conn: Session, caplog
+):
     await settling.save_tree(conn, TREE)
     caplog.set_level(logging.INFO, logger="litwatch.api.mcp")
     flaky = Flaky()
-    app = _app(conn, flaky)
+    app = mcp_app(conn, flaky)
     monitor = httpx.AsyncClient(
         transport=httpx.ASGITransport(create_monitor(app)), base_url="http://m"
     )
@@ -715,9 +719,9 @@ async def test_the_monitor_counts_calls_and_degrades_mcp_only_while_calls_fail(c
     assert not any("secret" in r.getMessage() or "secret" in str(r.fields) for r in lines)
 
 
-async def test_a_date_out_of_range_is_an_argument_error_not_a_server_error(conn):
+async def test_a_date_out_of_range_is_an_argument_error_not_a_server_error(conn: Session):
     await settling.save_tree(conn, TREE)
-    app = _app(conn)
+    app = mcp_app(conn)
     transport = httpx.ASGITransport(create_monitor(app))
     async with (
         serving(app) as http,
@@ -739,12 +743,12 @@ async def test_a_date_out_of_range_is_an_argument_error_not_a_server_error(conn)
         assert "(The range is cut to a 92-day span, ending on its last day.)" in bounds
 
 
-async def test_arguments_no_query_can_take_are_refused_and_not_counted_as_failures(conn):
+async def test_arguments_no_query_can_take_are_refused_and_not_counted_as_failures(conn: Session):
     """An offset past bigint, U+0000 (which PostgreSQL cannot hold) and a range ending before
     it starts are the caller's mistakes: errors before any query, never server failures."""
     await settling.save_tree(conn, TREE)
     weekly = await _digest(conn, AGENTS, DigestPeriod.WEEK, date(2026, 10, 12))
-    app = _app(conn)
+    app = mcp_app(conn)
     transport = httpx.ASGITransport(create_monitor(app))
     async with (
         serving(app) as http,
@@ -771,8 +775,8 @@ async def test_arguments_no_query_can_take_are_refused_and_not_counted_as_failur
         )
 
 
-async def test_an_mcp_without_its_token_has_no_component_or_metrics(conn):
-    app = create_app(_dsn(conn), TOKEN)
+async def test_an_mcp_without_its_token_has_no_component_or_metrics(conn: Session):
+    app = create_app(app_dsn(conn), TOKEN)
     async with AppClient(create_monitor(app), of=app, base_url="http://m") as monitor:
         components = (await monitor.get("/status")).json()["components"]
         assert "mcp" not in {c["id"] for c in components}

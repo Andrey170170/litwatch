@@ -35,8 +35,9 @@ from tests import test_digests as dg
 from tests import test_fulltext as ft
 from tests import test_steps as steps
 from tests.conftest import TREE, gate_on, started
-from tests.fakes import BatchingProvider, ScriptedProvider, anthropic_message
+from tests.fakes import FAST, BatchingProvider, ScriptedProvider, anthropic_message
 from tests.fakes_http import FakeArchive
+from tests.sessions import Session, in_read, in_write
 
 
 class Answer(BaseModel):
@@ -50,7 +51,6 @@ BRIEF = RoleConfig(provider="anthropic", model="test-brief", effort="high", fall
 MODELS = Models(brief=BRIEF)
 START = datetime(2026, 10, 16, 9, tzinfo=UTC)  # 03:00 in Denver
 DEADLINE = START + timedelta(hours=4, minutes=30)
-FAST = {"quiet": 0.02, "poll": 0.01}  # the batcher's timings in tests
 
 
 def ask(n: int | str) -> Request:
@@ -160,7 +160,9 @@ async def test_a_batch_that_cannot_be_sent_goes_as_normal_calls(monkeypatch):
 
 
 @pytest.mark.parametrize("debug", [False, True])
-async def test_an_account_error_in_a_batch_is_never_asked_again_nor_down_the_list(conn, db, debug):
+async def test_an_account_error_in_a_batch_is_never_asked_again_nor_down_the_list(
+    conn: Session, db, debug
+):
     gw, anthropic, openrouter, _ = batching(Together(db, await started(conn, "nightly"), 2))
     gw.debug = debug  # which keeps the text of a reply it could not use, and here there is none
     # Bounded: a call that fails before the barrier would leave the other waiting there.
@@ -200,7 +202,7 @@ async def test_a_batch_the_account_kept_from_being_sent_fails_its_calls_on_the_a
 
 
 async def test_a_batch_the_account_can_no_longer_read_fails_its_calls_and_stays_open(
-    conn, db, monkeypatch
+    conn: Session, db, monkeypatch
 ):
     gw, anthropic, _, _ = batching(CallJournal(db, await started(conn, "nightly")), hold=True)
     asked = asyncio.create_task(gw.ask("brief", ask(0)))
@@ -234,7 +236,7 @@ async def test_a_batch_the_account_can_no_longer_read_fails_its_calls_and_stays_
 
 
 async def test_a_batch_given_up_on_for_the_account_settles_its_row_with_the_answer_it_gave(
-    conn, db, monkeypatch
+    conn: Session, db, monkeypatch
 ):
     gw, anthropic, _, _ = batching(CallJournal(db, await started(conn, "nightly")), hold=True)
     asked = asyncio.create_task(gw.ask("brief", ask("account")))
@@ -329,7 +331,9 @@ async def test_a_batch_still_cancelling_after_the_drain_has_its_requests_sent_no
     await gw.close()
 
 
-async def test_a_batch_given_up_on_is_left_open_on_its_row_for_a_later_run_to_account_for(conn, db):
+async def test_a_batch_given_up_on_is_left_open_on_its_row_for_a_later_run_to_account_for(
+    conn: Session, db
+):
     gw, anthropic, _, clock = batching(CallJournal(db, await started(conn, "nightly")), hold=True)
     asked = asyncio.create_task(gw.ask("brief", ask(0)))
     await until(lambda: anthropic.batches)
@@ -353,12 +357,12 @@ async def test_a_batch_given_up_on_is_left_open_on_its_row_for_a_later_run_to_ac
     await later.close()
 
 
-async def test_a_request_a_batch_refused_for_the_account_fails_the_provider(conn, db):
+async def test_a_request_a_batch_refused_for_the_account_fails_the_provider(conn: Session, db):
     gw, _, _, _ = batching(CallJournal(db, await started(conn, "nightly")))
     with pytest.raises(CallError) as found:
         await gw.ask("brief", ask("account"))  # the batch's only request, awaited
     assert found.value.kind == "account"
-    seen = (await calls_store.observations(conn))["anthropic"]
+    seen = (await in_read(conn, calls_store.observations))["anthropic"]
     assert (seen["account_error"], seen["replied_at"]) == (
         "account: authentication_error in batch",
         None,
@@ -368,7 +372,7 @@ async def test_a_request_a_batch_refused_for_the_account_fails_the_provider(conn
 
 @pytest.mark.parametrize("refused", ["the read", "the request"])
 async def test_a_dead_runs_batch_refused_for_the_account_fails_the_provider_without_a_call(
-    conn, db, monkeypatch, refused
+    conn: Session, db, monkeypatch, refused
 ):
     gw, anthropic, _, _ = batching(CallJournal(db, await started(conn, "nightly")), hold=True)
     asked = asyncio.create_task(gw.ask("brief", ask("account" if refused == "the request" else 0)))
@@ -392,13 +396,15 @@ async def test_a_dead_runs_batch_refused_for_the_account_fails_the_provider_with
     await later.recover()
     await later.settle()
     # The provider is failed for its account, and the calls and their cost are as they were.
-    seen = (await calls_store.observations(conn))["anthropic"]
+    seen = (await in_read(conn, calls_store.observations))["anthropic"]
     assert (seen["account_error"], seen["replied_at"]) == (said, None)
     assert [(c["batch_id"], c["cost"]) for c in await calls(conn)] == [("msgbatch_1", None)]
     await later.close()
 
 
-async def test_a_journal_that_fails_fails_the_calls_waiting_on_their_batch(conn, db, monkeypatch):
+async def test_a_journal_that_fails_fails_the_calls_waiting_on_their_batch(
+    conn: Session, db, monkeypatch
+):
     journal = CallJournal(db, await started(conn, "nightly"))
     gw, _, _, _ = batching(journal)
 
@@ -412,7 +418,7 @@ async def test_a_journal_that_fails_fails_the_calls_waiting_on_their_batch(conn,
 
 
 async def test_a_journal_that_fails_on_one_batch_lets_the_others_checks_end_first(
-    conn, db, monkeypatch
+    conn: Session, db, monkeypatch
 ):
     anthropic, _ = await dead_batches(conn, db, 2)
     journal = CallJournal(db, await started(conn, "nightly"))
@@ -559,7 +565,7 @@ async def test_anthropic_batches_carry_the_request_key_and_are_priced_at_half():
 # -- the journal -----------------------------------------------------------------------------------
 
 
-async def calls(conn) -> list[dict]:
+async def calls(conn: Session) -> list[dict]:
     return await (
         await conn.execute(
             "SELECT run_id, batch_id, output IS NOT NULL AS answered, error, "
@@ -593,7 +599,7 @@ class Together(CallJournal):
         return call_id
 
 
-async def test_a_run_started_again_waits_on_the_batch_a_dead_run_sent(conn, db):
+async def test_a_run_started_again_waits_on_the_batch_a_dead_run_sent(conn: Session, db):
     dead = await started(conn, "nightly")
     gw, anthropic, _, clock = batching(Together(db, dead, 2), hold=True)
     asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
@@ -634,7 +640,7 @@ async def test_a_run_started_again_waits_on_the_batch_a_dead_run_sent(conn, db):
             },
         ]
     )
-    dead_run = await runs.get(conn, dead)  # its totals take them, as its close would have
+    dead_run = await in_read(conn, runs.get, dead)  # its totals take them, as its close would have
     assert (float(dead_run["cost"]), dead_run["counts"]["calls"]) == (
         0.001,
         {"brief": {"calls": 2, "cost": 0.001}},
@@ -642,7 +648,9 @@ async def test_a_run_started_again_waits_on_the_batch_a_dead_run_sent(conn, db):
     await gw.close()
 
 
-async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_again(conn, db):
+async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_again(
+    conn: Session, db
+):
     dead = await started(conn, "nightly")
     gw, anthropic, _, clock = batching(Together(db, dead, 2), hold=True)
     asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
@@ -668,7 +676,7 @@ async def test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_agai
     await gw.close()
 
 
-async def test_an_account_error_a_dead_runs_batch_gave_is_journalled_as_one(conn, db):
+async def test_an_account_error_a_dead_runs_batch_gave_is_journalled_as_one(conn: Session, db):
     dead = await started(conn, "nightly")
     gw, anthropic, _, clock = batching(Together(db, dead, 2), hold=True)
     asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in ("account", 0)]
@@ -697,7 +705,9 @@ async def test_an_account_error_a_dead_runs_batch_gave_is_journalled_as_one(conn
     await gw.close()
 
 
-async def test_a_run_past_the_deadline_cancels_a_dead_runs_batch_and_keeps_its_answers(conn, db):
+async def test_a_run_past_the_deadline_cancels_a_dead_runs_batch_and_keeps_its_answers(
+    conn: Session, db
+):
     dead = await started(conn, "nightly")
     gw, anthropic, _, clock = batching(Together(db, dead, 2), hold=True)
     asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
@@ -728,7 +738,9 @@ async def test_a_run_past_the_deadline_cancels_a_dead_runs_batch_and_keeps_its_a
     await gw.close()
 
 
-async def test_a_run_past_the_drain_reads_a_dead_runs_ended_batch_before_giving_up(conn, db):
+async def test_a_run_past_the_drain_reads_a_dead_runs_ended_batch_before_giving_up(
+    conn: Session, db
+):
     dead = await started(conn, "nightly")
     gw, anthropic, _, clock = batching(CallJournal(db, dead))
     await asyncio.gather(*(gw.ask("brief", ask(n)) for n in range(2)))
@@ -747,7 +759,7 @@ async def test_a_run_past_the_drain_reads_a_dead_runs_ended_batch_before_giving_
     await gw.close()
 
 
-async def dead_batches(conn, db, n: int) -> tuple[BatchingProvider, Clock]:
+async def dead_batches(conn: Session, db, n: int) -> tuple[BatchingProvider, Clock]:
     """A dead run's `n` batches of one call each, ended, their answers never read."""
     gw, anthropic, _, clock = batching(CallJournal(db, await started(conn, "nightly")))
     for i in range(n):
@@ -758,7 +770,7 @@ async def dead_batches(conn, db, n: int) -> tuple[BatchingProvider, Clock]:
 
 
 async def test_batches_attached_while_another_is_read_are_read_before_any_is_given_up(
-    conn, db, monkeypatch
+    conn: Session, db, monkeypatch
 ):
     anthropic, clock = await dead_batches(conn, db, 2)
     status = anthropic.status
@@ -792,7 +804,7 @@ async def test_a_provider_operation_that_hangs_gives_way_to_normal_calls(monkeyp
 
 
 async def test_batches_whose_reads_hang_are_given_up_together_not_one_after_another(
-    conn, db, monkeypatch
+    conn: Session, db, monkeypatch
 ):
     anthropic, _ = await dead_batches(conn, db, 8)
 
@@ -808,7 +820,7 @@ async def test_batches_whose_reads_hang_are_given_up_together_not_one_after_anot
     await gw.close()
 
 
-async def test_a_batch_its_provider_no_longer_has_is_settled_not_waited_on(conn, db):
+async def test_a_batch_its_provider_no_longer_has_is_settled_not_waited_on(conn: Session, db):
     """Deleted, or the key is now another workspace's: it never answers, so it is not waited on
     until the deadline's drain, nor recovered by every run until its results expire."""
     anthropic, _ = await dead_batches(conn, db, 2)
@@ -823,7 +835,7 @@ async def test_a_batch_its_provider_no_longer_has_is_settled_not_waited_on(conn,
     await gw.close()
 
 
-async def test_retallies_on_two_connections_in_opposite_orders_do_not_deadlock(conn, db):
+async def test_retallies_on_two_connections_in_opposite_orders_do_not_deadlock(conn: Session, db):
     first, second = await started(conn, "nightly"), await started(conn, "nightly")
     async with gate_on(conn) as other:
         mine = CallJournal(db, await started(conn, "nightly"))
@@ -837,7 +849,9 @@ async def test_retallies_on_two_connections_in_opposite_orders_do_not_deadlock(c
         await asyncio.wait_for(asyncio.gather(*both), 5)
 
 
-async def test_a_dead_runs_batch_is_recovered_by_its_provider_whatever_roles_use_now(conn, db):
+async def test_a_dead_runs_batch_is_recovered_by_its_provider_whatever_roles_use_now(
+    conn: Session, db
+):
     anthropic, clock = await dead_batches(conn, db, 1)
     moved = Models(brief=OTHER)  # brief moved to OpenRouter since the run died
     providers = {"anthropic": anthropic, "openrouter": ScriptedProvider("openrouter", respond)}
@@ -851,7 +865,7 @@ async def test_a_dead_runs_batch_is_recovered_by_its_provider_whatever_roles_use
     await gw.close()
 
 
-async def test_a_call_whose_batch_did_not_answer_it_is_settled_and_asked_again(conn, db):
+async def test_a_call_whose_batch_did_not_answer_it_is_settled_and_asked_again(conn: Session, db):
     dead = await started(conn, "nightly")
     gw, anthropic, _, clock = batching(CallJournal(db, dead), hold=True)
     anthropic.unanswered = lambda request: True
@@ -895,7 +909,7 @@ def tonight(late: bool = False) -> tuple[datetime, datetime]:
     return now - timedelta(hours=1), now + (-timedelta(minutes=1) if late else timedelta(hours=1))
 
 
-async def records(conn) -> dict[str, list]:
+async def records(conn: Session) -> dict[str, list]:
     """What a night's steps recorded, without ids, times and the runs that wrote them."""
     found = {}
     for table in ("classifications", "memberships", "analyses", "verdicts", "fulltext_passes"):
@@ -909,7 +923,7 @@ async def records(conn) -> dict[str, list]:
 
 
 @pytest.mark.parametrize("night", ["batched", "late"])
-async def test_a_batched_night_records_what_an_unbatched_one_does(conn, night):
+async def test_a_batched_night_records_what_an_unbatched_one_does(conn: Session, night):
     """V5, and V7's late start: a nightly run started after its deadline does not batch."""
 
     async def one_night(c, batching: str | None) -> tuple[dict, BatchingProvider]:
@@ -935,7 +949,7 @@ async def test_a_batched_night_records_what_an_unbatched_one_does(conn, night):
 
 
 async def test_a_run_whose_deadline_passes_before_its_steps_waits_for_the_nights_passes(
-    conn, db, monkeypatch
+    conn: Session, db, monkeypatch
 ):
     """A run started in the window whose deadline passed by its steps does not batch, and its
     digests still wait for the passes queued since the night's first run."""
@@ -950,13 +964,13 @@ async def test_a_run_whose_deadline_passes_before_its_steps_waits_for_the_nights
     anthropic = BatchingProvider("anthropic", respond)
     gateway = factory(respond, anthropic)
     await nightly.run(db, steps.CONFIG, fetch=False, gateway=gateway, night=night)
-    began = (await runs.get(conn, first))["started_at"]
+    began = (await in_read(conn, runs.get, first))["started_at"]
     ((since, left),) = waited
     assert since == began and anthropic.batches == {}
     assert left <= 0  # the night's deadline has passed: no wait begins again
 
 
-async def test_leases_are_taken_back_after_a_taxonomy_edit_in_flight(conn, db):
+async def test_leases_are_taken_back_after_a_taxonomy_edit_in_flight(conn: Session, db):
     """Under the taxonomy lock, shared, as every settle: never in another order than a taxonomy
     save dropping the same passes."""
     async with await sessions.connect(conn.test_dsn, conn.test_schema) as other:
@@ -973,7 +987,7 @@ async def take_back(db) -> int:
         return await fulltext_store.take_back(unit, LEASE)
 
 
-def batch_recorded(conn):
+def batch_recorded(conn: Session):
     """Whether a call's row has its batch's id, as a restart needs to attach to the batch: a
     run killed between submitting and recording pays again, as the spec allows."""
 
@@ -984,10 +998,10 @@ def batch_recorded(conn):
     return check
 
 
-async def passing(conn):
+async def passing(conn: Session):
     """The full-text tests' paper, classified and analysed, graded central: its Brief queued."""
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [ft.P])
+    await in_write(conn, papers_store.upsert, [ft.P])
     await conn.execute(
         "INSERT INTO classifications (paper_id, paper_revision, taxonomy_revision, "
         "primary_class, model) VALUES (%s, 1, 'x', 'interpretability', 'm')",
@@ -998,7 +1012,7 @@ async def passing(conn):
 
 
 async def test_a_nightly_started_again_takes_back_its_passes_and_pays_for_nothing_twice(
-    conn, db, monkeypatch
+    conn: Session, db, monkeypatch
 ):
     """V6: a nightly killed with its pass's call in an open batch; the next one takes the pass
     back at once and has it answered from that batch."""
@@ -1028,7 +1042,7 @@ async def test_a_nightly_started_again_takes_back_its_passes_and_pays_for_nothin
     run_id = await nightly.run(
         db, ft.CONFIG, fetch=False, gateway=factory(writer.respond, anthropic), night=night
     )
-    counts = (await runs.get(conn, run_id))["counts"]
+    counts = (await in_read(conn, runs.get, run_id))["counts"]
     assert (counts["fulltext_taken_back"], counts["briefs_written"]) == (1, 1)
     assert (len(anthropic.batches), anthropic.calls) == (1, [])  # submitted once, by the first
     assert (await ft.passes(conn))[0]["state"] == "done"
@@ -1036,7 +1050,7 @@ async def test_a_nightly_started_again_takes_back_its_passes_and_pays_for_nothin
 
 @pytest.mark.parametrize("still_running", [False, True])
 async def test_a_worker_answers_from_a_dead_nightlys_batch_rather_than_paying_again(
-    conn, db, monkeypatch, still_running
+    conn: Session, db, monkeypatch, still_running
 ):
     """A nightly dies with its pass's call in a batch and is not started again; once the lease
     runs out the service's worker takes the pass and is answered from that batch if it ended,
@@ -1066,13 +1080,13 @@ async def test_a_worker_answers_from_a_dead_nightlys_batch_rather_than_paying_ag
 
 
 @asynccontextmanager
-async def nightly_running(conn):
+async def nightly_running(conn: Session):
     """Another session holds the run lock, as a nightly does."""
     async with gate_on(conn) as other, other.held("run"):
         yield
 
 
-async def batching_work(conn, writer, fake, anthropic, until=None):
+async def batching_work(conn: Session, writer, fake, anthropic, until=None):
     """`fulltext.work` as a nightly runs it, batching until `until` (the night's deadline)."""
     gateway = factory(writer.respond, anthropic)
     async with gate_on(conn) as db, model_run(db, ft.CONFIG, "nightly", gateway=gateway) as run:
@@ -1083,7 +1097,7 @@ async def batching_work(conn, writer, fake, anthropic, until=None):
             await run.gateway.close()
 
 
-async def test_during_a_nightly_its_automatic_passes_are_its_own_batched(conn):
+async def test_during_a_nightly_its_automatic_passes_are_its_own_batched(conn: Session):
     """V8: the service's worker leaves an automatic pass to the nightly, which batches it."""
     await passing(conn)
     fake, writer = ft.ready(FakeArchive()), ft.Writer()
@@ -1096,12 +1110,12 @@ async def test_during_a_nightly_its_automatic_passes_are_its_own_batched(conn):
 
 
 async def test_a_worker_leaves_the_nightly_its_passes_from_the_claim_after_it_starts(
-    conn, monkeypatch
+    conn: Session, monkeypatch
 ):
     """V8: a worker already working when the nightly starts takes no automatic pass after."""
     await passing(conn)
     other = ft.P.model_copy(update={"id": "2610.00099"})  # its Brief queued after P's
-    await papers_store.upsert(conn, [other])
+    await in_write(conn, papers_store.upsert, [other])
     cols = ", ".join(c for c in (await ft.passes(conn))[0] if c not in ("id", "paper_id"))
     await conn.execute(
         f"INSERT INTO fulltext_passes (paper_id, {cols}) SELECT %s, {cols} "
@@ -1121,7 +1135,7 @@ async def test_a_worker_leaves_the_nightly_its_passes_from_the_claim_after_it_st
 @pytest.mark.parametrize("batched", [True, False], ids=["batched", "late"])
 @pytest.mark.parametrize("action", ["now", "pdf"])
 async def test_during_a_nightly_the_owners_pass_is_the_workers_at_once(
-    conn, monkeypatch, action, batched
+    conn: Session, monkeypatch, action, batched
 ):
     """V8: "run it now" and "Use the PDF" make the pass the owner's: the nightly leaves it,
     batching or not (`late`: past its deadline), and the service's worker runs it with a normal
@@ -1145,7 +1159,7 @@ async def test_during_a_nightly_the_owners_pass_is_the_workers_at_once(
     assert anthropic.batches == {}
 
 
-async def test_topics_digests_written_together_are_those_written_one_after_another(conn):
+async def test_topics_digests_written_together_are_those_written_one_after_another(conn: Session):
     """V11: a Monday's digests through batches, topics concurrently, equal those written in
     turn: a failed digest written again before the day's, the weeklies after the dailies."""
 

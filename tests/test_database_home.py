@@ -1,13 +1,15 @@
 """The Database gate is the only door to the database (docs/specs/architecture/a1-database-gate.md):
-no advisory-lock SQL outside `gates/database.py`, and no connection outside `gates/` and
-`store/`."""
+no advisory-lock SQL outside `gates/database.py`, no connection outside `gates/` and `store/`,
+and a test's connection typed, so ty sees one handed where a unit is wanted."""
 
+import ast
 import re
 from pathlib import Path
 
 from litwatch.gates.database import HELD_ACROSS_CALLS, REGISTRY
 
-SRC = Path(__file__).parent.parent / "src" / "litwatch"
+TESTS = Path(__file__).parent
+SRC = TESTS.parent / "src" / "litwatch"
 GATE = "gates/database.py"
 
 
@@ -34,6 +36,21 @@ def test_connections_stay_in_the_gate_and_store():
         if not name.startswith(("gates/", "store/")) and "AsyncConnection" in text
     }
     assert found == set()
+
+
+def test_a_tests_connection_is_typed():
+    """ty does not follow a fixture into the tests that take it: a `conn` left unannotated is
+    unknown to it, and a store function handed it, instead of a unit (`sessions.in_read`,
+    `in_write`), goes unseen."""
+    found = []
+    for path in sorted(TESTS.rglob("*.py")):
+        for node in ast.parse(path.read_text()).body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                args = node.args
+                for arg in args.posonlyargs + args.args + args.kwonlyargs:
+                    if arg.arg == "conn" and arg.annotation is None:
+                        found.append(f"{path.relative_to(TESTS)}:{node.lineno} {node.name}")
+    assert found == []
 
 
 def test_the_registry_has_todays_keys():

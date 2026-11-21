@@ -10,83 +10,35 @@ import pytest
 
 from litwatch.api import create_app
 from litwatch.config import Config
-from litwatch.core import Analysis, Cause, Facets, Fit, Opinion, Status, Verdict, Weight
-from litwatch.core.classification import Membership, Source
+from litwatch.core import Status
 from litwatch.feedback import word
-from litwatch.store import analyses as analyses_store
-from litwatch.store import classifications as classifications_store
-from litwatch.store import failures, verdicts
+from litwatch.store import failures
 from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests import sessions, settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, answering, paper, started
-from tests.sessions import Bridge
+from tests.seed import P, Q, analyse, classify, grade
+from tests.sessions import Bridge, Session, in_read, in_write
 
 TOKEN = "s3cret"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
-P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation in CoT.")
-Q = paper("2610.00002", title="A near neighbour", abstract="Sparse features.")
-VERSIONS = {c.slug: c.version for c in TREE.classes}
 
 
 @pytest.fixture
-async def client(conn):
+async def client(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P, Q])
+    await in_write(conn, papers_store.upsert, [P, Q])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, Config())
     async with AppClient(app, base_url="http://test", headers=AUTH) as c:
         yield c
 
 
-async def classify(conn, p, *classes, keyword=()) -> None:
-    """A classification: the first class primary, each a classifier membership; `keyword`
-    Focus classes joined by the keyword check alone."""
-    primary = classes[0] if classes else "other"
-    await classifications_store.add(conn, p, TREE.classes_version, primary, None, "test")
-    found = [
-        Membership(slug=c, source=Source.CLASSIFIER) for c in dict.fromkeys([primary, *classes])
-    ]
-    found += [Membership(slug=k, source=Source.KEYWORD) for k in keyword]
-    await classifications_store.replace(conn, p, found, VERSIONS)
-    await settling.settle(conn, p.id, cause=Cause.VERDICT)
-
-
-async def analyse(conn, p, weight="solid", *, code=False, gist="Probes find hidden steps.") -> None:
-    facets = Facets(contribution="method", releases_code=code, releases_weights=False)
-    found = Analysis(gist=gist, weight=Weight(weight), weight_reason="Sound work.", facets=facets)
-    await analyses_store.add(conn, p, "other", found, "test")
-    await settling.settle(conn, p.id, cause=Cause.VERDICT)
-
-
-async def grade(conn, p, fit: str, topic=FAITH, *, check=None, escalated=False) -> None:
-    """A verdict of `fit` on `topic`, on the paper's current text; `check` a second grader's
-    differing Fit (a split)."""
-    opinions = {"judge": Opinion(fit=Fit(fit), reason="judge's reason", model="anthropic:x")}
-    if check or topic is FAITH:
-        opinions["check"] = Opinion(fit=Fit(check or fit), reason="check's", model="openrouter:y")
-    await verdicts.add(
-        conn,
-        Verdict(
-            paper_id=p.id,
-            topic=topic.slug,
-            topic_version=topic.version,
-            paper_revision=await papers_store.revision(conn, p.id),
-            fit=Fit(fit),
-            reason="judge's reason",
-            opinions=opinions,
-            split=check is not None,
-            escalated=escalated,
-        ),
-    )
-    await settling.settle(conn, p.id, cause=Cause.VERDICT)
-
-
-async def stop(conn, p, step: str, topic: str = "") -> None:
+async def stop(conn: Session, p, step: str, topic: str = "") -> None:
     """Three unusable answers in a row: the step waits for the owner."""
     for _ in range(3):
-        await failures.failed(conn, p, step, "unusable", counts=True, topic=topic)
+        await in_write(conn, failures.failed, p, step, "unusable", counts=True, topic=topic)
 
 
 async def ids(client, path="/api/papers", **params) -> list[str]:
@@ -94,7 +46,7 @@ async def ids(client, path="/api/papers", **params) -> list[str]:
 
 
 @pytest.fixture
-async def shelves(client, conn):
+async def shelves(client, conn: Session):
     """Five papers, one per place on Papers: legendary (an Area must read on a landmark), epic
     (a Focus must read), rare (an ungraded landmark in the Focus class), common (a Field
     adjacent on an incremental paper) and one not classified yet."""
@@ -102,7 +54,7 @@ async def shelves(client, conn):
     rare = paper("2610.00004", title="Probing a trace", abstract="Linear probes.")
     common = paper("2610.00005", title="Agents with tools", abstract="Tool use.")
     unread = paper("2610.00006", title="Not read yet", abstract="Pending.")
-    await papers_store.upsert(conn, [legendary, rare, common, unread])
+    await in_write(conn, papers_store.upsert, [legendary, rare, common, unread])
     await classify(conn, P, FAITH.slug)
     await analyse(conn, P)
     await grade(conn, P, "central")
@@ -176,7 +128,9 @@ async def test_papers_are_rarest_first_with_the_counts_the_shelves_need(client, 
     assert (beyond["rows"], beyond["total"]) == ([], 6)
 
 
-async def test_papers_filter_by_topic_with_its_subtree_depth_grade_and_facts(client, conn, shelves):
+async def test_papers_filter_by_topic_with_its_subtree_depth_grade_and_facts(
+    client, conn: Session, shelves
+):
     legendary, epic, rare, common, _ = shelves
     # Interpretability's page holds its Focus topic's papers too.
     assert await ids(client, topic=INTERP.slug) == [legendary.id, epic.id, rare.id]
@@ -199,7 +153,7 @@ async def test_papers_filter_by_topic_with_its_subtree_depth_grade_and_facts(cli
 
 
 async def test_a_withdrawn_paper_leaves_lists_and_search_but_not_saved_or_its_page(
-    client, conn, shelves
+    client, conn: Session, shelves
 ):
     """Withdrawn on arXiv, a paper is out of every list and search; one the owner saved stays on
     the saved list, marked, and its page says when and why."""
@@ -217,7 +171,7 @@ async def test_a_withdrawn_paper_leaves_lists_and_search_but_not_saved_or_its_pa
     assert page["withdrawn"] == {"at": "2026-10-21T06:28:10Z", "reason": "The proof is wrong"}
 
 
-async def test_a_keyword_or_band_membership_shows_a_paper_only_once_graded(client, conn):
+async def test_a_keyword_or_band_membership_shows_a_paper_only_once_graded(client, conn: Session):
     """The uncertain band and the keyword check are for grading only (pipeline.md, section 2)."""
     await classify(conn, Q, "other", keyword=[FAITH.slug])
     assert await ids(client, topic=FAITH.slug) == []
@@ -230,7 +184,7 @@ async def test_a_keyword_or_band_membership_shows_a_paper_only_once_graded(clien
     assert (cards[INTERP.slug]["papers"], cards[INTERP.slug]["counts"]["uncommon"]) == (1, 1)
 
 
-async def test_search_reads_title_abstract_and_authors_best_match_first(client, conn):
+async def test_search_reads_title_abstract_and_authors_best_match_first(client, conn: Session):
     # Newer than P: rarest (then newest) would put it first, the best match puts P first.
     hidden = paper(
         "2610.00007",
@@ -238,7 +192,7 @@ async def test_search_reads_title_abstract_and_authors_best_match_first(client, 
         abstract="Traces hide steps, briefly.",
         published="2026-10-14T00:00:00+00:00",
     )
-    await papers_store.upsert(conn, [hidden])
+    await in_write(conn, papers_store.upsert, [hidden])
     assert set(await ids(client, q="Alice Smith")) == {P.id, Q.id, hidden.id}
     assert await ids(client, q="hide steps", sort="rarest") == [hidden.id, P.id]
     # A search without a sort is best match first; an explicit sort wins (L5-4).
@@ -250,7 +204,7 @@ async def test_search_reads_title_abstract_and_authors_best_match_first(client, 
     assert [r["id"] for r in rows] == [P.id]
 
 
-async def test_a_row_carries_its_open_state(client, conn, shelves):
+async def test_a_row_carries_its_open_state(client, conn: Session, shelves):
     _, epic, rare, common, _ = shelves
     await grade(conn, epic, "central", check="adjacent")  # a split, not yet labelled
     await stop(conn, rare, "analysis")
@@ -270,12 +224,14 @@ async def test_a_row_carries_its_open_state(client, conn, shelves):
     ] is None
     # Dismissal ends a paper's work: asked for by id (a lookup), it has no open state.
     await conn.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (rare.id,))
-    tree = await taxonomy_store.load(conn)
-    (row,) = (await reading_store.papers(conn, tree, reading_store.Query(ids=[rare.id]))).rows
+    tree = await in_read(conn, taxonomy_store.load)
+    (row,) = (
+        await in_read(conn, reading_store.papers, tree, reading_store.Query(ids=[rare.id]))
+    ).rows
     assert row["state"] is None
 
 
-async def test_badges_put_the_topic_giving_the_highest_level_first(client, conn):
+async def test_badges_put_the_topic_giving_the_highest_level_first(client, conn: Session):
     await classify(conn, P, FAITH.slug, AGENTS.slug)
     await grade(conn, P, "none")  # Focus none: common
     await grade(conn, P, "central", AGENTS)  # Field must read: epic, lowered to uncommon
@@ -284,7 +240,9 @@ async def test_badges_put_the_topic_giving_the_highest_level_first(client, conn)
     assert row["rarity"] == "uncommon"
 
 
-async def test_badges_and_rail_cover_every_followed_topic_whose_page_holds_the_paper(client, conn):
+async def test_badges_and_rail_cover_every_followed_topic_whose_page_holds_the_paper(
+    client, conn: Session
+):
     """A badge per followed topic whose subtree the paper is in, graded there or not, and per
     followed ancestor of a topic that graded it; the rail shows the same topics."""
     await classify(conn, P, FAITH.slug)  # not graded yet, as for a topic just followed
@@ -312,7 +270,7 @@ async def test_badges_and_rail_cover_every_followed_topic_whose_page_holds_the_p
 # -- topics ----------------------------------------------------------------------------------------
 
 
-async def test_topics_are_grouped_by_depth_in_the_owners_order(client, conn, shelves):
+async def test_topics_are_grouped_by_depth_in_the_owners_order(client, conn: Session, shelves):
     await settling.reorder(conn, [AGENTS.slug, INTERP.slug, FAITH.slug])
     groups = (await client.get("/api/topics")).json()
     assert [(g["depth"], [t["slug"] for t in g["topics"]]) for g in groups] == [
@@ -329,7 +287,9 @@ async def test_topics_are_grouped_by_depth_in_the_owners_order(client, conn, she
     assert groups[0]["topics"][0]["subject"] == FAITH.subject
 
 
-async def test_a_parent_topic_shows_its_own_grade_else_its_best_descendants(client, conn, shelves):
+async def test_a_parent_topic_shows_its_own_grade_else_its_best_descendants(
+    client, conn: Session, shelves
+):
     legendary, epic, rare, _, _ = shelves
     page = (await client.get(f"/api/topics/{INTERP.slug}")).json()
     assert page["topic"]["depth"] == "area" and page["topic"]["status"] == "active"
@@ -355,7 +315,7 @@ async def test_a_parent_topic_shows_its_own_grade_else_its_best_descendants(clie
 # -- a paper ---------------------------------------------------------------------------------------
 
 
-async def test_a_paper_page_has_its_header_rail_classes_states_and_history(client, conn):
+async def test_a_paper_page_has_its_header_rail_classes_states_and_history(client, conn: Session):
     await conn.execute(
         "UPDATE papers SET version = 2, version_history = %s WHERE id = %s",
         ('[{"version": 1, "date": "2026-10-01T00:00:00Z"}, {"version": 2}]', P.id),
@@ -416,7 +376,7 @@ async def test_a_paper_page_has_its_header_rail_classes_states_and_history(clien
     assert (await client.get("/api/papers/2610.99999")).status_code == 404
 
 
-async def test_a_paper_page_names_its_own_open_states(client, conn):
+async def test_a_paper_page_names_its_own_open_states(client, conn: Session):
     await stop(conn, Q, "classification")
     page = (await client.get(f"/api/papers/{Q.id}")).json()
     assert (page["in_collection"], page["rarity"], page["topics"]) == (False, None, [])
@@ -442,7 +402,7 @@ async def test_a_paper_page_names_its_own_open_states(client, conn):
 
 
 async def test_a_thumb_takes_a_reason_from_feedback_and_says_only_what_the_page_cannot(
-    client, conn
+    client, conn: Session
 ):
     await classify(conn, P, FAITH.slug)
     await grade(conn, P, "related")  # relevant: in the library
@@ -491,7 +451,7 @@ async def test_a_thumb_takes_a_reason_from_feedback_and_says_only_what_the_page_
     assert saved.json() == {"message": None, "saved": True, "grades": {}}
 
 
-async def test_a_label_is_a_fit_or_unsure_on_any_topic(client, conn):
+async def test_a_label_is_a_fit_or_unsure_on_any_topic(client, conn: Session):
     await classify(conn, P, INTERP.slug)
     await grade(conn, P, "related", INTERP, check="adjacent", escalated=True)
 
@@ -524,7 +484,7 @@ async def test_a_label_is_a_fit_or_unsure_on_any_topic(client, conn):
     assert (await rail())["label"] is None
 
 
-async def test_the_rail_says_what_set_the_owners_word(client, conn):
+async def test_the_rail_says_what_set_the_owners_word(client, conn: Session):
     await classify(conn, P, FAITH.slug)
     await grade(conn, P, "related")
 
@@ -553,7 +513,9 @@ async def test_the_rail_says_what_set_the_owners_word(client, conn):
     assert (said["word"], said["word_from"]) == ("central", "label")
 
 
-async def test_the_rail_credits_the_owners_word_to_whoever_wrote_the_label_last(client, conn):
+async def test_the_rail_credits_the_owners_word_to_whoever_wrote_the_label_last(
+    client, conn: Session
+):
     async def faith(p):
         page = (await client.get(f"/api/papers/{p.id}")).json()
         return next(t for t in page["topics"] if t["topic"]["slug"] == FAITH.slug)
@@ -585,7 +547,7 @@ async def test_signing_in_trades_the_token_for_a_cookie(client):
     assert (await bare.get("/api/summary")).json()["status"]["state"] == "none"
 
 
-async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
+async def test_the_status_line_follows_the_latest_nightly_run(client, conn: Session):
     assert (await client.get("/api/summary")).json()["status"] == {
         "state": "none",
         "run_id": None,
@@ -629,7 +591,7 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn):
     )
 
 
-async def test_a_reported_miss_is_the_owners_word(client, conn):
+async def test_a_reported_miss_is_the_owners_word(client, conn: Session):
     ack = await client.post("/api/misses", json={"paper_id": Q.id, "topic": FAITH.slug})
     assert ack.json()["message"] == (
         "Reported as missed for Chain-of-thought faithfulness; it joins the library"
@@ -659,7 +621,9 @@ async def test_a_reported_miss_is_the_owners_word(client, conn):
     assert (await client.post("/api/misses", json=body)).status_code == 409  # not Focus
 
 
-async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, monkeypatch):
+async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(
+    client, conn: Session, monkeypatch
+):
     # archive.md: reporting a paper outside the collection brings it in, the owner's word first.
     import psycopg
 
@@ -681,7 +645,7 @@ async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, m
     monkeypatch.setattr(misses, "fetch_by_ids", fetch)
     wrong = await client.post("/api/misses", json={"paper_id": "2610.09999", "topic": INTERP.slug})
     assert wrong.status_code == 409  # a refused report stores nothing
-    assert await papers_store.get(conn, "2610.09999") is None
+    assert await in_read(conn, papers_store.get, "2610.09999") is None
     body = {"paper_id": "2610.09999v2", "topic": FAITH.slug}
     assert (await client.post("/api/misses", json=body)).json()["saved"] is True
     assert fetched == [["2610.09999"], ["2610.09999"]]
@@ -697,14 +661,16 @@ async def test_a_miss_on_a_paper_litwatch_lacks_fetches_it_first(client, conn, m
         m.setattr(misses, "report", refused)
         body = {"paper_id": "2610.08888", "topic": FAITH.slug}
         assert (await client.post("/api/misses", json=body)).status_code == 409
-    assert await papers_store.get(conn, "2610.08888") is None
+    assert await in_read(conn, papers_store.get, "2610.08888") is None
     monkeypatch.setattr(misses, "fetch_by_ids", answering(lambda ids: []))  # arXiv lacks it too
     body = {"paper_id": "2601.99999", "topic": FAITH.slug}
     assert (await client.post("/api/misses", json=body)).status_code == 404
 
 
 @pytest.mark.parametrize("second_caller", ["owner", "nightly"])
-async def test_two_requests_storing_the_same_fetched_paper_both_get_it(conn, second_caller):
+async def test_two_requests_storing_the_same_fetched_paper_both_get_it(
+    conn: Session, second_caller
+):
     """An owner request and another owner request, or the nightly intake, that fetched the same
     unfetched paper store it once: the second waits on the first's settle lock, then stores
     over it as intake would, and there is one `paper.added` (L5-2)."""
@@ -747,7 +713,7 @@ async def test_two_requests_storing_the_same_fetched_paper_both_get_it(conn, sec
     assert added["n"] == 1
 
 
-async def test_an_owners_delayed_fetch_never_overwrites_newer_metadata(conn, monkeypatch):
+async def test_an_owners_delayed_fetch_never_overwrites_newer_metadata(conn: Session, monkeypatch):
     """The owner's request resolves a paper from arXiv; before it is kept, the nightly intake
     stores newer metadata without a version (OAI's); the owner's older record then changes
     nothing, though its version cannot be compared (L6-3)."""
@@ -768,7 +734,9 @@ async def test_an_owners_delayed_fetch_never_overwrites_newer_metadata(conn, mon
     assert revised["n"] == 0
 
 
-async def test_an_owner_request_ends_when_arxiv_stays_silent(client, conn, monkeypatch, slow_arxiv):
+async def test_an_owner_request_ends_when_arxiv_stays_silent(
+    client, conn: Session, monkeypatch, slow_arxiv
+):
     """Process and Report as a miss on a paper litwatch lacks wait on arXiv for its budget at
     most (P5), however slowly arXiv trickles its answer in: then a 503 that says so, and
     nothing stored."""
@@ -781,10 +749,10 @@ async def test_an_owner_request_ends_when_arxiv_stays_silent(client, conn, monke
     answer = await asyncio.wait_for(client.post("/api/misses", json=body), 5)
     assert answer.status_code == 503
     assert answer.json()["detail"] == misses.SILENT
-    assert await papers_store.get(conn, "2610.07777") is None
+    assert await in_read(conn, papers_store.get, "2610.07777") is None
 
 
-async def test_a_miss_taken_back_can_be_reported_again(client, conn):
+async def test_a_miss_taken_back_can_be_reported_again(client, conn: Session):
     """Taking a miss back withdraws the owner's word; reporting again gives it back, keeping
     the miss, and never over a correction the owner made since."""
 
@@ -820,7 +788,7 @@ async def test_a_miss_taken_back_can_be_reported_again(client, conn):
     ]
 
 
-async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, conn):
+async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, conn: Session):
     """Looking for the owner's standing word and giving it again happen under the paper's
     lock, so a correction being written meanwhile is seen, and stands."""
     from litwatch.core import Label, LabelOrigin, LabelValue
@@ -841,7 +809,7 @@ async def test_reporting_a_miss_again_waits_for_a_correction_in_flight(client, c
     assert (label["value"], label["origin"]) == ("none", "reader")
 
 
-async def test_a_paper_without_authors_still_reads(client, conn):
+async def test_a_paper_without_authors_still_reads(client, conn: Session):
     await conn.execute("UPDATE papers SET authors = 'null'::jsonb WHERE id = %s", (P.id,))
     rows = (await client.get("/api/papers", params={"q": "hidden computation"})).json()["rows"]
     assert rows[0]["authors"] == []
@@ -866,7 +834,7 @@ def test_lookup_reads_old_style_ids():
     assert id_from_url("arXiv:2610.00001v3") == "2610.00001"
 
 
-async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client, conn):
+async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client, conn: Session):
     """A search hit the collection lacks gets an arXiv entry from what the hit carries,
     beside the collection's papers, without being fetched (decision 6)."""
     hit = {
@@ -879,7 +847,7 @@ async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client
     assert text.count("@misc") == 2
     assert "eprint = {2610.99901}" in text and "year = {2026}" in text
     assert "author = {Ada Lovelace}" in text
-    assert await papers_store.get(conn, "2610.99901") is None
+    assert await in_read(conn, papers_store.get, "2610.99901") is None
     # A hit that is also chosen from the collection is not cited twice.
     hit["id"] = P.id
     text = (await client.post("/api/bibtex", json={"ids": [P.id], "cited": [hit]})).text
@@ -909,7 +877,7 @@ async def test_bibtex_covers_a_filter_and_papers_a_provider_found_outside(client
 
 
 async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_after(
-    conn, monkeypatch
+    conn: Session, monkeypatch
 ):
     """Before Process, the archive's record makes the page (DESIGN.md: title, authors,
     abstract, links; no rarity); after it, the page says the paper is fetched and waits for
@@ -966,14 +934,14 @@ async def test_an_archive_paper_has_a_page_before_process_and_shows_fetched_afte
         assert page["published"].startswith("2026-10-01")
         assert page["pdf_url"] == f"/api/papers/{pid}/pdf" and not page["card_requestable"]
         assert (await c.get("/api/papers/2610.08888")).status_code == 404
-        assert fetched == [] and await papers_store.get(conn, pid) is None
+        assert fetched == [] and await in_read(conn, papers_store.get, pid) is None
 
         assert (await settling.keep(conn, *await misses.resolve(Bridge(conn), pid)))[1]
         page = (await c.get(f"/api/papers/{pid}")).json()
         assert (page["stored"], page["in_collection"], page["next_run"]) == (True, False, True)
         assert fetched == [[pid]]
         # Dismissed, it stays fetched and no run processes it (L6-7).
-        assert await papers_store.dismiss(conn, pid)
+        assert await in_write(conn, papers_store.dismiss, pid)
         page = (await c.get(f"/api/papers/{pid}")).json()
         assert (page["stored"], page["next_run"]) == (True, False)
     for given in (None, down):
@@ -1000,7 +968,7 @@ async def hang(req: httpx.Request) -> httpx.Response:
 
 @pytest.mark.parametrize("trickle", ["headers", "body"])
 async def test_an_archive_paper_page_ends_at_its_deadline_however_the_archive_trickles(
-    conn, monkeypatch, slow_arxiv, trickle
+    conn: Session, monkeypatch, slow_arxiv, trickle
 ):
     """Bytes trickling in keep every socket read short: the page's own deadline ends the read,
     with the declared 503 (P5)."""
@@ -1018,7 +986,9 @@ async def test_an_archive_paper_page_ends_at_its_deadline_however_the_archive_tr
     assert answer.status_code == 503
 
 
-async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(conn, monkeypatch):
+async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(
+    conn: Session, monkeypatch
+):
     """The storage policy keeps few PDFs; the others are fetched when the owner opens them.
     Without an archive, or when it cannot get the PDF in time, arXiv's PDF is the answer."""
     from litwatch.archive import ArchiveClient
@@ -1026,7 +996,7 @@ async def test_a_pdf_opened_is_asked_for_urgently_and_served_from_the_archive(co
 
     await settling.save_tree(conn, TREE)
     held = P.model_copy(update={"version": 2})
-    await papers_store.upsert(conn, [held])
+    await in_write(conn, papers_store.upsert, [held])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     fake = FakeArchive()
     only = paper("2610.05555", title="Only in the archive", version=3)

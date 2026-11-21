@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import threading
+from collections.abc import AsyncIterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Self
@@ -19,7 +20,9 @@ from litwatch.events import dispatch
 from litwatch.feedback import word
 from litwatch.gates.database import STRICT_ENV, DatabaseGate, identity_of
 from litwatch.store import runs
+from litwatch.store.calls import CallJournal
 from tests import sessions
+from tests.sessions import Session, in_write
 from tests.settling import RULES
 
 
@@ -130,7 +133,7 @@ def no_host_services(monkeypatch):
 
 
 @pytest.fixture
-async def conn():
+async def conn() -> AsyncIterator[sessions.Session]:
     """A connection to an empty, migrated schema. Skips without `TEST_DATABASE_URL`, which
     must name a disposable database, never a production one."""
     dsn = os.environ.get("TEST_DATABASE_URL")
@@ -141,29 +144,29 @@ async def conn():
 
 
 @pytest.fixture
-async def db(conn):
+async def db(conn: Session):
     """The Database gate on `conn`'s schema, with a pool of its own."""
     async with gate_on(conn) as gate:
         yield gate
 
 
 @pytest.fixture
-async def gate(conn):
+async def gate(conn: Session):
     """The Database gate on `conn`'s schema, as `db`, for the modules whose own `db` fixture is
     a seeded connection."""
     async with gate_on(conn) as g:
         yield g
 
 
-def gate_on(conn) -> DatabaseGate:
+def gate_on(conn: Session) -> DatabaseGate:
     """A Database gate of its own on `conn`'s schema, with its own presence session: as another
     process's. Opened and closed with `async with`."""
     return DatabaseGate(conn.test_dsn, conn.test_schema)
 
 
-async def started(conn, kind: str, *args: Any, **kwargs: Any) -> int:
+async def started(conn: Session, kind: str, *args: Any, **kwargs: Any) -> int:
     """`store.runs.start` in the name of `conn`'s own session, alive while `conn` is open."""
-    return await runs.start(conn, kind, *args, me=await identity_of(conn), **kwargs)
+    return await in_write(conn, runs.start, kind, *args, me=await identity_of(conn), **kwargs)
 
 
 class AppClient(httpx.AsyncClient):
@@ -283,3 +286,12 @@ def slow_arxiv(monkeypatch):
     stop.set()
     server.shutdown()
     server.server_close()
+
+
+@pytest.fixture
+async def journal(conn: Session, db):
+    return CallJournal(db, await started(conn, "test"))
+
+
+async def calls(conn: Session):
+    return await (await conn.execute("SELECT * FROM inference_calls ORDER BY id")).fetchall()

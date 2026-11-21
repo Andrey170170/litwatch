@@ -7,21 +7,22 @@ from psycopg.types.json import Jsonb
 from litwatch import cli, store
 from litwatch.store import db
 from tests.conftest import gate_on
+from tests.sessions import Session
 
 
-async def tables(conn) -> set[str]:
+async def tables(conn: Session) -> set[str]:
     rows = await (
         await conn.execute("SELECT tablename FROM pg_tables WHERE schemaname = current_schema()")
     ).fetchall()
     return {r["tablename"] for r in rows}
 
 
-async def test_migrations_apply_once(conn):
+async def test_migrations_apply_once(conn: Session):
     assert await store.migrate(conn) == []
     assert {"papers", "runs", "inference_calls", "outbox"} <= await tables(conn)
 
 
-async def test_the_cli_migrates_the_gates_schema_under_the_migration_lock(conn):
+async def test_the_cli_migrates_the_gates_schema_under_the_migration_lock(conn: Session):
     for table in await tables(conn):
         await conn.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
     async with gate_on(conn) as gate:
@@ -30,7 +31,7 @@ async def test_the_cli_migrates_the_gates_schema_under_the_migration_lock(conn):
     assert {"papers", "runs", "inference_calls", "outbox"} <= await tables(conn)
 
 
-async def test_a_0x_database_is_refused(conn):
+async def test_a_0x_database_is_refused(conn: Session):
     # The schema as 0.x left it: no migration record, its own selections.
     for table in await tables(conn):
         await conn.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
@@ -53,7 +54,7 @@ def turns(n: int) -> list[dict]:
 
 
 @pytest.fixture
-async def before_traces(conn, monkeypatch):
+async def before_traces(conn: Session, monkeypatch):
     """`conn`'s schema rebuilt as it was before 0036, with a paper; `migrate` then applies it, and
     no later migration."""
     for table in await tables(conn):
@@ -70,7 +71,9 @@ async def before_traces(conn, monkeypatch):
     return conn
 
 
-async def attempt(conn, paper_id: str, job: str | None, usage: dict | None, ended=True) -> int:
+async def attempt(
+    conn: Session, paper_id: str, job: str | None, usage: dict | None, ended=True
+) -> int:
     row = await (
         await conn.execute(
             "INSERT INTO deep_attempts (paper_id, automatic, job_id, usage, ended_at) "
@@ -81,7 +84,7 @@ async def attempt(conn, paper_id: str, job: str | None, usage: dict | None, ende
     return row["id"]
 
 
-async def card_with(conn, paper_id: str, trace: list) -> None:
+async def card_with(conn: Session, paper_id: str, trace: list) -> None:
     await conn.execute(
         "INSERT INTO deep_cards (paper_id, card, trace, written_at) VALUES (%s, '{}', %s, now())",
         (paper_id, Jsonb(trace)),
@@ -138,7 +141,9 @@ async def test_a_trace_without_its_attempt_stops_the_whole_migration(before_trac
 WITHDRAWN = 41
 
 
-async def test_papers_already_withdrawn_are_dropped_from_their_stored_histories(conn, monkeypatch):
+async def test_papers_already_withdrawn_are_dropped_from_their_stored_histories(
+    conn: Session, monkeypatch
+):
     """The migration reads each stored version history: a paper whose newest version is empty
     (0kb) is withdrawn as of it, and dropped; an earlier empty version, or none, is not."""
     for table in await tables(conn):
@@ -179,7 +184,7 @@ async def test_papers_already_withdrawn_are_dropped_from_their_stored_histories(
 PROVISIONAL = 45
 
 
-async def test_a_provisional_label_left_stops_its_column_being_dropped(conn, monkeypatch):
+async def test_a_provisional_label_left_stops_its_column_being_dropped(conn: Session, monkeypatch):
     """Dropping the column would make a provisional label firm, so the migration refuses it;
     without one, the column goes."""
     for table in await tables(conn):
@@ -208,7 +213,7 @@ async def test_a_provisional_label_left_stops_its_column_being_dropped(conn, mon
 SET_BY = 46
 
 
-async def test_a_label_from_before_is_set_by_what_its_origin_says(conn, monkeypatch):
+async def test_a_label_from_before_is_set_by_what_its_origin_says(conn: Session, monkeypatch):
     """A miss's label was set by the miss, unless its value is one a miss can't write; every
     other by the owner: the backfill of `set_by`."""
     for table in await tables(conn):

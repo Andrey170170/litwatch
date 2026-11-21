@@ -27,11 +27,9 @@ from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests import sessions, settling
 from tests.conftest import FAITH, INTERP, TREE, AppClient, started
-from tests.fakes import ScriptedProvider
+from tests.fakes import ScriptedProvider, unavailable
 from tests.fakes_http import FakeArchive, mock
-from tests.sessions import Bridge
-from tests.test_intake import unavailable
-from tests.test_steps import (
+from tests.scripted import (
     ANALYSIS,
     CONFIG,
     LISTED,
@@ -44,14 +42,15 @@ from tests.test_steps import (
     refusal,
     rows,
 )
+from tests.sessions import Bridge, Session, in_read, in_write
 
 TOKEN = "s3cret"
 
 
 @pytest.fixture
-async def models(conn):
+async def models(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [A, B])
+    await in_write(conn, papers_store.upsert, [A, B])
     return Scripted()
 
 
@@ -59,7 +58,7 @@ def fit(value: str, reason: str = "Because.") -> dict:
     return {"reason": reason, "fit": value}
 
 
-async def verdicts(conn, paper_id: str) -> list[dict]:
+async def verdicts(conn: Session, paper_id: str) -> list[dict]:
     return await rows(conn, "SELECT * FROM verdicts WHERE paper_id = %s ORDER BY id", paper_id)
 
 
@@ -68,7 +67,9 @@ def test_every_grader_is_given_the_fit_definitions_word_for_word():
         assert meaning in grading.SYSTEM and meaning in grading.AREA_CHECK
 
 
-async def test_a_focus_topic_is_graded_by_both_labs_and_the_more_inclusive_fit_stands(conn, models):
+async def test_a_focus_topic_is_graded_by_both_labs_and_the_more_inclusive_fit_stands(
+    conn: Session, models
+):
     # B matches CoT faithfulness's keyword: graded for that Focus topic alone.
     models.fits[("judge", B.title)] = fit("central")
     models.fits[("check", B.title)] = fit("adjacent")
@@ -118,7 +119,7 @@ async def test_a_focus_topic_is_graded_by_both_labs_and_the_more_inclusive_fit_s
     [(0.9, False), (0.6, True), (0.3, True)],  # sure; a doubtful yes; a no
 )
 async def test_an_area_topic_escalates_to_check_on_doubt_and_the_less_inclusive_fit_stands(
-    conn, models, holds, escalated
+    conn: Session, models, holds, escalated
 ):
     models.decisions[A.title] = decision("other", interpretability=0.9)
     models.fits[("judge", A.title)] = fit("central")
@@ -136,14 +137,14 @@ async def test_an_area_topic_escalates_to_check_on_doubt_and_the_less_inclusive_
     assert await rows(conn, "SELECT 1 FROM library WHERE saved AND paper_id = %s", A.id) == []
 
 
-async def test_a_classified_paper_has_a_rarity_whatever_else_fails(conn, models):
+async def test_a_classified_paper_has_a_rarity_whatever_else_fails(conn: Session, models):
     models.analyses[A.title] = {"gist": "Too short."}  # invalid: no Weight
     await night(conn, models)  # A leads to no topic either
     (rarity,) = await rows(conn, "SELECT * FROM rarities WHERE paper_id = %s", A.id)
     assert (rarity["level"], rarity["best_topic"]) == ("uncommon", None)  # solid's floor
 
 
-async def test_a_field_topic_is_graded_by_field_grade_alone(conn, models):
+async def test_a_field_topic_is_graded_by_field_grade_alone(conn: Session, models):
     models.decisions[A.title] = decision("agents", agents=0.9)
     await night(conn, models)
     (v,) = await verdicts(conn, A.id)
@@ -151,11 +152,11 @@ async def test_a_field_topic_is_graded_by_field_grade_alone(conn, models):
     assert ("judge", A.title) not in models.asked
 
 
-async def test_a_rewritten_paper_is_graded_again_where_it_held_a_grade(conn, models):
+async def test_a_rewritten_paper_is_graded_again_where_it_held_a_grade(conn: Session, models):
     models.decisions[A.title] = decision("other", interpretability=0.9)
     await night(conn, models)
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(conn, [rewritten])
+    await in_write(conn, papers_store.upsert, [rewritten])
     models.decisions[A.title] = decision("other")  # no longer under Interpretability
     await night(conn, models)
     assert [(v["paper_revision"], v["topic"]) for v in await verdicts(conn, A.id)] == [
@@ -164,41 +165,50 @@ async def test_a_rewritten_paper_is_graded_again_where_it_held_a_grade(conn, mod
     ]
 
 
-async def test_a_rewrite_leaves_a_topic_that_held_none(conn, models):
+async def test_a_rewrite_leaves_a_topic_that_held_none(conn: Session, models):
     models.decisions[A.title] = decision("other", interpretability=0.9)
     models.fits[("judge", A.title)] = fit("none")
     await night(conn, models)
-    await papers_store.upsert(conn, [A.model_copy(update={"abstract": "Something else."})])
+    await in_write(
+        conn, papers_store.upsert, [A.model_copy(update={"abstract": "Something else."})]
+    )
     models.decisions[A.title] = decision("other")
     await night(conn, models)
     assert [v["paper_revision"] for v in await verdicts(conn, A.id)] == [1]
 
 
-async def test_a_topic_followed_later_grades_nothing_until_a_rerun_but_a_miss_does(conn, models):
+async def test_a_topic_followed_later_grades_nothing_until_a_rerun_but_a_miss_does(
+    conn: Session, models
+):
     await night(conn, models)  # A leads to no topic; its pass is done all the same
     assert await verdicts(conn, A.id) == []
     models.decisions[A.title] = decision("other", interpretability=0.9)
-    await classifications_store.put_owner(
-        conn, A, "interpretability", True, TREE.get("interpretability").version
+    await in_write(
+        conn,
+        classifications_store.put_owner,
+        A,
+        "interpretability",
+        True,
+        TREE.get("interpretability").version,
     )  # now under a followed topic, as if a class had moved
     await night(conn, models)
     assert await verdicts(conn, A.id) == []
     await settling.report_miss(conn, A.id, INTERP.slug, Fit.RELATED)
     await night(conn, models)
     assert [v["topic"] for v in await verdicts(conn, A.id)] == [INTERP.slug]
-    assert await verdicts_store.candidates(conn, FAILED_RUNS) == []  # the miss is done
+    assert await in_read(conn, verdicts_store.candidates, FAILED_RUNS) == []  # the miss is done
 
 
-async def test_the_limit_caps_papers_not_gradings(conn, models):
+async def test_the_limit_caps_papers_not_gradings(conn: Session, models):
     for p in (A, B):
         models.decisions[p.title] = decision("other", interpretability=0.9)
         models.fits[("judge", p.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models)  # classified; every grading left to try again
-    assert len(await verdicts_store.candidates(conn, FAILED_RUNS, limit=1)) == 1
-    tree = await taxonomy_store.load(conn)
-    due, _ = await grading.due(conn, tree, FAILED_RUNS, limit=1)
+    assert len(await in_read(conn, verdicts_store.candidates, FAILED_RUNS, limit=1)) == 1
+    tree = await in_read(conn, taxonomy_store.load)
+    due, _ = await in_read(conn, grading.due, tree, FAILED_RUNS, limit=1)
     assert [(d.paper.id, d.topic.slug) for d in due] == [(A.id, INTERP.slug)]
-    due, _ = await grading.due(conn, tree, FAILED_RUNS)
+    due, _ = await in_read(conn, grading.due, tree, FAILED_RUNS)
     assert {(d.paper.id, d.topic.slug) for d in due} == {
         (A.id, INTERP.slug),
         (B.id, INTERP.slug),
@@ -210,7 +220,9 @@ async def test_the_limit_caps_papers_not_gradings(conn, models):
     "error",
     [ProviderError("APITimeoutError", timeout=True), ProviderError("AuthenticationError: no key")],
 )
-async def test_a_grader_that_did_not_answer_is_retried_without_counting(conn, models, error):
+async def test_a_grader_that_did_not_answer_is_retried_without_counting(
+    conn: Session, models, error
+):
     models.fits[("check", B.title)] = error
     for _ in range(FAILED_RUNS + 1):
         models.asked.clear()
@@ -222,7 +234,7 @@ async def test_a_grader_that_did_not_answer_is_retried_without_counting(conn, mo
 
 
 @asynccontextmanager
-async def api(conn, models, config=CONFIG):
+async def api(conn: Session, models, config=CONFIG):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, config, gateway=models.gateway)
     headers = {"authorization": f"Bearer {TOKEN}"}
@@ -230,7 +242,7 @@ async def api(conn, models, config=CONFIG):
         yield c
 
 
-async def stuck(conn, models) -> None:
+async def stuck(conn: Session, models) -> None:
     """B's grading for its Focus topic failed three runs in a row: an unusable judge."""
     models.fits[("judge", B.title)] = fit("very central")
     for n in range(1, FAILED_RUNS + 1):
@@ -240,11 +252,13 @@ async def stuck(conn, models) -> None:
     del models.fits[("judge", B.title)]
 
 
-async def test_an_unusable_answer_is_no_verdict_and_three_leave_it_for_the_owner(conn, models):
+async def test_an_unusable_answer_is_no_verdict_and_three_leave_it_for_the_owner(
+    conn: Session, models
+):
     # One grader answering unusably is enough: the other's answer alone is no verdict.
     await stuck(conn, models)
     assert await verdicts(conn, B.id) == []
-    assert await verdicts_store.candidates(conn, FAILED_RUNS) == []
+    assert await in_read(conn, verdicts_store.candidates, FAILED_RUNS) == []
     models.asked.clear()
     await night(conn, models)
     assert ("judge", B.title) not in models.asked  # it waits for the owner now
@@ -269,13 +283,13 @@ async def test_an_unusable_answer_is_no_verdict_and_three_leave_it_for_the_owner
         assert (await client.post(now, json={"revision": 1})).status_code == 409  # done
     (v,) = await verdicts(conn, B.id)
     assert v["fit"] == "related"
-    assert await failures.stuck(conn, "grading", FAILED_RUNS) == []
+    assert await in_read(conn, failures.stuck, "grading", FAILED_RUNS) == []
 
 
 NOW = f"/api/settings/grading/{FAITH.slug}/{B.id}/now"
 
 
-async def test_grading_now_cut_short_is_left_to_the_next_night(conn, models, monkeypatch):
+async def test_grading_now_cut_short_is_left_to_the_next_night(conn: Session, models, monkeypatch):
     await stuck(conn, models)
 
     async def crash(conn, g):
@@ -292,7 +306,9 @@ async def test_grading_now_cut_short_is_left_to_the_next_night(conn, models, mon
     assert [v["fit"] for v in await verdicts(conn, B.id)] == ["related"]
 
 
-async def test_grading_now_on_text_that_changed_meanwhile_is_refused(conn, models, monkeypatch):
+async def test_grading_now_on_text_that_changed_meanwhile_is_refused(
+    conn: Session, models, monkeypatch
+):
     await stuck(conn, models)
 
     async def rewritten(conn, paper):
@@ -318,7 +334,7 @@ def paused(slug: str = FAITH.slug):
     )
 
 
-async def test_a_paused_topic_is_not_graded_now_nor_waits_for_the_owner(conn, models):
+async def test_a_paused_topic_is_not_graded_now_nor_waits_for_the_owner(conn: Session, models):
     await stuck(conn, models)
     await settling.save_taxonomy(conn, paused())
     async with api(conn, models) as client:
@@ -331,15 +347,17 @@ async def test_a_paused_topic_is_not_graded_now_nor_waits_for_the_owner(conn, mo
     assert await rows(conn, "SELECT 1 FROM runs WHERE kind = 'grading'") == []
 
 
-async def test_a_failure_on_a_paused_topic_does_not_wait_for_the_owner(conn, models):
+async def test_a_failure_on_a_paused_topic_does_not_wait_for_the_owner(conn: Session, models):
     await stuck(conn, models)
-    paper = await papers_store.get(conn, B.id)
-    assert await failures.waiting(conn, paper, "grading", FAILED_RUNS, FAITH.slug)
+    paper = await in_read(conn, papers_store.get, B.id)
+    assert await in_read(conn, failures.waiting, paper, "grading", FAILED_RUNS, FAITH.slug)
     await settling.save_taxonomy(conn, paused())
-    assert not await failures.waiting(conn, paper, "grading", FAILED_RUNS, FAITH.slug)
+    assert not await in_read(conn, failures.waiting, paper, "grading", FAILED_RUNS, FAITH.slug)
 
 
-async def test_grading_now_checks_the_topic_under_the_taxonomy_lock(conn, models, monkeypatch):
+async def test_grading_now_checks_the_topic_under_the_taxonomy_lock(
+    conn: Session, models, monkeypatch
+):
     """No topic edit can land between grading now's look at the topic and what it does: when
     it locks the paper, a pause trying to take the taxonomy lock finds it held."""
     await stuck(conn, models)
@@ -364,8 +382,10 @@ async def test_grading_now_checks_the_topic_under_the_taxonomy_lock(conn, models
     assert landed == [False]
 
 
-async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(conn, db, models):
-    paper = await papers_store.get(conn, B.id)
+async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(
+    conn: Session, db, models
+):
+    paper = await in_read(conn, papers_store.get, B.id)
     due = grading.Due(paper, FAITH, "Chain-of-thought faithfulness")
     async with (
         model_run(db, CONFIG, "grading", gateway=models.gateway) as run,
@@ -380,13 +400,13 @@ async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(conn,
     assert await rows(conn, "SELECT 1 FROM outbox WHERE type = 'verdict.recorded'") == []
 
 
-async def test_a_miss_whose_grading_stopped_is_no_longer_a_candidate(conn, models):
+async def test_a_miss_whose_grading_stopped_is_no_longer_a_candidate(conn: Session, models):
     await night(conn, models)  # A leads to no topic; its pass is done
     await settling.report_miss(conn, A.id, INTERP.slug, Fit.RELATED)
     models.fits[("judge", A.title)] = fit("very central")
     for _ in range(FAILED_RUNS):
         await night(conn, models)
-    assert await verdicts_store.candidates(conn, FAILED_RUNS) == []
+    assert await in_read(conn, verdicts_store.candidates, FAILED_RUNS) == []
 
 
 # B's second version as the archive lists it: a new abstract, so a rewrite.
@@ -408,14 +428,14 @@ B_REWRITTEN = {
 WINDOW = (date(2026, 10, 1), date(2026, 10, 14))
 
 
-async def assert_settled_on_solid(conn) -> None:
+async def assert_settled_on_solid(conn: Session) -> None:
     (g,) = await rows(conn, "SELECT * FROM effective_grades WHERE paper_id = %s", B.id)
     assert g["grade"] == "relevant"  # the new text has no Weight yet: solid
     (saved,) = await rows(conn, "SELECT saved FROM library WHERE paper_id = %s", B.id)
     assert saved["saved"] is True
 
 
-async def test_a_rewrite_read_in_settles_the_paper_on_solid(conn, db, models):
+async def test_a_rewrite_read_in_settles_the_paper_on_solid(conn: Session, db, models):
     models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
     await night(conn, models)  # related and incremental: adjacent, not saved
     fake = FakeArchive()
@@ -434,16 +454,16 @@ class FailingLater:
         raise ArchiveError("the archive went away")
 
 
-async def test_a_rewrite_settles_with_its_page_when_a_later_page_fails(conn, db, models):
+async def test_a_rewrite_settles_with_its_page_when_a_later_page_fails(conn: Session, db, models):
     models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
     await night(conn, models)
     with pytest.raises(ArchiveError):
         await intake_job.from_archive(db, CONFIG, FailingLater(), *WINDOW)
-    assert (await papers_store.get(conn, B.id)).version == 2  # the first page is stored
+    assert (await in_read(conn, papers_store.get, B.id)).version == 2  # the first page is stored
     await assert_settled_on_solid(conn)
 
 
-async def test_a_rewrite_whose_settle_fails_is_not_stored(conn, db, models, monkeypatch):
+async def test_a_rewrite_whose_settle_fails_is_not_stored(conn: Session, db, models, monkeypatch):
     async def failing(unit, paper_ids, **kwargs):
         raise RuntimeError("settle failed")
 
@@ -453,12 +473,14 @@ async def test_a_rewrite_whose_settle_fails_is_not_stored(conn, db, models, monk
     client = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
     with pytest.raises(RuntimeError, match="settle failed"):
         await intake_job.from_archive(db, CONFIG, client, *WINDOW)
-    stored = await papers_store.get(conn, B.id)
+    stored = await in_read(conn, papers_store.get, B.id)
     assert (stored.version, stored.revision, stored.abstract) == (B.version, 1, B.abstract)
     assert await rows(conn, "SELECT * FROM outbox WHERE type = 'paper.revised'") == []
 
 
-async def test_a_rewrite_harvested_from_arxiv_settles_as_it_is_stored(conn, models, monkeypatch):
+async def test_a_rewrite_harvested_from_arxiv_settles_as_it_is_stored(
+    conn: Session, models, monkeypatch
+):
     models.analyses[B.title] = ANALYSIS | {"weight": "incremental"}
     await night(conn, models)
     now = datetime.now(UTC) - timedelta(minutes=1)
@@ -484,7 +506,9 @@ def refused_by(models: Scripted, listed: list[str], title: str) -> None:
         models.said[(model, title)] = refusal(model)
 
 
-async def test_a_focus_side_refused_throughout_leaves_the_others_fit_standing(conn, models):
+async def test_a_focus_side_refused_throughout_leaves_the_others_fit_standing(
+    conn: Session, models
+):
     refused_by(models, JUDGES, B.title)
     models.fits[("check", B.title)] = fit("central")
     assert (await night(conn, models, LISTED))["graded"] == 1
@@ -504,7 +528,7 @@ async def test_a_focus_side_refused_throughout_leaves_the_others_fit_standing(co
         assert [(s["kind"], s["topic"]) for s in page["states"]] == [("one_lab", FAITH.slug)]
 
 
-async def test_a_one_lab_grade_below_related_waits_for_no_one(conn, models):
+async def test_a_one_lab_grade_below_related_waits_for_no_one(conn: Session, models):
     refused_by(models, CHECKS, B.title)
     models.fits[("judge", B.title)] = fit("adjacent")
     await night(conn, models, LISTED)
@@ -514,13 +538,15 @@ async def test_a_one_lab_grade_below_related_waits_for_no_one(conn, models):
         assert (await client.get("/api/settings/quality")).json()["night"]["splits"] == []
 
 
-async def test_a_refused_side_is_not_asked_again_while_the_other_has_not_answered(conn, models):
+async def test_a_refused_side_is_not_asked_again_while_the_other_has_not_answered(
+    conn: Session, models
+):
     refused_by(models, JUDGES, B.title)
     models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
     assert (await night(conn, models, LISTED))["grading_failed"] == 1
     (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
     assert (failure["failed_runs"], failure["refused"]) == (0, ["judge"])  # still pending
-    assert await failures.stuck(conn, "grading", FAILED_RUNS) == []
+    assert await in_read(conn, failures.stuck, "grading", FAILED_RUNS) == []
     models.fits[("check", B.title)] = fit("related")
     assert (await night(conn, models, LISTED))["graded"] == 1
     assert await calls_for(conn, B.id, "judge") == JUDGES  # the first night's, and no more
@@ -528,7 +554,7 @@ async def test_a_refused_side_is_not_asked_again_while_the_other_has_not_answere
     assert (v["fit"], v["one_lab"]) == ("related", True)
 
 
-async def test_a_refused_side_is_asked_again_once_the_question_changed(conn, models):
+async def test_a_refused_side_is_asked_again_once_the_question_changed(conn: Session, models):
     refused_by(models, JUDGES, B.title)
     models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models, LISTED)
@@ -546,7 +572,9 @@ async def test_a_refused_side_is_asked_again_once_the_question_changed(conn, mod
     assert (v["one_lab"], sorted(v["opinions"])) == (False, ["check", "judge"])
 
 
-async def test_a_remembered_refusal_with_its_provider_gone_waits_without_counting(conn, db, models):
+async def test_a_remembered_refusal_with_its_provider_gone_waits_without_counting(
+    conn: Session, db, models
+):
     refused_by(models, JUDGES, B.title)
     models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models, LISTED)
@@ -557,20 +585,22 @@ async def test_a_remembered_refusal_with_its_provider_gone_waits_without_countin
 
     models.fits[("check", B.title)] = fit("related")
     run_id = await nightly.run(db, LISTED, fetch=False, gateway=openrouter_only)
-    assert (await runs.get(conn, run_id))["counts"]["grading_failed"] == 1
+    assert (await in_read(conn, runs.get, run_id))["counts"]["grading_failed"] == 1
     (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
     assert failure["failed_runs"] == 0 and "no credentials" in failure["last_error"]
     assert await verdicts(conn, B.id) == []  # no grade from one lab on a side not asked
 
 
-async def test_a_remembered_refusal_gives_way_to_an_answer_journalled_since(conn, db, models):
+async def test_a_remembered_refusal_gives_way_to_an_answer_journalled_since(
+    conn: Session, db, models
+):
     refused_by(models, JUDGES, B.title)
     models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models, LISTED)
     # An evaluation asks judge the identical question, and Sonnet answers it this time.
     models.said[(JUDGES[1], B.title)] = fit("central")
-    tree = await taxonomy_store.load(conn)
-    paper = await papers_store.get(conn, B.id)
+    tree = await in_read(conn, taxonomy_store.load)
+    paper = await in_read(conn, papers_store.get, B.id)
     asked = grading.request(paper, tree.topic(FAITH.slug), tree.get(FAITH.slug).name)
     async with model_run(db, LISTED, "eval", gateway=models.gateway) as run:
         await run.gateway.ask("judge", asked, paper_id=B.id)
@@ -580,11 +610,11 @@ async def test_a_remembered_refusal_gives_way_to_an_answer_journalled_since(conn
     assert (v["fit"], v["split"], v["one_lab"]) == ("central", True, False)  # reused, not skipped
 
 
-async def test_both_sides_refused_throughout_is_ungraded_at_once(conn, models):
+async def test_both_sides_refused_throughout_is_ungraded_at_once(conn: Session, models):
     refused_by(models, JUDGES, B.title)
     refused_by(models, CHECKS, B.title)
     assert (await night(conn, models, LISTED))["grading_failed"] == 1
-    (stuck,) = await failures.stuck(conn, "grading", FAILED_RUNS)  # after one night
+    (stuck,) = await in_read(conn, failures.stuck, "grading", FAILED_RUNS)  # after one night
     assert (stuck["failed_runs"], stuck["refused"]) == (FAILED_RUNS, ["check", "judge"])
     assert stuck["stopped_by_refusal"] is True
     assert await verdicts(conn, B.id) == []
@@ -601,14 +631,14 @@ async def test_both_sides_refused_throughout_is_ungraded_at_once(conn, models):
 
 
 async def test_a_side_refused_throughout_while_the_other_fails_three_runs_is_said_as_such(
-    conn, models
+    conn: Session, models
 ):
     refused_by(models, JUDGES, B.title)
     for model in CHECKS:
         models.said[(model, B.title)] = fit("very central")  # invalid
     for _ in range(FAILED_RUNS):
         await night(conn, models, LISTED)
-    (stuck,) = await failures.stuck(conn, "grading", FAILED_RUNS)
+    (stuck,) = await in_read(conn, failures.stuck, "grading", FAILED_RUNS)
     assert (stuck["failed_runs"], stuck["refused"]) == (FAILED_RUNS, ["judge"])
     assert stuck["stopped_by_refusal"] is False  # the runs stopped it, not the refusal
     assert await calls_for(conn, B.id, "check") == CHECKS  # one model down each run
@@ -617,7 +647,7 @@ async def test_a_side_refused_throughout_while_the_other_fails_three_runs_is_sai
     assert [(s["kind"], s["refused"]) for s in page["states"]] == [("ungraded", False)]
 
 
-async def test_a_refusal_after_a_failed_run_stops_at_three_runs(conn, models):
+async def test_a_refusal_after_a_failed_run_stops_at_three_runs(conn: Session, models):
     models.decisions[A.title] = decision("agents", agents=0.9)
     fields = [m.model for m in LISTED.models.field_grade.models]
     models.said[(fields[0], A.title)] = fit("very central")  # invalid: one failed run
@@ -626,7 +656,7 @@ async def test_a_refusal_after_a_failed_run_stops_at_three_runs(conn, models):
     await night(conn, models, LISTED)
     # Started one model down, the run went on to the top: every model refused.
     assert await calls_for(conn, A.id, "field_grade") == [*fields[:1], *fields[1:], *fields[:1]]
-    (stuck,) = await failures.stuck(conn, "grading", FAILED_RUNS)
+    (stuck,) = await in_read(conn, failures.stuck, "grading", FAILED_RUNS)
     assert (stuck["topic"], stuck["failed_runs"], stuck["stopped_by_refusal"]) == (
         "agents",
         FAILED_RUNS,
@@ -634,12 +664,14 @@ async def test_a_refusal_after_a_failed_run_stops_at_three_runs(conn, models):
     )
 
 
-async def test_an_area_or_field_grading_refused_throughout_has_no_one_lab_rule(conn, models):
+async def test_an_area_or_field_grading_refused_throughout_has_no_one_lab_rule(
+    conn: Session, models
+):
     models.decisions[A.title] = decision("agents", agents=0.9, interpretability=0.9)
     refused_by(models, JUDGES, A.title)
     refused_by(models, [m.model for m in LISTED.models.field_grade.models], A.title)
     assert (await night(conn, models, LISTED))["grading_failed"] == 2
-    stopped = await failures.stuck(conn, "grading", FAILED_RUNS)
+    stopped = await in_read(conn, failures.stuck, "grading", FAILED_RUNS)
     assert {(f["topic"], tuple(f["refused"])) for f in stopped} == {
         (INTERP.slug, ("judge",)),
         ("agents", ("field_grade",)),
@@ -648,7 +680,9 @@ async def test_an_area_or_field_grading_refused_throughout_has_no_one_lab_rule(c
     assert await verdicts(conn, A.id) == []
 
 
-async def test_an_answer_that_came_in_is_kept_while_the_other_side_steps_down(conn, models):
+async def test_an_answer_that_came_in_is_kept_while_the_other_side_steps_down(
+    conn: Session, models
+):
     models.said[(CHECKS[0], B.title)] = fit("very central")  # invalid
     assert (await night(conn, models, LISTED))["grading_failed"] == 1
     assert (await night(conn, models, LISTED))["graded"] == 1

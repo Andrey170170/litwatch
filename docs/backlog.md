@@ -23,15 +23,10 @@ milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
 ### A1. Database gate
 
 Shaped 2026-11-17 in [`specs/architecture/a1-database-gate.md`](specs/architecture/a1-database-gate.md), planned in
-[`plans/a1-database-gate.md`](plans/a1-database-gate.md) (P1–P7); drive next. Input: the measurement of where work waits
+[`plans/a1-database-gate.md`](plans/a1-database-gate.md) (P1–P7). Input: the measurement of where work waits
 ([`notes/where-work-waits.md`](notes/where-work-waits.md), 2026-11-09/10).
 
-- **Tests reach `store` through units** (A1 P6's review): many tests still seed and assert with the raw `conn`
-  fixture, an autocommit connection, passed to store functions typed for units. They work, but a multi-row seed that
-  fails part way commits its first rows, and `ty` does not see the calls because the fixture is untyped. Typing the
-  fixture as a connection makes `ty` list them; each then takes a unit (`tests/sessions.Bridge`). With it, the
-  shared test helpers move out of `test_*` modules into support modules (review, project 7; about ten modules import
-  from each other).
+All built.
 
 ### A2. Work gate
 

@@ -11,6 +11,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store import verdicts
 from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, paper
+from tests.sessions import Bridge, Session, in_read, in_write
 
 TOKEN = "s3cret"
 P = paper("2610.00001", title="Faithful traces", abstract="Chain-of-thought omits steps.")
@@ -18,9 +19,9 @@ Q = paper("2610.00002", title="Protein folding", abstract="Structures.")
 
 
 @pytest.fixture
-async def client(conn):
+async def client(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P, Q])
+    await in_write(conn, papers_store.upsert, [P, Q])
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, Config())
     headers = {"authorization": f"Bearer {TOKEN}"}
@@ -38,7 +39,9 @@ async def test_the_taxonomy_reads_back_as_saved(client):
     )
 
 
-async def test_a_topic_edit_applies_forward_and_a_depth_change_settles_its_papers(client, conn):
+async def test_a_topic_edit_applies_forward_and_a_depth_change_settles_its_papers(
+    client, conn: Session
+):
     async def revision() -> int:
         row = await (
             await conn.execute("SELECT revision FROM topics WHERE class = %s", (FAITH.slug,))
@@ -60,8 +63,7 @@ async def test_a_topic_edit_applies_forward_and_a_depth_change_settles_its_paper
     nowhere = await client.put("/api/settings/topics/no-such-class", json=body)
     assert nowhere.status_code == 404
 
-    await verdicts.add(
-        conn,
+    await in_write(conn, verdicts.add,
         Verdict(
             paper_id=P.id, topic=FAITH.slug, topic_version="v", fit=Fit.RELATED, reason="r",
             opinions={},
@@ -91,7 +93,7 @@ async def test_the_owners_order(client):
     assert [t["class"] for t in topics] == order
 
 
-async def test_the_schedule_says_when_each_job_next_fires_in_its_zone(conn):
+async def test_the_schedule_says_when_each_job_next_fires_in_its_zone(conn: Session):
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
@@ -114,7 +116,9 @@ async def test_the_schedule_says_when_each_job_next_fires_in_its_zone(conn):
     assert (local.hour, local.minute) == (6, 0)
 
 
-async def test_quality_lists_last_nights_splits_and_escalations_and_hides_secrets(client, conn):
+async def test_quality_lists_last_nights_splits_and_escalations_and_hides_secrets(
+    client, conn: Session
+):
     await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
     judge = Opinion(fit=Fit.CENTRAL, reason="yes", model="a")
     disagrees = {"judge": judge, "check": Opinion(fit=Fit.NONE, reason="no", model="b")}
@@ -126,8 +130,9 @@ async def test_quality_lists_last_nights_splits_and_escalations_and_hides_secret
         "agents": {"escalated": True, "opinions": agrees},
     }
     for topic, marked in marks.items():
-        await verdicts.add(
+        await in_write(
             conn,
+            verdicts.add,
             Verdict(
                 paper_id=P.id,
                 topic=topic,
@@ -192,7 +197,7 @@ async def test_settings_refuse_what_does_not_exist(client):
     assert (await client.post("/api/settings/calibrate/999/more")).status_code == 404
 
 
-async def _classify(conn, paper, probabilities, primary):
+async def _classify(conn: Session, paper, probabilities, primary):
     """Record a classification as the nightly step would, with the memberships it makes."""
     from litwatch import classification
     from litwatch.core.classification import Classified, memberships
@@ -211,7 +216,7 @@ async def _classify(conn, paper, probabilities, primary):
         assert await classification.record(change.unit, c)
 
 
-async def test_a_miss_carries_what_each_stage_concluded(client, conn):
+async def test_a_miss_carries_what_each_stage_concluded(client, conn: Session):
     from litwatch.core import Reaction, ReactionReason, ReactionValue
 
     # Reported before any stage ran: every cell pending.
@@ -228,8 +233,9 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     assert m["trace"]["classified"] is False and m["trace"]["probability"] is None
     # Classified under the Focus threshold, kept in by the band; graded by both labs.
     await _classify(conn, Q, {FAITH.slug: 0.3, "other": 0.9}, "other")
-    await verdicts.add(
+    await in_write(
         conn,
+        verdicts.add,
         Verdict(
             paper_id=Q.id,
             topic=FAITH.slug,
@@ -255,7 +261,8 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     # A miss on the parent: the classifier's membership in the Focus class stands in it too.
     from litwatch.feedback import misses as misses_store
 
-    await misses_store.report(conn, P.id, "interpretability")
+    async with Bridge(conn).write("report", taxonomy="shared", papers=[P.id]) as unit:
+        await misses_store.report(unit, P.id, "interpretability")
     await _classify(conn, P, {FAITH.slug: 0.9, "interpretability": 0.1}, FAITH.slug)
     found = (await client.get("/api/settings/misses")).json()
     (parent,) = [x for x in found if x["topic"] == "interpretability"]
@@ -267,7 +274,8 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     (parent,) = [x for x in found if x["topic"] == "interpretability"]
     assert (parent["trace"]["classifier"], parent["trace"]["below"]) == (True, False)
     # The band admits a paper to one Focus class for grading, not to the classes above it.
-    await misses_store.report(conn, Q.id, "interpretability")
+    async with Bridge(conn).write("report", taxonomy="shared", papers=[Q.id]) as unit:
+        await misses_store.report(unit, Q.id, "interpretability")
     found = (await client.get("/api/settings/misses")).json()
     (band,) = [x for x in found if x["topic"] == "interpretability" and x["paper_id"] == Q.id]
     assert (band["trace"]["classifier"], band["trace"]["uncertain"]) == (False, False)
@@ -293,11 +301,11 @@ async def test_a_miss_carries_what_each_stage_concluded(client, conn):
     ]
 
 
-async def test_taxonomy_stats_and_export(client, conn):
+async def test_taxonomy_stats_and_export(client, conn: Session):
     from datetime import UTC, datetime
 
     recent = P.model_copy(update={"published": datetime.now(UTC).isoformat()})
-    await papers_store.upsert(conn, [recent])  # the keyword window is the last 90 days
+    await in_write(conn, papers_store.upsert, [recent])  # the keyword window is the last 90 days
     await _classify(conn, recent, {FAITH.slug: 0.9}, FAITH.slug)
     stats = (await client.get("/api/settings/taxonomy/stats")).json()
     # A member of the Focus class stands in its parent too.
@@ -313,15 +321,16 @@ async def test_taxonomy_stats_and_export(client, conn):
     assert text.startswith("classes:") and f"class: {FAITH.slug}" in text
 
 
-async def test_a_miss_reads_the_verdict_as_its_depth_graded_it(client, conn):
+async def test_a_miss_reads_the_verdict_as_its_depth_graded_it(client, conn: Session):
     """A Field topic is graded by `field_grade` alone, an Area topic by the judge with the check
     on doubt: the trace carries the graders asked and the Fit that stands by that depth's rule,
     not a Focus pair read as pending."""
 
     await settling.report_miss(conn, Q.id, AGENTS.slug)
     await settling.report_miss(conn, Q.id, INTERP.slug)
-    await verdicts.add(
+    await in_write(
         conn,
+        verdicts.add,
         Verdict(
             paper_id=Q.id,
             topic=AGENTS.slug,
@@ -331,8 +340,9 @@ async def test_a_miss_reads_the_verdict_as_its_depth_graded_it(client, conn):
             opinions={"field_grade": Opinion(fit=Fit.CENTRAL, reason="y", model="a")},
         ),
     )
-    await verdicts.add(
+    await in_write(
         conn,
+        verdicts.add,
         Verdict(
             paper_id=Q.id,
             topic=INTERP.slug,
@@ -360,10 +370,12 @@ async def test_a_miss_reads_the_verdict_as_its_depth_graded_it(client, conn):
     ]
 
 
-async def test_a_nights_cost_takes_in_the_runs_outside_jobs_until_the_next_night(client, conn):
+async def test_a_nights_cost_takes_in_the_runs_outside_jobs_until_the_next_night(
+    client, conn: Session
+):
     """The Briefs the worker writes after a night (its batches closed) are that day's spend, on
     that night's row; a job's run shows on its job, and the next night starts a new day."""
-    job = await jobs_store.create(conn, "process", {"papers": [P.id]}, 1, "queued")
+    job = await in_write(conn, jobs_store.create, "process", {"papers": [P.id]}, 1, "queued")
     await conn.execute(
         "INSERT INTO runs (kind, started_at, finished_at, cost, job_id) VALUES "
         "('nightly', now() - interval '30 hours', now() - interval '25 hours', 2, NULL), "
@@ -379,7 +391,7 @@ async def test_a_nights_cost_takes_in_the_runs_outside_jobs_until_the_next_night
     assert costs == [("5.5000", "0.5000"), ("5.0000", "3.0000")]
 
 
-async def test_a_split_on_an_older_text_no_longer_waits(client, conn):
+async def test_a_split_on_an_older_text_no_longer_waits(client, conn: Session):
     """A paper rewritten since its split (a new revision) is graded again by the next run: the
     old split is not the owner's to settle, on Needs you or in the sidebar's count."""
     await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
@@ -387,8 +399,9 @@ async def test_a_split_on_an_older_text_no_longer_waits(client, conn):
         "judge": Opinion(fit=Fit.CENTRAL, reason="yes", model="a"),
         "check": Opinion(fit=Fit.NONE, reason="no", model="b"),
     }
-    await verdicts.add(
+    await in_write(
         conn,
+        verdicts.add,
         Verdict(
             paper_id=P.id,
             topic=FAITH.slug,
@@ -405,14 +418,14 @@ async def test_a_split_on_an_older_text_no_longer_waits(client, conn):
     rewritten = paper(
         P.id, title=P.title, abstract="A new abstract on wholly other steps.", version=2
     )
-    await papers_store.upsert(conn, [rewritten])
-    assert await papers_store.revision(conn, P.id) == 2
+    await in_write(conn, papers_store.upsert, [rewritten])
+    assert await in_read(conn, papers_store.revision, P.id) == 2
     page = (await client.get("/api/settings/quality")).json()
     assert page["night"]["splits"] == []
     assert (await client.get("/api/summary")).json()["settings"]["waiting"] == 0
 
 
-async def test_the_summarys_hints_count_what_the_settings_pages_list(client, conn):
+async def test_the_summarys_hints_count_what_the_settings_pages_list(client, conn: Session):
     """The summary counts with narrow reads of its own: the splits Needs you lists that the
     owner has not labelled, and the last Calibrate session Calibrate lists."""
     await conn.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
@@ -430,7 +443,7 @@ async def test_the_summarys_hints_count_what_the_settings_pages_list(client, con
             opinions=opinions,
             split=True,
         )
-        await verdicts.add(conn, split)
+        await in_write(conn, verdicts.add, split)
     await conn.execute(
         "INSERT INTO labels (paper_id, topic, value, origin) VALUES (%s, %s, 'central', 'owner')",
         (P.id, FAITH.slug),
@@ -452,7 +465,7 @@ async def test_the_summarys_hints_count_what_the_settings_pages_list(client, con
     assert hints["last_session"] == sessions[0]["drawn_at"]
 
 
-async def test_the_summary_carries_the_status_line_the_badges_and_the_hints(client, conn):
+async def test_the_summary_carries_the_status_line_the_badges_and_the_hints(client, conn: Session):
     """One read for the shell: the run status, the shown topics in the fixed order as badges, and
     the Settings sidebar's counts, which follow the misses reported and the digests that failed."""
     before = (await client.get("/api/summary")).json()

@@ -22,12 +22,13 @@ from litwatch.store import word as word_store
 from tests import settling
 from tests.conftest import INTERP, TREE, deliver, paper, start
 from tests.fakes_http import FakeArchive, mock
+from tests.sessions import Session, in_write
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=3)
 
 
 @pytest.fixture
-async def world(conn):
+async def world(conn: Session):
     await settling.save_tree(conn, TREE)
     return conn
 
@@ -188,13 +189,19 @@ async def test_every_new_paper_is_registered_with_its_pdf_and_source(world, db):
     assert unknown.id in fake.records  # its metadata, and nothing to fetch yet
 
 
-async def _graded(conn, paper_id: str, topic: str, grade: Grade) -> None:
+async def _graded(conn: Session, paper_id: str, topic: str, grade: Grade) -> None:
     """The paper's effective grade on `topic` changes to `grade`, with its event."""
     fit = Fit.CENTRAL if grade != Grade.NONE else Fit.NONE
-    await word_store.set_effective(
-        conn, paper_id, topic, Effective(fit=fit, grade=grade, rarity=Rarity.RARE)
+    await in_write(
+        conn,
+        word_store.set_effective,
+        paper_id,
+        topic,
+        Effective(fit=fit, grade=grade, rarity=Rarity.RARE),
     )
-    await outbox.emit(conn, events.GRADE_CHANGED, paper_id, topic=topic, after=grade.value)
+    await in_write(
+        conn, outbox.emit, events.GRADE_CHANGED, paper_id, topic=topic, after=grade.value
+    )
 
 
 async def test_the_storage_policy_asks_for_the_pdfs_of_graded_up_and_saved_papers(world, db):
@@ -331,7 +338,7 @@ async def test_the_archive_answers_searches_by_arxiv_id_in_its_order():
 # -- webhook ---------------------------------------------------------------------------------------
 
 
-async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(conn, db):
+async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(conn: Session, db):
     received, status = [], [500]
 
     def receive(req: httpx.Request) -> httpx.Response:
@@ -342,13 +349,13 @@ async def test_a_webhook_posts_matching_events_signed_and_retries_on_failure(con
         "http://n8n.test/hook", patterns=("paper.*",), secret="s3cret", http=mock(receive)
     )
     await start(db, hook)
-    await papers_store.upsert(conn, [P])
-    saved = await outbox.emit(conn, events.PAPER_SAVED, P.id)
+    await in_write(conn, papers_store.upsert, [P])
+    saved = await in_write(conn, outbox.emit, events.PAPER_SAVED, P.id)
     await deliver(db, hook)
-    assert (await outbox.cursor(conn, hook.name)).failing is not None  # the 500
+    assert (await in_write(conn, outbox.cursor, hook.name)).failing is not None  # the 500
 
     status[0] = 204
-    await outbox.retry(conn, hook.name)
+    await in_write(conn, outbox.retry, hook.name)
     await deliver(db, hook)
     assert [json.loads(r.content)["type"] for r in received] == ["paper.added"] * 2 + [
         "paper.saved"

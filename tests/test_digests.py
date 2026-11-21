@@ -26,7 +26,7 @@ from litwatch.digests import writer
 from litwatch.jobs import digests as digests_job
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
-from litwatch.llm import Gateway, ProviderError, Reply, Stop, Usage
+from litwatch.llm import ProviderError, Reply, Stop, Usage
 from litwatch.store import classifications as classifications_store
 from litwatch.store import digests as store_
 from litwatch.store import papers as papers_store
@@ -34,12 +34,11 @@ from litwatch.store import reading, runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
 from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, gate_on, paper, started
-from tests.fakes import ScriptedProvider
-from tests.sessions import Bridge
-from tests.test_reading import analyse, classify, grade
+from tests.digesting import MON, SAT, THU, TUE, WED, Writer, area, day, focus, listed, week
+from tests.feeds import entry, feed
+from tests.seed import analyse, classify, grade
+from tests.sessions import Bridge, Session, in_read, in_write
 
-TUE, WED, THU, SAT = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8), date(2026, 10, 10)
-MON = date(2026, 10, 5)
 TOKEN = "t"
 P = paper("2610.00001", title="Traces that hide steps")
 Q = paper("2610.00002", title="A near neighbour")
@@ -47,83 +46,16 @@ R = paper("2610.00003", title="A distant cousin")
 S = paper("2610.00004", title="Late to the party")
 
 
-class Writer:
-    """The `writer` role, scripted: a valid answer built from the request's answer model (the
-    first candidates as picks, a Focus daily marking its first paper, a Focus weekly bringing
-    back the first earlier paper), or each of `failures` raised in turn first."""
-
-    def __init__(self) -> None:
-        self.failures: list[Exception] = []
-        self.asked: list[str] = []
-
-    def respond(self, role, request) -> str:
-        self.asked.append(request.user)
-        if self.failures:
-            raise self.failures.pop(0)
-        out = request.output
-        answer = {"text": " ".join(["Probes recover hidden steps."] * 20), "gist": "words " * 40}
-        if issubclass(out, writer.Picked):
-            n = out.picks_range[1] if out.picks_range[0] else min(1, out.picks_range[1])
-            picks = sorted(out.candidates)[:n]
-            answer |= {"picks": [{"paper": p, "why": "It stands out."} for p in picks]}
-        if issubclass(out, writer.FocusDay):
-            answer["text"] += f" [The first]({min(out.papers)}) shows it."
-        if issubclass(out, writer.FocusWeek) and out.earlier:
-            answer["text"] += f" As [an earlier paper]({min(out.earlier)}) found."
-        return json.dumps(answer)
-
-    def gateway(self, config: Config, journal) -> Gateway:
-        providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
-
-
 @pytest.fixture
-async def db(conn):
+async def db(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [P, Q, R, S])
+    await in_write(conn, papers_store.upsert, [P, Q, R, S])
     return conn
 
 
-async def listed(conn, day: date, *papers) -> None:
-    await conn.execute(
-        "UPDATE papers SET announced = %s WHERE id = ANY(%s)", (day, [p.id for p in papers])
-    )
-
-
-async def focus(conn, p, fit: str) -> None:
-    """Graded on the Focus topic at `fit`."""
-    await classify(conn, p, FAITH.slug)
-    await analyse(conn, p)
-    await grade(conn, p, fit)
-
-
-async def area(conn, p, fit: str, weight: str = "solid") -> None:
-    """A member of the Area topic's class, graded there at `fit`, grading finished."""
-    await classify(conn, p, INTERP.slug)
-    await analyse(conn, p, weight)
-    await grade(conn, p, fit, INTERP)
-    await verdicts.passed(conn, [(p.id, 1)])
-
-
-async def day(conn, w: Writer, on: date, config: Config | None = None) -> bool:
-    tree = await taxonomy_store.load(conn)
-    async with (
-        gate_on(conn) as db,
-        model_run(db, config or Config(), "digests", gateway=w.gateway) as run,
-    ):
-        return await digests.write_day(Bridge(conn), run, tree, on, rules=settling.RULES)
-
-
-async def week(conn, w: Writer, monday: date) -> None:
-    tree = await taxonomy_store.load(conn)
-    async with (
-        gate_on(conn) as db,
-        model_run(db, Config(), "digests", gateway=w.gateway) as run,
-    ):
-        await digests.write_week(Bridge(conn), run, tree, monday, rules=settling.RULES)
-
-
-async def shown(conn, topic: str, period: str, on: date) -> tuple[str, list[tuple[str, str]]]:
+async def shown(
+    conn: Session, topic: str, period: str, on: date
+) -> tuple[str, list[tuple[str, str]]]:
     """The digest's state, and its papers with their roles in its order."""
     row = await (
         await conn.execute(
@@ -134,7 +66,7 @@ async def shown(conn, topic: str, period: str, on: date) -> tuple[str, list[tupl
     if row is None:
         return None, []
     return row["state"], [
-        (p["paper_id"], p["role"]) for p in await store_.papers_of(conn, row["id"])
+        (p["paper_id"], p["role"]) for p in await in_read(conn, store_.papers_of, row["id"])
     ]
 
 
@@ -158,7 +90,7 @@ def test_a_paper_is_listed_the_weekday_after_the_deadline_it_made():
     assert listing_day(datetime(2026, 12, 7, 18, 30, tzinfo=UTC)) == date(2026, 12, 8)
 
 
-async def test_the_migration_dates_stored_papers_as_the_code_does(conn):
+async def test_the_migration_dates_stored_papers_as_the_code_does(conn: Session):
     """0024 backfills `announced` in SQL; it agrees with `core.digests.announced`."""
     late = paper("2610.00011", version_history=[{"version": 1, "date": "2026-10-05T18:30:00Z"}])
     early = paper("2610.00012", version_history=[{"version": 1, "date": "2026-10-05T17:00:00Z"}])
@@ -166,7 +98,7 @@ async def test_the_migration_dates_stored_papers_as_the_code_does(conn):
     friday = paper("2610.00014", published="2026-10-09")
     searched = paper("2610.00015", published="2026-10-05T18:30:00+00:00")  # arXiv search's time
     found = [late, early, weekend, friday, searched]
-    await papers_store.upsert(conn, found)
+    await in_write(conn, papers_store.upsert, found)
     by_code = {
         r["id"]: r["announced"]
         for r in await (await conn.execute("SELECT id, announced FROM papers")).fetchall()
@@ -192,7 +124,7 @@ async def test_the_migration_dates_stored_papers_as_the_code_does(conn):
 # -- due, per depth --------------------------------------------------------------------------------
 
 
-async def test_a_focus_daily_lists_central_then_related_and_each_paper_once(db):
+async def test_a_focus_daily_lists_central_then_related_and_each_paper_once(db: Session):
     w = Writer()
     await focus(db, P, "related")
     await focus(db, Q, "central")
@@ -210,7 +142,7 @@ async def test_a_focus_daily_lists_central_then_related_and_each_paper_once(db):
     assert await shown(db, FAITH.slug, "day", WED) == ("written", [(S.id, "listed")])
 
 
-async def test_the_owners_word_never_makes_a_paper_due(db):
+async def test_the_owners_word_never_makes_a_paper_due(db: Session):
     await focus(db, P, "adjacent")
     await listed(db, TUE, P)
     label = Label(paper_id=P.id, topic=FAITH.slug, value=LabelValue.CENTRAL, origin="reader")
@@ -219,7 +151,7 @@ async def test_the_owners_word_never_makes_a_paper_due(db):
     assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
 
 
-async def test_a_late_paper_is_in_the_next_daily_with_its_own_listing_day(db):
+async def test_a_late_paper_is_in_the_next_daily_with_its_own_listing_day(db: Session):
     """Graded after Tuesday's digest (its grading failed that night), P is due on Wednesday."""
     w = Writer()
     await listed(db, TUE, P)
@@ -231,7 +163,7 @@ async def test_a_late_paper_is_in_the_next_daily_with_its_own_listing_day(db):
     assert "(listed Tue 6 Oct 2026)" in w.asked[-1]
 
 
-async def test_an_area_must_read_waits_for_its_weight_recheck(db):
+async def test_an_area_must_read_waits_for_its_weight_recheck(db: Session):
     """Graded must read from its abstract, P waits for the re-check its grading queued; Q,
     relevant, does not. Once the re-check is done P is due, and a pick candidate."""
     w = Writer()
@@ -250,7 +182,7 @@ async def test_an_area_must_read_waits_for_its_weight_recheck(db):
     assert await shown(db, INTERP.slug, "day", WED) == ("written", [(P.id, "pick")])
 
 
-async def test_a_terminal_recheck_makes_the_paper_due_on_its_abstract_weight(db):
+async def test_a_terminal_recheck_makes_the_paper_due_on_its_abstract_weight(db: Session):
     await area(db, P, "central")
     await listed(db, TUE, P)
     await db.execute(
@@ -261,7 +193,7 @@ async def test_a_terminal_recheck_makes_the_paper_due_on_its_abstract_weight(db)
     assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(P.id, "pick")])
 
 
-async def test_an_area_paper_waits_while_its_grading_is_unfinished(db):
+async def test_an_area_paper_waits_while_its_grading_is_unfinished(db: Session):
     await classify(db, P, INTERP.slug)
     await analyse(db, P)
     await listed(db, TUE, P)
@@ -269,13 +201,13 @@ async def test_an_area_paper_waits_while_its_grading_is_unfinished(db):
     assert await shown(db, INTERP.slug, "day", TUE) == ("nothing_new", [])
 
 
-async def test_a_field_paper_is_due_until_a_weekly_digest_covers_it(db):
+async def test_a_field_paper_is_due_until_a_weekly_digest_covers_it(db: Session):
     w = Writer()
     for p in (P, Q):
         await classify(db, p, AGENTS.slug)
         await analyse(db, p)
         await grade(db, p, "related", AGENTS)
-        await verdicts.passed(db, [(p.id, 1)])
+        await in_write(db, verdicts.passed, [(p.id, 1)])
     await listed(db, TUE, P)
     await listed(db, date(2026, 10, 13), Q)
     await week(db, w, MON)
@@ -286,7 +218,7 @@ async def test_a_field_paper_is_due_until_a_weekly_digest_covers_it(db):
     assert {p for p, _ in (await shown(db, AGENTS.slug, "week", date(2026, 10, 12)))[1]} == {Q.id}
 
 
-async def test_a_focus_weekly_covers_its_dailies_and_may_bring_back_an_earlier_paper(db):
+async def test_a_focus_weekly_covers_its_dailies_and_may_bring_back_an_earlier_paper(db: Session):
     w = Writer()
     await focus(db, P, "central")
     await listed(db, date(2026, 9, 29), P)  # the week before
@@ -313,12 +245,12 @@ async def test_a_focus_weekly_covers_its_dailies_and_may_bring_back_an_earlier_p
     assert "The first shows it" in w.asked[-1] and "](" not in w.asked[-1]  # dailies, unmarked
 
 
-async def test_the_owners_word_neither_makes_an_area_paper_due_nor_keeps_one(db):
+async def test_the_owners_word_neither_makes_an_area_paper_due_nor_keeps_one(db: Session):
     """A label related on a paper outside the Area's subtree makes it no member; a label
     adjacent on a member takes it out."""
     await classify(db, P, AGENTS.slug)
     await analyse(db, P)
-    await verdicts.passed(db, [(P.id, 1)])
+    await in_write(db, verdicts.passed, [(P.id, 1)])
     await settling.label(
         db, Label(paper_id=P.id, topic=INTERP.slug, value=LabelValue.RELATED, origin="reader")
     )
@@ -332,76 +264,83 @@ async def test_the_owners_word_neither_makes_an_area_paper_due_nor_keeps_one(db)
     assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(R.id, "listed")])
 
 
-async def test_a_paper_the_keyword_check_sent_to_a_focus_topic_is_in_its_areas_daily(db):
+async def test_a_paper_the_keyword_check_sent_to_a_focus_topic_is_in_its_areas_daily(db: Session):
     """No member of the Area's class by classification, it reached the Focus topic by the
     keyword check; graded related there, it is the Area's too, and graded adjacent, it is not."""
     for p, fit in ((P, "related"), (Q, "adjacent")):
         await classify(db, p, keyword=(FAITH.slug,))
         await analyse(db, p)
         await grade(db, p, fit)
-    await verdicts.passed(db, [(P.id, 1), (Q.id, 1)])
+    await in_write(db, verdicts.passed, [(P.id, 1), (Q.id, 1)])
     await listed(db, TUE, P, Q)
     await day(db, Writer(), TUE)
     state, found = await shown(db, INTERP.slug, "day", TUE)
     assert state == "written" and [i for i, _ in found] == [P.id]
 
 
-async def test_a_reported_miss_graded_central_is_due_neither_for_its_topic_nor_above(db):
+async def test_a_reported_miss_graded_central_is_due_neither_for_its_topic_nor_above(db: Session):
     """Grading follows the owner's report of a miss, but the owner already knows the paper."""
     await classify(db, P)
     await analyse(db, P)
-    version = (await taxonomy_store.load(db)).get(FAITH.slug).version
-    await classifications_store.put_owner(db, P, FAITH.slug, True, version, source=Source.MISS)
+    version = (await in_read(db, taxonomy_store.load)).get(FAITH.slug).version
+    await in_write(
+        db, classifications_store.put_owner, P, FAITH.slug, True, version, source=Source.MISS
+    )
     await grade(db, P, "central")
-    await verdicts.passed(db, [(P.id, 1)])
+    await in_write(db, verdicts.passed, [(P.id, 1)])
     await listed(db, TUE, P)
     await day(db, Writer(), TUE)
     assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
     assert await shown(db, INTERP.slug, "day", TUE) == ("nothing_new", [])
 
 
-async def test_a_rewritten_paper_graded_again_where_it_was_held_is_due_there(db):
+async def test_a_rewritten_paper_graded_again_where_it_was_held_is_due_there(db: Session):
     """Graded adjacent, then rewritten and classified elsewhere: grading follows it to the topic
     from its older text (pipeline.md, section 8), and a related verdict makes it due there and
     in the Area above."""
     await focus(db, P, "adjacent")
-    await verdicts.passed(db, [(P.id, 1)])
+    await in_write(db, verdicts.passed, [(P.id, 1)])
     rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(db, [rewritten])
+    await in_write(db, papers_store.upsert, [rewritten])
     await classify(db, rewritten)
     await analyse(db, rewritten)
     await grade(db, rewritten, "related")
-    await verdicts.passed(db, [(P.id, 2)])
+    await in_write(db, verdicts.passed, [(P.id, 2)])
     await listed(db, TUE, P)
     await day(db, Writer(), TUE)
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
     assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(P.id, "listed")])
 
 
-async def test_an_owners_class_label_taking_a_held_paper_out_keeps_it_from_being_due(db):
+async def test_an_owners_class_label_taking_a_held_paper_out_keeps_it_from_being_due(db: Session):
     """Held on the Focus topic from its older text, but the owner has since taken it out of
     that class: grading follows it there, and its new verdict makes it due nowhere."""
     await focus(db, P, "adjacent")
-    await verdicts.passed(db, [(P.id, 1)])
+    await in_write(db, verdicts.passed, [(P.id, 1)])
     rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(db, [rewritten])
+    await in_write(db, papers_store.upsert, [rewritten])
     await classify(db, rewritten)
-    await classifications_store.put_owner(
-        db, rewritten, FAITH.slug, False, TREE.get(FAITH.slug).version
+    await in_write(
+        db,
+        classifications_store.put_owner,
+        rewritten,
+        FAITH.slug,
+        False,
+        TREE.get(FAITH.slug).version,
     )
     await analyse(db, rewritten)
     await grade(db, rewritten, "related")
-    await verdicts.passed(db, [(P.id, 2)])
+    await in_write(db, verdicts.passed, [(P.id, 2)])
     await listed(db, TUE, P)
     await day(db, Writer(), TUE)
     assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
     assert await shown(db, INTERP.slug, "day", TUE) == ("nothing_new", [])
 
 
-async def test_a_rewritten_focus_paper_waits_for_its_new_texts_grading(db):
+async def test_a_rewritten_focus_paper_waits_for_its_new_texts_grading(db: Session):
     await focus(db, P, "central")
     rewritten = P.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(db, [rewritten])
+    await in_write(db, papers_store.upsert, [rewritten])
     await listed(db, TUE, P)
     await listed(db, WED, S)
     await day(db, Writer(), TUE)
@@ -411,7 +350,7 @@ async def test_a_rewritten_focus_paper_waits_for_its_new_texts_grading(db):
     assert await shown(db, FAITH.slug, "day", WED) == ("written", [(P.id, "listed")])
 
 
-async def test_a_grading_failed_on_a_paused_topic_does_not_hold_back_its_area(db):
+async def test_a_grading_failed_on_a_paused_topic_does_not_hold_back_its_area(db: Session):
     """A paused topic grades nothing, so its failed grading is not waited for."""
     await area(db, Q, "related")
     await db.execute(
@@ -425,36 +364,34 @@ async def test_a_grading_failed_on_a_paused_topic_does_not_hold_back_its_area(db
     assert await shown(db, INTERP.slug, "day", TUE) == ("written", [(Q.id, "listed")])
 
 
-async def test_a_focus_paper_without_its_brief_is_written_from_its_abstract(db):
+async def test_a_focus_paper_without_its_brief_is_written_from_its_abstract(db: Session):
     w = Writer()
     late = paper("2610.00021", title="No Brief yet", abstract="Probes read the hidden steps.")
-    await papers_store.upsert(db, [late])
+    await in_write(db, papers_store.upsert, [late])
     await focus(db, late, "central")
     await listed(db, TUE, late)
     await day(db, w, TUE)
     assert "Abstract: Probes read the hidden steps." in w.asked[0]
 
 
-async def test_a_feed_without_submission_times_dates_a_paper_by_its_listing(db):
+async def test_a_feed_without_submission_times_dates_a_paper_by_its_listing(db: Session):
     """Atom, the fallback when OAI is out, carries the listing day and no submission time."""
     from litwatch.intake.atom import parse_feed  # noqa: PLC0415
-    from tests.test_intake_atom import entry, feed  # noqa: PLC0415
 
     batch = parse_feed(feed(entry("2609.11999v1")))
-    await papers_store.upsert(db, batch.papers, source="atom", listed=batch.listed)
+    await in_write(db, papers_store.upsert, batch.papers, source="atom", listed=batch.listed)
     row = await (
         await db.execute("SELECT announced FROM papers WHERE id = '2609.11999'")
     ).fetchone()
     assert row["announced"] == date(2026, 9, 14)
 
 
-async def test_a_cross_listing_is_dated_by_its_feed_only_when_new(db):
+async def test_a_cross_listing_is_dated_by_its_feed_only_when_new(db: Session):
     """An older paper's cross-listing is not its first listing, so Atom leaves it undated; a new
     submission cross-listed from a category intake does not read (a first version, its id of the
     feed's month or the one before) is dated by the feed like a new paper, and canonical metadata
     corrects either."""
     from litwatch.intake.atom import parse_feed  # noqa: PLC0415
-    from tests.test_intake_atom import entry, feed  # noqa: PLC0415
 
     entries = [
         entry("2609.11999v1"),
@@ -465,9 +402,9 @@ async def test_a_cross_listing_is_dated_by_its_feed_only_when_new(db):
         entry("2401.00001v3", "cross"),
     ]
     batch = parse_feed(feed("".join(entries)))
-    await papers_store.upsert(db, batch.papers, source="atom", listed=batch.listed)
+    await in_write(db, papers_store.upsert, batch.papers, source="atom", listed=batch.listed)
     oai = paper("2609.11999", title="A paper", published="2026-09-10")
-    await papers_store.upsert(db, [oai])
+    await in_write(db, papers_store.upsert, [oai])
     ids = [p.id for p in batch.papers]
     rows = await (
         await db.execute("SELECT id, announced FROM papers WHERE id = ANY(%s)", (ids,))
@@ -496,41 +433,41 @@ def oai(id: str, created: str, version_history=(), **more):
     return paper(id, published=at, updated=at, version=version, version_history=found, **more)
 
 
-async def day_of(conn, p) -> date:
+async def day_of(conn: Session, p) -> date:
     row = await (
         await conn.execute("SELECT announced FROM papers WHERE id = %s", (p.id,))
     ).fetchone()
     return row["announced"]
 
 
-async def test_a_failed_version_list_never_moves_a_known_first_day(db):
+async def test_a_failed_version_list_never_moves_a_known_first_day(db: Session):
     """Read from v1's submission time, a first day stands against a record whose version list
     failed to load, whose `<created>` is a later version's date; and against a second one,
     after the first cleared the stored history."""
     old = oai("2605.00001", "2026-05-04", history("2026-05-04T15:00:00+00:00", "2026-05-08"))
-    await papers_store.upsert(db, [old], source="oai")
+    await in_write(db, papers_store.upsert, [old], source="oai")
     assert await day_of(db, old) == date(2026, 5, 5)
     for created in ("2026-10-12", "2026-10-14"):
-        await papers_store.upsert(db, [oai(old.id, created)], source="oai")
+        await in_write(db, papers_store.upsert, [oai(old.id, created)], source="oai")
         assert await day_of(db, old) == date(2026, 5, 5)
 
 
-async def test_a_version_history_corrects_a_guessed_first_day_either_way(db):
+async def test_a_version_history_corrects_a_guessed_first_day_either_way(db: Session):
     """A Monday `<created>` reads as Tuesday's listing, a Monday-afternoon v1 is Wednesday's;
     a `<created>` that was a later version's date reads months late."""
     early = oai("2610.00031", "2026-10-05")
     late = oai("2610.00032", "2026-10-12")
-    await papers_store.upsert(db, [early, late], source="oai")
+    await in_write(db, papers_store.upsert, [early, late], source="oai")
     assert (await day_of(db, early), await day_of(db, late)) == (TUE, date(2026, 10, 13))
     known = [
         oai(early.id, "2026-10-05", history("2026-10-05T19:00:00+00:00")),
         oai(late.id, "2026-10-12", history("2026-05-04T15:00:00+00:00", "2026-10-12")),
     ]
-    await papers_store.upsert(db, known, source="oai")
+    await in_write(db, papers_store.upsert, known, source="oai")
     assert (await day_of(db, early), await day_of(db, late)) == (WED, date(2026, 5, 5))
 
 
-async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db, gate):
+async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db: Session, gate):
     """P's re-check finishes on Saturday, after Friday's digest: Monday's daily covers it,
     and the weekly of P's week, written after it, has it; the next weekly does not list it,
     and the weekly before does not take Monday's own paper."""
@@ -543,7 +480,7 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db, gate):
     await db.execute("UPDATE fulltext_passes SET state = 'done' WHERE paper_id = %s", (P.id,))
     await area(db, R, "related")
     await listed(db, mon2, R)
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.nightly(gate, run, tree, mon2, rules=settling.RULES)
     assert {p for p, _ in (await shown(db, INTERP.slug, "day", mon2))[1]} == {P.id, R.id}
@@ -556,7 +493,9 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db, gate):
     assert asked.index("Also in the week's daily digests") < asked.index(P.id)
 
 
-async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_own(db, gate):
+async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_own(
+    db: Session, gate
+):
     """P is listed late, in Monday's daily; the weekly before takes it. The next weekly reads
     that daily, so its writer is given P as one of the week's, not as an earlier paper: its
     text may name P and still bring back one earlier paper, R."""
@@ -583,7 +522,7 @@ async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_
     await focus(db, P, "central")
     await focus(db, Q, "central")
     await listed(db, mon2, Q)
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.nightly(gate, run, tree, mon2, rules=settling.RULES)
     assert (P.id, "listed") in (await shown(db, FAITH.slug, "week", MON))[1]
@@ -599,7 +538,9 @@ async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_
     assert asked.index(P.id) < asked.index("Earlier papers") < asked.index(R.id)
 
 
-async def test_a_daily_paper_no_weekly_has_and_no_longer_due_is_not_given_to_the_weekly(db):
+async def test_a_daily_paper_no_weekly_has_and_no_longer_due_is_not_given_to_the_weekly(
+    db: Session,
+):
     w = Writer()
     await focus(db, P, "central")
     await focus(db, Q, "central")
@@ -631,15 +572,17 @@ def updated(id: str, *later: str, title: str = "Back with a new version", **more
 U = updated("2605.00011")
 
 
-async def field(conn, p, fit: str) -> None:
+async def field(conn: Session, p, fit: str) -> None:
     """A member of the Field topic's class, graded there at `fit`, grading finished."""
     await classify(conn, p, AGENTS.slug)
     await analyse(conn, p)
     await grade(conn, p, fit, AGENTS)
-    await verdicts.passed(conn, [(p.id, await papers_store.revision(conn, p.id))])
+    await in_write(
+        conn, verdicts.passed, [(p.id, await in_read(conn, papers_store.revision, p.id))]
+    )
 
 
-async def digest_row(conn, topic: str, period: str, on: date) -> dict:
+async def digest_row(conn: Session, topic: str, period: str, on: date) -> dict:
     return await (
         await conn.execute(
             "SELECT * FROM digests WHERE topic = %s AND period = %s AND day = %s",
@@ -648,13 +591,13 @@ async def digest_row(conn, topic: str, period: str, on: date) -> dict:
     ).fetchone()
 
 
-async def test_an_old_papers_new_version_is_listed_once_in_its_daily_and_its_weekly(db):
+async def test_an_old_papers_new_version_is_listed_once_in_its_daily_and_its_weekly(db: Session):
     """U, first out in May, is back with v2 in Tuesday's listing: Tuesday's daily lists it as
     updated, after the papers. Its v3, in the next Monday's listing, brings it back in no later
     daily; the week's weekly recaps it once, at the version its daily listed, and the next
     weekly, though v3 is of its week, does not."""
     w = Writer()
-    await papers_store.upsert(db, [U])
+    await in_write(db, papers_store.upsert, [U])
     await focus(db, U, "central")
     await focus(db, S, "related")
     await listed(db, TUE, S)
@@ -664,8 +607,8 @@ async def test_an_old_papers_new_version_is_listed_once_in_its_daily_and_its_wee
         [(S.id, "listed"), (U.id, "updated")],
     )
     tuesday = await digest_row(db, FAITH.slug, "day", TUE)
-    assert [p["version"] for p in await store_.papers_of(db, tuesday["id"])] == [None, 2]
-    await papers_store.upsert(db, [updated(U.id, FOR_TUE, "2026-10-09T15:00:00+00:00")])
+    assert [p["version"] for p in await in_read(db, store_.papers_of, tuesday["id"])] == [None, 2]
+    await in_write(db, papers_store.upsert, [updated(U.id, FOR_TUE, "2026-10-09T15:00:00+00:00")])
     await focus(db, Q, "related")
     await listed(db, THU, Q)
     await day(db, w, THU)
@@ -676,7 +619,7 @@ async def test_an_old_papers_new_version_is_listed_once_in_its_daily_and_its_wee
         [(S.id, "listed"), (Q.id, "listed"), (U.id, "updated")],
     )
     weekly = await digest_row(db, FAITH.slug, "week", MON)
-    assert [p["version"] for p in await store_.papers_of(db, weekly["id"])][-1] == 2
+    assert [p["version"] for p in await in_read(db, store_.papers_of, weekly["id"])][-1] == 2
     await listed(db, date(2026, 10, 12), R)
     await day(db, w, date(2026, 10, 12))  # v3's own listing day
     assert await shown(db, FAITH.slug, "day", date(2026, 10, 12)) == ("nothing_new", [])
@@ -684,18 +627,18 @@ async def test_an_old_papers_new_version_is_listed_once_in_its_daily_and_its_wee
     assert await shown(db, FAITH.slug, "week", date(2026, 10, 12)) == ("nothing_new", [])
 
 
-async def test_updated_papers_add_no_call_and_stay_out_of_the_text_counts_and_rarity(db):
+async def test_updated_papers_add_no_call_and_stay_out_of_the_text_counts_and_rarity(db: Session):
     """U is a must read, rarer than the day's one related paper: the writer is not given it,
     and the digest's counts, best rarity, evaluation input and voice-check titles leave it out."""
     w = Writer()
-    await papers_store.upsert(db, [U])
+    await in_write(db, papers_store.upsert, [U])
     await focus(db, U, "central")
     await focus(db, S, "related")
     await listed(db, TUE, S)
     await day(db, w, TUE)
     assert len(w.asked) == 1 and U.title not in w.asked[0] and S.title in w.asked[0]
     row = await digest_row(db, FAITH.slug, "day", TUE)
-    papers = {p["paper_id"]: p for p in await store_.papers_of(db, row["id"])}
+    papers = {p["paper_id"]: p for p in await in_read(db, store_.papers_of, row["id"])}
     assert row["counts"] == {
         "papers": 1,
         "picks": 0,
@@ -705,11 +648,11 @@ async def test_updated_papers_add_no_call_and_stay_out_of_the_text_counts_and_ra
         "updated": 1,
     }
     assert row["best_rarity"] == papers[S.id]["rarity"] != papers[U.id]["rarity"]
-    assert [d.paper_id for d in await store_.as_shown(db, row["id"], True)] == [S.id]
-    assert [r["titles"] for r in await store_.written(db, TUE, TUE)] == [[S.title]]
+    assert [d.paper_id for d in await in_read(db, store_.as_shown, row["id"], True)] == [S.id]
+    assert [r["titles"] for r in await in_read(db, store_.written, TUE, TUE)] == [[S.title]]
 
 
-async def test_an_updated_list_is_by_grade_then_rarity_then_newest_first_out(db):
+async def test_an_updated_list_is_by_grade_then_rarity_then_newest_first_out(db: Session):
     """Three must reads, the landmark one rarer, then of two alike the one first out in June
     before May's, then a relevant one, whatever their ids."""
     w = Writer()
@@ -719,7 +662,7 @@ async def test_an_updated_list_is_by_grade_then_rarity_then_newest_first_out(db)
     )
     solid = updated("2605.00012", title="Solid")
     relevant = updated("2605.00011", title="Related only")
-    await papers_store.upsert(db, [landmark, june, solid, relevant])
+    await in_write(db, papers_store.upsert, [landmark, june, solid, relevant])
     for p, fit, weight in (
         (landmark, "central", "landmark"),
         (june, "central", "solid"),
@@ -742,13 +685,15 @@ async def test_an_updated_list_is_by_grade_then_rarity_then_newest_first_out(db)
     )
 
 
-async def test_a_day_with_only_updated_papers_is_nothing_new_and_its_weekly_recaps_them(db):
+async def test_a_day_with_only_updated_papers_is_nothing_new_and_its_weekly_recaps_them(
+    db: Session,
+):
     """U's v2 is in Friday's listing the week before, graded late: Tuesday's daily, with
     nothing new, lists it without a call, and Tuesday's weekly, though its version is not of
     the week, recaps it."""
     w = Writer()
     u = updated(U.id, "2026-10-01T15:00:00+00:00")
-    await papers_store.upsert(db, [u])
+    await in_write(db, papers_store.upsert, [u])
     await focus(db, u, "central")
     await listed(db, TUE, S)  # released, nothing due
     await day(db, w, TUE)
@@ -759,12 +704,12 @@ async def test_a_day_with_only_updated_papers_is_nothing_new_and_its_weekly_reca
     assert (await digest_row(db, FAITH.slug, "week", MON))["counts"]["updated"] == 1
 
 
-async def test_no_updated_row_for_a_paper_shown_as_new_or_adjacent_or_undated(db):
+async def test_no_updated_row_for_a_paper_shown_as_new_or_adjacent_or_undated(db: Session):
     w = Writer()
     shown_new = updated("2605.00012", title="Shown in May")
     adjacent = updated("2605.00014", title="Only adjacent")
     undated = updated("2605.00015", None, title="Its v2 has no time")
-    await papers_store.upsert(db, [shown_new, adjacent, undated])
+    await in_write(db, papers_store.upsert, [shown_new, adjacent, undated])
     await focus(db, shown_new, "central")
     await day(db, w, date(2026, 5, 5))  # shown as new on its own day
     await focus(db, adjacent, "adjacent")
@@ -781,7 +726,7 @@ def withdrawn(p):
     return p.model_copy(update={"version_history": [*kept, {**newest, "size": "0kb"}]})
 
 
-async def test_a_withdrawn_paper_is_never_due_new_or_updated(db):
+async def test_a_withdrawn_paper_is_never_due_new_or_updated(db: Session):
     """arXiv withdraws a paper with an empty version: graded before it was, an old paper does not
     come back as updated with it, and a new one is no longer listed."""
     w = Writer()
@@ -792,26 +737,28 @@ async def test_a_withdrawn_paper_is_never_due_new_or_updated(db):
         version=2,
         version_history=history(MAY.replace("05-04", "10-05"), FOR_TUE),
     )
-    await papers_store.upsert(db, [old, new])
+    await in_write(db, papers_store.upsert, [old, new])
     for p in (old, new):
         await focus(db, p, "central")
     await focus(db, S, "related")
-    await papers_store.upsert(db, [withdrawn(old), withdrawn(new)])
+    await in_write(db, papers_store.upsert, [withdrawn(old), withdrawn(new)])
     await listed(db, TUE, S, new)
     await day(db, w, TUE)
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(S.id, "listed")])
     # Nor does a weekly bring back one a daily listed before arXiv withdrew it.
     late = paper("2610.00032", title="Withdrawn after its daily", version_history=history(FOR_TUE))
-    await papers_store.upsert(db, [late])
+    await in_write(db, papers_store.upsert, [late])
     await focus(db, late, "central")
     await listed(db, WED, late)
     await day(db, w, WED)
-    assert [d.paper_id for d in await store_.earlier_central(db, FAITH.slug, THU)] == [late.id]
-    await papers_store.upsert(db, [withdrawn(late)])
-    assert await store_.earlier_central(db, FAITH.slug, THU) == []
+    assert [d.paper_id for d in await in_read(db, store_.earlier_central, FAITH.slug, THU)] == [
+        late.id
+    ]
+    await in_write(db, papers_store.upsert, [withdrawn(late)])
+    assert await in_read(db, store_.earlier_central, FAITH.slug, THU) == []
 
 
-async def test_the_three_weeks_of_an_update_are_exact_on_both_sides(db):
+async def test_the_three_weeks_of_an_update_are_exact_on_both_sides(db: Session):
     """For Tuesday's daily, a v2 in Tuesday 15 Sep's listing is three weeks old and one in
     Monday 14 Sep's more. A paper first out on Tue 15 Sep, exactly three weeks before its v2 in
     Tuesday's listing, is not old: graded after Tuesday's daily, it is in Wednesday's neither as
@@ -822,7 +769,7 @@ async def test_the_three_weeks_of_an_update_are_exact_on_both_sides(db):
     young = paper(
         "2609.00016", version=2, version_history=history("2026-09-14T15:00:00+00:00", FOR_TUE)
     )
-    await papers_store.upsert(db, [edge, stale, young])
+    await in_write(db, papers_store.upsert, [edge, stale, young])
     await focus(db, edge, "central")
     await focus(db, stale, "central")
     await listed(db, TUE, S)
@@ -834,12 +781,12 @@ async def test_the_three_weeks_of_an_update_are_exact_on_both_sides(db):
     assert await shown(db, FAITH.slug, "day", WED) == ("nothing_new", [])
 
 
-async def test_a_rewritten_version_waits_for_its_grade(db):
+async def test_a_rewritten_version_waits_for_its_grade(db: Session):
     first = paper(U.id, title=U.title, version=1, version_history=history(MAY))
-    await papers_store.upsert(db, [first])
+    await in_write(db, papers_store.upsert, [first])
     await focus(db, first, "central")
     rewritten = U.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(db, [rewritten])
+    await in_write(db, papers_store.upsert, [rewritten])
     await listed(db, TUE, S)
     await day(db, Writer(), TUE)
     assert await shown(db, FAITH.slug, "day", TUE) == ("nothing_new", [])
@@ -849,10 +796,10 @@ async def test_a_rewritten_version_waits_for_its_grade(db):
     assert await shown(db, FAITH.slug, "day", WED) == ("nothing_new", [(U.id, "updated")])
 
 
-async def test_an_area_lists_an_updated_must_read_once_rechecked_and_no_lesser_one(db):
+async def test_an_area_lists_an_updated_must_read_once_rechecked_and_no_lesser_one(db: Session):
     w = Writer()
     relevant = updated("2605.00012", title="Only relevant")
-    await papers_store.upsert(db, [U, relevant])
+    await in_write(db, papers_store.upsert, [U, relevant])
     await area(db, U, "central")  # must read: waits for its re-check
     await area(db, relevant, "related")
     await area(db, S, "related")
@@ -870,7 +817,7 @@ async def test_an_area_lists_an_updated_must_read_once_rechecked_and_no_lesser_o
     assert U.title not in w.asked[-1]  # no pick candidate, nor in the text
 
 
-async def test_a_field_weekly_lists_updated_must_reads_and_one_graded_late_in_the_next(db):
+async def test_a_field_weekly_lists_updated_must_reads_and_one_graded_late_in_the_next(db: Session):
     """Both back with versions in Friday's listing: U, graded in time, is in that week's
     weekly; V, graded after it, in the next. A relevant one never is, nor one a weekly showed
     as new in May."""
@@ -879,7 +826,7 @@ async def test_a_field_weekly_lists_updated_must_reads_and_one_graded_late_in_th
     late = updated("2605.00012", friday, title="Graded late")
     relevant = updated("2605.00013", friday, title="Only relevant")
     shown_new = updated("2605.00014", friday, title="Shown in May")
-    await papers_store.upsert(db, [updated(U.id, friday), late, relevant, shown_new])
+    await in_write(db, papers_store.upsert, [updated(U.id, friday), late, relevant, shown_new])
     await field(db, shown_new, "central")
     await week(db, w, date(2026, 5, 4))
     assert (await shown(db, AGENTS.slug, "week", date(2026, 5, 4)))[1] == [(shown_new.id, "pick")]
@@ -895,7 +842,7 @@ async def test_a_field_weekly_lists_updated_must_reads_and_one_graded_late_in_th
     )
 
 
-async def test_an_updated_must_read_is_the_pipelines_on_the_current_text(db):
+async def test_an_updated_must_read_is_the_pipelines_on_the_current_text(db: Session):
     """Graded must read on its first text, then rewritten, U is not listed while its new text
     has no verdict (its grading ended without one), only once graded must read again. One
     relevant by the pipeline is not listed when the owner's word makes it must read; a landmark
@@ -905,13 +852,13 @@ async def test_an_updated_must_read_is_the_pipelines_on_the_current_text(db):
     first = paper(U.id, title=U.title, version=1, version_history=history(MAY))
     word_only = updated("2605.00012", friday, title="Must read by the owner's word")
     kept = updated("2605.00013", friday, title="A landmark, related by the owner")
-    await papers_store.upsert(db, [first, word_only, kept])
+    await in_write(db, papers_store.upsert, [first, word_only, kept])
     await field(db, first, "central")
     rewritten = updated(U.id, friday, abstract="An entirely different abstract about robots.")
-    await papers_store.upsert(db, [rewritten])
+    await in_write(db, papers_store.upsert, [rewritten])
     await classify(db, rewritten, AGENTS.slug)
     await analyse(db, rewritten)
-    await verdicts.passed(db, [(U.id, 2)])  # grading done for the new text, no verdict
+    await in_write(db, verdicts.passed, [(U.id, 2)])  # grading done for the new text, no verdict
     await field(db, word_only, "related")
     label = Label(
         paper_id=word_only.id, topic=AGENTS.slug, value=LabelValue.CENTRAL, origin="reader"
@@ -920,7 +867,7 @@ async def test_an_updated_must_read_is_the_pipelines_on_the_current_text(db):
     await classify(db, kept, AGENTS.slug)
     await analyse(db, kept, "landmark")
     await grade(db, kept, "central", AGENTS)
-    await verdicts.passed(db, [(kept.id, 1)])
+    await in_write(db, verdicts.passed, [(kept.id, 1)])
     label = Label(paper_id=kept.id, topic=AGENTS.slug, value=LabelValue.RELATED, origin="reader")
     await settling.label(db, label)
     grades = await (
@@ -943,12 +890,12 @@ async def test_an_updated_must_read_is_the_pipelines_on_the_current_text(db):
     )
 
 
-async def test_a_weekly_recaps_a_dailys_updated_paper_no_weekly_has_however_old(db):
+async def test_a_weekly_recaps_a_dailys_updated_paper_no_weekly_has_however_old(db: Session):
     """Listed as updated by the daily of Tue 15 Sep, U is in no weekly while they are not
     written (a pause): the weekly of 5 Oct recaps it."""
     w = Writer()
     u = updated(U.id, "2026-09-14T15:00:00+00:00")
-    await papers_store.upsert(db, [u])
+    await in_write(db, papers_store.upsert, [u])
     await focus(db, u, "central")
     await listed(db, date(2026, 9, 15), S)
     await day(db, w, date(2026, 9, 15))
@@ -957,14 +904,14 @@ async def test_a_weekly_recaps_a_dailys_updated_paper_no_weekly_has_however_old(
     assert await shown(db, FAITH.slug, "week", MON) == ("nothing_new", [(U.id, "updated")])
 
 
-async def test_the_monday_after_recaps_last_weeks_versions_and_keeps_its_own(db):
+async def test_the_monday_after_recaps_last_weeks_versions_and_keeps_its_own(db: Session):
     """Monday 12 Oct's daily, written before the weekly of 5 Oct, lists L, whose v2 was in
     Friday's listing and graded late, and U, whose v2 is in Monday's own: the weekly of 5 Oct
     recaps L, and U waits for the weekly of 12 Oct."""
     w = Writer()
     late = updated("2605.00016", "2026-10-08T15:00:00+00:00", title="Graded late")
     monday = updated(U.id, "2026-10-09T15:00:00+00:00")
-    await papers_store.upsert(db, [late, monday])
+    await in_write(db, papers_store.upsert, [late, monday])
     await focus(db, late, "central")
     await focus(db, monday, "central")
     await focus(db, S, "related")
@@ -985,12 +932,12 @@ async def test_the_monday_after_recaps_last_weeks_versions_and_keeps_its_own(db)
     ]
 
 
-async def test_an_updated_paper_is_not_a_focus_weeklys_earlier_paper(db):
+async def test_an_updated_paper_is_not_a_focus_weeklys_earlier_paper(db: Session):
     """Listed as updated at Fit central the week before, U is not one the next weekly may
     bring back; P, listed there as new, is."""
     w = Writer()
     u = updated(U.id, "2026-09-28T15:00:00+00:00")  # in Tuesday 29 Sep's listing
-    await papers_store.upsert(db, [u])
+    await in_write(db, papers_store.upsert, [u])
     await focus(db, u, "central")
     await focus(db, P, "central")
     await listed(db, date(2026, 9, 29), P)
@@ -1007,12 +954,12 @@ async def test_an_updated_paper_is_not_a_focus_weeklys_earlier_paper(db):
     assert P.title in w.asked[-1] and U.title not in w.asked[-1]
 
 
-async def test_an_updated_row_is_no_cover_for_a_paper_due_as_new(db):
+async def test_an_updated_row_is_no_cover_for_a_paper_due_as_new(db: Session):
     """Should U's first day move into the window (a guessed day corrected), its updated row on
     Tuesday neither makes it one of the weekly's new papers (the weekly recaps it as updated)
     nor keeps it from a later daily as new."""
     w = Writer()
-    await papers_store.upsert(db, [U])
+    await in_write(db, papers_store.upsert, [U])
     await focus(db, U, "central")
     await focus(db, S, "related")
     await listed(db, TUE, S)
@@ -1030,13 +977,13 @@ async def test_an_updated_row_is_no_cover_for_a_paper_due_as_new(db):
 # -- quiet days and records ------------------------------------------------------------------------
 
 
-async def test_a_digest_shows_a_papers_rarity_as_a_mixed_list_does(db):
+async def test_a_digest_shows_a_papers_rarity_as_a_mixed_list_does(db: Session):
     """A Field topic's must read shows on its page at its grade's level, in a digest lowered by
     the Field's depth offset, as on every mixed list."""
     await classify(db, P, AGENTS.slug)
     await analyse(db, P)
     await grade(db, P, "central", AGENTS)
-    await verdicts.passed(db, [(P.id, 1)])
+    await in_write(db, verdicts.passed, [(P.id, 1)])
     await listed(db, TUE, P)
     await week(db, Writer(), MON)
     row = await (
@@ -1052,7 +999,9 @@ async def test_a_digest_shows_a_papers_rarity_as_a_mixed_list_does(db):
     assert row["rarity"] == row["level"] != row["page"]
 
 
-async def test_a_day_without_a_listing_has_no_digests_and_a_quiet_topic_says_nothing_new(db):
+async def test_a_day_without_a_listing_has_no_digests_and_a_quiet_topic_says_nothing_new(
+    db: Session,
+):
     w = Writer()
     assert not await day(db, w, SAT)
     assert (await (await db.execute("SELECT count(*) AS n FROM digests")).fetchone())["n"] == 0
@@ -1064,7 +1013,7 @@ async def test_a_day_without_a_listing_has_no_digests_and_a_quiet_topic_says_not
     assert len(w.asked) == 1  # nothing new is written without a call
 
 
-async def test_a_paused_topic_gets_no_digest(db):
+async def test_a_paused_topic_gets_no_digest(db: Session):
     paused = TREE.following(FAITH.model_copy(update={"status": Status.PAUSED}))
     await settling.save_tree(db, paused)
     await focus(db, P, "central")
@@ -1073,7 +1022,7 @@ async def test_a_paused_topic_gets_no_digest(db):
     assert await shown(db, FAITH.slug, "day", TUE) == (None, [])
 
 
-async def test_a_published_digest_is_a_record_but_for_the_set_aside_mark(db):
+async def test_a_published_digest_is_a_record_but_for_the_set_aside_mark(db: Session):
     w = Writer()
     await focus(db, P, "central")
     await listed(db, TUE, P)
@@ -1088,7 +1037,7 @@ async def test_a_published_digest_is_a_record_but_for_the_set_aside_mark(db):
         await db.execute("SELECT * FROM digests WHERE topic = %s", (FAITH.slug,))
     ).fetchone()
     assert after == before and len(w.asked) == 1
-    [shown_p] = await store_.papers_of(db, before["id"])
+    [shown_p] = await in_read(db, store_.papers_of, before["id"])
     assert (shown_p["fit"], shown_p["grade"], shown_p["set_aside"]) == (
         "central",
         "must_read",
@@ -1096,7 +1045,7 @@ async def test_a_published_digest_is_a_record_but_for_the_set_aside_mark(db):
     )
 
 
-async def test_a_published_digest_keeps_its_titles_and_its_set_aside_mark(db):
+async def test_a_published_digest_keeps_its_titles_and_its_set_aside_mark(db: Session):
     """The set-aside mark is the owner's word in force, so a later verdict that agrees with it
     keeps it; a title arXiv rewrites later stays as the digest showed it."""
     await focus(db, P, "central")
@@ -1109,11 +1058,11 @@ async def test_a_published_digest_keeps_its_titles_and_its_set_aside_mark(db):
     row = await (
         await db.execute("SELECT id FROM digests WHERE topic = %s", (FAITH.slug,))
     ).fetchone()
-    [shown_p] = await store_.papers_of(db, row["id"])
+    [shown_p] = await in_read(db, store_.papers_of, row["id"])
     assert (shown_p["title"], shown_p["set_aside"]) == (P.title, True)
 
 
-async def test_publishing_a_digest_emits_its_event_and_a_failed_one_none(db):
+async def test_publishing_a_digest_emits_its_event_and_a_failed_one_none(db: Session):
     w = Writer()
     w.failures = [ProviderError("down")]
     await focus(db, P, "central")
@@ -1131,37 +1080,37 @@ async def test_publishing_a_digest_emits_its_event_and_a_failed_one_none(db):
     assert all(r["payload"]["day"] == str(TUE) for r in rows)
 
 
-async def test_a_day_stays_released_when_its_papers_are_dismissed(db):
+async def test_a_day_stays_released_when_its_papers_are_dismissed(db: Session):
     """Dismissing stops processing; it does not undo arXiv's listing."""
     await listed(db, TUE, P)
     await db.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (P.id,))
-    assert await store_.released(db, TUE)
-    assert await store_.released_days(db, MON, WED) == {TUE}
+    assert await in_read(db, store_.released, TUE)
+    assert await in_read(db, store_.released_days, MON, WED) == {TUE}
 
 
 # -- failed digests --------------------------------------------------------------------------------
 
 
-async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(db, gate):
+async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(db: Session, gate):
     w = Writer()
     w.failures = [ProviderError("down")]
     await focus(db, P, "central")
     await listed(db, TUE, P)
     await day(db, w, TUE)
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"
-    assert await store_.count_failed(db) == 1
+    assert await in_read(db, store_.count_failed) == 1
     # Wednesday's run writes Tuesday's again first, so Wednesday's does not take P.
     await focus(db, Q, "central")
     await listed(db, WED, Q)
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.nightly(gate, run, tree, WED, rules=settling.RULES)
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
     assert await shown(db, FAITH.slug, "day", WED) == ("written", [(Q.id, "listed")])
-    assert await store_.count_failed(db) == 0
+    assert await in_read(db, store_.count_failed) == 0
 
 
-async def test_a_window_writes_a_failed_digest_again_before_its_days(db, gate):
+async def test_a_window_writes_a_failed_digest_again_before_its_days(db: Session, gate):
     """A failed Tuesday digest is written again before a recovery window's Wednesday, so
     Wednesday's does not take its paper."""
     w = Writer()
@@ -1177,25 +1126,25 @@ async def test_a_window_writes_a_failed_digest_again_before_its_days(db, gate):
     assert await shown(db, FAITH.slug, "day", WED) == ("written", [(Q.id, "listed")])
 
 
-async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db, gate):
+async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db: Session, gate):
     w = Writer()
     w.failures = [ProviderError("down")]
     await focus(db, P, "central")
     await listed(db, TUE, P)
     await day(db, w, TUE)
-    await runs.finish(db, await started(db, "nightly"))
-    status = await reading.status(db)
+    await in_write(db, runs.finish, await started(db, "nightly"))
+    status = await in_read(db, reading.status)
     assert (status["state"], status["digests_failed"]) == ("attention", 1)
     await settling.save_tree(db, TREE.following(FAITH.model_copy(update={"status": Status.PAUSED})))
-    status = await reading.status(db)
+    status = await in_read(db, reading.status)
     assert (status["state"], status["digests_failed"]) == ("quiet", 0)
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.retry_failed(gate, run, tree, rules=settling.RULES)
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"  # not written while paused
 
 
-async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each(db, gate):
+async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each(db: Session, gate):
     # models.md, roles: an unusable answer moves the next attempt one model down, per failed
     # digest of the topic; no answer moves nothing; the last model is kept. An invalid answer is
     # asked again once, of the model that gave it, before the digest fails.
@@ -1220,7 +1169,7 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
     await focus(db, P, "central")
     await listed(db, TUE, P)
     await day(db, w, TUE)
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     for _ in range(4):
         async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
             await digests.retry_failed(gate, run, tree, rules=settling.RULES)
@@ -1235,7 +1184,7 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
     assert w.models[-1] == opus
 
 
-async def test_a_rejected_answer_is_asked_again_once_saying_what_was_wrong(db):
+async def test_a_rejected_answer_is_asked_again_once_saying_what_was_wrong(db: Session):
     class Long(Writer):
         """Its first answer runs over the Focus daily's words."""
 
@@ -1257,7 +1206,7 @@ async def test_a_rejected_answer_is_asked_again_once_saying_what_was_wrong(db):
     assert [r["error"] is None for r in await errors.fetchall()] == [False, True]
 
 
-async def test_a_second_ask_with_no_answer_still_moves_the_next_attempt_down(db, gate):
+async def test_a_second_ask_with_no_answer_still_moves_the_next_attempt_down(db: Session, gate):
     class Scripted(Writer):
         def __init__(self, script: list) -> None:
             super().__init__()
@@ -1277,13 +1226,13 @@ async def test_a_second_ask_with_no_answer_still_moves_the_next_attempt_down(db,
     await day(db, w, TUE)
     row = await digest_row(db, FAITH.slug, "day", TUE)
     assert (row["state"], row["error"]) == ("failed", "invalid: not JSON")
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.retry_failed(gate, run, tree, rules=settling.RULES)
     assert w.models == [opus, opus, sonnet]
 
 
-async def test_an_answer_naming_a_paper_that_is_not_a_candidate_fails_the_digest(db):
+async def test_an_answer_naming_a_paper_that_is_not_a_candidate_fails_the_digest(db: Session):
     class Wrong(Writer):
         def respond(self, role, request) -> str:
             answer = json.loads(super().respond(role, request))
@@ -1305,7 +1254,7 @@ class Archive:
         pass
 
 
-async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db, gate, monkeypatch):
+async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db: Session, gate, monkeypatch):
     await focus(db, P, "central")  # queues P's Brief
     since = datetime.now(UTC) - timedelta(minutes=1)
     worked = []
@@ -1321,12 +1270,12 @@ async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db, gate, monke
     monkeypatch.setattr(fulltext, "work", work)
     deadline = nightly.time.monotonic() + 60
     async with model_run(gate, Config(), "nightly", gateway=Writer().gateway) as run:
-        assert await store_.waiting_passes(db, since) == 1
+        assert await in_read(db, store_.waiting_passes, since) == 1
         await nightly.wait_for_texts(gate, Config(), run, since, deadline, 0.01)
     assert worked == [deadline, deadline] and "digest_wait_ended" not in run.counts
 
 
-async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db, gate, monkeypatch):
+async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db: Session, gate, monkeypatch):
     await focus(db, P, "central")
     since = datetime.now(UTC) - timedelta(minutes=1)
 
@@ -1342,10 +1291,12 @@ async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db, gate, monkeypat
     assert run.counts["digest_wait_ended"] == 1
     # A pass that failed in this run is not waited for: it is tried on the next one.
     await db.execute("UPDATE fulltext_passes SET state = 'failed', failed_runs = 1")
-    assert await store_.waiting_passes(db, since) == 0
+    assert await in_read(db, store_.waiting_passes, since) == 0
 
 
-async def test_the_wait_works_no_more_passes_than_the_runs_limit_leaves(db, gate, monkeypatch):
+async def test_the_wait_works_no_more_passes_than_the_runs_limit_leaves(
+    db: Session, gate, monkeypatch
+):
     """`nightly --limit`: the passes worked before the wait count against it too."""
     await focus(db, P, "central")
     since = datetime.now(UTC) - timedelta(minutes=1)
@@ -1364,7 +1315,7 @@ async def test_the_wait_works_no_more_passes_than_the_runs_limit_leaves(db, gate
 
 
 async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_started(
-    db, gate, monkeypatch
+    db: Session, gate, monkeypatch
 ):
     """Started Monday 23:59 in the schedule's zone and ending after midnight, the run writes
     Monday's dailies and the week before's weeklies."""
@@ -1378,7 +1329,7 @@ async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_star
 
     monkeypatch.setattr(nightly, "datetime", Clock)
     await focus(db, P, "central")
-    await verdicts.passed(db, [(P.id, 1)])
+    await in_write(db, verdicts.passed, [(P.id, 1)])
     await db.execute("UPDATE papers SET dismissed_at = now() WHERE id <> %s", (P.id,))  # no calls
     await listed(db, MON, P)
     config = Config.model_validate({"schedule": {"timezone": "America/New_York"}})
@@ -1387,11 +1338,11 @@ async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_star
     assert (await shown(db, FAITH.slug, "week", MON - timedelta(days=7)))[0] == "nothing_new"
 
 
-async def test_a_nightly_run_without_digests_writes_none(db, gate):
+async def test_a_nightly_run_without_digests_writes_none(db: Session, gate):
     """`nightly --no-digests` (the restart, whose digests `digests write` makes for its window):
     on a Monday with a paper listed, neither the day's dailies nor last week's weeklies."""
     await focus(db, P, "central")
-    await verdicts.passed(db, [(P.id, 1)])
+    await in_write(db, verdicts.passed, [(P.id, 1)])
     await db.execute("UPDATE papers SET dismissed_at = now() WHERE id <> %s", (P.id,))  # no calls
     await listed(db, MON, P)
     await nightly.run(
@@ -1400,13 +1351,13 @@ async def test_a_nightly_run_without_digests_writes_none(db, gate):
     assert (await (await db.execute("SELECT count(*) AS n FROM digests")).fetchone())["n"] == 0
 
 
-async def test_no_batch_of_passes_starts_after_the_deadline(db):
+async def test_no_batch_of_passes_starts_after_the_deadline(db: Session):
     """The full-text work before the digests stops at the wait's deadline; the worker takes
     the passes left."""
     await focus(db, P, "central")
     await db.execute("UPDATE fulltext_passes SET state = 'ready'")
     past = nightly.time.monotonic() - 1
-    assert await fulltext.work(db, Config(), None, deadline=past) == {}
+    assert await fulltext.work(Bridge(db), Config(), None, deadline=past) == {}
     state = await (await db.execute("SELECT state, tried_at FROM fulltext_passes")).fetchone()
     assert (state["state"], state["tried_at"]) == ("ready", None)
 
@@ -1484,7 +1435,7 @@ def test_a_focus_weekly_brings_back_the_one_earlier_paper_its_text_marks():
 # -- the Digest tab --------------------------------------------------------------------------------
 
 
-def client(conn, w: Writer, config: Config | None = None) -> httpx.AsyncClient:
+def client(conn: Session, w: Writer, config: Config | None = None) -> httpx.AsyncClient:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     app = create_app(dsn, TOKEN, config or Config(), gateway=w.gateway)
     return AppClient(
@@ -1495,7 +1446,7 @@ def client(conn, w: Writer, config: Config | None = None) -> httpx.AsyncClient:
 
 
 async def test_the_summary_carries_today_in_the_schedules_zone_and_its_digests_counts(
-    db, monkeypatch
+    db: Session, monkeypatch
 ):
     """Wednesday 02:00 UTC is still Tuesday in New York: the summary's today is the schedule's,
     and beside each topic the new papers of that day's digest, where it was written; none where
@@ -1539,7 +1490,9 @@ async def test_the_summary_carries_today_in_the_schedules_zone_and_its_digests_c
     assert [t["count"] for t in utc["topics"]] == [None, None, None]
 
 
-async def test_history_without_until_reads_back_from_today_in_the_schedules_zone(db, monkeypatch):
+async def test_history_without_until_reads_back_from_today_in_the_schedules_zone(
+    db: Session, monkeypatch
+):
     """Wednesday 02:00 UTC is still Tuesday in New York: History asked for no date ends on
     Tuesday and goes `HISTORY_SPAN` back; `since` without `until` is refused."""
 
@@ -1562,7 +1515,7 @@ async def test_history_without_until_reads_back_from_today_in_the_schedules_zone
         assert earliest.status_code == 200
 
 
-async def test_the_digest_tab_reads_days_weeks_history_and_a_digest(db):
+async def test_the_digest_tab_reads_days_weeks_history_and_a_digest(db: Session):
     w = Writer()
     await focus(db, P, "central")
     await area(db, Q, "related")
@@ -1604,12 +1557,12 @@ async def test_the_digest_tab_reads_days_weeks_history_and_a_digest(db):
         assert (await http.get("/api/digests/999999")).status_code == 404
 
 
-async def test_the_tab_counts_updated_papers_apart_and_gives_each_its_version(db):
+async def test_the_tab_counts_updated_papers_apart_and_gives_each_its_version(db: Session):
     """A day whose only paper is U, updated at Fit central: its card shows none of its papers
     (they are picks or central papers listed as new) and counts it apart; the digest gives
     its version and when it first came out."""
     w = Writer()
-    await papers_store.upsert(db, [U])
+    await in_write(db, papers_store.upsert, [U])
     await focus(db, U, "central")
     await listed(db, TUE, S)
     await day(db, w, TUE)
@@ -1628,10 +1581,10 @@ async def test_the_tab_counts_updated_papers_apart_and_gives_each_its_version(db
     )
 
 
-async def test_the_tab_steps_only_through_the_digests_it_shows(db, gate):
+async def test_the_tab_steps_only_through_the_digests_it_shows(db: Session, gate):
     """An unfollowed topic keeps its digests, but the tab neither shows nor steps to them."""
     w = Writer()
-    tree = await taxonomy_store.load(db)
+    tree = await in_read(db, taxonomy_store.load)
     async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
         await digests.write(
             gate, run, tree, tree.topic(FAITH.slug), DigestPeriod.DAY, TUE, rules=settling.RULES
@@ -1650,17 +1603,19 @@ SCHEDULED = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
 AFTERNOON = datetime(2026, 10, 7, 14, 0, tzinfo=SCHEDULED.schedule.zone)  # no nightly due
 
 
-async def failed_day(db, w: Writer) -> int:
+async def failed_day(db: Session, w: Writer) -> int:
     """P's daily digest of Tuesday, failed: its id."""
     w.failures = [ProviderError("down")]
     await focus(db, P, "central")
     await listed(db, TUE, P)
     await day(db, w, TUE)
-    (row,) = await store_.failed(db)
+    (row,) = await in_read(db, store_.failed)
     return row["id"]
 
 
-async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_written(db, gate):
+async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_written(
+    db: Session, gate
+):
     """Write again queues a job instead of answering 409 while another job holds the run lock;
     the worker writes the digest once the lock is free, and its Needs you item and its job
     settle together."""
@@ -1699,7 +1654,7 @@ async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_w
 
 
 async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_run_writes_it(
-    db, gate
+    db: Session, gate
 ):
     w = Writer()
     digest_id = await failed_day(db, w)
@@ -1714,7 +1669,7 @@ async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_ru
         assert row["actions"] == ["again"]
         # The next run writes it: the failed job settles with it, done.
         w.failures = []
-        tree = await taxonomy_store.load(db)
+        tree = await in_read(db, taxonomy_store.load)
         async with model_run(gate, Config(), "digests", gateway=w.gateway) as run:
             await digests.retry_failed(gate, run, tree, rules=settling.RULES)
         settled = (await http.get(f"/api/digests/{digest_id}")).json()
@@ -1722,7 +1677,9 @@ async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_ru
         assert (await http.get("/api/jobs")).json()["failed"] == []
 
 
-async def test_a_digest_is_written_again_only_through_a_worker_and_while_its_topic_is_active(db):
+async def test_a_digest_is_written_again_only_through_a_worker_and_while_its_topic_is_active(
+    db: Session,
+):
     w = Writer()
     digest_id = await failed_day(db, w)
     async with client(db, w) as http:  # the schedule off: no worker runs jobs
@@ -1736,7 +1693,7 @@ async def test_a_digest_is_written_again_only_through_a_worker_and_while_its_top
     assert await rows(db, "SELECT id FROM jobs") == []
 
 
-async def rows(conn, query: str, *params) -> list[dict]:
+async def rows(conn: Session, query: str, *params) -> list[dict]:
     return await (await conn.execute(query, params)).fetchall()
 
 
@@ -1783,7 +1740,7 @@ def test_only_today_has_a_run_and_only_with_the_schedule_on():
     assert today_run(WED, denver(23, 30), DENVER, None).state == "late"
 
 
-async def test_the_day_carries_todays_run_on_today_only(db):
+async def test_the_day_carries_todays_run_on_today_only(db: Session):
     w = Writer()
     config = Config(schedule=Schedule(enabled=True))
     today = datetime.now(config.schedule.zone).date()

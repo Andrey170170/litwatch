@@ -3,7 +3,6 @@ the owner's actions on a paper classification keeps failing on. Models are scrip
 answers too, and is tested in test_grading."""
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,141 +14,49 @@ from litwatch import classification
 from litwatch.analysis import Output
 from litwatch.api import create_app
 from litwatch.api import settings as settings_api
-from litwatch.config import Classification, Config, Models, RoleConfig
+from litwatch.config import Classification, Config
 from litwatch.core import FAILED_RUNS, Cause, Paper
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run, run_record
-from litwatch.llm import Gateway, ProviderError, Reply, Stop, Usage
+from litwatch.llm import Gateway, ProviderError, Usage
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store.calls import CallJournal
 from tests import settling
-from tests.conftest import TREE, AppClient, gate_on, paper
+from tests.conftest import TREE, AppClient
 from tests.fakes import ScriptedProvider
-
-CLASSIFY = RoleConfig(provider="openrouter", model="test/decider")
-# Each role its own model, so a scripted answer knows which role was asked.
-ROLES = {
-    "classify": CLASSIFY,
-    "analyse": RoleConfig(provider="anthropic", model="test-analyse"),
-    "judge": RoleConfig(provider="anthropic", model="test-judge"),
-    "check": RoleConfig(provider="openrouter", model="test/check"),
-    "area_check": RoleConfig(provider="openrouter", model="test/area-check"),
-    "field_grade": RoleConfig(provider="anthropic", model="test-field"),
-}
-CONFIG = Config(models=Models(**ROLES))
-# The roles that write, each with two fallbacks named after it, for the list tests; `judge`'s and
-# `check`'s keep to their own labs.
-LISTS = {
-    name: ROLES[name].model_copy(
-        update={
-            "fallbacks": tuple(
-                ROLES[name].model_copy(update={"model": f"{ROLES[name].model}-{n}"}) for n in (2, 3)
-            )
-        }
-    )
-    for name in ("analyse", "judge", "check", "field_grade")
-}
-LISTED = Config(models=Models(**ROLES | LISTS))
-BY_MODEL = {m.model: name for name, r in (ROLES | LISTS).items() for m in r.models}
-NAMES = {c.slug: c.name for c in TREE.classes}
-GIST = (
-    "Probes read a model's hidden steps from its activations and find that traces omit a third "
-    "of them across four tasks."
+from tests.scripted import (
+    ANALYSIS,
+    CONFIG,
+    GIST,
+    LISTED,
+    A,
+    B,
+    Scripted,
+    calls_for,
+    decision,
+    night,
+    refusal,
+    rows,
 )
-ANALYSIS = {
-    "gist": GIST,
-    "contribution": "analysis",
-    "releases_code": True,
-    "releases_weights": False,
-    "weight_reason": "A careful analysis with a fair comparison.",
-    "weight": "solid",
-}
-
-A = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes on activations.")
-B = paper("2610.00002", title="Is the chain of thought faithful?", abstract="We test traces.")
-
-
-def decision(primary: str = "other", **probabilities: float) -> dict:
-    return (
-        dict.fromkeys(NAMES, 0.0)
-        | probabilities
-        | {"primary_class": {"option": NAMES[primary], "probability": 0.9}}
-    )
-
-
-class Scripted:
-    """Scripted roles, answering by the paper's title: `classify` and `analyse`, and the
-    graders (`fits` by (role, title); related unless scripted, and `area_check` sure it holds).
-    `said` by (model, title) comes first, for a model of a role's list; a `Reply` answers as
-    it is (a refusal)."""
-
-    def __init__(self) -> None:
-        self.decisions: dict[str, dict] = {}
-        self.analyses: dict[str, dict] = {}
-        self.fits: dict[tuple[str, str], dict | Exception] = {}
-        self.said: dict[tuple[str, str], dict | Exception | Reply] = {}
-        self.asked: list[tuple[str, str]] = []  # (role, title)
-        self.models_asked: list[tuple[str, str]] = []  # (model, title)
-        self.users: list[str] = []  # every request's user message
-
-    def respond(self, role: RoleConfig, request) -> str | Reply:
-        title = request.user.split("Title: ", 1)[1].split("\n", 1)[0]
-        step = BY_MODEL[role.model]
-        self.asked.append((step, title))
-        self.models_asked.append((role.model, title))
-        self.users.append(request.user)
-        if (role.model, title) in self.said:
-            answer = self.said[(role.model, title)]
-            if isinstance(answer, Exception):
-                raise answer
-            return answer if isinstance(answer, Reply) else json.dumps(answer)
-        match step:
-            case "classify":
-                answer = self.decisions.get(title) or decision()
-            case "analyse":
-                answer = self.analyses.get(title) or ANALYSIS
-            case "area_check":
-                answer = self.fits.get((step, title)) or {"holds": 0.9}
-            case _:
-                answer = self.fits.get((step, title)) or {
-                    "reason": "On the subject.",
-                    "fit": "related",
-                }
-        if isinstance(answer, Exception):
-            raise answer
-        return json.dumps(answer)
-
-    def gateway(self, config: Config, journal) -> Gateway:
-        providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+from tests.sessions import Session, in_read, in_write
 
 
 @pytest.fixture
-async def models(conn):
+async def models(conn: Session):
     await settling.save_tree(conn, TREE)
-    await papers_store.upsert(conn, [A, B])
+    await in_write(conn, papers_store.upsert, [A, B])
     return Scripted()
 
 
-async def night(conn, models: Scripted, config: Config = CONFIG) -> dict:
-    async with gate_on(conn) as db:
-        run_id = await nightly.run(db, config, fetch=False, gateway=models.gateway)
-    return (await runs.get(conn, run_id))["counts"]
-
-
-async def rows(conn, query: str, *params) -> list[dict]:
-    return await (await conn.execute(query, params)).fetchall()
-
-
-async def members(conn, paper_id: str) -> set[tuple[str, str]]:
-    found = await classifications_store.memberships(conn, paper_id)
+async def members(conn: Session, paper_id: str) -> set[tuple[str, str]]:
+    found = await in_read(conn, classifications_store.memberships, paper_id)
     return {(m.slug, m.source.value) for m in found}
 
 
-async def test_thresholds_the_band_the_primary_class_and_the_keyword_check(conn, models):
+async def test_thresholds_the_band_the_primary_class_and_the_keyword_check(conn: Session, models):
     # Interpretability at the default 0.8; its Focus child CoT faithfulness in the band
     # [0.1, 0.5); Agents just under 0.8; the primary class whatever its own probability.
     models.decisions[A.title] = decision(
@@ -186,18 +93,20 @@ async def test_thresholds_the_band_the_primary_class_and_the_keyword_check(conn,
     }
 
 
-async def test_the_configured_thresholds_draw_membership(conn, models):
+async def test_the_configured_thresholds_draw_membership(conn: Session, models):
     models.decisions[A.title] = decision("other", interpretability=0.85)
     stricter = Config(models=CONFIG.models, classification=Classification(default_threshold=0.9))
     await night(conn, models, stricter)
     assert await members(conn, A.id) == {("other", "classifier")}
 
 
-async def test_the_owners_class_label_outranks_the_classifier(conn, models):
+async def test_the_owners_class_label_outranks_the_classifier(conn: Session, models):
     models.decisions[A.title] = decision("other", interpretability=0.95)
     version = TREE.get("interpretability").version
-    await classifications_store.put_owner(conn, A, "interpretability", False, version)
-    await classifications_store.put_owner(conn, A, "agents", True, TREE.get("agents").version)
+    await in_write(conn, classifications_store.put_owner, A, "interpretability", False, version)
+    await in_write(
+        conn, classifications_store.put_owner, A, "agents", True, TREE.get("agents").version
+    )
     await night(conn, models)
     # The classifier's word is kept, but the owner's decides.
     assert ("interpretability", "classifier") in await members(conn, A.id)
@@ -208,7 +117,7 @@ async def test_the_owners_class_label_outranks_the_classifier(conn, models):
 
 
 async def test_an_invalid_answer_fails_and_three_failed_runs_leave_the_paper_to_the_owner(
-    conn, models
+    conn: Session, models
 ):
     models.decisions[A.title] = decision("other", interpretability=1.4)  # outside [0, 1]
     for n in range(1, FAILED_RUNS + 1):
@@ -217,16 +126,18 @@ async def test_an_invalid_answer_fails_and_three_failed_runs_leave_the_paper_to_
         (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE paper_id = %s", A.id)
         assert failure["failed_runs"] == n and failure["last_error"].startswith("invalid")
     assert await rows(conn, "SELECT 1 FROM classifications WHERE paper_id = %s", A.id) == []
-    assert await classifications_store.due(conn, FAILED_RUNS) == []
+    assert await in_read(conn, classifications_store.due, FAILED_RUNS) == []
     models.asked.clear()
     await night(conn, models)
     assert ("classify", A.title) not in models.asked  # it waits for the owner now
 
 
-async def test_a_rewrite_classifies_and_analyses_again_and_keeps_the_old_records(conn, models):
+async def test_a_rewrite_classifies_and_analyses_again_and_keeps_the_old_records(
+    conn: Session, models
+):
     await night(conn, models)
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(conn, [rewritten])
+    await in_write(conn, papers_store.upsert, [rewritten])
     models.decisions[A.title] = decision("agents", agents=0.9)
     counts = await night(conn, models)
     assert counts["classified"] == 1 and counts["analysed"] == 1
@@ -241,7 +152,7 @@ async def test_a_rewrite_classifies_and_analyses_again_and_keeps_the_old_records
     assert analysed[-1] == {"paper_revision": 2, "primary_class": "agents"}
 
 
-async def test_analysis_records_gist_weight_and_facets_with_its_event(conn, models):
+async def test_analysis_records_gist_weight_and_facets_with_its_event(conn: Session, models):
     counts = await night(conn, models)
     assert counts["analysed"] == 2
     (a,) = await rows(conn, "SELECT * FROM analyses WHERE paper_id = %s", A.id)
@@ -281,11 +192,13 @@ def test_a_gist_over_the_target_is_kept_and_only_a_broken_one_fails():
             Output.model_validate(ANALYSIS | {"gist": broken})
 
 
-async def test_failed_analysis_stops_after_three_runs_until_the_owner_says_try_again(conn, models):
+async def test_failed_analysis_stops_after_three_runs_until_the_owner_says_try_again(
+    conn: Session, models
+):
     models.analyses[A.title] = ANALYSIS | {"gist": "Too short."}  # not a Gist: invalid
     for _ in range(FAILED_RUNS):
         assert (await night(conn, models))["analysis_failed"] == 1
-    (listed,) = await failures.stuck(conn, "analysis", FAILED_RUNS)
+    (listed,) = await in_read(conn, failures.stuck, "analysis", FAILED_RUNS)
     assert listed["paper_id"] == A.id and listed["title"] == A.title
     del models.analyses[A.title]
     models.asked.clear()
@@ -299,42 +212,28 @@ async def test_failed_analysis_stops_after_three_runs_until_the_owner_says_try_a
         assert (await client.post(url.format(B.id), json=AT_1)).status_code == 409  # analysed
         assert (await client.post(url.format(A.id), json=AT_1)).status_code == 204
     assert (await night(conn, models))["analysed"] == 1
-    assert await failures.stuck(conn, "analysis", FAILED_RUNS) == []
-
-
-def refusal(model: str = "m") -> Reply:
-    return Reply("", Stop.REFUSED, Usage(model=model, cost=0.001), refusal="bio")
-
-
-async def calls_for(conn, paper_id: str, role: str) -> list[str]:
-    """The models the journal shows `role` asked about the paper, in order."""
-    found = await rows(
-        conn,
-        "SELECT usage->>'model' AS model FROM inference_calls "
-        "WHERE paper_id = %s AND operation = %s ORDER BY id",
-        paper_id,
-        role,
-    )
-    return [r["model"] for r in found]
+    assert await in_read(conn, failures.stuck, "analysis", FAILED_RUNS) == []
 
 
 ANALYSE = [m.model for m in LISTED.models.analyse.models]
 
 
-async def test_an_unusable_answer_moves_one_model_down_each_run_one_call_a_run(conn, models):
+async def test_an_unusable_answer_moves_one_model_down_each_run_one_call_a_run(
+    conn: Session, models
+):
     for model in ANALYSE:
         models.said[(model, A.title)] = ANALYSIS | {"gist": "Too short."}  # invalid
     for _ in range(FAILED_RUNS):
         assert (await night(conn, models, LISTED))["analysis_failed"] == 1
     # One call a run, each run one model further down (D4), every one under the role's name.
     assert await calls_for(conn, A.id, "analyse") == ANALYSE
-    (stuck,) = await failures.stuck(conn, "analysis", FAILED_RUNS)
+    (stuck,) = await in_read(conn, failures.stuck, "analysis", FAILED_RUNS)
     assert (stuck["paper_id"], stuck["refused"]) == (A.id, [])
     await night(conn, models, LISTED)
     assert len(await calls_for(conn, A.id, "analyse")) == FAILED_RUNS  # left for the owner
 
 
-async def test_an_answer_further_down_is_kept_and_the_paper_settled(conn, models):
+async def test_an_answer_further_down_is_kept_and_the_paper_settled(conn: Session, models):
     models.said[(ANALYSE[0], A.title)] = ANALYSIS | {"gist": "Too short."}
     await night(conn, models, LISTED)
     assert (await night(conn, models, LISTED))["analysed"] == 1
@@ -344,7 +243,7 @@ async def test_an_answer_further_down_is_kept_and_the_paper_settled(conn, models
     assert analysed["model"] == f"anthropic:{ANALYSE[1]}"
 
 
-async def test_a_call_with_no_answer_never_moves_down_nor_counts(conn, models):
+async def test_a_call_with_no_answer_never_moves_down_nor_counts(conn: Session, models):
     models.said[(ANALYSE[0], A.title)] = ProviderError("APITimeoutError", timeout=True)
     for _ in range(FAILED_RUNS + 1):
         await night(conn, models, LISTED)
@@ -353,12 +252,16 @@ async def test_a_call_with_no_answer_never_moves_down_nor_counts(conn, models):
     assert (failure["failed_runs"], failure["refused"]) == (0, [])
 
 
-async def test_a_paper_every_model_refused_stops_at_once_until_the_owner_tries_again(conn, models):
+async def test_a_paper_every_model_refused_stops_at_once_until_the_owner_tries_again(
+    conn: Session, models
+):
     for model in ANALYSE:
         models.said[(model, A.title)] = refusal(model)
     assert (await night(conn, models, LISTED))["analysis_failed"] == 1
     assert await calls_for(conn, A.id, "analyse") == ANALYSE  # down the list in one run
-    (stuck,) = await failures.stuck(conn, "analysis", FAILED_RUNS)  # after one run, not three
+    (stuck,) = await in_read(
+        conn, failures.stuck, "analysis", FAILED_RUNS
+    )  # after one run, not three
     assert (stuck["failed_runs"], stuck["refused"]) == (FAILED_RUNS, ["analyse"])
     assert stuck["last_error"] == "refused: bio"
     await night(conn, models, LISTED)
@@ -372,13 +275,13 @@ async def test_a_paper_every_model_refused_stops_at_once_until_the_owner_tries_a
     assert (await calls_for(conn, A.id, "analyse"))[3:] == [ANALYSE[0]]
 
 
-async def test_a_result_for_text_that_changed_meanwhile_records_nothing(conn, models):
-    tree = await taxonomy_store.load(conn)
+async def test_a_result_for_text_that_changed_meanwhile_records_nothing(conn: Session, models):
+    tree = await in_read(conn, taxonomy_store.load)
     gateway = models.gateway(CONFIG, None)
     async with classification.classify([A], tree, gateway) as results:
         (found,) = [c async for c in results]
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(conn, [rewritten])
+    await in_write(conn, papers_store.upsert, [rewritten])
     async with settling.change(conn, A.id, cause=Cause.VERDICT) as change:
         assert not await classification.record(change.unit, found)
     assert await rows(conn, "SELECT 1 FROM classifications") == []
@@ -393,7 +296,9 @@ async def test_a_result_for_text_that_changed_meanwhile_records_nothing(conn, mo
         ProviderError("AuthenticationError: no key"),
     ],
 )
-async def test_a_model_that_did_not_answer_is_retried_without_counting(conn, models, step, error):
+async def test_a_model_that_did_not_answer_is_retried_without_counting(
+    conn: Session, models, step, error
+):
     (models.decisions if step == "classify" else models.analyses)[A.title] = error
     table = "classification" if step == "classify" else "analysis"
     for _ in range(FAILED_RUNS + 1):
@@ -403,17 +308,19 @@ async def test_a_model_that_did_not_answer_is_retried_without_counting(conn, mod
     (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE paper_id = %s", A.id)
     assert (failure["step"], failure["failed_runs"]) == (table, 0)
     assert failure["last_error"].startswith(("timeout", "provider"))
-    assert await failures.stuck(conn, table, FAILED_RUNS) == []
+    assert await in_read(conn, failures.stuck, table, FAILED_RUNS) == []
 
 
-async def test_a_retry_that_did_not_count_still_comes_after_new_papers(conn, models):
+async def test_a_retry_that_did_not_count_still_comes_after_new_papers(conn: Session, models):
     # A is older than B by id; a failure that adds no failed run still sends it to the back.
-    await failures.failed(conn, A, "classification", "timeout: x", counts=False)
-    assert [p.id for p in await classifications_store.due(conn, FAILED_RUNS, limit=1)] == [B.id]
+    await in_write(conn, failures.failed, A, "classification", "timeout: x", counts=False)
+    assert [p.id for p in await in_read(conn, classifications_store.due, FAILED_RUNS, limit=1)] == [
+        B.id
+    ]
 
 
 async def test_a_failing_record_stops_every_call_before_the_run_closes(
-    conn, db, models, monkeypatch
+    conn: Session, db, models, monkeypatch
 ):
     """B's call never returns; recording A fails. The run must not end with B still asking."""
     stalled, cancelled = asyncio.Event(), []
@@ -449,7 +356,7 @@ async def test_a_failing_record_stops_every_call_before_the_run_closes(
     "failure", [RuntimeError("the journal's connection went away"), asyncio.CancelledError()]
 )
 async def test_a_journal_that_fails_after_the_job_keeps_the_jobs_error_and_its_cost(
-    conn, db, monkeypatch, failure
+    conn: Session, db, monkeypatch, failure
 ):
     async def lost(self):
         raise failure
@@ -466,7 +373,7 @@ async def test_a_journal_that_fails_after_the_job_keeps_the_jobs_error_and_its_c
 
 
 async def test_a_run_that_cannot_close_after_the_job_failed_raises_the_jobs_error(
-    conn, db, monkeypatch
+    conn: Session, db, monkeypatch
 ):
     async def unclosable(*args, **kwargs):
         raise RuntimeError("could not close")
@@ -487,7 +394,7 @@ AT_1 = {"revision": 1}  # the revision Quality listed the paper at
 
 
 @pytest.fixture
-async def client(conn, models):
+async def client(conn: Session, models):
     models.decisions[A.title] = {"broken": True}  # never valid
     for _ in range(FAILED_RUNS):
         await night(conn, models)
@@ -496,7 +403,7 @@ async def client(conn, models):
 
 
 @asynccontextmanager
-async def api(conn) -> AsyncIterator[httpx.AsyncClient]:
+async def api(conn: Session) -> AsyncIterator[httpx.AsyncClient]:
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     headers = {"authorization": f"Bearer {TOKEN}"}
     app = create_app(dsn, TOKEN, CONFIG)
@@ -509,12 +416,12 @@ async def awaiting(client) -> list[str]:
     return [r["paper_id"] for r in quality["night"]["awaiting_classification"]]
 
 
-async def test_a_classifier_refusal_stops_at_once(conn, models):
+async def test_a_classifier_refusal_stops_at_once(conn: Session, models):
     # The decision roles have no fallbacks (models.md, roles): its model refusing is every model.
     classify = CONFIG.models.classify.model
     models.said[(classify, A.title)] = refusal(classify)
     await night(conn, models)
-    (stuck,) = await failures.stuck(conn, "classification", FAILED_RUNS)  # after one night
+    (stuck,) = await in_read(conn, failures.stuck, "classification", FAILED_RUNS)  # after one night
     assert (stuck["paper_id"], stuck["refused"], stuck["stopped_by_refusal"]) == (
         A.id,
         ["classify"],
@@ -534,19 +441,21 @@ async def test_a_paper_awaiting_classification_is_counted_and_listed(client):
     assert (await client.post(url.format("2610.99999"), json={"revision": 1})).status_code == 404
 
 
-async def test_dismissing_drops_the_paper_from_processing(client, conn, models):
+async def test_dismissing_drops_the_paper_from_processing(client, conn: Session, models):
     dismissed = await client.post(f"/api/settings/classification/{A.id}/dismiss", json=AT_1)
     assert dismissed.status_code == 204
     assert await awaiting(client) == []
     assert (await client.get("/api/summary")).json()["status"]["state"] == "quiet"
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(conn, [rewritten])
+    await in_write(conn, papers_store.upsert, [rewritten])
     models.asked.clear()
     await night(conn, models)
     assert ("classify", A.title) not in models.asked  # not even after a rewrite
 
 
-async def test_classifying_by_hand_goes_on_as_usual_with_source_owner(client, conn, models):
+async def test_classifying_by_hand_goes_on_as_usual_with_source_owner(
+    client, conn: Session, models
+):
     bad = await client.put(
         f"/api/settings/classification/{A.id}", json=AT_1 | {"classes": ["nope"]}
     )
@@ -570,14 +479,16 @@ async def test_classifying_by_hand_goes_on_as_usual_with_source_owner(client, co
     assert ("classify", A.title) not in models.asked
 
 
-async def test_fixing_the_text_counts_as_a_rewrite_and_classifies_again(client, conn, models):
+async def test_fixing_the_text_counts_as_a_rewrite_and_classifies_again(
+    client, conn: Session, models
+):
     empty = await client.post(f"/api/settings/classification/{A.id}/correction", json=AT_1)
     assert empty.status_code == 422
     fixed = await client.post(
         f"/api/settings/classification/{A.id}/correction", json=AT_1 | {"title": "Probes, fixed"}
     )
     assert fixed.status_code == 204
-    stored: Paper = await papers_store.get(conn, A.id)
+    stored: Paper = await in_read(conn, papers_store.get, A.id)
     assert (stored.title, stored.revision) == ("Probes, fixed", 2)
     (event,) = await rows(
         conn, "SELECT * FROM outbox WHERE type = 'paper.revised' AND paper_id = %s", A.id
@@ -588,7 +499,7 @@ async def test_fixing_the_text_counts_as_a_rewrite_and_classifies_again(client, 
     assert ("other", "classifier") in await members(conn, A.id)
 
 
-async def test_a_correction_that_cannot_settle_is_not_kept(client, conn, monkeypatch):
+async def test_a_correction_that_cannot_settle_is_not_kept(client, conn: Session, monkeypatch):
     """The new text and the grades without the old text's Weight are stored together, so a
     failed settle leaves the old text current and the correction can be made again."""
 
@@ -599,7 +510,7 @@ async def test_a_correction_that_cannot_settle_is_not_kept(client, conn, monkeyp
     url = f"/api/settings/classification/{A.id}/correction"
     with pytest.raises(RuntimeError):
         await client.post(url, json=AT_1 | {"title": "Probes, fixed"})
-    assert (await papers_store.get(conn, A.id)).revision == 1
+    assert (await in_read(conn, papers_store.get, A.id)).revision == 1
     monkeypatch.undo()
     assert (await client.post(url, json=AT_1 | {"title": "Probes, fixed"})).status_code == 204
 
@@ -613,19 +524,19 @@ async def test_a_correction_that_cannot_settle_is_not_kept(client, conn, monkeyp
     ],
 )
 async def test_an_action_on_text_that_changed_meanwhile_is_refused(
-    client, conn, method, path, body
+    client, conn: Session, method, path, body
 ):
     url = f"/api/settings/classification/{A.id}{path}"
     # A revision the owner never saw.
     assert (await client.request(method, url, json=body | {"revision": 2})).status_code == 409
     # The nightly run rewrote the paper after Quality listed it at revision 1.
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
-    await papers_store.upsert(conn, [rewritten])
+    await in_write(conn, papers_store.upsert, [rewritten])
     refused = await client.request(method, url, json=body | AT_1)
     assert refused.status_code == 409
     # Nor does the new text wait for the owner: its classification never failed.
     assert (await client.request(method, url, json=body | {"revision": 2})).status_code == 409
-    stored = await papers_store.get(conn, A.id)
+    stored = await in_read(conn, papers_store.get, A.id)
     assert (stored.title, stored.abstract, stored.revision) == (A.title, rewritten.abstract, 2)
     assert await rows(conn, "SELECT 1 FROM papers WHERE dismissed_at IS NOT NULL") == []
     assert await rows(conn, "SELECT 1 FROM classifications WHERE paper_id = %s", A.id) == []
