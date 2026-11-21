@@ -116,13 +116,12 @@ def test_the_owners_word_outranks_the_verdict_with_a_floor_at_relevant():
     assert effective(None, None, Weight.SOLID) is None
 
 
-def label(value: str, at=T0, provisional=False) -> Label:
+def label(value: str, at=T0) -> Label:
     return Label(
         paper_id="p",
         topic="t",
         value=LabelValue(value),
         origin=LabelOrigin.READER,
-        provisional=provisional,
         labelled_at=at,
     )
 
@@ -150,9 +149,7 @@ def test_the_owners_word_is_a_fit_from_the_newest_label_or_reaction():
     assert owners_word(label("central", at=later), thumb("wrong_topic"), None, focus=True) == (
         Fit.CENTRAL
     )
-    # A bulk-accepted label loses to any thumb that speaks; unsure is no word.
-    old = label("central", at=later, provisional=True)
-    assert owners_word(old, thumb("wrong_topic"), None, focus=True) == Fit.NONE
+    # Unsure is no word.
     assert owners_word(label("unsure"), None, Fit.CENTRAL, focus=True) is None
     # Reasons that carry no word, and any reaction outside a Focus topic, are only collected.
     assert owners_word(None, thumb("not_interesting"), None, focus=True) is None

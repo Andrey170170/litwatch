@@ -36,17 +36,16 @@ DRAW_DAYS = 30
 PRECISION_DAYS = 90
 
 
-async def _pool(unit: ReadUnit, topic: str, above: bool) -> list[dict[str, Any]]:
-    """The current verdicts of the trailing days on one side of the line, made on the paper's
-    current text and with no firm label.
-    The side is the pipeline's grade, from the verdict's Fit and the current Weight, whatever
-    the owner said."""
-    return [
-        r
-        for r in await store.pool(unit, topic, DRAW_DAYS)
-        if grade(Fit(r["fit"]), r["weight"] and Weight(r["weight"])).at_least(Grade.RELEVANT)
-        == above
-    ]
+async def _sides(unit: ReadUnit, topic: str) -> dict[bool, list[dict[str, Any]]]:
+    """The topic's current verdicts of the trailing days, made on the paper's current text and
+    with no label, read once and split by side of the line (True: relevant or above), each in
+    the pool's order. The side is the pipeline's grade, from the verdict's Fit and the current
+    Weight, whatever the owner said."""
+    sides: dict[bool, list[dict[str, Any]]] = {True: [], False: []}
+    for r in await store.pool(unit, topic, DRAW_DAYS):
+        weight = r["weight"] and Weight(r["weight"])
+        sides[grade(Fit(r["fit"]), weight).at_least(Grade.RELEVANT)].append(r)
+    return sides
 
 
 async def draw(db: DatabaseGate, seed: int, size: int = SESSION) -> int:
@@ -59,8 +58,9 @@ async def draw(db: DatabaseGate, seed: int, size: int = SESSION) -> int:
         picked: list[tuple[str, str, str, int | None]] = []
         seen: set[str] = set()
         for topic in focus:
+            sides = await _sides(unit, topic)
             for above in (True, False):
-                pool = [r for r in await _pool(unit, topic, above) if r["paper_id"] not in seen]
+                pool = [r for r in sides[above] if r["paper_id"] not in seen]
                 for row in rng.sample(pool, min(per_group, len(pool))):
                     seen.add(row["paper_id"])
                     picked.append(
@@ -108,11 +108,11 @@ async def answer(
         focus = {t.slug for t in await taxonomy_store.topics(unit) if t.depth == Depth.FOCUS}
         if unknown := sorted(set(given.fit) - focus):
             raise ValueError(f"not Focus topics: {', '.join(unknown)}")
-        # A firm label already saying this Fit is not written again: writing renews its time,
+        # A label already saying this Fit is not written again: writing renews its time,
         # which would put it above a reaction given since (the newest word wins).
-        firm = await store.firm_labels(unit, item["paper_id"])
+        held = await store.label_values(unit, item["paper_id"])
         for topic, fit in given.fit.items():
-            if firm.get(topic) == fit.value:
+            if held.get(topic) == fit.value:
                 continue
             # The drawn topic's answer is the sample; any other is the owner's own choice.
             drawn = topic == item["topic"] and item["why"] in ("above", "below")

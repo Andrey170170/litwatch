@@ -104,7 +104,7 @@ when they are merged:
   owner's word from the API, and typed responses for `/quality`, `/runs` and `/calibrate`;
 - intake no longer rewriting unchanged rows on its overlap;
 - `store`'s listed import violations (`events`, `llm`) gone;
-- the drops the owner marked in `notes/still-used.md`.
+- the drops the owner marked in `notes/still-used.md` (removed once they were built; read it at 858c3d30).
 
 Ratings on the generated text move to A3, beside Calibrate's corrections. They need their own decision on the UI,
 and they are not database work.

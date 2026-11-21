@@ -506,7 +506,7 @@ async def test_a_label_is_a_fit_or_unsure_on_any_topic(client, conn):
     assert last["payload"]["cause"] == "owner"
     topic = await rail()
     assert (topic["word"], topic["fit"], topic["state"]) == ("central", "central", None)
-    assert topic["label"] == {"value": "central", "origin": "reader", "provisional": False}
+    assert topic["label"] == {"value": "central", "origin": "reader"}
     # Unsure is stored and is no word: the verdict's Fit stands.
     await client.put(url, json={"value": "unsure"})
     topic = await rail()
@@ -584,7 +584,7 @@ async def test_a_reported_miss_is_the_owners_word(client, conn):
     page = (await client.get(f"/api/papers/{Q.id}")).json()
     faith, interp = page["topics"]  # its Area shows it through the Focus topic
     assert (interp["topic"]["slug"], interp["via"]) == (INTERP.slug, FAITH.slug)
-    assert faith["label"] == {"value": "central", "origin": "miss", "provisional": False}
+    assert faith["label"] == {"value": "central", "origin": "miss"}
     assert faith["missed"] and faith["word"] == "central" and faith["grade"] == "must_read"
     said = [(h["what"], h["value"]) for h in page["history"]]
     assert said == [("missed", None), ("labelled", "central")]
