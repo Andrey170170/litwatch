@@ -195,18 +195,18 @@ export async function patchRead<T>(qc: QueryClient, key: QueryKey, patch: (old: 
   else void qc.invalidateQueries({ queryKey: key, exact: true });
 }
 
-export const qualityQuery = (page: "needs" | "overview" | "runs") => settingsRead(page, "quality", async ({ signal }) => ok(await api.GET("/api/settings/quality", { signal })) as unknown as Quality);
+export const qualityQuery = (page: "needs" | "overview" | "runs") => settingsRead(page, "quality", async ({ signal }) => ok(await api.GET("/api/settings/quality", { signal })));
 
 export const missesQuery = settingsRead("misses", "list", async ({ signal }) => ok(await api.GET("/api/settings/misses", { signal })));
 
-export const sessionsQuery = (page: "calibrate" | "overview") => settingsRead(page, "sessions", async ({ signal }) => ok(await api.GET("/api/settings/calibrate", { signal })) as unknown as SessionRow[]);
+export const sessionsQuery = (page: "calibrate" | "overview") => settingsRead(page, "sessions", async ({ signal }) => ok(await api.GET("/api/settings/calibrate", { signal })));
 
 /** A Calibrate session, run to its end even when its page is left (no `signal`): a write patches the session lists
  * from it (`sessionChanged`). */
 export const sessionQuery = (id: number) =>
-  settingsRead(`calibrate/${id}`, "session", async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })) as unknown as Session);
+  settingsRead(`calibrate/${id}`, "session", async () => ok(await api.GET("/api/settings/calibrate/{session_id}", { params: { path: { session_id: id } } })));
 
-export const runsQuery = (page: "overview" | "runs") => settingsRead(page, "runs", async ({ signal }) => ok(await api.GET("/api/settings/runs", { signal })) as unknown as Run[]);
+export const runsQuery = (page: "overview" | "runs") => settingsRead(page, "runs", async ({ signal }) => ok(await api.GET("/api/settings/runs", { signal })));
 
 export const scheduleQuery = settingsRead("runs", "schedule", async ({ signal }) => ok(await api.GET("/api/settings/schedule", { signal })));
 

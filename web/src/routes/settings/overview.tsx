@@ -102,7 +102,7 @@ export function OverviewPage() {
           </Tile>
           <Tile to="runs" tone={q?.night.run == null ? "" : nightFailed ? "fail" : "ok"} big={night ? rowDate(night.started_at) : "–"}>
             {night
-              ? `Last night · ${night.counts?.classified ?? 0} classified · ${night.counts?.graded ?? 0} graded${digests(night) === null ? "" : ` · ${digests(night)} digests`} · ${usd(night.cost)}`
+              ? `Last night · ${night.counts.classified ?? 0} classified · ${night.counts.graded ?? 0} graded${digests(night) === null ? "" : ` · ${digests(night)} digests`} · ${usd(night.cost)}`
               : q?.night.run == null
                 ? "No night yet"
                 : runs.data
