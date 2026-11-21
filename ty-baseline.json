@@ -1403,22 +1403,10 @@
     ],
     "src/litwatch/store/papers.py": [
       {
-        "rule": "invalid-argument-type",
-        "startColumn": 16,
-        "endColumn": 19,
-        "lineCount": 77
-      },
-      {
         "rule": "not-subscriptable",
         "startColumn": 11,
         "endColumn": 91,
         "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 8,
-        "endColumn": 91,
-        "lineCount": 3
       }
     ],
     "src/litwatch/store/quality.py": [

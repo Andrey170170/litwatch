@@ -23,12 +23,18 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class IntakeResult:
+    # The papers read, each once; of them, those new and those whose stored row changed.
     fetched: int = 0
     inserted: int = 0
     updated: int = 0
     # Stored papers whose title or abstract a revision rewrote, settled as they were stored.
     rewritten: list[str] = field(default_factory=list)
     details: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def unchanged(self) -> int:
+        """The papers read that were neither new nor changed: most of a night's overlap."""
+        return self.fetched - self.inserted - self.updated
 
 
 async def _state(db: DatabaseGate, category: str, since: date, run_id: int) -> dict[str, Any]:
