@@ -1,7 +1,7 @@
 # A1. Database gate
 
-Status (2026-11-20): **built through P6**, deployed through P5; P7's folded items follow. The build plan, with its
-evidence, is [`plans/a1-database-gate.md`](../../plans/a1-database-gate.md). This is milestone A1 of
+Status (2026-11-23): **built and deployed**, P1–P7 by 2026-11-21; the first full night on every stage was clean. The
+build plan, with its evidence, is [`plans/a1-database-gate.md`](../../plans/a1-database-gate.md). This is milestone A1 of
 [the architecture](../architecture.md): the Database gate, its units and its locks, and settling a paper made cheap.
 Its input is the measurement in [`notes/where-work-waits.md`](../../notes/where-work-waits.md).
 

@@ -248,3 +248,25 @@ Filled in as stages land.
     - The `pg_locks` sampler saw no lock wait from 01:55 to 04:30. Every `/status` component is healthy.
   - **No full night ran on P5 alone:** P6 deployed on 2026-11-21 (D3's change), so the first full night checks P5 and
     P6, with P7, together.
+- **P5–P7, V7:** P6 deployed 2026-11-21 12:41 MST as `litwatch:1.0.0-dev-858c3d30` and P7 (#176–#179) at 14:24 MST as
+  `litwatch:1.0.0-dev-49a81c03`; the test sweep (#180) changed no code. Nothing was deployed after.
+  - **Sunday 2026-11-22 (run 121),** quiet by arXiv's schedule: 1,450 fetched, none new and **0 updated**, where
+    every weekend run before rewrote each paper it read (runs 105 and 107: 1,843 and 1,113 updated). 55 s, no error.
+  - **Monday 2026-11-23 (run 123)** finished in 49 min with no error: 1,374 fetched, 517 new, **110 updated** (runs
+    113 to 117 updated 2,100–2,900), 531 classified, 603 graded, 35 Briefs, 5 daily digests and 9 weekly, $3.89. In
+    line with runs 113 to 117 for a smaller announcement; about 7 of its minutes were the Anthropic API timing out on
+    one batch's status read from 09:23 to 09:29 UTC, retried each minute until it answered (seven error lines,
+    `trying again`).
+  - Its events kept run 117's proportions: 603 `verdict.recorded`, 604 `grade.changed`, 531 `paper.classified`, 517
+    `paper.added`, 566 `gist.written`, 35 `brief.written`, 14 `digest.written`. `paper.revised` (107) is in line with
+    the week (103–110 a night), as revisions were always only real version changes; what #176 dropped is the rewrite
+    of rows that hadn't changed.
+  - The weekly digests of 2026-11-16 were written for all 9 topics, and the 5 daily ones of 2026-11-23. Notion
+    updated 11 pages; both integrations' cursors are at the outbox's end, lag 0, nothing failing. The Sunday and
+    publications runs finished; no run is unfinished; no job is running or failed.
+  - From the P7 deploy to 08:30 the log has 25,451 info lines, the seven batch-read retries and two model refusals:
+    no traceback outside those retries, no `gate nesting:`, slow unit, pool timeout, presence or identity change,
+    taken-back job or lost lock, and no 5xx response. Every `/status` component is healthy.
+  - Lock waits were not sampled: the sampler script had been removed from the scratch directory before Sunday night,
+    so neither timer ran it. Postgres counts no deadlock in `litwatch`, and the run took no longer than the batch
+    outage explains.
