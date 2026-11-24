@@ -9,6 +9,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Models } from "@earendil-works/pi-ai";
 import type { RunOptions } from "../src/agent.ts";
+import type { PaperInput } from "../src/contracts.ts";
+import type { Text } from "../src/paper.ts";
 import { PROVIDER } from "../src/auth.ts";
 import { makeGuard, type HostConfig } from "../src/hosts.ts";
 import type { Box, Imaging, RenderTarget, RenderWidth } from "../src/imaging.ts";
@@ -54,10 +56,72 @@ The learning rate is 0.003 and training runs for 40 epochs.
 \end{document}
 `;
 
+const FIXTURES = new URL("./fixtures/", import.meta.url);
+
+/** A heading as a test states it: its command as it stands in the body, its depth, and its number if it has one. */
+export type Stated = [command: string, depth: number, number?: string];
+/** `BODY`'s headings, numbered as LaTeX's defaults number them. */
+export const HEADINGS: Stated[] = [
+  ["\\begin{abstract}", 0],
+  ["\\section{Introduction}", 0, "1"],
+  ["\\section{Method}", 0, "2"],
+  ["\\section{Results}", 0, "3"],
+  ["\\begin{thebibliography}", 0],
+  ["\\section{Probe training details}", 0, "A"],
+];
+/** Headings stated as a source that numbers its sections itself has them: none numbered. */
+export const unnumbered = (headings: Stated[]): Stated[] => headings.map(([command, depth]) => [command, depth]);
+
+/**
+ * A LaTeX source with the outline a test states for it, as litwatch would send it (litwatch's parser is tested on
+ * real sources in tests/test_outline.py, and what it sends in `sentJob`). Each heading starts where its command stands
+ * in the body, and one the body lacks is left out; its title is the command's argument ("Abstract" and "References"
+ * for those environments). The bibliography is its environment, and the appendix starts at \\appendix.
+ */
+export function latex(body: string, headings: Stated[] = HEADINGS): Text & { body_source: "latex" } {
+  const title = (command: string) =>
+    command.startsWith("\\begin{abstract") ? "Abstract" : command.startsWith("\\begin{thebibliography") ? "References" : command.slice(command.indexOf("{") + 1, command.lastIndexOf("}"));
+  const found = headings
+    .map(([command, depth, number]) => ({ title: title(command), depth, start: body.indexOf(command), ...(number === undefined ? {} : { number }) }))
+    .filter((h) => h.start >= 0)
+    .sort((a, b) => a.start - b.start);
+  const sections = found.map((h, i) => ({ ...h, end: found.slice(i + 1).find((next) => next.depth <= h.depth)?.start ?? body.length }));
+  const opened = body.indexOf("\\begin{thebibliography}");
+  const closed = body.indexOf("\\end{thebibliography}");
+  const appendix = body.indexOf("\\appendix");
+  return {
+    body,
+    body_source: "latex",
+    outline: {
+      sections,
+      ...(opened < 0 ? {} : { references: { start: opened, end: closed < 0 ? body.length : closed + "\\end{thebibliography}".length } }),
+      ...(appendix < 0 ? {} : { appendix }),
+    },
+  };
+}
+
+/** A whole submission litwatch's code wrote (tests/deep_fixtures.py): `job-latex.json` or `job-pdf.json`. */
+export const sentJob = (name: "job-latex.json" | "job-pdf.json"): unknown => JSON.parse(readFileSync(new URL(name, FIXTURES), "utf8"));
+
 /** BODY with a long Discussion, so the main text is a real paper's size against a read: a read's length check is
  * its share of the main text. */
 const DISCUSSION = `\\section{Discussion}\n${"The probe's accuracy holds across the tested layers. ".repeat(60)}\n`;
-export const PAPER = { id: "2610.00001", title: "Probes read the trace", abstract: "A.", authors: ["A. Author"], body: BODY.replace("\\begin{thebibliography}", `${DISCUSSION}\\begin{thebibliography}`), body_source: "latex", body_version: 2 };
+/** `PAPER`'s headings: `BODY`'s and its Discussion. */
+export const PAPER_HEADINGS: Stated[] = [...HEADINGS.slice(0, 4), ["\\section{Discussion}", 0, "4"], ...HEADINGS.slice(4)];
+export const PAPER: PaperInput = {
+  id: "2610.00001",
+  title: "Probes read the trace",
+  abstract: "A.",
+  authors: ["A. Author"],
+  ...latex(BODY.replace("\\begin{thebibliography}", `${DISCUSSION}\\begin{thebibliography}`), PAPER_HEADINGS),
+  body_version: 2,
+};
+/** `PAPER` with another text: a LaTeX source, with the outline of its `headings` (`BODY`'s by default), unless
+ * the text is a PDF's. */
+export const paperWith = (body: string, source: "latex" | "pdf" = "latex", headings: Stated[] = HEADINGS): PaperInput => {
+  const { outline: _, ...rest } = PAPER;
+  return { ...rest, ...(source === "latex" ? latex(body, headings) : { body, body_source: "pdf" }) };
+};
 
 /** A draft that passes every check against `BODY`, with no figure and no lens. */
 export function draft(): Draft {

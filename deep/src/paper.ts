@@ -2,8 +2,12 @@
  * The paper's text as the run reads it: its headings, which the session's `sections()` gives and the checks look
  * places up in (`places.ts`), and the split the writer's first message makes of it (docs/plans/deep-read.md, D4):
  * the main text, with the bibliography and the appendix cut out wherever they sit. Both stay in the session's
- * `paper`, where the writer reads them on demand (`section()`, `find()`, `refs()`).
+ * `paper`, where the writer reads them on demand (`section()`, `find()`, `refs()`). A LaTeX source's headings, its
+ * bibliography and its appendix are litwatch's, from the outline it sends with the source (`contracts.ts`); a PDF's
+ * text is read here.
  */
+
+import type { Outline } from "./contracts.ts";
 
 export const MAX_BODY_CHARS_IN_CONTEXT = 200_000;
 
@@ -36,25 +40,11 @@ export interface Heading {
   chars: number;
 }
 
-/** Whether the text is a LaTeX source: litwatch says so, or it reads like one. */
-export const isLatex = (body: string, source?: string | null): boolean =>
-  source === "latex" || (source !== "pdf" && /\\begin\s*\{document\}|\\section\*?\s*\{/.test(body));
+/** The text as the run reads it: the paper's body, where it comes from, and a LaTeX source's outline. */
+export type Text = { body: string } & ({ body_source: "latex"; outline: Outline } | { body_source: "pdf"; outline?: undefined });
 
-/** Whether the match at `at` sits on a LaTeX comment line: an unescaped % before it. */
-function commented(body: string, at: number): boolean {
-  const line = body.slice(body.lastIndexOf("\n", at - 1) + 1, at);
-  return /(^|[^\\])(\\\\)*%/.test(line);
-}
-
-/** The first match of `pattern` (a global one) that is not commented out. */
-function first(body: string, pattern: RegExp): RegExpExecArray | null {
-  pattern.lastIndex = 0;
-  for (let m = pattern.exec(body); m; m = pattern.exec(body)) if (!commented(body, m.index)) return m;
-  return null;
-}
-
-/** LaTeX without its comments: an unescaped % to the end of its line. */
-export const uncommented = (tex: string): string => tex.replace(/((?:^|[^\\])(?:\\\\)*)%.*$/gm, "$1");
+/** Whether the text is a LaTeX source: litwatch sends one with its outline (`contracts.ts`), and nothing else. */
+export const isLatex = (text: Text): boolean => text.outline !== undefined;
 
 type Bare = Omit<Heading, "end" | "chars">;
 
@@ -67,44 +57,9 @@ function sized(found: Bare[], length: number): Heading[] {
   });
 }
 
-// ── a LaTeX source ──────────────────────────────────────────────────────────────────────────────────
+// ── a LaTeX source, by the outline litwatch parsed of it ──────────────────────────────────────────────
 
-const TEX_LEVELS: Record<string, number> = { section: 1, subsection: 2, subsubsection: 3, paragraph: 4 };
-
-/** What numbers a paper some other way than an article's defaults, whatever is counted: chapters, a class that
- * has them, or the package that ties one counter to another. */
-const RENUMBERING = /\\chapter\*?\s*[[{]|\\documentclass\s*(?:\[[^\]]*\])?\s*\{(?:book|report|memoir|scrbook|scrreprt)\}|\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bchngcntr\b/;
-/** The classes that number sections in Roman numerals and subsections by letter. */
-const ROMAN_SECTIONS = /\\documentclass\s*(?:\[[^\]]*\])?\s*\{(?:IEEEtran|revtex[\w-]*)\}/;
-/** A float that takes the number of the one before it. */
-const CONTINUED = /\\ContinuedFloat(?![a-zA-Z])/;
-
-/** Whether a LaTeX source (without its comments) numbers these counters itself, rather than leave them to the
- * defaults this code models: counted from 1 through the paper, sections lettered from \appendix on. It does where
- * it sets or steps a counter, ties it to another, redefines or prints its form (\thefigure), or loads a class or
- * package that numbers its own way. No number of that kind is then inferred from the source. */
-export function ownNumbering(tex: string, counters: readonly string[], also?: RegExp): boolean {
-  const names = counters.join("|");
-  const set = new RegExp(`\\\\(?:setcounter|addtocounter|stepcounter|refstepcounter|numberwithin|counterwithin\\*?|counterwithout\\*?)\\s*\\{(?:${names})\\}|\\\\the(?:${names})(?![a-zA-Z])`);
-  return set.test(tex) || RENUMBERING.test(tex) || (also?.test(tex) ?? false);
-}
-/** Whether it numbers a kind of float itself. */
-export const ownFloatNumbering = (tex: string, kind: string): boolean => ownNumbering(tex, [kind], CONTINUED);
-
-/** Where a LaTeX source starts its appendix by command: from here its sections are lettered. */
-const APPENDIX_COMMAND = /\\appendi(?:x|ces)(?![a-zA-Z])|\\begin\s*\{appendi(?:x|ces)\}/g;
-
-/** The text between the brace at `open` and its match. */
-function braced(body: string, open: number): string {
-  for (let depth = 0, i = open; i < body.length; i++) {
-    const ch = body[i];
-    if (ch === "\\") i++;
-    else if (ch === "{") depth++;
-    else if (ch === "}" && --depth === 0) return body.slice(open + 1, i);
-  }
-  return body.slice(open + 1);
-}
-
+/** A heading's title as plain text, without its commands and braces. */
 const plain = (tex: string): string =>
   tex
     .replace(/\\label\{[^}]*\}/g, "")
@@ -114,50 +69,21 @@ const plain = (tex: string): string =>
     .replace(/\s+/g, " ")
     .trim();
 
-function latexHeadings(body: string): Bare[] {
-  const out: Bare[] = [];
-  // Numbers are LaTeX's defaults: sections counted from 1, lettered from the appendix command on. A source that
-  // numbers any level of its sections itself is numbered some other way, which is not guessed at: no heading of
-  // it gets a number.
-  const numbered = !ownNumbering(uncommented(body), ["section", "subsection", "subsubsection", "secnumdepth"], ROMAN_SECTIONS);
-  const appendix = first(body, APPENDIX_COMMAND)?.index ?? Infinity;
-  const counters = [0, 0, 0];
-  let lettered = false;
-  const command = /\\(section|subsection|subsubsection|paragraph)(\*?)\s*(?:\[[^\]]*\])?\s*\{/g;
-  for (const m of body.matchAll(command)) {
-    if (commented(body, m.index)) continue;
-    const level = TEX_LEVELS[m[1]!]!;
-    const heading: Bare = { level, title: plain(braced(body, m.index + m[0].length - 1)), start: m.index };
-    if (numbered && level <= 3 && m[2] === "") {
-      if (!lettered && m.index > appendix) {
-        lettered = true;
-        counters.fill(0);
-      }
-      counters[level - 1]! += 1;
-      counters.fill(0, level);
-      const top = lettered ? String.fromCharCode(64 + counters[0]!) : String(counters[0]);
-      // a subsection before any section has no number worth giving
-      if (counters[0]! > 0 && (!lettered || counters[0]! <= 26)) heading.number = [top, ...counters.slice(1, level)].join(".");
-    }
-    out.push(heading);
-  }
-  for (const m of body.matchAll(/\\begin\s*\{(abstract|thebibliography)\}/g))
-    if (!commented(body, m.index)) out.push({ level: 1, title: m[1] === "abstract" ? "Abstract" : "References", start: m.index });
-  return out;
+function latexHeadings(outline: Outline): Heading[] {
+  return outline.sections.map(({ title, depth, number, start, end }) => ({
+    level: depth + 1,
+    title: plain(title),
+    ...(number === undefined ? {} : { number }),
+    start,
+    end,
+    chars: end - start,
+  }));
 }
 
-function latexCuts(body: string): Cut[] {
+function latexCuts(outline: Outline, length: number): Cut[] {
   const cuts: Cut[] = [];
-  // the archive inlines the bibliography as a thebibliography environment, often before the appendix
-  const open = first(body, /\\begin\s*\{thebibliography\}/g);
-  if (open) {
-    const close = /\\end\s*\{thebibliography\}/g;
-    close.lastIndex = open.index;
-    const end = close.exec(body);
-    cuts.push({ part: "references", start: open.index, end: end ? end.index + end[0].length : body.length });
-  }
-  const appendix = first(body, new RegExp(`${APPENDIX_COMMAND.source}|\\\\section\\*?\\s*(?:\\[[^\\]]*\\])?\\s*\\{\\s*(?:Appendi(?:x|ces)|Supplementa(?:ry|l)\\b)`, "g"));
-  if (appendix) cuts.push({ part: "appendix", start: appendix.index, end: body.length });
+  if (outline.references) cuts.push({ part: "references", ...outline.references });
+  if (outline.appendix !== undefined) cuts.push({ part: "appendix", start: outline.appendix, end: length });
   return cuts;
 }
 
@@ -235,15 +161,16 @@ function pdfCuts(body: string): Cut[] {
 // ── both ────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The paper's headings in the order of its text. */
-export function headings(body: string, source?: string | null): Heading[] {
-  return sized(isLatex(body, source) ? latexHeadings(body) : pdfParts(body).headings, body.length);
+export function headings(text: Text): Heading[] {
+  return text.outline ? latexHeadings(text.outline) : sized(pdfParts(text.body).headings, text.body.length);
 }
 
 /** The paper's main text and what was cut from it: the bibliography wherever it sits, and everything from the
- * appendix's start (LaTeX's \appendix, an Appendix heading, or the first lettered heading after a PDF's
+ * appendix's start (LaTeX's \\appendix, an Appendix heading, or the first lettered heading after a PDF's
  * bibliography) to the end. A paper with neither is all main text. */
-export function splitPaper(body: string, source?: string | null): Split {
-  const found = (isLatex(body, source) ? latexCuts(body) : pdfCuts(body)).sort((a, b) => a.start - b.start);
+export function splitPaper(text: Text): Split {
+  const { body } = text;
+  const found = (text.outline ? latexCuts(text.outline, body.length) : pdfCuts(body)).sort((a, b) => a.start - b.start);
   // a bibliography inside the appendix is part of it; one the appendix starts inside ends where the appendix starts
   const cuts: Cut[] = [];
   for (const cut of found) {

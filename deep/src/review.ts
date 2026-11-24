@@ -9,7 +9,8 @@ import type { AssistantMessage, ImageContent, Message, Model, Models, TextConten
 import { Type, type Static, type TSchema } from "typebox";
 import type { Shot } from "./imaging.ts";
 import { LENGTH_MAX, type Length } from "./length.ts";
-import { reviewerMessage, reviewerPrompt, reviewerText, type PaperInput, type SelectionContext } from "./prompt.ts";
+import type { PaperInput, SelectionContext } from "./contracts.ts";
+import { reviewerMessage, reviewerPrompt, reviewerText } from "./prompt.ts";
 import type { Read } from "./read.ts";
 import { enumOf, schemaErrors } from "./schema.ts";
 

@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import type { SelectionContext } from "../src/contracts.ts";
 import { LENS_QUESTIONS, findingsMessage, reviewerPrompt, schemaJson, systemPrompt, topicKey } from "../src/prompt.ts";
 import { DraftSchema } from "../src/read.ts";
 import { JUDGED } from "./support.ts";
 
-const selections = [
+const selections: SelectionContext[] = [
   { name: "CoT faithfulness", slug: "cot-faithfulness", subject: "Chain-of-thought faithfulness and monitoring", rubric: "Tier 1: measures or detects unfaithful traces.", grade: "must_read" },
   { name: "sae-methods", subject: "Sparse autoencoder methodology", rubric: null, grade: "adjacent" },
 ];

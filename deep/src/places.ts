@@ -7,12 +7,28 @@
  * An answer is "there" or a refusal only on evidence. A LaTeX source numbered by LaTeX's defaults shows its floats
  * and its section commands, so a number past them is refused and one within them is there. Everything else is
  * "unknown" and left to the reviewer by name: any place of a PDF's text that the text does not itself name, every
- * number of a kind the source numbers itself (`ownNumbering`), an appendix's own numbering, a float the count
- * cannot place.
+ * number of a kind the source numbers itself (`ownFloatNumbering`; litwatch sends no section number of such a
+ * source), an appendix's own numbering, a float the count cannot place.
  */
 
 import { PaperNumbers } from "./numbers.ts";
-import { headings, isLatex, ownFloatNumbering, splitPaper, uncommented } from "./paper.ts";
+import { headings, isLatex, splitPaper, type Text } from "./paper.ts";
+
+/** LaTeX without its comments: an unescaped % to the end of its line. */
+const uncommented = (tex: string): string => tex.replace(/((?:^|[^\\])(?:\\\\)*)%.*$/gm, "$1");
+
+/** What numbers a paper's floats some other way than an article's defaults: chapters, a class that has them, the
+ * package that ties one counter to another, or a float that takes the number of the one before it. */
+const RENUMBERING = /\\chapter\*?\s*[[{]|\\documentclass\s*(?:\[[^\]]*\])?\s*\{(?:book|report|memoir|scrbook|scrreprt)\}|\\usepackage\s*(?:\[[^\]]*\])?\s*\{[^}]*\bchngcntr\b|\\ContinuedFloat(?![a-zA-Z])/;
+
+/** Whether a LaTeX source (without its comments) numbers a kind of float itself, rather than leave it to the
+ * defaults this code models: counted from 1 through the paper. It does where it sets or steps the counter, ties it
+ * to another, redefines or prints its form (\thefigure), or loads a class or package that numbers its own way. No
+ * number of that kind is then inferred from the source. (litwatch numbers the sections, `core/outline.py`.) */
+function ownFloatNumbering(tex: string, kind: string): boolean {
+  const set = new RegExp(`\\\\(?:setcounter|addtocounter|stepcounter|refstepcounter|numberwithin|counterwithin\\*?|counterwithout\\*?)\\s*\\{${kind}\\}|\\\\the${kind}(?![a-zA-Z])`);
+  return set.test(tex) || RENUMBERING.test(tex);
+}
 
 export type Kind = "figure" | "table";
 /** Whether the paper has a place: it does, it does not (and why), or the text cannot tell. */
@@ -136,17 +152,17 @@ export class PaperIndex {
   private readonly hasAppendix: boolean;
   private found: PaperNumbers | undefined;
 
-  constructor(paper: string, source?: string | null) {
-    this.outlined = isLatex(paper, source);
-    this.text = this.outlined ? uncommented(paper) : paper;
+  constructor(paper: Text) {
+    this.outlined = isLatex(paper);
+    this.text = this.outlined ? uncommented(paper.body) : paper.body;
     for (const c of cites(this.text)) this.mentioned[c.kind].add(labelKey(c.label));
-    const heads = headings(paper, source);
-    const appendix = splitPaper(paper, source).cuts.find((c) => c.part === "appendix");
+    const heads = headings(paper);
+    const appendix = splitPaper(paper).cuts.find((c) => c.part === "appendix");
     this.hasAppendix = appendix !== undefined;
     let titles: string[];
     if (this.outlined) {
       for (const kind of ["figure", "table"] as const) this.floats[kind] = this.count(kind, appendix?.start ?? Infinity);
-      // `headings` numbers a source only where its numbering is LaTeX's own
+      // litwatch numbers a source's headings only where its numbering is LaTeX's own
       this.sections = new Set(heads.flatMap((h) => (h.number ? [labelKey(h.number)] : [])));
       this.numbered = this.sections.size > 0;
       titles = heads.map((h) => h.title);

@@ -2,8 +2,8 @@
 and desktop widths in headless Chromium, failing on a console error, an uncaught exception, a 5xx
 answer or an empty page, with a screenshot of each kept in OUT. Before the walk, a Deep read
 asked for through the API must come back from the deep service with live "Among the collection"
-rows and its figures, and a second paper's Deep card, the format from before, likewise; the walk
-then sees a paper page drawing each.
+rows and its figures, and a second paper's Deep card, the format from before, seeded by
+smoke.sh, likewise; the walk then sees a paper page drawing each.
 
     python pages.py BASE_URL TOKEN PAPERS_JSON OUT
 
@@ -247,14 +247,17 @@ def figure_names(block: object) -> list[str]:
 
 
 def card(base: str, token: str, paper: str, collection: set[str], *, read: bool) -> list[str]:
-    """Ask for a paper's Deep read and wait for it: it must be what the fake deep service sends
-    this paper (`read`: a Deep read; else a Deep card, the format from before), its among rows
-    must name collection papers, and every figure a read cites must be served as an image."""
+    """A paper's Deep read, asked for and waited for, as the fake deep service writes it
+    (`read`), or else the Deep card from before that smoke.sh seeded (`legacy_card.py`): its
+    among rows must name collection papers, and every figure a read cites must be served as an
+    image."""
     from urllib.request import Request, urlopen  # noqa: PLC0415
 
     what = "read" if read else "card"
     auth = {"Authorization": f"Bearer {token}"}
-    urlopen(Request(f"{base}/api/papers/{paper}/card", method="POST", headers=auth), timeout=30)
+    if read:
+        asked = Request(f"{base}/api/papers/{paper}/card", method="POST", headers=auth)
+        urlopen(asked, timeout=30)
     deadline = time.monotonic() + CARD_WAIT_SECONDS
     while time.monotonic() < deadline:
         with urlopen(Request(f"{base}/api/papers/{paper}", headers=auth), timeout=30) as response:
@@ -312,7 +315,8 @@ def main(base: str, token: str, fixture: str, out: str) -> None:
     shots = Path(out)
     shots.mkdir(parents=True, exist_ok=True)
     # smoke.sh classified every seeded paper into the seed taxonomy's language-models Field topic.
-    # The fake deep service sends the first paper a Deep read and the second a Deep card.
+    # The fake deep service writes the first paper's Deep read; smoke.sh seeded the second's
+    # Deep card from before.
     failures = card(base, token, papers[0], set(papers), read=True)
     failures += card(base, token, papers[1], set(papers), read=False)
     failures += topic_lists(base, token, "language-models", set(papers))

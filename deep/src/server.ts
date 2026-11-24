@@ -1,12 +1,14 @@
 /**
- * Stack-internal HTTP surface: start a job, watch it, read the outcome. No auth by design. A submission's
- * `Idempotency-Key` header names it: a key the service already has is answered (200) with that key's job, and
- * `GET /keys/<key>` finds that job (404 when the service has none).
+ * Stack-internal HTTP surface: start a job, watch it, read the outcome. No auth by design. A submission is checked
+ * against the job's input contract (`contracts.ts`). Its `Idempotency-Key` header names it: a key the service already
+ * has is answered (200) with that key's job, and `GET /keys/<key>` finds that job (404 when the service has none).
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { JobInputSchema, type JobInput } from "./contracts.ts";
 import type { JobQueue } from "./jobs.ts";
-import { LENS_QUESTIONS, type PaperInput, type SelectionContext } from "./prompt.ts";
+import { LENS_QUESTIONS } from "./prompt.ts";
+import { schemaErrors } from "./schema.ts";
 
 export interface ServerDeps {
   jobs: JobQueue;
@@ -52,44 +54,27 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
     return json(res, 200, job);
   }
   if (req.method === "POST" && path === "/process") {
-    const body = (await readJson(req)) as {
-      paper?: Partial<PaperInput>;
-      extensions?: string[];
-      selections?: SelectionContext[];
-    };
+    const body = await readJson(req);
     const key = req.headers["idempotency-key"];
     const known = typeof key === "string" ? deps.jobs.byKey(key) : undefined;
     if (known) return json(res, 200, { id: known.id, status: known.status });
-    const paper = body.paper;
-    if (!paper || typeof paper.id !== "string" || typeof paper.title !== "string" || typeof paper.body !== "string")
-      throw new HttpError(422, "paper.id, paper.title, and paper.body are required");
-    const extensions = body.extensions ?? [];
-    for (const name of extensions)
-      if (!Object.hasOwn(LENS_QUESTIONS, name)) throw new HttpError(400, `unknown extension "${name}"; known: ${Object.keys(LENS_QUESTIONS).join(", ")}`);
-    // The version the text is of, which the figures are taken at: a whole number from 1, or null when litwatch
-    // cannot say. Anything else is a submission gone wrong, not a paper with no version.
-    const version = paper.body_version ?? null;
-    if (version !== null && !(typeof version === "number" && Number.isInteger(version) && version >= 1))
-      throw new HttpError(422, "paper.body_version is the text's arXiv version, a whole number from 1, or null");
-    const job = deps.jobs.submit(
-      {
-        id: paper.id,
-        title: paper.title,
-        abstract: paper.abstract ?? "",
-        authors: paper.authors ?? [],
-        published: paper.published ?? null,
-        url: paper.url ?? null,
-        body: paper.body,
-        body_source: paper.body_source ?? null,
-        body_version: version,
-      },
-      extensions,
-      body.selections ?? [],
-      typeof key === "string" ? key : undefined,
-    );
+    const wrong = refusal(body);
+    if (wrong) throw new HttpError(wrong.status, wrong.error);
+    const { paper, extensions = [], selections = [] } = body as JobInput;
+    const job = deps.jobs.submit(paper, extensions, selections, typeof key === "string" ? key : undefined);
     return json(res, 202, { id: job.id, status: job.status });
   }
   throw new HttpError(404, "not found");
+}
+
+/** Why a job's input is turned down, as `POST /process` answers it: not the contract's (422), or asking for an
+ * extension the service has not (400). None when it is a job's input. `run FILE.json` checks its file by it too. */
+export function refusal(body: unknown): { status: 400 | 422; error: string } | undefined {
+  const wrong = schemaErrors(JobInputSchema, body);
+  if (wrong.length) return { status: 422, error: `not a job's input: ${wrong.slice(0, 20).join("; ")}` };
+  for (const name of (body as JobInput).extensions ?? [])
+    if (!Object.hasOwn(LENS_QUESTIONS, name)) return { status: 400, error: `unknown extension "${name}"; known: ${Object.keys(LENS_QUESTIONS).join(", ")}` };
+  return undefined;
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {

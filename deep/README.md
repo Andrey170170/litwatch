@@ -20,8 +20,11 @@ restart forgets them.
 The writer's first message carries the paper's outline and its main text; the bibliography and the appendix stay in
 the session (`paper`), wherever they sit in the text, to be read where the read needs them. The headings are found
 once per run (`src/paper.ts`): the session's `sections()` gives them, the first message's outline lists them, and
-the checks look sections up in them. A LaTeX source's carry their numbers (`3.2`, `A.1` from `\appendix` on); a
-PDF's text is read in the two forms litwatch's archive writes, Markdown with bold headings (`## **References**`)
+the checks look sections up in them. A LaTeX source's come from litwatch, which parses the source
+(`src/litwatch/core/outline.py`) and sends its outline with it (`paper.outline`: the headings with their depths,
+spans and numbers, `3.2`, `A.1` from `\appendix` on, the bibliography's span and where the appendix starts, each
+offset in UTF-16 code units, as JavaScript indexes the text; `refs()` reads the bibliography's entries from that
+span); a PDF's text is read in the two forms litwatch's archive writes, Markdown with bold headings (`## **References**`)
 and plain text, where only two lines are told as headings: the References line, and the appendix's first, which
 is a line that names it (`Appendix`, `Appendix A: Proofs`) anywhere past the Introduction, or a lettered line
 (`A Additional samples`) after the references.
@@ -91,12 +94,13 @@ What goes to the reviewer by name, since code can neither confirm it nor rule it
 - in a LaTeX source: a figure or table past the main text's count and within the source's whole count, an
   appendix's own labels (`A.1`, `S2`), an appendix where no command starts one, and a `fig` block's number with no
   number in it;
-- every number of a kind a LaTeX source numbers itself (`ownNumbering` in `src/paper.ts`). The source's numbering
-  is taken as LaTeX's defaults only where nothing in it says otherwise. A `\setcounter`, `\addtocounter`,
+- every number of a kind a LaTeX source numbers itself (`ownFloatNumbering` in `src/places.ts` for figures and
+  tables; litwatch's parser for sections). The source's numbering is taken as LaTeX's defaults only where nothing
+  in it says otherwise. A `\setcounter`, `\addtocounter`,
   `\numberwithin` or `\counterwithin` on the counter, any `\the…` of it, chapters or a class that has them, the
   `chngcntr` package, a `\ContinuedFloat` (for figures and tables), and `secnumdepth` or a class that numbers
   sections in Roman numerals (IEEEtran, REVTeX; for sections) each make every figure, table or section number of
-  that paper unknown. Its headings then carry no numbers in `sections()` either.
+  that paper unknown. Its headings then carry no numbers in `sections()` either: litwatch sends none.
 
 A draft that passes is laid out: a diagram without coordinates gets them from ELK's layered algorithm
 (`src/layout.ts`), so the stored read always carries them.
@@ -153,7 +157,12 @@ carries no slug. The extensions a submission asks for (`faithfulness`, `monitori
 its lens; they are no longer objects of their own.
 
 `npm run read-schema` exports the stored read's schema to `web/src/deepread/read.schema.json`, from which the web
-app's types are generated (`pnpm generate:read` in `web/`); run both after changing `src/read.ts`.
+app's types are generated (`pnpm generate:read` in `web/`). The contracts litwatch shares with the service are
+declared in `src/contracts.ts`: what `POST /process` is sent (checked against `JobInputSchema`, a 422 otherwise),
+the answer to a submission, the job as `GET /jobs/<id>` reports it, and the names of a read's sections, notes and
+relations. `npm run contracts` exports them to `contracts/deep.schema.json` at the repository's root, from which
+litwatch's models are generated. After changing `src/read.ts` or `src/contracts.ts`, run `scripts/contracts.sh` at
+the repository's root, which does all of it; CI fails on a generated file that is not current.
 
 ## Running it
 
@@ -171,13 +180,31 @@ node src/main.ts login    # sign in once; the auth file keeps the session
 node src/main.ts serve
 ```
 
+A LaTeX source in the tests comes with the small outline each test states for it (`latex(body, headings)` in
+`tests/support.ts`); litwatch's parser, which writes the real ones, is tested at the repository's root
+(`tests/test_outline.py`). `tests/fixtures/job-*.json` are whole submissions litwatch's code wrote, one of each paper
+variant, which the service must take; the LaTeX one's offsets count characters past the Basic Multilingual Plane as
+JavaScript does (`tests/deep_fixtures.py` writes them; `tests/test_deep_fixtures.py` fails when one is stale).
+
+`node src/main.ts run FILE.json` reads one paper from a file and writes its outcome next to it, for trying a
+change on a paper without litwatch. The file is what `POST /process` is sent, checked the same way before the
+model is called. litwatch writes one for a paper's text, with a LaTeX source's outline, from the repository's root:
+
+```sh
+uv run litwatch deep input paper.tex --id 2610.00001 --title "The paper's title" > deep/paper.json
+cd deep && node src/main.ts run paper.json
+```
+
+`--pdf` says the text is a PDF's; `--abstract` gives the abstract.
+
 ## Environment
 
 | Variable | Default | |
 | --- | --- | --- |
 | `DEEP_PORT` | `8081` | Port to listen on |
 | `DEEP_AUTH_FILE` | `/var/lib/litwatch-deep/auth.json` | Where `login` keeps the model session |
-| `DEEP_MODEL`, `DEEP_EFFORT` | `gpt-6.1-sol`, `high` | The model and reasoning effort, the writer's and the reviewer's |
+| `DEEP_MODEL`, `DEEP_EFFORT` | `gpt-6.2-sol`, `high` | The model and reasoning effort, the writer's and the reviewer's |
+| `DEEP_LINKS_MODEL`, `DEEP_LINKS_EFFORT` | `gpt-6.2-sol`, `medium` | The release-link finder's model and reasoning effort; read by nothing until the finder is built (A2, P6) |
 | `DEEP_MAX_CELLS` | `100` | REPL cells per paper, revisions included |
 | `DEEP_CELL_TIMEOUT_S` | `90` | One cell's time limit |
 | `DEEP_WALL_CLOCK_MIN` | `60` | One paper's time limit, its review and revisions included; keep it below litwatch's `[integrations.deep] timeout_minutes` (75), past which litwatch ends a running job as stuck and may start a duplicate |

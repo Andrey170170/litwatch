@@ -1,5 +1,5 @@
-"""The deep service's side: a finished card job about `Q` (`DONE`), and the Deep integration
-on a fake service (`make`)."""
+"""The deep service's side: a finished job about `Q` (`DONE`), its result a read of few
+fields (`CARD`), and the Deep integration on a fake service (`make`)."""
 
 from litwatch.integrations.deep import Deep, DeepClient
 from tests.conftest import (
@@ -8,8 +8,12 @@ from tests.conftest import (
 from tests.fakes_http import FakeDeep, mock
 
 Q = paper("2610.00002", title="Probes for hidden steps", abstract="Linear probes.", version=1)
-USAGE = {"turns": 7, "input": 41000, "output": 2300, "list_cost": 0.42, "cells": 4}
+USAGE = {
+    "turns": 7, "input": 41000, "output": 2300, "reasoning": 900, "cache_read": 12000,
+    "list_cost": 0.42, "cells": 4, "seconds": 310,
+}  # fmt: skip
 CARD = {
+    "format": "read",
     "summary": "S.",
     "key_claim": "K.",
     "among_collection": [

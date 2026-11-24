@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Value } from "typebox/value";
 import { JobQueue } from "../src/jobs.ts";
-import { buildServer } from "../src/server.ts";
+import { buildServer, refusal } from "../src/server.ts";
 import type { Outcome } from "../src/agent.ts";
+import { JobInputSchema, JobRefSchema, JobSchema } from "../src/contracts.ts";
+import { BODY, latex, sentJob } from "./support.ts";
+
+/** A paper as litwatch sends one, a PDF's text unless `over` says otherwise. */
+const paper = (over: Record<string, unknown> = {}) => ({ id: "a", title: "T", abstract: "", authors: [], body: "# T", body_source: "pdf", ...over });
 
 const outcome = (id: string): Outcome => ({
   result: null,
@@ -34,19 +40,26 @@ test("jobs run one at a time and expose progress, outcome, and health", async ()
   const port = (server.address() as { port: number }).port;
   const base = `http://127.0.0.1:${port}`;
   try {
-    const bad = await fetch(`${base}/process`, { method: "POST", body: JSON.stringify({ paper: { id: "x" } }) });
+    const post = (body: unknown) => fetch(`${base}/process`, { method: "POST", body: JSON.stringify(body) });
+    const bad = await post({ paper: { id: "x" } });
     assert.equal(bad.status, 422);
-    const unknown = await fetch(`${base}/process`, {
-      method: "POST",
-      body: JSON.stringify({ paper: { id: "x", title: "T", body: "# T" }, extensions: ["nope"] }),
-    });
+    assert.match(((await bad.json()) as { error: string }).error, /not a job's input: \/paper: must have required properties title/);
+    // the contract is exact: a field it does not name is a submission gone wrong
+    assert.equal((await post({ paper: paper({ id: "x", pages: 3 }) })).status, 422);
+    // a LaTeX source comes with its outline, and a PDF's text without one
+    assert.equal((await post({ paper: paper({ id: "x", body: BODY, body_source: "latex" }) })).status, 422);
+    assert.equal((await post({ paper: paper({ id: "x", outline: { sections: [] } }) })).status, 422);
+    // and every text says where it comes from: a file from before the outline names none, or null
+    for (const body_source of [undefined, null]) assert.equal((await post({ paper: paper({ id: "x", body: BODY, body_source }) })).status, 422);
+    const unknown = await post({ paper: paper({ id: "x" }), extensions: ["nope"] });
     assert.equal(unknown.status, 400);
     assert.match(((await unknown.json()) as { error: string }).error, /unknown extension "nope"/);
     const submit = async (id: string, extra: Record<string, unknown> = {}) =>
-      (await (await fetch(`${base}/process`, { method: "POST", body: JSON.stringify({ paper: { id, title: "T", body: "# T" }, ...extra }) })).json()) as { id: string };
+      (await (await post({ paper: paper({ id }), ...extra })).json()) as { id: string };
     const selections = [{ name: "cot-faithfulness", subject: "CoT faithfulness", rubric: "Measures unfaithfulness." }];
     const a = await submit("a", { extensions: ["faithfulness"], selections });
-    const b = await submit("b");
+    const b = await post({ paper: { ...paper({ id: "b" }), ...latex(BODY) } }).then((r) => r.json() as Promise<{ id: string }>);
+    assert.ok(Value.Check(JobRefSchema, a), "a submission is answered as the contract says");
     const health = (await (await fetch(`${base}/healthz`)).json()) as Record<string, unknown>;
     assert.equal(health.running, a.id);
     assert.equal(health.queued, 1);
@@ -57,6 +70,7 @@ test("jobs run one at a time and expose progress, outcome, and health", async ()
       job = (await (await fetch(`${base}/jobs/${b.id}`)).json()) as Record<string, unknown>;
     }
     assert.equal(job.status, "error");
+    assert.ok(Value.Check(JobSchema, job), "a job is reported as the contract says");
     assert.equal(job.error, "the model stopped without submitting");
     assert.equal(job.failure, "paper");
     assert.deepEqual(job.trace, [{ t: 1, type: "system", text: "ran b" }]);
@@ -89,7 +103,7 @@ test("a submission's key answers with the job it started, and a runner that thro
     fetch(`${base}/process`, {
       method: "POST",
       headers: key ? { "idempotency-key": key } : {},
-      body: JSON.stringify({ paper: { id: "a", title: "T", body: "# T" } }),
+      body: JSON.stringify({ paper: paper() }),
     });
   try {
     const first = await submit("7:a");
@@ -119,7 +133,7 @@ test("a submission's key answers with the job it started, and a runner that thro
 
 test("a key is forgotten with its job", async () => {
   const jobs = new JobQueue(async () => outcome("x"), 1);
-  const paper = { id: "a", title: "T", abstract: "", authors: [], body: "# T" };
+  const paper = { id: "a", title: "T", abstract: "", authors: [], body: "# T", body_source: "pdf" as const };
   const first = jobs.submit(paper, [], [], "1:a");
   for (let i = 0; i < 50 && first.status !== "error"; i++) await new Promise((r) => setTimeout(r, 5));
   const second = jobs.submit(paper, [], [], "2:a");
@@ -144,7 +158,7 @@ test("a finished job carries the read, its figures and its reviews, and the text
   const server = buildServer({ jobs, health: async () => ({ ok: true }) });
   await new Promise<void>((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const submit = (paper: Record<string, unknown>) => fetch(`${base}/process`, { method: "POST", body: JSON.stringify({ paper: { title: "T", body: "# T", ...paper } }) });
+  const submit = (over: Record<string, unknown>) => fetch(`${base}/process`, { method: "POST", body: JSON.stringify({ paper: paper(over) }) });
   const finished = async (id: string) => {
     let job: Record<string, unknown> = {};
     for (let i = 0; i < 50 && job.status !== "done"; i++) {
@@ -157,14 +171,28 @@ test("a finished job carries the read, its figures and its reviews, and the text
     for (const body_version of ["2", 0, 1.5, -1, true]) assert.equal((await submit({ id: "x", body_version })).status, 422, `body_version ${JSON.stringify(body_version)}`);
     const a = await finished(((await (await submit({ id: "a", body_version: 3 })).json()) as { id: string }).id);
     assert.deepEqual([a.result, a.figures, a.reviews], [read, figures, reviews]);
+    assert.ok(Value.Check(JobSchema, a), "a finished job is reported as the contract says");
     const b = await finished(((await (await submit({ id: "b", body_version: null })).json()) as { id: string }).id);
     assert.ok(!("figures" in b), "no figures field for a read that shows none");
     assert.equal(b.reviews, null);
     await finished(((await (await submit({ id: "c" })).json()) as { id: string }).id);
-    assert.deepEqual(versions, [3, null, null], "the version as litwatch sent it; null when it cannot say");
+    assert.deepEqual(versions, [3, null, undefined], "the version as litwatch sent it; null or absent when it cannot say");
     const list = (await (await fetch(`${base}/jobs`)).json()) as Record<string, unknown>[];
     assert.ok(list.every((j) => !("figures" in j) && !("reviews" in j) && !("result" in j)), "the list stays light");
   } finally {
     server.close();
+  }
+});
+
+test("a paper arXiv gives no title is still a job's input", () => {
+  assert.equal(refusal({ paper: paper({ title: "" }) }), undefined);
+  assert.notEqual(refusal({ paper: paper({ title: undefined }) }), undefined, "but the title is never left out");
+});
+
+test("what litwatch's code sends of a LaTeX source and of a PDF's text is a job's input", () => {
+  for (const name of ["job-latex.json", "job-pdf.json"] as const) {
+    const sent = sentJob(name);
+    assert.equal(refusal(sent), undefined, name);
+    assert.ok(Value.Check(JobInputSchema, sent), name);
   }
 });

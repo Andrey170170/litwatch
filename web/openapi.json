@@ -3293,14 +3293,7 @@
             "title": "Title"
           },
           "relation": {
-            "type": "string",
-            "enum": [
-              "agrees",
-              "contradicts",
-              "extends",
-              "supersedes"
-            ],
-            "title": "Relation"
+            "$ref": "#/components/schemas/Relation"
           },
           "note": {
             "anyOf": [
@@ -7566,6 +7559,15 @@
         ],
         "title": "Recall",
         "description": "The four numbers for one cohort and Focus topic, each over the positives the stages it\nneeds have concluded on; and how many of the cohort's negatives came through end to end."
+      },
+      "Relation": {
+        "type": "string",
+        "enum": [
+          "agrees",
+          "contradicts",
+          "extends",
+          "supersedes"
+        ]
       },
       "ReplayIn": {
         "properties": {

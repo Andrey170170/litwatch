@@ -105,9 +105,13 @@ def chunk(answer: str) -> str:
 
 
 def entries(outline: str) -> list[tuple[str, int, str, int]]:
-    """An outline's entries: (indent, number, title, offset), with each size checked later."""
+    """An outline's entries: (indent, number, title, offset), with each size checked later; a
+    title without the section's number before it and the appendix's mark after it."""
     found = re.findall(
-        r"^( *)(\d+)\. (.+) · (?:[\d,]+ characters|blank) · offset (\d+)$", outline, re.M
+        r"^( *)(\d+)\. (?:§\S+ )?(.+?)(?: · appendix)?"
+        r" · (?:[\d,]+ characters|blank) · offset (\d+)$",
+        outline,
+        re.M,
     )
     return [(indent, int(n), title, int(at)) for indent, n, title, at in found]
 
@@ -159,9 +163,13 @@ async def test_the_outline_lists_latex_sections_and_reads_them_whole_a_page_at_a
         ("  ", 3, "Probes {on} layers"),
         ("  ", 4, "After an escaped per cent"),
         ("", 5, "Results"),
-        ("", 6, "References (the bibliography)"),
+        ("", 6, "References"),
         ("", 7, "Proofs"),
     ]
+    # each section with the number LaTeX gives it, and the appendix's marked
+    assert "\n1. §1 Introduction · " in outline and "\n2. Method \\& setup · " in outline
+    assert "\n  3. §1.1 Probes {on} layers · " in outline and "\n5. §2 Results · " in outline
+    assert "\n6. References · " in outline and "\n7. §A Proofs · appendix · " in outline
     starts = {n: at for _, n, _, at in listed}
     assert LATEX[starts[5] :].startswith("\\section{Results}")
     assert LATEX[starts[3] :].startswith("\\subsection{Probes {on} layers}")
@@ -200,7 +208,7 @@ async def test_reading_follows_the_owners_use_the_pdf_on_the_papers_text(
         latex = await ok(http, "paper_outline", paper_id=HELD.id)
     assert 'its PDF\'s text (the owner chose "Use the PDF" for it), 1 page,' in from_pdf
     assert chunk(read) == "The words of the PDF." and set(asked) == {"pdf"}
-    assert "its LaTeX source" in latex and "1. Introduction" in latex
+    assert "its LaTeX source" in latex and "1. §1 Introduction" in latex
 
 
 async def test_a_pdfs_text_is_outlined_by_page_as_the_pdf_numbers_them(

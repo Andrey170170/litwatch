@@ -2,9 +2,11 @@
 must be to be stored, and how a stored read is taken apart by what exports it.
 
 The read's schema is the deep service's (`deep/src/read.ts`), which validates a read before it
-returns one. litwatch stores it as JSON and checks only its format tag (`received`), so what
-reads a stored one here takes a missing field as absent and never raises on it. A Deep card
-from before has no format tag and none of a read's fields.
+returns one. The job that returns it is a contract the service declares (`core.contracts.deep`,
+generated): its result is told by its format tag alone, and its figures by their name and type.
+litwatch stores the read as JSON (`received` checks what the contract cannot: the figures' bytes),
+so what reads a stored one here takes a missing field as absent and never raises on it. A Deep
+card from before the read has no format tag and none of a read's fields.
 """
 
 from __future__ import annotations
@@ -15,24 +17,23 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-# A read's format tag; a Deep card has none.
-FORMAT = "read"
+from litwatch.core.contracts import deep as contract
+
+# A read's format tag; a Deep card from before has none.
+FORMAT: contract.ReadFormat = "read"
 # The process note the service leaves on a read that still failed its review.
-REVIEW = "review"
-# What a figure may be. The figure endpoint serves the stored type to the owner's browser, so
-# nothing a browser would run is let in.
-FIGURE_MIMES = frozenset({"image/webp"})
-# A figure's name, as the read's `fig` blocks name it (`deep/src/read.ts`).
-FIGURE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+REVIEW: contract.NoteKind = "review"
 # The most one read's figures may weigh, decoded: far above any read's (about 1 MB).
 FIGURES_BYTES = 32 * 1024 * 1024
 # Whose a limitation is (its `by`), as every export of a read words it.
-LIMITATION_BY = {"paper": "the paper's own", "read": "the read's"}
+LIMITATION_BY: dict[contract.LimitationBy, str] = {"paper": "the paper's own", "read": "the read's"}
 
 
 @dataclass(frozen=True)
 class Figure:
-    """One of a paper's figures, stored with its read under the name the read cites."""
+    """One of a paper's figures, stored with its read under the name the read cites. Its type
+    is the contract's one (WebP): the figure endpoint serves it to the owner's browser, so
+    nothing a browser would run is let in."""
 
     name: str
     mime: str
@@ -44,43 +45,19 @@ def is_read(card: Mapping[str, Any]) -> bool:
     return card.get("format") == FORMAT
 
 
-def received(
-    result: Any, figures: Any = None, reviews: Any = None
-) -> tuple[list[Figure], list[Any] | None]:
-    """Check what the deep service returned for a finished job before any of it is stored: the
-    result's format tag (absent: a Deep card; `read`: a Deep read; anything else is refused),
-    its figures and its reviews. Returns the figures decoded, and the reviews as given (None:
-    no review ran). Raises `ValueError` saying what is wrong with it."""
-    if not isinstance(result, dict):
-        raise ValueError("the result is not an object")
-    if "format" in result and result["format"] != FORMAT:
-        raise ValueError(f"unknown format {result['format']!r}")
-    if reviews is not None and not isinstance(reviews, list):
-        raise ValueError("`reviews` is not a list")
-    return _figures(figures), reviews
-
-
-def _figures(sent: Any) -> list[Figure]:
-    if sent is None:
-        return []
-    if not isinstance(sent, list):
-        raise ValueError("`figures` is not a list")
+def received(figures: list[contract.Figure] | None) -> list[Figure]:
+    """Check the figures of a finished job, which the contract has named and typed, before any
+    of them is stored: each is base64 of a WebP image, no two share a name, and together they
+    weigh no more than FIGURES_BYTES. Returns them decoded; raises `ValueError` saying what is
+    wrong."""
     found: dict[str, Figure] = {}
     size = 0
-    for figure in sent:
-        if not isinstance(figure, dict):
-            raise ValueError("a figure is not an object")
-        name, mime, data = figure.get("name"), figure.get("mime"), figure.get("data")
-        if not isinstance(name, str) or not FIGURE_NAME.fullmatch(name):
-            raise ValueError(f"a figure's name is not one: {name!r}")
+    for figure in figures or []:
+        name = figure.name
         if name in found:
             raise ValueError(f"two figures are named {name}")
-        if mime not in FIGURE_MIMES:
-            raise ValueError(f"figure {name} is {mime!r}, not {' or '.join(sorted(FIGURE_MIMES))}")
-        if not isinstance(data, str):
-            raise ValueError(f"figure {name} has no data")
         try:
-            image = base64.b64decode(data, validate=True)
+            image = base64.b64decode(figure.data, validate=True)
         except ValueError as exc:
             raise ValueError(f"figure {name} is not base64: {exc}") from exc
         if image[:4] != b"RIFF" or image[8:12] != b"WEBP":
@@ -88,7 +65,7 @@ def _figures(sent: Any) -> list[Figure]:
         size += len(image)
         if size > FIGURES_BYTES:
             raise ValueError(f"the figures weigh more than {FIGURES_BYTES} bytes")
-        found[name] = Figure(name, mime, image)
+        found[name] = Figure(name, figure.mime, image)
     return list(found.values())
 
 

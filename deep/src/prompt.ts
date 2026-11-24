@@ -5,33 +5,11 @@
  * works in phases of its own choosing.
  */
 
+import type { PaperInput, SelectionContext } from "./contracts.ts";
 import { MAX_BODY_CHARS_IN_CONTEXT, outline, splitPaper, type Heading } from "./paper.ts";
 import { lengthLine, type Length } from "./length.ts";
 import { DraftSchema, type Read } from "./read.ts";
 import type { Review } from "./review.ts";
-
-export interface PaperInput {
-  id: string;
-  title: string;
-  abstract: string;
-  authors: string[];
-  published?: string | null;
-  url?: string | null;
-  body: string;
-  body_source?: string | null;
-  /** The arXiv version the text is of, which the figures are taken at; null when litwatch cannot say. */
-  body_version?: number | null;
-}
-
-/** A topic the read is for: why the lab follows it, what it must read, and the grade litwatch gave the paper there
- * (`must_read`, `relevant` or `adjacent`). `slug` is the topic's, when litwatch sends it. */
-export interface SelectionContext {
-  name: string;
-  slug?: string | null;
-  subject: string;
-  rubric?: string | null;
-  grade?: string | null;
-}
 
 /** What a lens names its topic by (`Lens.topic`): the topic's slug, or its name when litwatch sent no slug. */
 export const topicKey = (s: SelectionContext): string => s.slug || s.name;
@@ -290,7 +268,7 @@ Budget: ${maxCells} cells for the whole run, revisions included. The run ends wh
 
 /** The writer's first message: what the paper is, its outline, and its main text (D4). */
 export function userMessage(paper: PaperInput, headings: Heading[]): string {
-  const { main, cuts } = splitPaper(paper.body, paper.body_source);
+  const { main, cuts } = splitPaper(paper);
   const body =
     main.length > MAX_BODY_CHARS_IN_CONTEXT ? `${main.slice(0, MAX_BODY_CHARS_IN_CONTEXT)}\n\n[truncated here; the complete text is in \`paper\` in the session]` : main;
   const left = cuts.map((c) => `${c.part === "appendix" ? "the appendix" : "the bibliography"} (${c.end - c.start} characters)`);
@@ -382,7 +360,7 @@ export function reviewerText(paper: PaperInput, room: number): { text: string; l
   if (paper.body.length <= room) return { text: paper.body, left: [] };
   const left: string[] = [];
   let text = paper.body;
-  const refs = splitPaper(paper.body, paper.body_source).cuts.find((c) => c.part === "references");
+  const refs = splitPaper(paper).cuts.find((c) => c.part === "references");
   if (refs) {
     left.push(`its bibliography (${refs.end - refs.start} characters)`);
     text = `${text.slice(0, refs.start)}[the bibliography stood here and is left out]\n${text.slice(refs.end)}`;

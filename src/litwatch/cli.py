@@ -302,6 +302,27 @@ def deep_trace(
     print(text.trace_text(paper, title, found, chosen, trace, notes, zone, reviews), end="")
 
 
+@deep_app.command("input")
+def deep_input(
+    text: Annotated[
+        Path, typer.Argument(help="The paper's text: its LaTeX source, inputs inlined, or a PDF's.")
+    ],
+    paper_id: Annotated[str, typer.Option("--id", help="The paper's arXiv id.")],
+    title: Annotated[str, typer.Option(help="The paper's title.")],
+    abstract: Annotated[str, typer.Option(help="The paper's abstract.")] = "",
+    pdf: Annotated[bool, typer.Option("--pdf", help="The text is a PDF's, not LaTeX.")] = False,
+) -> None:
+    """Print what the deep service is sent to read a paper's text, as `node src/main.ts run
+    FILE.json` in deep/ reads it: the text, and a LaTeX source's outline as litwatch parses it.
+    It reads no database and calls no service."""
+    from litwatch.archive import PaperText  # noqa: PLC0415
+    from litwatch.integrations.deep import job_input  # noqa: PLC0415
+
+    paper = Paper(id=paper_id, title=title, abstract=abstract)
+    body = PaperText(text.read_text(), None, "pdf" if pdf else "latex")
+    typer.echo(job_input(paper, body).model_dump_json(exclude_none=True, indent=2))
+
+
 @deep_app.command("notes")
 def deep_notes(
     since: Annotated[

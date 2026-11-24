@@ -359,6 +359,13 @@ async def test_a_deep_pass_awaits_text_then_writes_the_card_with_its_usage(db: S
     (sent,) = fake.requests
     assert sent["paper"]["body"] == BODY and sent["paper"]["body_source"] == "latex"
     assert sent["paper"]["body_version"] == 2  # the text's arXiv version, for its figures
+    # A LaTeX source goes with its outline, which the service reads it by (`core.outline`).
+    sections = sent["paper"]["outline"]["sections"]
+    assert len(sections) == 40 and "references" not in sent["paper"]["outline"]
+    assert [(s["title"], s["depth"], s["number"], s["start"]) for s in sections[:2]] == [
+        ("Method", 0, "1", 0),
+        ("Method", 0, "2", len(BODY) // 40),
+    ]
     assert sent["extensions"] == ["faithfulness"]
     assert [s["name"] for s in sent["selections"]] == ["Chain-of-thought faithfulness"]
     stored = await in_read(db, cards.card, P.id)
@@ -623,6 +630,8 @@ REVIEWS = [
     },
 ]
 WROTE_READ = DONE | {"result": READ, "figures": FIGURES, "reviews": REVIEWS}
+# A Deep card, as the service wrote them before the Deep read: no format tag.
+CARD_BEFORE = {k: v for k, v in CARD.items() if k != "format"}
 
 
 async def figures(conn: Session, pid: str = P.id) -> dict[str, tuple[str, bytes]]:
@@ -663,7 +672,7 @@ async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_repla
     assert await figures(db) == {"pact_vs_bid": ("image/webp", RUST)}
     assert [a["reviews"] for a in await attempts(db)] == [REVIEWS, []]
 
-    # A Deep card, from a service that writes none yet: no format, no figures, no review ran.
+    # A read of no figures, of which no review ran.
     fake.outcome = DONE
     await ask(db, P.id)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
@@ -674,27 +683,29 @@ async def test_a_read_is_stored_with_its_figures_and_reviews_and_a_new_one_repla
 @pytest.mark.parametrize(
     ("sent", "said"),
     [
-        ({"result": READ | {"format": "essay"}}, "unknown format 'essay'"),
-        ({"result": READ | {"format": None}}, "unknown format None"),
-        ({"result": ["not", "a", "card"]}, "the result is not an object"),
-        ({"figures": [sent_figure("f", mime="image/svg+xml")]}, "figure f is 'image/svg+xml'"),
+        ({"result": READ | {"format": "essay"}}, "result.format: Input should be 'read'"),
+        ({"result": READ | {"format": None}}, "result.format: Input should be 'read'"),
+        ({"result": CARD_BEFORE}, "result.format: Field required"),
+        ({"result": ["not", "a", "card"]}, "result: Input should be a valid dictionary"),
+        ({"figures": [sent_figure("f", mime="image/svg+xml")]}, "0.mime: Input should be"),
         ({"figures": [sent_figure("f", b"<svg/>")]}, "figure f is not a WebP image"),
         ({"figures": [{"name": "f", "mime": "image/webp", "data": "%%%"}]}, "is not base64"),
-        ({"figures": [sent_figure("../f")]}, "a figure's name is not one: '../f'"),
+        ({"figures": [sent_figure("../f")]}, "figures.0.name: String should match pattern"),
         ({"figures": [sent_figure("f"), sent_figure("f")]}, "two figures are named f"),
-        ({"figures": {"f": "x"}}, "`figures` is not a list"),
-        ({"reviews": "passed"}, "`reviews` is not a list"),
+        ({"figures": {"f": "x"}}, "figures: Input should be a valid list"),
+        ({"reviews": "passed"}, "reviews: Input should be a valid list"),
     ],
     ids=[
-        "format", "null-format", "no-object", "mime", "not-webp", "base64", "name", "twice",
-        "figures-shape", "reviews-shape",
+        "format", "null-format", "card-before", "no-object", "mime", "not-webp", "base64",
+        "name", "twice", "figures-shape", "reviews-shape",
     ],
 )  # fmt: skip
 async def test_a_result_litwatch_cannot_store_is_the_services_failure_and_stores_nothing(
     db: Session, sent, said
 ):
-    """An unknown format, or figures and reviews that are not the contract's: an error with
-    the job's usage and trace kept, never a card with something missing (P14)."""
+    """A result of an unknown format or of none (a Deep card, which the service writes no
+    longer), or figures and reviews that are not the contract's: an error with the job's usage,
+    trace and reviews kept, never a card with something missing (P14)."""
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(WROTE_READ | {"trace": trace("wrote")} | sent)
     assert await work(db, with_text(P), make(fake)) == {"card_service_failed": 1}
@@ -704,6 +715,7 @@ async def test_a_result_litwatch_cannot_store_is_the_services_failure_and_stores
     (attempt,) = await attempts(db)
     assert attempt["failure"] == "service" and said in attempt["error"]
     assert attempt["usage"] == USAGE and attempt["trace"] == trace("wrote")
+    assert attempt["reviews"] == (REVIEWS if "reviews" not in sent else None)  # when a list
     # The service's failure counts against nothing: the pass is back in the queue, which pauses.
     (row,) = await deep_rows(db)
     assert (row["state"], row["failed_runs"]) == ("ready", 0)
@@ -727,7 +739,7 @@ async def test_a_failed_read_keeps_the_figures_of_the_read_before_it(db: Session
 
 async def test_a_text_of_unknown_version_is_submitted_as_such(db: Session):
     """A paper of no known arXiv version is read from the archive's historical LaTeX, of no
-    known version either: the submission says so, and the service takes the latest figures."""
+    known version either: the submission gives none, and the service takes the latest figures."""
     old = paper("2610.00003", title="A paper of no known version", version=None)
     await in_write(db, papers_store.upsert, [old])
     await ask(db, old.id)
@@ -736,7 +748,7 @@ async def test_a_text_of_unknown_version_is_submitted_as_such(db: Session):
     fake = FakeDeep(DONE)
     assert await work(db, held, make(fake)) == {"cards_written": 1}
     (sent,) = fake.requests
-    assert "body_version" in sent["paper"] and sent["paper"]["body_version"] is None
+    assert "body_version" not in sent["paper"]  # the contract's null, left out
 
 
 async def test_the_figure_endpoint_serves_a_reads_figures_to_the_web_app_alone(db: Session):
@@ -1129,6 +1141,41 @@ async def test_a_failed_poll_lets_the_pass_go_and_its_next_claim_follows_the_job
     await unpause(db)
     assert await work(db, with_text(P), d) == {"cards_written": 1}
     assert len(fake.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "odd", [{"id": "job-1", "status": "paused"}, {"status": "running"}, ["not", "a", "job"]]
+)
+async def test_a_progress_reply_that_is_not_the_contracts_is_a_failed_poll(db: Session, odd):
+    """An unknown status, or a running job missing what the contract says it reports: the
+    job may well be running, so it is followed again, never ended or sent again."""
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.odd_polls = [odd]
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    (attempt,) = await attempts(db)
+    assert (
+        attempt["ended_at"] is None
+        and "the deep job is not" in (await deep_rows(db))[0]["last_error"]
+    )
+    await unpause(db)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    assert len(fake.requests) == 1 and len(await attempts(db)) == 1
+
+
+async def test_a_failed_job_from_before_with_a_null_result_is_the_papers_failure(db: Session):
+    """The service once reported a failed job's result as null; the contract still takes it."""
+    failed = {"error": "no valid card", "failure": "paper", "stats": USAGE, "result": None}
+    fake = FakeDeep(failed | {"trace": []})
+    await grade(db, Fit.CENTRAL)
+    assert await work(db, with_text(P), make(fake)) == {"card_failed": 1}
+    (attempt,) = await attempts(db)
+    assert (attempt["failure"], attempt["error"], attempt["usage"]) == (
+        "paper",
+        "no valid card",
+        USAGE,
+    )
 
 
 async def test_a_submitted_job_is_followed_past_a_dismissal(db: Session):

@@ -1,6 +1,6 @@
 // Injected into every REPL session before the first cell. Plain script, no module syntax:
-// top-level `var`/`function` here become globals the cells can see. `paper`, `__meta` and
-// `__headings` are set by the host before this runs; `_print` and `_host` are the only bridges out.
+// top-level `var`/`function` here become globals the cells can see. `paper`, `__meta`, `__headings` and
+// `__references` are set by the host before this runs; `_print` and `_host` are the only bridges out.
 
 var __last;
 var meta = JSON.parse(__meta);
@@ -80,15 +80,17 @@ function find(pattern, context, limit) {
   return out;
 }
 
-// The bibliography's entries: each \bibitem of a thebibliography environment, else each "- " line
-// under a References or Bibliography heading. Empty for a bibliography in another form (biblatex).
-// LaTeX comments are dropped first, so a commented-out \bibitem is no entry; an escaped \% stays.
+// The bibliography's entries: each \bibitem of a LaTeX source's thebibliography environment, where
+// litwatch's outline found it (`__references`, wherever it sits, the appendix included), else each
+// "- " line under a References or Bibliography heading. Empty for a bibliography in another form
+// (biblatex). LaTeX comments are dropped first, so a commented-out \bibitem is no entry; an escaped
+// \% stays; the environment's closing \end is no part of the last entry.
 function refs() {
-  var tex = /\\begin\{thebibliography\}/.exec(paper);
-  if (tex) {
-    var close = paper.indexOf('\\end{thebibliography}', tex.index);
-    return paper.slice(tex.index, close === -1 ? paper.length : close)
+  var span = JSON.parse(__references);
+  if (span) {
+    return paper.slice(span.start, span.end)
       .replace(/(^|[^\\])%.*$/gm, '$1')
+      .replace(/\\end\s*\{thebibliography\}\s*$/, '')
       .split(/\\bibitem\s*(?:\[[^\]]*\])?\s*\{[^}]*\}/).slice(1)
       .map(function (e) { return e.replace(/\\newblock\s*/g, '').replace(/\s+/g, ' ').trim(); })
       .filter(function (e) { return e.length > 0; });

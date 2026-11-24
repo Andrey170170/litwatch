@@ -6,34 +6,15 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { Failure, Outcome, Progress, Stats, TraceEvent } from "./agent.ts";
-import type { PaperInput, SelectionContext } from "./prompt.ts";
+import type { Static } from "typebox";
+import type { Outcome, Progress, TraceEvent } from "./agent.ts";
+import type { JobSchema, PaperInput, SelectionContext, Stats } from "./contracts.ts";
+import type { Read } from "./read.ts";
+import type { Review } from "./review.ts";
 
-export type JobStatus = "queued" | "running" | "done" | "error";
-
-export interface Job {
-  id: string;
-  paper_id: string;
-  title: string;
-  extensions: string[];
-  status: JobStatus;
-  created_at: string;
-  started_at?: string;
-  finished_at?: string;
-  model?: string;
-  stats: Stats;
-  last_event?: string;
-  last_activity: string;
-  result?: Outcome["result"];
-  /** The figures the read shows; absent when it shows none. */
-  figures?: Outcome["figures"];
-  /** The review rounds; null when no review gave a verdict. */
-  reviews?: Outcome["reviews"];
-  trace?: TraceEvent[];
-  error?: string;
-  failure?: Failure; // whose failure an `error` job's was
-  key?: string;
-}
+/** A job as `GET /jobs/<id>` reports it (`contracts.ts`, `JobSchema`), with its read, reviews and trace typed as
+ * the service makes them. */
+export type Job = Omit<Static<typeof JobSchema>, "result" | "reviews" | "trace"> & { result?: Read; reviews?: Review[] | null; trace?: TraceEvent[] };
 
 /** What a job carries into the run: the paper, the lens questions asked for (`extensions`), and the topics the read
  * is written for. */
@@ -125,7 +106,7 @@ export class JobQueue {
       job.status = outcome.error ? "error" : "done";
       job.model = outcome.model;
       job.stats = outcome.stats;
-      job.result = outcome.result;
+      job.result = outcome.result ?? undefined;
       if (outcome.figures.length) job.figures = outcome.figures;
       job.reviews = outcome.reviews;
       job.trace = outcome.trace;
