@@ -46,6 +46,8 @@ FOCUS = "focus"
 PICK = "pick"
 # A pass awaiting text this long is listed for the owner.
 AWAITING_TOO_LONG = timedelta(days=7)
+# A pass awaiting its text is tried again this long after, when the archive is asked again.
+TEXT_WAIT = timedelta(seconds=30)
 # The nightly reconcile also looks at verdicts and labels this recent, whose settle may have
 # been missed: more than a night, so a missed trigger costs at most one.
 RECONCILE_LOOKBACK = timedelta(days=2)

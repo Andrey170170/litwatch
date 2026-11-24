@@ -20,18 +20,10 @@ from litwatch.gates.database import Cursor, DatabaseGate, LeaseLostError, Query,
 from litwatch.gates.work import SYSTEM, Done, Later, Worker, WorkGate
 from litwatch.store import work as queue
 from tests.sessions import Session, in_read, sibling, staged
+from tests.working import WAIT, serving, until
 
-WAIT = 10.0  # how long a test waits on something that must happen
 SHORT = timedelta(seconds=1.5)  # a lease that lapses within a test
 LONG = timedelta(minutes=5)  # one that does not
-
-
-async def until(check: Callable[[], Awaitable[bool]], what: str) -> None:
-    """Wait until `check` holds, looking again every 50 ms, for at most `WAIT`."""
-    async with asyncio.timeout(WAIT):
-        while not await check():
-            await asyncio.sleep(0.05)
-    del what  # named for the reader of a timeout's traceback
 
 
 async def submit(db: DatabaseGate, kind: str, key: str, **kwargs) -> WorkItem:
@@ -96,24 +88,6 @@ async def other(conn: Session) -> AsyncGenerator[Session]:
         yield session
 
 
-@contextlib.asynccontextmanager
-async def serving(gate: WorkGate, workers: dict[str, Worker]) -> AsyncGenerator[asyncio.Task]:
-    """`gate.run(workers)` for the block, listening and asleep before it starts; stopped at the
-    end."""
-    task = asyncio.create_task(gate.run(workers))
-
-    async def idle() -> bool:
-        return gate.listening.is_set() and gate.idle
-
-    try:
-        await until(idle, "the gate listens and sleeps")
-        yield task
-    finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-
 def finished(event: asyncio.Event) -> Worker:
     """A Worker that sets `event` and is done."""
 
@@ -153,6 +127,27 @@ async def test_an_open_key_is_the_same_item(conn: Session, db):
     async with db.write("end") as unit:
         assert await queue.end(unit, taken, Outcome.DONE)
     assert (await submit(db, "fulltext", "7")).id != first.id  # ended, the key is free
+
+
+async def test_a_submission_that_keeps_leaves_a_pending_items_time_and_marks_a_running_one(
+    conn: Session, db
+):
+    gate = WorkGate(db)
+    backoff = datetime.now(UTC) + timedelta(hours=1)
+    first = await submit(db, "deliver", "zotero", not_before=backoff)
+    kept = await submit(db, "deliver", "zotero", keep=True)  # an event during the backoff
+    assert (kept.id, kept.not_before) == (first.id, backoff)
+    async with db.write("due") as unit:
+        await unit.execute("UPDATE work_items SET not_before = now() WHERE id = %s", (first.id,))
+    taken = await take(gate, ["deliver"])
+    assert taken is not None
+    await submit(db, "deliver", "zotero", keep=True)  # an event while it runs
+    async with db.write("end") as unit:
+        assert await queue.end(unit, taken, Outcome.DONE)
+    assert await records(conn, "zotero") == [
+        ("ended", "done", None, False),
+        ("pending", None, None, False),
+    ]
 
 
 # A resubmitted item ended done, and the item that took its key.

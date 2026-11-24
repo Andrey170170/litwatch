@@ -1,7 +1,8 @@
 """The full-text queue (docs/specs/v1/pipeline.md, section 6). A settle (`feedback.word`) queues
-a paper's Brief or Weight re-check; here passes are worked. A pass reads the paper's text from the
+a paper's Brief or Weight re-check; here passes are worked, by the nightly and a re-run inline,
+and otherwise each by its work item (`fulltext.worker`). A pass reads the paper's text from the
 archive, asked for at urgent priority. While the archive is still fetching it, the pass is
-awaiting text and is tried again on the worker's next tick, so it runs once the text is there.
+awaiting text and is tried again after `TEXT_WAIT`, so it runs once the text is there.
 With the text, the `brief` role writes the Brief, a Gist and the Weight from the full text, which
 `record_in_change` stores and settles. Both kinds of pass make that one call.
 
@@ -36,7 +37,7 @@ from litwatch.archive import (
 from litwatch.concurrency import bounded
 from litwatch.config import Config
 from litwatch.core import Cause
-from litwatch.core.fulltext import LEASE, PassKind, TextRead
+from litwatch.core.fulltext import LEASE, TEXT_WAIT, PassKind, TextRead
 from litwatch.feedback import word
 from litwatch.fulltext import brief
 from litwatch.gates.database import DatabaseGate, WriteUnit
@@ -57,7 +58,7 @@ CONCURRENCY = 4  # `brief` calls at a time, and archive reads
 # call takes its whole timeout and retries. A batching run claims every pass due at once, held
 # until its deadline (models.md, batches).
 BATCH = CONCURRENCY
-TICK_SECONDS = 30  # how often the service's worker looks at the queue
+TICK_SECONDS = TEXT_WAIT.total_seconds()  # how often `work_waiting` looks again
 
 
 @dataclass
@@ -286,22 +287,15 @@ async def work(
     worker's. The calls go on `run`, or on a run of kind `fulltext` opened only when some text
     arrived. Returns how the tries ended.
 
-    A `run` (a nightly) leaves the owner's passes to the service's worker; batching, it claims
-    all the automatic ones due at once, held until its gateway's deadline. Without a run, while
+    A `run` (a nightly) leaves the owner's passes to their work items; batching, it claims all
+    the automatic ones due at once, held until its gateway's deadline. Without a run, while
     another job holds the run lock, only the owner's are worked (models.md, batches). A re-run's
     passes are worked only by its `job`, on its run, until its ceiling is reached."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
-    rules = word.rules(config)
     lease, wide, owners = LEASE, False, False if run and job is None else None
     if run and (until := run.gateway.batching_until()):
         lease, wide = until - datetime.now(UTC) + DRAIN + LEASE, True
-    reads = asyncio.Semaphore(CONCURRENCY)
-
-    async def read_one(c: Claimed) -> Attempt:
-        async with reads:
-            return await read(archive, c)
-
     while (
         (limit is None or len(tried) < limit)
         and (deadline is None or time.monotonic() < deadline)
@@ -318,40 +312,65 @@ async def work(
         if not claimed:
             break
         tried.update(c.id for c in claimed)
-        wanted = []
-        for c in claimed:
-            if (why := await still_wanted(db, c, rules)) is None:
-                wanted.append(c)
-            elif why != "lost":
-                counts[why] += 1
-                if run:
-                    run.add(why)
-        attempts = await asyncio.gather(*(read_one(c) for c in wanted))
-        for a in attempts:
-            if a.text is None and await record_in_change(db, a, rules):
-                counts[_outcome(a)] += 1
-                if run:
-                    run.add(_outcome(a))
-        texts = [a for a in attempts if a.text is not None]
-        if not texts:
-            continue
-        # With no nightly running, a key in an open batch is a dead run's (models.md, batches).
-        factory = attaching(gateway) if owners is None else gateway
-        opened = (
-            contextlib.nullcontext(run)
-            if run
-            else model_run(db, config, "fulltext", gateway=factory)
-        )
-        async with opened as r:
-            try:
-                async with _write(texts, r.gateway) as answered:
-                    async for a in answered:
-                        if await record_in_change(db, a, rules):
-                            counts[_outcome(a)] += 1
-                            r.add(_outcome(a))
-            finally:
-                if run is None:  # the gateway this wave opened, its batch polling included
-                    await r.gateway.close()
+        counts += await wave(db, config, archive, claimed, run=run, gateway=gateway, owners=owners)
+    return counts
+
+
+async def wave(
+    db: DatabaseGate,
+    config: Config,
+    archive: ArchiveClient,
+    claimed: list[Claimed],
+    *,
+    run: ModelRun | None,
+    gateway: GatewayFactory = default_gateway,
+    owners: bool | None = None,
+) -> Counter[str]:
+    """Try the claimed passes once: settle each paper (`still_wanted`), read the texts, and
+    write from them, `CONCURRENCY` at a time. The calls go on `run`, or on a run of kind
+    `fulltext` opened only when some text arrived; `owners` is how the passes were claimed
+    (`claim`): with no nightly running, a key in an open batch is a dead run's. Returns how
+    the tries ended."""
+    counts: Counter[str] = Counter()
+    rules = word.rules(config)
+    reads = asyncio.Semaphore(CONCURRENCY)
+
+    async def read_one(c: Claimed) -> Attempt:
+        async with reads:
+            return await read(archive, c)
+
+    wanted = []
+    for c in claimed:
+        if (why := await still_wanted(db, c, rules)) is None:
+            wanted.append(c)
+        elif why != "lost":
+            counts[why] += 1
+            if run:
+                run.add(why)
+    attempts = await asyncio.gather(*(read_one(c) for c in wanted))
+    for a in attempts:
+        if a.text is None and await record_in_change(db, a, rules):
+            counts[_outcome(a)] += 1
+            if run:
+                run.add(_outcome(a))
+    texts = [a for a in attempts if a.text is not None]
+    if not texts:
+        return counts
+    # With no nightly running, a key in an open batch is a dead run's (models.md, batches).
+    factory = attaching(gateway) if owners is None else gateway
+    opened = (
+        contextlib.nullcontext(run) if run else model_run(db, config, "fulltext", gateway=factory)
+    )
+    async with opened as r:
+        try:
+            async with _write(texts, r.gateway) as answered:
+                async for a in answered:
+                    if await record_in_change(db, a, rules):
+                        counts[_outcome(a)] += 1
+                        r.add(_outcome(a))
+        finally:
+            if run is None:  # the gateway this wave opened, its batch polling included
+                await r.gateway.close()
     return counts
 
 
@@ -382,28 +401,3 @@ async def work_waiting(
         if not done["awaiting_text"] or left <= 0:
             return total
         await asyncio.sleep(min(TICK_SECONDS, left))
-
-
-async def run_forever(
-    db: DatabaseGate,
-    config: Config,
-    archive: ArchiveClient,
-    gateway: GatewayFactory = default_gateway,
-    wake: asyncio.Event | None = None,
-) -> None:
-    """The service's worker: work the queue every `TICK_SECONDS`, or as soon as `wake` is set
-    (the owner ran a pass now), until cancelled. A tick that fails (a lost database) is retried
-    on the next."""
-    wake = wake or asyncio.Event()
-    log.info("full-text worker on")
-    while True:
-        try:
-            if done := await work(db, config, archive, gateway=gateway):
-                log.info("full-text queue: %s", dict(done))
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.exception("full-text queue tick failed")
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(wake.wait(), TICK_SECONDS)
-        wake.clear()

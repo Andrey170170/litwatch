@@ -261,8 +261,7 @@ class Notion:
         await self.notion.aclose()
 
     async def handle(self, db: DatabaseGate, event: Event) -> None:
-        # Read again, under the dispatch lock: another service's setup may have made something
-        # again since this one's.
+        # Read again: another process's setup may have made something again since this one's.
         async with db.read(f"{self.name}: set up") as unit:
             database = await state.database(unit, self.name)
         if self._db is None or database is None or database.parent_page != self.parent_page:

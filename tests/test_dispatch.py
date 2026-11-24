@@ -1,18 +1,24 @@
-"""The dispatcher: order, cursors, backoff, the owner's retry and skip, and independence."""
+"""Delivery: order, cursors, backoff, the owner's retry and skip, independence, and each turn
+as a work item of the Work gate."""
 
 import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
 
+import psycopg
+
 from litwatch import events
 from litwatch.api import create_app
 from litwatch.events import dispatch
+from litwatch.events.worker import DeliveryWorker
 from litwatch.gates.database import outside_unit
+from litwatch.gates.work import WorkGate
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.store import outbox
 from tests import sessions
-from tests.conftest import deliver, start
+from tests.conftest import deliver, settled, start
 from tests.sessions import Session, in_read, in_write, staged
+from tests.working import items_of, serving, until
 
 NOW = datetime(2026, 10, 12, 12, tzinfo=UTC)
 
@@ -194,24 +200,6 @@ async def test_one_failing_integration_delays_no_other(conn: Session, db):
     assert (lags["broken"].lag, lags["fine"].lag) == (3, 0)
 
 
-async def test_run_forever_delivers_in_the_background(conn: Session, db, monkeypatch):
-    monkeypatch.setattr(dispatch, "IDLE_SECONDS", 0.02)
-    rec = Recorder()
-    await start(db, rec)
-    task = asyncio.create_task(dispatch.run_forever(db, [rec]))
-    try:
-        ids = await emit(conn, events.PAPER_SAVED, events.PAPER_UNSAVED)
-        for _ in range(1000):
-            if rec.seen == ids:
-                break
-            await asyncio.sleep(0.02)
-        assert rec.seen == ids
-    finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-
 class Writer(Recorder):
     """Keeps a table of its own: made in `setup`, and a row per event in `handle`, written with
     an event of its own in one write unit, as an integration may (docs/integrations.md)."""
@@ -239,43 +227,135 @@ async def test_an_integration_is_given_the_gate_and_writes_in_units_of_its_own(c
     assert [r["type"] for r in emitted] == [events.CARD_READY]
 
 
-class Idler(Recorder):
-    """Has idle work of its own, done in a unit of the gate it is given; the first try fails."""
+# -- deliveries as work items (docs/plans/a2-work-gate.md, P2) -------------------------------------
+
+
+def delivering(db, *integrations) -> tuple[WorkGate, dict]:
+    """A Work gate on `db`, and the delivery Worker for `integrations`, as `serve` runs them."""
+    return WorkGate(db, poll=60), {outbox.DELIVERY: DeliveryWorker(db, list(integrations))}
+
+
+async def turns(conn: Session, name: str) -> list[dict]:
+    return await items_of(conn, outbox.DELIVERY, name)
+
+
+async def test_each_event_wakes_its_integrations_delivery_as_it_commits(conn: Session, db):
+    rec = Recorder()
+    gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()  # as `serve` starts: set up, and its cursor made
+    async with serving(gate, workers):
+        await until(lambda: _ended(conn, rec.name), "the first turn ends")
+        ids = await emit(conn, events.PAPER_SAVED, events.PAPER_UNSAVED)
+        await until(lambda: _seen(rec, ids), "the events are delivered")
+    found = await turns(conn, rec.name)
+    assert all(t["admission"] == f"deliver:{rec.name}" for t in found)
+    assert {t["state"] for t in found} == {"ended"}  # nothing left: no turn waits
+
+
+async def _ended(conn: Session, name: str) -> bool:
+    found = await turns(conn, name)
+    return bool(found) and {t["state"] for t in found} == {"ended"}
+
+
+async def _seen(rec: Recorder, ids: list[int]) -> bool:
+    return rec.seen == ids
+
+
+async def test_a_turn_that_leaves_events_arranges_the_next(conn: Session, db, monkeypatch):
+    monkeypatch.setattr(dispatch, "BATCH", 2)
+    rec = Recorder()
+    await start(db, rec)
+    ids = await emit(conn, *[events.PAPER_SAVED] * 5)  # waiting before any turn runs
+    await settled(db)
+    gate, workers = delivering(db, rec)
+    async with serving(gate, workers):
+        await until(lambda: _seen(rec, ids), "every event is delivered")
+        await until(lambda: _ended(conn, rec.name), "the last turn ends")
+    # A batch a turn, each turn its own record: the first was woken by the events, the next
+    # two arranged by the turn before.
+    assert [t["outcome"] for t in await turns(conn, rec.name)] == ["done"] * 3
+
+
+async def test_a_failed_delivery_waits_out_its_backoff_which_new_events_do_not_cut_short(
+    conn: Session, db
+):
+    rec = Recorder()
+    await start(db, rec)
+    gate, workers = delivering(db, rec)
+    async with serving(gate, workers):
+        (a,) = await emit(conn, events.PAPER_SAVED)
+        rec.fail = {a}
+
+        async def failing() -> bool:
+            return (await in_write(conn, outbox.cursor, rec.name)).failing == a
+
+        await until(failing, "the event fails")
+        await until(lambda: _waits(conn, rec.name), "the next turn waits")
+        cursor = await in_write(conn, outbox.cursor, rec.name)
+        (waiting,) = [t for t in await turns(conn, rec.name) if t["state"] == "pending"]
+        assert waiting["not_before"] == cursor.retry_at
+        (b,) = await emit(conn, events.PAPER_SAVED)  # the backoff stands
+        (still,) = [t for t in await turns(conn, rec.name) if t["state"] == "pending"]
+        assert (still["id"], still["not_before"]) == (waiting["id"], cursor.retry_at)
+        # The owner's retry runs the turn now.
+        rec.fail = set()
+        assert await in_write(conn, outbox.retry, rec.name)
+        await until(lambda: _seen(rec, [a, b]), "both are delivered")
+
+
+async def _waits(conn: Session, name: str) -> bool:
+    return any(t["state"] == "pending" for t in await turns(conn, name))
+
+
+class Dropping(Recorder):
+    """Loses the database the first time it handles an event."""
 
     def __init__(self):
-        super().__init__("idler")
-        self.idled = 0
+        super().__init__("dropping")
+        self.dropped = False
 
-    async def idle(self, db):
-        async with db.read("idler: idle") as unit:
-            await unit.execute("SELECT 1")
-        self.idled += 1
-        if self.idled == 1:
-            raise RuntimeError("idle work failed once")
+    async def handle(self, db, event):
+        if not self.dropped:
+            self.dropped = True
+            raise psycopg.OperationalError("the connection dropped")
+        await super().handle(db, event)
 
 
-async def test_an_integration_with_nothing_to_handle_gets_its_idle_call(
-    conn: Session, db, monkeypatch
+async def test_a_lost_database_in_a_delivery_is_no_failure_and_its_turn_is_tried_again(
+    conn: Session, db
 ):
-    monkeypatch.setattr(dispatch, "IDLE_SECONDS", 0.01)
-    monkeypatch.setattr(dispatch, "IDLE_HOOK_SECONDS", 0.05)
-    idler = Idler()
-    task = asyncio.create_task(dispatch.run_forever(db, [idler]))
-    try:
-        for _ in range(500):
-            if idler.idled >= 3:
-                break
-            await asyncio.sleep(0.01)
-        # Called again after its first call failed: a failure there does not stick.
-        assert idler.idled >= 3
-    finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-    assert not await dispatch.idle(db, Recorder())  # no hook, nothing to call
+    rec = Dropping()
+    await start(db, rec)
+    gate, workers = delivering(db, rec)
+    async with serving(gate, workers):
+        ids = await emit(conn, events.PAPER_SAVED)
+        await until(lambda: _seen(rec, ids), "the event is delivered")
+    cursor = await in_write(conn, outbox.cursor, rec.name)
+    assert (cursor.failing, cursor.failures, cursor.last_error) == (None, 0, None)
+    (turn, *_) = await turns(conn, rec.name)
+    assert turn["attempts"] == 2  # given back, and the same item run again
 
 
-async def test_the_app_dispatches_only_what_reacts_to_events_and_closes_every_integration(
+async def test_an_integration_this_process_does_not_load_waits_for_one_that_does(conn: Session, db):
+    gone, rec = Recorder("gone"), Recorder()
+    for each in (gone, rec):
+        await start(db, each)
+    gate, workers = delivering(db, rec)  # `gone` is not configured here
+    async with serving(gate, workers):
+        ids = await emit(conn, events.PAPER_SAVED)
+        await until(lambda: _seen(rec, ids), "the loaded one gets it")
+        await until(lambda: _waits(conn, gone.name), "the other's turn waits")
+        ids += await emit(conn, events.PAPER_SAVED, events.PAPER_SAVED)
+        await until(lambda: _seen(rec, ids), "the loaded one gets them")
+    # One item, waiting: more events add none.
+    assert [(t["state"], t["attempts"]) for t in await turns(conn, gone.name)] == [("pending", 1)]
+    gate, workers = delivering(db, gone)  # a process that loads it starts
+    await workers[outbox.DELIVERY].sweep()
+    async with serving(gate, workers):
+        await until(lambda: _seen(gone, ids), "it delivers what waited")
+
+
+async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_integration(
     monkeypatch,
 ):
     deep = Deep(DeepClient("http://deep.test"))
@@ -286,16 +366,21 @@ async def test_the_app_dispatches_only_what_reacts_to_events_and_closes_every_in
         closed.append(recorder.name)
 
     recorder.aclose = aclose
-    handed = []
+    served = {}
 
-    async def run_forever(db, integrations):
-        handed.extend(integrations)
+    async def run(gate, workers):
+        served.update(workers)
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(dispatch, "run_forever", run_forever)
+    async def sweep(worker):
+        pass  # no database here
+
+    monkeypatch.setattr(WorkGate, "run", run)
+    monkeypatch.setattr(DeliveryWorker, "sweep", sweep)
     app = create_app("postgresql://unused", "t", integrations=[deep, recorder])
     app.state.db = contextlib.nullcontext()  # no database: the gate the lifespan opens
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0)
-    assert handed == [recorder]
+    assert list(served) == [outbox.DELIVERY]
+    assert list(served[outbox.DELIVERY].loaded.values()) == [recorder]
     assert deep.client.http.is_closed and closed == ["recorder"]

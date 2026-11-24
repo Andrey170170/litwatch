@@ -3,6 +3,10 @@
 An event's place is its `Position`, (xid, id): the writing transaction's id, then the event's
 own. Only events whose transaction is older than every transaction still running are read
 (`_SETTLED`), so an event that commits late can never land behind a position already passed.
+
+Each integration with a cursor is delivered to by work items of its own (docs/plans/a2-work-gate.md,
+P2), one turn each, keyed and admitted by its name (`wake`): an event wakes every one of them as
+it commits (`wake_all`), as the owner's retry or skip wakes theirs.
 """
 
 from __future__ import annotations
@@ -16,6 +20,10 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core import Event
 from litwatch.gates.database import ReadUnit, WriteUnit
+from litwatch.store import work
+
+# The kind of the deliveries' work items.
+DELIVERY = "deliver"
 
 _EVENT = "xid::text::bigint AS xid, id, type, paper_id, payload, created_at"
 # Every transaction below the snapshot's xmin has finished: its events are all there is.
@@ -77,15 +85,53 @@ def _cursor(row: dict) -> Cursor:
 
 
 async def emit(unit: WriteUnit, type: str, paper_id: str | None = None, **payload: Any) -> int:
-    """Record an event of `type` (`core.events`), in the unit that writes what it describes.
-    Returns the event's id."""
+    """Record an event of `type` (`core.events`), in the unit that writes what it describes, and
+    wake every integration's delivery as the unit commits (`wake_all`). Returns the event's
+    id."""
     row = await (
         await unit.execute(
             "INSERT INTO outbox (type, paper_id, payload) VALUES (%s, %s, %s) RETURNING id",
             (type, paper_id, Jsonb(payload)),
         )
     ).fetchone()
+    unit.at_commit(DELIVERY, lambda: wake_all(unit))
     return row["id"]
+
+
+async def wake_all(unit: WriteUnit) -> None:
+    """Wake the delivery of every integration with a cursor, but one waiting out a backoff: the
+    last write of a unit that emitted, since every such unit locks those items' rows."""
+    names = await (
+        await unit.execute("SELECT name FROM integration_cursors ORDER BY name")
+    ).fetchall()
+    for r in names:
+        await wake(unit, r["name"], keep=True)
+
+
+async def wake(
+    unit: WriteUnit, name: str, *, at: datetime | None = None, keep: bool = False
+) -> None:
+    """Submit the integration's delivery, to run no earlier than `at` (now when not given): one
+    pending keeps its time with `keep`, so an event never cuts its backoff short."""
+    await work.submit(unit, DELIVERY, name, admission=f"deliver:{name}", not_before=at, keep=keep)
+
+
+async def waiting(unit: ReadUnit, name: str) -> tuple[bool, bool]:
+    """Whether events wait after the integration's cursor: settled ones, which a delivery would
+    read now, and any, those whose transaction an older one still running holds back
+    included."""
+    behind = (
+        "SELECT 1 FROM outbox o JOIN integration_cursors c ON c.name = %(name)s "
+        "WHERE (o.xid, o.id) > (c.position_xid, c.position)"
+    )
+    row = await (
+        await unit.execute(
+            f"SELECT EXISTS ({behind} AND {_SETTLED}) AS settled, EXISTS ({behind}) AS any",
+            {"name": name},
+        )
+    ).fetchone()
+    assert row is not None  # a SELECT of expressions has its row
+    return row["settled"], row["any"]
 
 
 async def after(unit: ReadUnit, position: Position, limit: int) -> list[Event]:
@@ -223,6 +269,8 @@ async def retry(unit: WriteUnit, name: str) -> bool:
         "updated_at = now() WHERE name = %s AND (failing IS NOT NULL OR setup_failures > 0)",
         (name,),
     )
+    if cur.rowcount:
+        await wake(unit, name)
     return cur.rowcount > 0
 
 
@@ -240,7 +288,10 @@ async def skip(unit: WriteUnit, name: str, expected: int | None = None) -> int |
             (name, expected, expected),
         )
     ).fetchone()
-    return row["id"] if row else None
+    if row is None:
+        return None
+    await wake(unit, name)
+    return row["id"]
 
 
 async def event(unit: ReadUnit, event_id: int) -> Event | None:

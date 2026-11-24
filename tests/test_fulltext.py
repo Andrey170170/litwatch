@@ -5,6 +5,7 @@ lease, revisions, and what the owner sees of it."""
 import asyncio
 import json
 from collections import Counter
+from datetime import timedelta
 
 import httpx
 import pytest
@@ -34,7 +35,10 @@ from litwatch.core.fulltext import (
 )
 from litwatch.feedback import word
 from litwatch.fulltext import brief, trim
+from litwatch.fulltext import worker as text_worker
+from litwatch.fulltext.worker import TextPassWorker
 from litwatch.gates.database import LOCKS
+from litwatch.gates.work import WorkGate
 from litwatch.jobs import nightly
 from litwatch.llm import Gateway, ProviderError
 from litwatch.store import analyses as analyses_store
@@ -61,11 +65,12 @@ from tests.briefs import (
     ready,
     work,
 )
-from tests.conftest import FAITH, INTERP, TREE, paper
+from tests.conftest import FAITH, INTERP, TREE, gate_on, paper
 from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive
 from tests.scripted import refusal
 from tests.sessions import Bridge, Session, in_read, in_write
+from tests.working import items_of, serving, until
 
 
 @pytest.fixture
@@ -339,7 +344,8 @@ async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_n
     (row,) = await passes(db)
 
     await db.execute("INSERT INTO runs (kind, finished_at) VALUES ('nightly', now())")
-    app, http = client(db)
+    await db.execute("DELETE FROM work_items")
+    _, http = client(db)
     async with http:
         status = (await http.get("/api/summary")).json()["status"]
         quality = (await http.get("/api/settings/quality")).json()
@@ -352,7 +358,8 @@ async def test_a_pass_stopped_after_three_runs_waits_for_the_owner_who_runs_it_n
     assert (listed["id"], listed["kind"], listed["failed_runs"]) == (row["id"], "brief", 3)
     assert [(s["kind"], s["pass_id"]) for s in page["states"]] == [("fulltext_failed", row["id"])]
     assert page["text_pass"]["state"] == "failed" and page["brief"] is None
-    assert now.status_code == 204 and app.state.fulltext_wake.is_set()
+    assert now.status_code == 204
+    assert [i["state"] for i in await items_of(db, "fulltext", str(row["id"]))] == ["pending"]
     assert (again.status_code, missing.status_code) == (409, 404)  # no longer waiting; none
     (row,) = await passes(db)
     assert (row["state"], row["failed_runs"]) == ("ready", 0)
@@ -449,12 +456,14 @@ async def test_use_the_pdf_runs_a_pass_waiting_for_the_owner_on_the_papers_pdf(
     await work(db, fake, writer)
     await db.execute("UPDATE fulltext_passes SET failed_runs = %s", (FAILED_RUNS,))
     (row,) = await passes(db)
-    app, http = client(db)
+    await db.execute("DELETE FROM work_items")
+    _, http = client(db)
     async with http:
         used = await http.post(f"/api/settings/fulltext/{row['id']}/pdf")
         again = await http.post(f"/api/settings/fulltext/{row['id']}/pdf")
         missing = await http.post("/api/settings/fulltext/999999/pdf")
-    assert used.status_code == 204 and app.state.fulltext_wake.is_set()
+    assert used.status_code == 204
+    assert [i["state"] for i in await items_of(db, "fulltext", str(row["id"]))] == ["pending"]
     assert (again.status_code, missing.status_code) == (409, 404)
     (row,) = await passes(db)
     assert (row["state"], row["failed_runs"], row["use_pdf"]) == ("ready", 0, True)
@@ -725,6 +734,94 @@ async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(
         gate, CONFIG, archive(fake), limit=2, wait=5, gateway=writer.gateway
     )
     assert done["briefs_written"] == 2 and len(writer.asked) == 2
+
+
+# -- passes as work items (docs/plans/a2-work-gate.md, P2) -----------------------------------------
+
+
+@pytest.fixture
+def soon(monkeypatch):
+    """A pass awaiting its text tried again within a tenth of a second, not half a minute."""
+    for module in (fulltext_store, text_worker):
+        monkeypatch.setattr(module, "TEXT_WAIT", timedelta(seconds=0.1))
+
+
+def workers(gate, fake: FakeArchive, writer: Writer) -> dict:
+    return {"fulltext": TextPassWorker(gate, CONFIG, archive(fake), gateway=writer.gateway)}
+
+
+async def state_is(conn: Session, state: str) -> bool:
+    return [r["state"] for r in await passes(conn)] == [state]
+
+
+async def item_ended(conn: Session, pass_id: int) -> bool:
+    """The pass's item ended: its try is over, not only its pass's write."""
+    return [i["state"] for i in await items_of(conn, "fulltext", str(pass_id))] == ["ended"]
+
+
+async def test_a_pass_awaiting_its_text_runs_as_one_item_once_the_text_is_there(
+    db: Session, gate, soon
+):
+    fake, writer = FakeArchive(status="pending"), Writer()
+    async with serving(WorkGate(gate), workers(gate, fake, writer)):
+        await graded(db, "central")
+        (row,) = await passes(db)
+
+        async def tried() -> bool:  # the archive asked, and the pass left awaiting its text
+            return bool(fake.jobs) and await state_is(db, "awaiting_text")
+
+        await until(tried, "the pass is tried and awaits its text")
+        fake.status = "complete"
+        ready(fake)
+        await until(lambda: item_ended(db, row["id"]), "the item ends")
+    assert await state_is(db, "done")
+    (item,) = await items_of(db, "fulltext", str(row["id"]))
+    assert item["attempts"] >= 2
+    assert len(writer.asked) == 1
+
+
+async def test_a_pass_the_nightly_worked_inline_leaves_its_item_nothing_to_do(db: Session, gate):
+    await graded(db, "central")
+    fake, writer = ready(FakeArchive()), Writer()
+    assert await work(db, fake, writer) == {"briefs_written": 1}
+    (row,) = await passes(db)
+    async with serving(WorkGate(gate), workers(gate, fake, writer)):
+        await until(lambda: item_ended(db, row["id"]), "the item ends")
+    assert len(writer.asked) == 1 and len(fake.jobs) == 1  # nothing worked twice
+    assert (await passes(db))[0]["state"] == "done"
+
+
+async def test_a_claim_a_process_abandoned_is_taken_by_the_passs_item_once_it_lapses(
+    db: Session, gate
+):
+    await graded(db, "central")
+    (row,) = await passes(db)
+    async with gate_on(db) as gone, gone.write("claim and die") as unit:
+        (taken,) = await fulltext_store.claim(unit, timedelta(seconds=1), 1, pass_id=row["id"])
+    fake, writer = ready(FakeArchive()), Writer()
+    async with serving(WorkGate(gate), workers(gate, fake, writer)):
+        await until(lambda: item_ended(db, row["id"]), "the item ends")
+    assert await state_is(db, "done")
+    (item,) = await items_of(db, "fulltext", str(row["id"]))
+    # One try found it held and waited for its lease to end; the next took it over.
+    assert item["attempts"] == 2
+    assert item["not_before"] >= taken.lease_until and len(writer.asked) == 1
+
+
+async def test_the_owners_run_now_runs_a_stopped_pass_while_the_gate_serves(db: Session, gate):
+    await graded(db, "central")
+    fake, writer = FakeArchive(status="failed"), Writer()
+    await work(db, fake, writer)
+    await db.execute("UPDATE fulltext_passes SET failed_runs = %s", (FAILED_RUNS,))
+    await db.execute("DELETE FROM work_items")  # a stopped pass has none; the owner gives it one
+    (row,) = await passes(db)
+    fake = ready(FakeArchive())
+    async with serving(WorkGate(gate), workers(gate, fake, writer)):
+        _, http = client(db)
+        async with http:
+            assert (await http.post(f"/api/settings/fulltext/{row['id']}/now")).status_code == 204
+        await until(lambda: item_ended(db, row["id"]), "the owner's pass is tried")
+    assert await state_is(db, "done") and len(writer.asked) == 1
 
 
 # -- revisions -------------------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 """Deep card passes (docs/specs/v1/pipeline.md, section 6; integrations.md). A settle queues
 an automatic one for a Focus must read or a published Area pick with no card, unless it is
-unsaved, and `request` the owner's, which no settle drops. They are worked by their own worker,
-one at a time, since a card takes up to most of an hour: a claimed pass is settled under its
-paper's lock before anything is spent (`still_wanted`), its text is read from the archive at
-urgent priority, and the `deep` integration's service is given it.
+unsaved, and `request` the owner's, which no settle drops. Each is worked by its work item
+(`fulltext.worker`), one at a time, since a card takes up to most of an hour: a claimed pass is
+settled under its paper's lock before anything is spent (`still_wanted`), its text is read from
+the archive at urgent priority, and the `deep` integration's service is given it.
 
 Each submission is an attempt, recorded before it is sent and given its job once accepted, so a
 worker that dies while a job runs leaves the job to the next claim to follow, never paid for
@@ -32,8 +32,6 @@ requests go first.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -47,8 +45,8 @@ from litwatch.config import Config
 from litwatch.core import Cause
 from litwatch.core.fulltext import REQUESTED, TextRead
 from litwatch.feedback import word
-from litwatch.fulltext import TICK_SECONDS, judged, read, record_in_change, still_wanted
-from litwatch.gates.database import BusyError, DatabaseGate, WriteUnit
+from litwatch.fulltext import judged, read, record_in_change, still_wanted
+from litwatch.gates.database import DatabaseGate, WriteUnit
 from litwatch.integrations.deep import Deep, RejectedError
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
@@ -88,37 +86,16 @@ async def work(
     limit: int | None = None,
     config: Config | None = None,
 ) -> Counter[str]:
-    """Work the Deep passes that are due, one at a time, up to `limit` claimed, under the Deep
-    worker's lock, unless another worker holds it; their papers are settled by `rules`. With
-    the `config`'s schedule, a re-run's (background) passes wait while a nightly run is running
-    or due (pipeline.md, section 10). Returns how the tries ended."""
-    held = contextlib.AsyncExitStack()
-    try:
-        await held.enter_async_context(db.held("deep-worker"))
-    except BusyError:
-        log.info("another worker is working the Deep passes")
-        return Counter()
-    async with held:
-        return await _work(db, archive, deep, rules, limit, config)
-
-
-async def _work(
-    db: DatabaseGate,
-    archive: ArchiveClient,
-    deep: Deep,
-    rules: word.Rules,
-    limit: int | None,
-    config: Config | None,
-) -> Counter[str]:
+    """Work the Deep passes that are due, one at a time, up to `limit` claimed (`litwatch
+    fulltext --deep`); their papers are settled by `rules`. With the `config`'s schedule, a
+    re-run's (background) passes wait while a nightly run is running or due (pipeline.md,
+    section 10). Returns how the tries ended."""
     from litwatch.jobs.worker import nightly_waits  # noqa: PLC0415 (the jobs import this module)
 
     counts: Counter[str] = Counter()
     tried: set[int] = set()
     while limit is None or len(tried) < limit:
-        async with db.read("deep queue: paused") as unit:
-            until = await cards.paused_until(unit, PAUSE)
-        if until:
-            log.debug("the deep queue waits after a service failure, until %s", until)
+        if await paused(db):
             break
         # Asked at each claim: a nightly may have come due meanwhile.
         background = config is None or not await nightly_waits(
@@ -135,12 +112,34 @@ async def _work(
             break
         (c,) = claimed
         tried.add(c.id)
-        why = None if attempt else await still_wanted(db, c, rules)
-        if why is None:
-            why = await _work_one(db, archive, deep, c, attempt, rules)
+        why = await work_one(db, archive, deep, c, attempt, rules)
         if why != "lost":
             counts[why] += 1
     return counts
+
+
+async def paused(db: DatabaseGate) -> datetime | None:
+    """Until when the Deep queue waits after a service failure, if it does."""
+    async with db.read("deep queue: paused") as unit:
+        until = await cards.paused_until(unit, PAUSE)
+    if until:
+        log.debug("the deep queue waits after a service failure, until %s", until)
+    return until
+
+
+async def work_one(
+    db: DatabaseGate,
+    archive: ArchiveClient,
+    deep: Deep,
+    c: Claimed,
+    attempt: dict | None,
+    rules: word.Rules,
+) -> str:
+    """Work one claimed Deep pass, `attempt` its open attempt if it has one: settled first
+    unless its job was submitted (`still_wanted`), then worked (`_work_one`). Returns how the
+    try ended."""
+    why = None if attempt else await still_wanted(db, c, rules)
+    return why or await _work_one(db, archive, deep, c, attempt, rules)
 
 
 async def _work_one(
@@ -304,7 +303,7 @@ async def _ended(
             return "lost"
         await cards.card_failed(unit, c.paper.id, error, usage if ran else None)
         if failure == "service":
-            await store_.wait_again(unit, c, error)
+            await store_.wait_again(unit, c, error, datetime.now(UTC) + PAUSE)
             return "card_service_failed"
         revision, text = await store_.read_of(unit, c.id)
         await store_.failed(unit, c, error, counts=True, text=text)
@@ -317,32 +316,5 @@ async def _service_failed(db: DatabaseGate, c: Claimed, attempt_id: int, error: 
     log.warning("%s: the deep service failed: %s; the queue waits %s", c.paper.id, error, PAUSE)
     async with db.write("deep service failed") as unit:
         await cards.service_failed(unit, attempt_id, error)
-        await store_.let_go(unit, c, error)
+        await store_.let_go(unit, c, error, datetime.now(UTC) + PAUSE)
     return "card_service_failed"
-
-
-async def run_forever(
-    db: DatabaseGate,
-    archive: ArchiveClient,
-    deep: Deep,
-    wake: asyncio.Event | None = None,
-    config: Config | None = None,
-    *,
-    rules: word.Rules,
-) -> None:
-    """The service's Deep worker: work the Deep passes every `TICK_SECONDS`, or as soon as
-    `wake` is set (the owner asked for a card), until cancelled. A tick that fails (a lost
-    database) is retried on the next."""
-    wake = wake or asyncio.Event()
-    log.info("deep card worker on")
-    while True:
-        try:
-            if done := await work(db, archive, deep, rules=rules, config=config):
-                log.info("deep cards: %s", dict(done))
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.exception("deep card tick failed")
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(wake.wait(), TICK_SECONDS)
-        wake.clear()

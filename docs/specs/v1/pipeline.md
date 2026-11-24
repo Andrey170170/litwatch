@@ -233,8 +233,8 @@ when its paper no longer qualifies (the owner's word, a paused or unfollowed top
 queue: the worker settles a pass's paper before it spends anything on it, so a pass no longer wanted is dropped
 unread, and the nightly run settles every paper with a pass open or that may qualify for one, so a missed trigger
 costs at most a night. It is **awaiting text** until the archive has the paper's text, then runs at
-once, not at the next night: the service's full-text worker, which runs with the schedule, looks at the queue every
-half minute (`litwatch fulltext` works it by hand). Text comes from the archive: the LaTeX source's text first, the PDF's text when the paper
+once, not at the next night: the service's full-text worker, which runs with the schedule, tries a pass awaiting its
+text again every half minute (`litwatch fulltext` works the queue by hand). Text comes from the archive: the LaTeX source's text first, the PDF's text when the paper
 has no source (see [archive.md](archive.md)), or when the owner chose "Use the PDF" on a pass waiting for them, for
 LaTeX that reads badly. The PDF's text is read with `pypdfium2`; `pymupdf4llm` (AGPL, the opt-in `pdf` extra) is
 used instead when it is installed. For a pass queued by the nightly run, litwatch asks the archive to fetch

@@ -17,7 +17,7 @@ The queue records each submission as an attempt before it is sent and the job on
 and sends the attempt as the submission's key, by which the service finds the job it
 started for that key while it keeps it; so a submission whose answer was lost is looked up,
 never sent again. A failed job says whose failure it was, the paper's or the service's. It
-reacts to no event, so the dispatcher never runs it: `card.requested` is the owner's request
+reacts to no event, so no delivery runs it: `card.requested` is the owner's request
 already queued, and `card.ready` is emitted when the card is stored.
 
 Options: `url` (or $LITWATCH_DEEP_URL), `extensions` ({topic slug: extension}), `poll_seconds`

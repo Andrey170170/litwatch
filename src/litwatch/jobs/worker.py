@@ -11,8 +11,8 @@ then pick only what is still due. Each time it runs a job, from claim
 to stop, is one run of kind `job`, however many chunks that takes.
 
 A Process job runs the nightly's own steps (classification, analysis, grading) on its papers
-only; each recorded result settles its paper as in the nightly, and the full-text and Deep
-workers then take the passes it queued, as the owner's requests (`feedback.word.settle_many`).
+only; each recorded result settles its paper as in the nightly, and the passes it queued are
+then worked by their work items, as the owner's requests (`feedback.word.settle_many`).
 A job is done once its papers have no step left failed; else it fails, and settles when they
 do (`store.jobs.settle_process`).
 
@@ -29,7 +29,6 @@ import asyncio
 import contextlib
 import logging
 from collections import Counter
-from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -101,11 +100,9 @@ class Worker:
         db: DatabaseGate,
         config: Config,
         gateway: GatewayFactory = default_gateway,
-        worked: Callable[[], None] = lambda: None,
         archive: ArchiveClient | None = None,
     ) -> None:
         self.db, self.config, self.gateway = db, config, gateway
-        self.worked = worked  # after each chunk: have the full-text and Deep workers look
         self.archive = archive  # a re-run's text passes read from it; without, the re-run stops
         self.open: dict[int, _Open] = {}  # the jobs this worker runs, each with its run
         self.me: Identity | None = None  # the identity its open jobs were claimed in
@@ -165,7 +162,6 @@ class Worker:
             await self._end(job, f"{type(exc).__name__}: {exc}")
             await self._close(job["id"], exc)
             return True
-        self.worked()
         if after is None:  # no longer this session's
             await self._close(job["id"])
         elif after["done"] >= after["papers"]:
@@ -237,7 +233,6 @@ class Worker:
             await self._end_rerun(job, "failed", f"{type(exc).__name__}: {exc}")
             await self._close(job["id"], exc)
             return
-        self.worked()
         match chunk.outcome:
             case "more":
                 return
@@ -264,7 +259,6 @@ class Worker:
         except Exception as exc:
             await self._failed(job, exc)
             return
-        self.worked()
         match chunk.outcome:
             case "more":
                 return
@@ -287,7 +281,6 @@ class Worker:
         except Exception as exc:
             await self._failed(job, exc)
             return
-        self.worked()
         await self._close(job["id"])
 
     async def _failed(self, job: dict[str, Any], exc: Exception) -> None:
@@ -346,7 +339,6 @@ async def run_forever(
     config: Config,
     gateway: GatewayFactory = default_gateway,
     wake: asyncio.Event | None = None,
-    worked: Callable[[], None] = lambda: None,
     archive: ArchiveClient | None = None,
 ) -> None:
     """Work the queue until cancelled: chunk after chunk while there is one to run, else look
@@ -356,7 +348,7 @@ async def run_forever(
     wake = wake or asyncio.Event()
     log.info("jobs worker on")
     while True:
-        worker = Worker(db, config, gateway, worked, archive)
+        worker = Worker(db, config, gateway, archive)
         try:
             while True:
                 if not await worker.step(datetime.now(config.schedule.zone)):

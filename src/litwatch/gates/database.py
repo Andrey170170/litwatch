@@ -43,7 +43,15 @@ import contextlib
 import logging
 import os
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Iterable, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Hashable,
+    Iterable,
+    Sequence,
+)
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -168,10 +176,6 @@ REGISTRY: tuple[Lock, ...] = (
     Lock("run", 7213911, "session"),
     # One scheduler deciding and running a job kind.
     Lock("schedule", 7213913, "session", "text"),
-    # One delivery to an integration at a time.
-    Lock("dispatch", 7213914, "session", "text"),
-    # One worker on the Deep passes.
-    Lock("deep-worker", 7213915, "session"),
     # Migrations, applied by one process at a time as it starts.
     Lock("migration", 7213910, "startup"),
 )
@@ -180,7 +184,7 @@ _ORDER = {lock.name: position for position, lock in enumerate(REGISTRY)}
 
 # The session locks held across network calls, against the rule that only a unit holds a lock.
 # The list only shrinks: A2 turns their loops into Workers and A3 removes the run lock.
-HELD_ACROSS_CALLS = ("run", "schedule", "dispatch", "deep-worker")
+HELD_ACROSS_CALLS = ("run", "schedule")
 
 _ARGS: dict[str | None, LiteralString] = {None: "%s", "text": "%s, hashtext(%s)", "int": "%s, %s"}
 
@@ -318,6 +322,18 @@ class WriteUnit(ReadUnit):
         self.taxonomy = taxonomy
         self.locks: tuple[Named, ...] = ()
         self._papers: set[str] = set()
+        self._at_commit: dict[Hashable, Callable[[], Awaitable[None]]] = {}
+
+    def at_commit(self, key: Hashable, write: Callable[[], Awaitable[None]]) -> None:
+        """Make `write` the unit's last, run as the block ends without error, just before the
+        commit: once for `key`, however often it is asked for. For a write to a row many units
+        share (the Work gate's item an event wakes), whose lock is then held for the commit
+        alone, and taken after every other, so it never closes a cycle of waits."""
+        self._at_commit.setdefault(key, write)
+
+    async def _committing(self) -> None:
+        for write in self._at_commit.values():
+            await write()
 
     @property
     def papers(self) -> frozenset[str]:
@@ -537,6 +553,7 @@ class DatabaseGate:
                     await _fence(unit, work)
                 await unit._take(paper_ids, others)
                 yield unit
+                await unit._committing()
 
     @asynccontextmanager
     async def held(self, name: str, key_arg: str | int | None = None) -> AsyncIterator[Hold]:

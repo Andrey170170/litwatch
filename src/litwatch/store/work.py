@@ -71,6 +71,7 @@ async def submit(
     not_before: datetime | None = None,
     admission: str | None = None,
     lasting: bool = False,
+    keep: bool = False,
 ) -> WorkItem:
     """Submit the work `key` of `kind`, to run no earlier than `not_before` (now when not
     given), admitted one at a time per `admission` (its kind when not given). Returns the item.
@@ -81,7 +82,8 @@ async def submit(
     at `not_before` (the sooner of two such submissions), so work asked for while it ran is not
     lost: when that run ends, a fresh item takes the key (`end`). A `lasting` key, a scheduled
     occurrence's (the fire time), holds for good: once submitted, it returns its item, pending,
-    running or ended, unchanged, and never runs it again.
+    running or ended, unchanged, and never runs it again. With `keep`, a pending item keeps its
+    `not_before`: an event wakes a delivery, but never cuts short the backoff it waits out.
 
     The open item's row is locked `FOR NO KEY UPDATE` before its state is read, so a claim or a
     settling of it in flight is waited for and the item returned is as it stands. That lock
@@ -121,7 +123,7 @@ async def submit(
                 continue
             await _notify(unit, kind)
             return _item(inserted)
-        if row["state"] == "ended" or row["lasting"]:
+        if row["state"] == "ended" or row["lasting"] or (keep and row["state"] == "pending"):
             return _item(row)
         if row["state"] == "pending":
             sooner = await (

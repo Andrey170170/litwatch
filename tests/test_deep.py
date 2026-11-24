@@ -40,7 +40,9 @@ from litwatch.core.fulltext import (
 )
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
+from litwatch.fulltext.worker import DeepPassWorker
 from litwatch.gates.database import identity_of
+from litwatch.gates.work import WorkGate
 from litwatch.intake import search
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
@@ -73,6 +75,7 @@ from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.seed import analyse, classify
 from tests.seed import grade as verdict
 from tests.sessions import Bridge, Session, in_read, in_write
+from tests.working import items_of, serving, until
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=2)
 BODY = "\\section{Method} We read hidden steps off the residual stream. " * 40
@@ -1317,15 +1320,6 @@ async def test_a_job_queued_past_its_deadline_is_kept_however_often_it_is_follow
     assert fake.started == 1 and len(await attempts(db)) == 1
 
 
-async def test_one_worker_at_a_time_works_the_deep_passes(db: Session):
-    await grade(db, Fit.CENTRAL)
-    fake = FakeDeep(DONE)
-    async with gate_on(db) as other, other.held("deep-worker"):  # another process's worker
-        assert await work(db, with_text(P), make(fake)) == {}
-    assert fake.requests == [] and [r["state"] for r in await deep_rows(db)] == ["awaiting_text"]
-    assert await work(db, with_text(P), make(fake)) == {"cards_written": 1}
-
-
 async def test_a_pass_no_longer_wanted_at_claim_spends_nothing(db: Session):
     await grade(db, Fit.CENTRAL)
     # Unsaved by a write that missed its settle: the claim settles it first.
@@ -1633,7 +1627,9 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
         again = await http.post(f"/api/papers/{P.id}/card")
         quality = (await http.get("/api/settings/quality")).json()
     assert missing.status_code == 404
-    assert asked.status_code == 202 and app.state.deep_wake.is_set()
+    assert asked.status_code == 202
+    items = await items_of(db, "deep", str(asked.json()["pass_id"]))
+    assert [i["state"] for i in items] == ["pending"]  # worked here inline, by `work`
     assert queued["card_pass"]["reason"] == "request" and not queued["card_requestable"]
     assert queued["card_pass"]["state"] == "awaiting_text" and queued["card"] is None
     card = written["card"]
@@ -1650,25 +1646,43 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
     assert quality["deep"] == {"attempts": 1, "list_cost": USAGE["list_cost"], "unknown": 0}
 
 
-async def test_the_deep_worker_runs_a_requested_card_as_soon_as_it_is_woken(db: Session, gate):
+async def test_a_requested_card_runs_as_its_passs_work_item_while_the_gate_serves(
+    db: Session, gate
+):
     fake = FakeDeep(DONE)
-    d = make(fake)
-    wake = asyncio.Event()
-    worker = asyncio.create_task(
-        deep_passes.run_forever(gate, archive(with_text(P)), d, wake, rules=settling.RULES)
-    )
-    try:
-        await ask(db, P.id)
-        wake.set()
-        for _ in range(200):
-            if (await in_read(db, cards.card, P.id) or {}).get("card"):
-                break
-            await asyncio.sleep(0.05)
-    finally:
-        worker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await worker
+    workers = {"deep": DeepPassWorker(gate, Config(), archive(with_text(P)), make(fake))}
+    async with serving(WorkGate(gate), workers):
+        pass_id = await ask(db, P.id)
+
+        async def ended() -> bool:  # its try over, not only the card written
+            return [i["state"] for i in await items_of(db, "deep", str(pass_id))] == ["ended"]
+
+        await until(ended, "the item ends")
     assert (await in_read(db, cards.card, P.id))["card"] == CARD
+
+
+async def test_a_deep_pass_waits_out_the_services_pause_as_the_same_item(
+    db: Session, gate, monkeypatch
+):
+    fake = FakeDeep(DONE)
+    workers = {"deep": DeepPassWorker(gate, Config(), archive(with_text(P)), make(fake))}
+    pass_id = await ask(db, P.id)
+    paused = datetime.now(UTC) + timedelta(minutes=5)
+
+    async def until_paused(_db) -> datetime:
+        return paused
+
+    monkeypatch.setattr(deep_passes, "paused", until_paused)
+    async with serving(WorkGate(gate), workers):
+        await until(lambda: _waits_until(db, pass_id, paused), "the item waits out the pause")
+    (item,) = await items_of(db, "deep", str(pass_id))
+    assert item["attempts"] == 1  # one try, which found the queue paused
+    assert (fake.started, await attempts(db)) == (0, [])  # the pass never claimed
+
+
+async def _waits_until(conn: Session, pass_id: int | None, at: datetime) -> bool:
+    items = await items_of(conn, "deep", str(pass_id))
+    return bool(items) and items[-1]["state"] == "pending" and items[-1]["not_before"] == at
 
 
 async def test_connect_reaches_the_test_schema(db: Session):
