@@ -11,7 +11,7 @@ it are merged. A note leaves `docs/notes/` once every item it holds is merged.
 
 ## Now
 
-The rework's A2, below, once A1's first full night on all its stages is checked (its plan's V7).
+The rework's A2, below: shaped ([`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md)), blueprint next.
 
 ## The rework
 
@@ -23,12 +23,18 @@ time. A0, the role checks and the baseline, was merged on 2026-11-10
 
 ### A2. Work gate
 
-Shape, blueprint, drive.
+Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md). Blueprint, drive.
 
-- **The OpenAI adapter** in the Model gate, for the owner's OpenAI credit; which roles use it is decided by an
-  evaluation once it is in.
+- **The OpenAI adapter** in the Model gate, for the owner's OpenAI credit: normal calls and the Batch API. Which
+  roles use it is decided by an evaluation once it is in.
+- **Release links:** code and weights links found by a narrow agent on the deep service, with their access state,
+  shown on the paper's page and in the API; placeholders re-checked weekly for four weeks; the deep service running
+  with automatic Deep reads off (the spec, "Release links"). Replaces the code and weights item that was outside the
+  rework.
 - **Python and deep share their contracts** instead of declaring each other's types by hand; the two LaTeX outline
   parsers become one (review, project 3).
+- **The deep service brought up to date:** Pi to the newest version that knows the GPT-6.2 models, and the Deep
+  read's default model to `gpt-6.2-sol`.
 - **A first Deep read while the paper's Process job runs** marks the job as asked again by the owner, so it runs
   once more over what is due when it ends: harmless but the paper shows Processing longer. Narrow the trigger to
   owner changes that affect the job's steps (Codex on #127).
@@ -151,11 +157,6 @@ Built between milestones, on whatever structure exists then.
   makes the length check lax, since the rest stays readable in the session. Idea (2026-11-10): the writer may move a
   part's border when the parsing is wrong, and the length check stays measured on code's cuts, or on the reviewer's,
   so the writer does not set its own bar. Wait for a PDF-only read whose parts came out wrong. *Needs shaping.*
-- **Code and weights links on the paper's page,** not only from a Deep card's URL. Taken out of A1's read gaps
-  (2026-11-21): the analysis records only whether a paper releases code or weights (`releases_code`,
-  `releases_weights`), never a link. *Needs a decision:* links found in the abstract and arXiv comments when those
-  are true (no model change, a heuristic), or the analysis returning them (a prompt change, a migration and an
-  evaluation).
 - **A cleared publication record reaches the exports.** Clearing a paper's record emits no event, so Notion's Venue
   and Zotero's "Published" line keep the old record until the paper's next event or Notion's reconcile. A write that
   lands while an export reads the paper is missed the same way (A1 P5's review). An event on clearing closes both.

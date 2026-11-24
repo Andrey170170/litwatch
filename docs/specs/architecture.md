@@ -139,7 +139,7 @@ merged; [`../backlog.md`](../backlog.md) lists them under each milestone.
 |---|---|---|---|
 | **A0** | Rules and baseline | this spec merged; the role checks in CI with today's violations listed; what production no longer uses found, so nothing dead is migrated | blueprint |
 | **A1** | Database gate | one pool; short units, snapshot reads; locks named, ordered and owned by the gate; the runtime nesting check; settling a paper cheap and done once per paper | shape → blueprint → drive |
-| **A2** | Work gate | every loop is a Worker taking items from the Work gate; one work record per item; one Model gate per process, with the OpenAI adapter; work and request attribution in context, with its runtime check; the CLI submits and waits. Behaviour otherwise unchanged | shape → blueprint → drive |
+| **A2** | Work gate | every loop is a Worker taking items from the Work gate; one work record per item; one Model gate per process, with the OpenAI adapter; work and request attribution in context, with its runtime check; the CLI submits and waits. Behaviour otherwise unchanged, but for one new kind of work, the release-link finder | shape → blueprint → drive |
 | **A3** | Lanes and the Orchestrator | no run lock; the nightly submits child work; the owner's work runs during it; taxonomy edits commit, then re-settle; deliveries are work items | shape → blueprint → drive |
 | **A4** | Telemetry and the activity log | gate events on work records; normal and debug levels; the Jobs page as the log of all work | shape (with sketches) → blueprint → drive |
 | **A5** | Fetch, Compute and Files gates | all HTTP, blocking work and paper files behind their gates; the Postgres limiter; the bypass checks with empty lists | blueprint each; shape for Files |
