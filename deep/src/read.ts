@@ -36,6 +36,10 @@ export const COLOURS = ["neutral", "accent", "red", "orange", "amber", "green", 
 export const EDGE_STYLES = ["solid", "dash", "dot"] as const;
 /** A read's process notes may also be `review`: the service's note on a read that still failed its review. */
 export const READ_NOTE_KINDS = [...NOTE_KINDS, "review"] as const;
+/** Whose a limitation is: one the paper states, or one the read sees. */
+export const LIMITATION_BY = ["paper", "read"] as const;
+/** A figure's name among the read's figures. */
+export const FIGURE_NAME = "^[A-Za-z0-9][A-Za-z0-9._-]*$";
 
 /** One schema, two variants: the stored read, or (`draft`) what the agent may submit. Each varying part is typed as
  * the stored read's, so `Read` is the stored shape and `Draft` is derived from it below. */
@@ -82,7 +86,7 @@ function build(draft: boolean) {
     {
       type: Type.Literal("fig"),
       name: Type.String({
-        pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        pattern: FIGURE_NAME,
         description: "The figure's name among the read's figures; its image is stored with the read under this name.",
       }),
       number: plain("The figure's number in the paper, as the paper labels it (\"Figure 6\")."),
@@ -309,7 +313,7 @@ function build(draft: boolean) {
       limitations: Type.Array(
         Type.Object(
           {
-            by: enumOf(["paper", "read"] as const, "Whose it is: one the paper states, or one the read sees."),
+            by: enumOf(LIMITATION_BY, "Whose it is: one the paper states, or one the read sees."),
             text: text("The limitation."),
           },
           { additionalProperties: false },

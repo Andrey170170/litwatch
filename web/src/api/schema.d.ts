@@ -1247,11 +1247,7 @@ export interface components {
             id: string;
             /** Title */
             title: string;
-            /**
-             * Relation
-             * @enum {string}
-             */
-            relation: "agrees" | "contradicts" | "extends" | "supersedes";
+            relation: components["schemas"]["Relation"];
             /** Note */
             note?: string | null;
             rarity?: components["schemas"]["Rarity"] | null;
@@ -2891,6 +2887,8 @@ export interface components {
             grading_failed: number;
             negatives: components["schemas"]["Share"];
         };
+        /** @enum {string} */
+        Relation: "agrees" | "contradicts" | "extends" | "supersedes";
         /**
          * ReplayIn
          * @description Run replay under a ceiling, in USD; a stopped replay goes on only above what it spent.

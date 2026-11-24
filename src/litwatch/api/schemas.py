@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,6 +26,7 @@ from litwatch.core import (
     WordSource,
 )
 from litwatch.core.budget import Spend
+from litwatch.core.contracts import deep as contract
 from litwatch.core.digests import DigestPeriod, DigestRole, DigestState
 from litwatch.core.evaluation import Recall
 
@@ -469,7 +470,8 @@ class HistoryItem(BaseModel):
     escalated: bool | None = None
 
 
-RELATIONS = ("agrees", "contradicts", "extends", "supersedes")
+# How a card's "among the collection" rows may relate (the deep contract's).
+RELATIONS = get_args(contract.Relation.__value__)
 
 
 class AmongRow(BaseModel):
@@ -478,7 +480,7 @@ class AmongRow(BaseModel):
 
     id: str
     title: str
-    relation: Literal["agrees", "contradicts", "extends", "supersedes"]
+    relation: contract.Relation
     note: str | None = None
     rarity: Rarity | None = None
     in_collection: bool = False

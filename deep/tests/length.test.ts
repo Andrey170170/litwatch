@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { measure } from "../src/length.ts";
+import { latex } from "./support.ts";
 
 test("a read's length counts what a reader reads, against the main text from its first heading", () => {
   const body = String.raw`\documentclass{article}
@@ -17,7 +18,7 @@ ${"z".repeat(500)}
 \end{document}
 `;
   const read = { format: "read", sections: [{ id: "method", kind: "method", title: "Method", blocks: [{ type: "p", text: "abcdefghij", where: "§1" }] }] };
-  const m = measure(read, { body, body_source: "latex" });
+  const m = measure(read, latex(body));
   assert.equal(m.read, "Method".length + "abcdefghij".length, "ids, kinds, places and the format are no text");
   // the Method section alone, give or take the line break at a cut
   const method = body.slice(body.indexOf("\\section{Method}"), body.indexOf("\\begin{thebibliography}")).length;
@@ -41,6 +42,6 @@ ${"x".repeat(1000)}
 \end{thebibliography}
 \end{document}
 `;
-  const m = measure({ sections: [{ title: "Method", blocks: [{ type: "p", text: "z".repeat(300) }] }] }, { body, body_source: "latex" });
+  const m = measure({ sections: [{ title: "Method", blocks: [{ type: "p", text: "z".repeat(300) }] }] }, latex(body));
   assert.ok(m.main > 1000 && m.main < 1100, `the text before the bibliography: ${m.main}`);
 });

@@ -2,11 +2,14 @@
 docs/specs/v1/integrations.md). Which papers get one, and when, is the full-text queue's
 (`litwatch.fulltext.deep`): a card is a pass like a Brief, so it waits for the paper's text and
 is re-checked under the paper's lock before it runs. This module is how one is asked for: what
-a submission carries (the paper's text from the archive and its arXiv version, the topics the
-card is for and the card extensions they ask for), and the service's job protocol, followed to
-the job's end with its usage. What a finished job returns is checked before any of it is
-stored (`core.deepread.received`): a result of an unknown format, or figures or reviews that
-are not what docs/integrations.md says, end the job as the service's failure.
+a submission carries (the paper's text from the archive and its arXiv version, a LaTeX
+source's outline as `core.outline` parses it, the topics the card is for and the card
+extensions they ask for), and the service's job protocol, followed to the job's end with its
+usage. Both are contracts the service declares (`core.contracts.deep`, generated from
+`deep/src/contracts.ts`): a submission is built as one, and every answer is read as one. A
+job that is not the contract's, a result of an unknown format among them, or figures that are
+not WebP images (`core.deepread.received`), ends as the service's failure, with the usage and
+trace it reported kept where they are readable; nothing of it is stored.
 
 The queue records each submission as an attempt before it is sent and the job once accepted,
 and sends the attempt as the submission's key, by which the service finds the job it
@@ -33,10 +36,13 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
+from pydantic import ValidationError
 
 from litwatch.archive import PaperText
 from litwatch.config import Config
 from litwatch.core import Grade, Paper, Status, Topic, deepread
+from litwatch.core.contracts import deep as contract
+from litwatch.core.outline import latex
 from litwatch.gates.database import ReadUnit
 from litwatch.integrations import IntegrationError, enabled_using, required, required_secret
 from litwatch.store import taxonomy as taxonomy_store
@@ -72,29 +78,51 @@ class Outcome:
     reviews: list[Any] | None = None
 
 
-def ended(job: dict[str, Any]) -> Outcome:
-    """A finished job as the service reports it. One that says it is done is checked before
-    its result is taken (`deepread.received`): what litwatch cannot store is the service's
-    failure, an error with the job's usage and trace kept, never a card with something
-    missing."""
-    said = job.get("reviews")
+def ended(job: contract.Job) -> Outcome:
+    """A finished job as the service reports it, read as the contract's. A done one's figures
+    are checked before its result is taken (`deepread.received`): what litwatch cannot store is
+    the service's failure, an error with the job's usage and trace kept, never a card with
+    something missing."""
     outcome = Outcome(
-        job.get("result"),
-        job.get("trace"),
-        job.get("stats"),
-        job.get("model") or "",
-        job.get("error"),
-        job.get("failure"),
-        reviews=said if isinstance(said, list) else None,
+        job.result.model_dump() if job.result else None,
+        job.trace,
+        job.stats.model_dump(),
+        job.model or "",
+        job.error,
+        job.failure,
+        reviews=job.reviews,
     )
     if outcome.error or outcome.result is None:
         return outcome
     try:
-        figures, reviews = deepread.received(outcome.result, job.get("figures"), said)
+        figures = deepread.received(job.figures)
     except ValueError as exc:
-        error = f"the deep service returned a result litwatch cannot store: {exc}"
-        return replace(outcome, result=None, error=error, failure="service")
-    return replace(outcome, figures=tuple(figures), reviews=reviews)
+        return _unstorable(outcome, str(exc))
+    return replace(outcome, figures=tuple(figures))
+
+
+def unreadable(job: Any, exc: ValidationError) -> Outcome:
+    """A job that is not the contract's: the service's failure, ending it whatever its status,
+    with the usage and trace it reported kept when they are the contract's."""
+    job = job if isinstance(job, dict) else {}
+    try:
+        usage = contract.Stats.model_validate(job.get("stats")).model_dump()
+    except ValidationError:
+        usage = None
+    trace = job.get("trace") if isinstance(job.get("trace"), list) else None
+    return _unstorable(Outcome(None, trace, usage, ""), _errors(exc))
+
+
+def _unstorable(outcome: Outcome, why: str) -> Outcome:
+    error = f"the deep service returned a job litwatch cannot store: {why}"
+    return replace(outcome, result=None, error=error, failure="service")
+
+
+def _errors(exc: ValidationError) -> str:
+    """A contract's refusal in a line: each field that is wrong, and what is wrong with it."""
+    return "; ".join(
+        f"{'.'.join(str(at) for at in e['loc']) or 'the job'}: {e['msg']}" for e in exc.errors()
+    )
 
 
 # A 4xx the service answers a submission with that is not about the submission: a wrong
@@ -114,6 +142,16 @@ def _said(resp: httpx.Response) -> str:
     except ValueError:
         return resp.text[:500]
     return str(body.get("error", body)) if isinstance(body, dict) else str(body)
+
+
+def _job_ref(resp: httpx.Response) -> contract.JobRef:
+    """The job a submission or a key lookup names. An answer that is not the contract's raises
+    as a transport failure would: the submission is looked up by its key on the next try."""
+    try:
+        return contract.JobRef.model_validate(resp.json())
+    except ValueError as exc:
+        error = f"the deep service named no job: {exc}"
+        raise httpx.DecodingError(error, request=resp.request) from exc
 
 
 class DeepClient:
@@ -138,17 +176,19 @@ class DeepClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def submit(self, submission: dict[str, Any], *, key: str) -> str:
+    async def submit(self, submission: contract.JobInput, *, key: str) -> str:
         """Submit one paper; returns the job's id. `key` names the submission: the service
         answers a key it has with that key's job, so one sent again after a lost answer never
         starts a second. Raises `RejectedError` when the service turns it down for what it is."""
         resp = await self.http.post(
-            f"{self.base_url}/process", json=submission, headers={"Idempotency-Key": key}
+            f"{self.base_url}/process",
+            json=submission.model_dump(mode="json", exclude_none=True),
+            headers={"Idempotency-Key": key},
         )
         if 400 <= resp.status_code < 500 and resp.status_code not in NOT_REJECTIONS:
             raise RejectedError(f"{resp.status_code} {_said(resp)}")
         resp.raise_for_status()
-        return str(resp.json()["id"])
+        return _job_ref(resp).id
 
     async def job_for(self, key: str) -> str | None:
         """The job a submission with `key` started, if the service still has it."""
@@ -156,7 +196,7 @@ class DeepClient:
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
-        return str(resp.json()["id"])
+        return _job_ref(resp).id
 
     async def follow(self, job_id: str, since: datetime, label: str = "") -> Outcome:
         """Poll a job until it ends, or until `timeout_seconds` after `since` (when it was
@@ -181,27 +221,31 @@ class DeepClient:
                 if datetime.now(UTC) > deadline:
                     return kept
                 raise
-            job = resp.json()
-            stats = job.get("stats") or {}
-            mark = f"{job['status']} {job.get('last_event', '')} cells={stats.get('cells', 0)}"
+            raw = resp.json()
+            try:
+                job = contract.Job.model_validate(raw)
+            except ValidationError as exc:
+                return unreadable(raw, exc)
+            stats = job.stats
+            mark = f"{job.status} {job.last_event or ''} cells={stats.cells}"
             if mark != seen:
                 log.info(
                     "%s: %s turns=%s tokens=%s/%s list_cost=$%.2f %ss",
                     label,
                     mark,
-                    stats.get("turns", 0),
-                    stats.get("input", 0),
-                    stats.get("output", 0),
-                    stats.get("list_cost", 0.0),
-                    stats.get("seconds", 0),
+                    stats.turns,
+                    stats.input,
+                    stats.output,
+                    stats.list_cost,
+                    stats.seconds,
                 )
                 seen = mark
-            if job["status"] in ("done", "error"):
+            if job.status in ("done", "error"):
                 return ended(job)
             if datetime.now(UTC) > deadline:
-                started = job.get("started_at")
-                running = started and datetime.now(UTC) - datetime.fromisoformat(started)
-                if job["status"] == "running" and running and running > self.limit:
+                started = job.started_at
+                running = datetime.now(UTC) - datetime.fromisoformat(started) if started else None
+                if job.status == "running" and running is not None and running > self.limit:
                     # It may go on spending; what it spent was never reported.
                     error = "litwatch gave up on the deep job: running past its deadline"
                     return Outcome(None, None, None, "", error, "service")
@@ -238,37 +282,39 @@ class Deep:
     async def aclose(self) -> None:
         await self.client.http.aclose()
 
-    async def submission(self, conn: ReadUnit, paper: Paper, text: PaperText) -> dict[str, Any]:
-        """What the service is sent for the paper: its text and the arXiv version it is of (null
-        when the archive cannot say), which the service fetches the paper's figures at; the
-        topics the card is for with the grade each gave it, and the extensions they ask for."""
+    async def submission(self, conn: ReadUnit, paper: Paper, text: PaperText) -> contract.JobInput:
+        """What the service is sent for the paper: its text, the arXiv version it is of (none
+        when the archive cannot say), which the service fetches the paper's figures at, and a
+        LaTeX source's outline; the topics the card is for with the grade each gave it, and the
+        extensions they ask for."""
         topics = await self._topics(conn, paper.id)
-        return {
-            "paper": {
-                "id": paper.id,
-                "title": paper.title,
-                "abstract": paper.abstract,
-                "authors": paper.authors,
-                "published": paper.published,
-                "url": paper.url,
-                "body": text.body,
-                "body_source": text.source,
-                "body_version": text.version,
-            },
-            "extensions": sorted(
+        return contract.JobInput(
+            paper=contract.Paper(
+                id=paper.id,
+                title=paper.title,
+                abstract=paper.abstract,
+                authors=paper.authors,
+                published=paper.published,
+                url=paper.url,
+                body=text.body,
+                body_source=text.source,
+                body_version=text.version,
+                outline=_outline(text.body) if text.source == "latex" else None,
+            ),
+            extensions=sorted(
                 {self.extensions[t.slug] for _, t, _ in topics if t.slug in self.extensions}
             ),
-            "selections": [
-                {
-                    "slug": t.slug,
-                    "name": name,
-                    "subject": t.subject,
-                    "rubric": t.rubric,
-                    "grade": g.value,
-                }
+            selections=[
+                contract.Selection(
+                    slug=t.slug,
+                    name=name,
+                    subject=t.subject,
+                    rubric=t.rubric,
+                    grade=None if g == Grade.NONE else g.value,  # never none: see _topics
+                )
                 for name, t, g in topics
             ],
-        }
+        )
 
     async def _topics(self, conn: ReadUnit, paper_id: str) -> list[tuple[str, Topic, Grade]]:
         """The topics the card is for: the active topics, at any depth, that grade the paper
@@ -301,3 +347,22 @@ def load(name: str, options: dict[str, Any], config: Config) -> Deep:
         timeout_seconds=float(options.get("timeout_minutes", 75)) * 60,
     )
     return Deep(client, name=name, extensions=options.get("extensions"))
+
+
+def _outline(body: str) -> contract.Outline:
+    """A LaTeX source's outline as the service reads it: its headings, without what comes
+    before the first, its bibliography's span and where its appendix starts."""
+    parsed = latex(body)
+    return contract.Outline(
+        sections=[
+            contract.Section(
+                title=p.title, depth=p.depth, number=p.number, start=p.start, end=p.end
+            )
+            for p in parsed.parts
+            if p.index > 0
+        ],
+        references=contract.References(start=parsed.references[0], end=parsed.references[1])
+        if parsed.references
+        else None,
+        appendix=parsed.appendix,
+    )

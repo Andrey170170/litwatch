@@ -9,10 +9,10 @@ import { detailedSummaries, processPaper, withoutOldImages, type CardSpec, type 
 import { PROVIDER } from "../src/auth.ts";
 import type { HostConfig } from "../src/hosts.ts";
 import { RenderUnavailable, type Imaging } from "../src/imaging.ts";
-import type { PaperInput } from "../src/prompt.ts";
+import type { PaperInput } from "../src/contracts.ts";
 import type { Draft } from "../src/read.ts";
 import { passes, type Verdict } from "../src/review.ts";
-import { BODY, blocks, cell, changed, draft, fakeImaging, HOSTS, imagesOf, models, OPEN, OPTS, PAPER, PASSING, png, reviews, follows, JUDGED, READABLE, seeing, submits, textOf, WEBP, withSite, type Sent } from "./support.ts";
+import { BODY, blocks, cell, changed, draft, fakeImaging, HOSTS, imagesOf, models, OPEN, OPTS, PAPER, PASSING, paperWith, png, reviews, follows, JUDGED, READABLE, seeing, submits, textOf, WEBP, withSite, type Sent } from "./support.ts";
 
 const NONE: CardSpec = { extensions: [], selections: [] };
 interface Run {
@@ -118,11 +118,11 @@ test("the provider is asked for detailed reasoning summaries", async () => {
 // ── the first message ───────────────────────────────────────────────────────────────────────────────
 
 /** The writer's first message for a paper's text. */
-async function firstMessage(body: string): Promise<string> {
+async function firstMessage(body: string, source: "latex" | "pdf" = "latex"): Promise<string> {
   const { models: m, faux } = models();
   const sent: Sent[] = [];
   faux.setResponses([seeing(fauxAssistantMessage("Done."), sent), ...stopping]);
-  await run(m, { paper: { ...PAPER, body } });
+  await run(m, { paper: paperWith(body, source) });
   assert.deepEqual(sent[0]!.messages.map((x) => x.role), ["system", "user"]);
   return textOf(sent[0]!.messages[1]!);
 }
@@ -148,7 +148,7 @@ test("the first message of a paper with no appendix leaves out its bibliography 
   assert.ok(!/appendix/i.test(message), "no appendix is spoken of");
 
   const whole = "# Probes\n\n## Method\n\nWe probe 1,200 traces.\n\n## Results\n\nThe probe reaches 71.3%.\n";
-  const all = await firstMessage(whole);
+  const all = await firstMessage(whole, "pdf");
   assert.ok(all.endsWith(whole));
   assert.ok(all.includes(`Full text (${whole.length} characters; the paper has no separate appendix or bibliography in it):`));
 });
@@ -252,7 +252,7 @@ test("the length check is code's: the read's measured share of the main text, to
   // the same read against a paper whose main text is shorter than it: the reviewer's word does not pass it
   const short = models();
   short.faux.setResponses([submits(draft()), reviews(PASSING), follows(), ...stopping]);
-  const long = await run(short.models, { paper: { ...PAPER, body: BODY } });
+  const long = await run(short.models, { paper: paperWith(BODY) });
   assert.deepEqual(long.reviews?.map((r) => [r.passed, r.checks.length]), [[false, false]]);
 });
 
@@ -296,7 +296,7 @@ test("the reviewer reads the whole paper where the model's context has room, pas
   const sent: Sent[] = [];
   faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent), follows()]);
   const body = long(250_000);
-  const outcome = await run(m, { paper: { ...PAPER, body } });
+  const outcome = await run(m, { paper: paperWith(body) });
   assert.ok(textOf(sent[0]!.messages[1]!).includes(body), "all of it, the appendix's last sentence included");
   assert.deepEqual(outcome.result, draft(), "a whole review leaves no note");
 });
@@ -307,7 +307,7 @@ test("a paper past the model's context reaches the reviewer cut, with what was l
   const sent: Sent[] = [];
   faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent), follows()]);
   const body = long(40_000);
-  const outcome = await run(m, { paper: { ...PAPER, body } });
+  const outcome = await run(m, { paper: paperWith(body) });
   const message = textOf(sent[0]!.messages[1]!);
   const bibliography = body.indexOf("\\appendix") - body.indexOf("\\begin{thebibliography}") - 1;
   // what is left once a line stands in for the bibliography, past the first 10,000 characters
@@ -395,7 +395,7 @@ test("a revision whose review cannot run is kept as unreviewed, not as failing t
   // what round 1's reviewer was not given of a long paper is no note on a revision no reviewer read
   const small = models(64_000);
   small.faux.setResponses([submits(draft()), reviews(FAILING), follows(), submits(revised(1)), fauxAssistantMessage("", { stopReason: "error", errorMessage: "usage limit reached" })]);
-  const cut = await run(small.models, { paper: { ...PAPER, body: long(40_000) } });
+  const cut = await run(small.models, { paper: paperWith(long(40_000)) });
   assert.deepEqual(cut.result?.process_notes?.map((n) => n.note.slice(0, 28)), ["The read was not reviewed: t"]);
 });
 
@@ -587,7 +587,7 @@ test("figures made at once in one cell each reach the reviewer under their own n
       cell(`await Promise.all([figure("figs/probe.png", "probe", "Figure 1"), figure("a/setup.png", "setup", "Figure 2")]); await submit(${JSON.stringify(read)})`),
       seeing(reviews(PASSING), sent), follows(),
     ]);
-    const outcome = await run(m, { paper: { ...PAPER, body }, hosts: local(url) });
+    const outcome = await run(m, { paper: paperWith(body), hosts: local(url) });
     assert.equal(outcome.error, undefined);
     const content = sent[0]!.messages[1]!.content as { type: string; text?: string; data?: string }[];
     const shown = content.flatMap((c, i) => (c.type === "image" ? [[/figure "(\w+)"/.exec(content[i - 1]!.text!)![1], c.data]] : []));

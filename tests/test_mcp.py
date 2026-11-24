@@ -284,7 +284,7 @@ async def test_no_tool_writes_and_its_only_effect_is_reading_the_archive(conn: S
         await ok(http, "list_digests", since="2026-10-01", until="2026-10-20")
         await ok(http, "read_digest", digest_id=digest)
         found = len(seen)
-        assert "1. Probes" in await ok(http, "paper_outline", paper_id=P.id)
+        assert "1. §1 Probes" in await ok(http, "paper_outline", paper_id=P.id)
         assert "Hidden steps." in await ok(http, "read_paper", paper_id=P.id, section=1)
         assert "Hidden steps." in await ok(http, "read_paper", paper_id=ONLY.id)  # its PDF's
         arguments = {"paper_id": ONLY.id, "page": 1}

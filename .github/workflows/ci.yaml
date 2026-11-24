@@ -114,19 +114,41 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: The Deep read's schema and types match deep/src/read.ts
-        run: |
-          npm ci --no-audit --no-fund --prefix ../deep
-          npm run read-schema --prefix ../deep
-          pnpm generate:read
-          git diff --exit-code -- src/deepread/read.schema.json src/deepread/read.d.ts
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
 
+  contracts:
+    name: Files generated from deep's contracts are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.16"
+          python-version: "3.13"
+          enable-cache: true
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - run: uv sync --frozen --extra dev
+      - run: npm ci --no-audit --no-fund --prefix deep
+      - run: pnpm install --frozen-lockfile --dir web
+      - run: scripts/contracts.sh
+      - name: Nothing changed or new (else run scripts/contracts.sh and commit what it wrote)
+        run: |
+          generated="contracts src/litwatch/core/contracts web/src/deepread"
+          git status --porcelain -- $generated
+          git diff --exit-code -- $generated
+          test -z "$(git status --porcelain -- $generated)"
+
   container:
     name: Container and stack smoke tests
-    needs: [quality, deep, web, archive]
+    needs: [quality, deep, web, archive, contracts]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

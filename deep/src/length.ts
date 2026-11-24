@@ -1,7 +1,6 @@
 /** A read's length against its paper's: measured in code, since a reviewer judging it by eye is not consistent. The
  * read aims for about a third of the paper's main text; it fails its length check only past LENGTH_MAX of it. */
-import { headings, isLatex, splitPaper } from "./paper.ts";
-import type { PaperInput } from "./prompt.ts";
+import { headings, isLatex, splitPaper, type Text } from "./paper.ts";
 
 /** What a read aims for, as a share of its paper's main text. */
 export const LENGTH_AIM = 1 / 3;
@@ -28,12 +27,12 @@ export interface Length {
   share: number;
 }
 
-export function measure(read: unknown, paper: Pick<PaperInput, "body" | "body_source">): Length {
-  const { main, cuts } = splitPaper(paper.body, paper.body_source);
+export function measure(read: unknown, paper: Text): Length {
+  const { main, cuts } = splitPaper(paper);
   // what comes before a LaTeX source's first heading is its preamble and the title, which no read retells, unless
   // that heading is where the cuts begin (a note with no sections); a PDF's text has no preamble, and its headings are
   // found loosely enough (a table's "# Failed" column) to trim the paper
-  const first = isLatex(paper.body, paper.body_source) ? headings(paper.body, paper.body_source)[0]?.start : undefined;
+  const first = isLatex(paper) ? headings(paper)[0]?.start : undefined;
   const start = first !== undefined && first < (cuts[0]?.start ?? Infinity) ? first : 0;
   const length = Math.max(1, main.length - start);
   const text = chars(read);

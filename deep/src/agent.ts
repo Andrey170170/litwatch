@@ -12,6 +12,7 @@ import type { AssistantMessage, ImageContent, Models, TextContent, ThinkingLevel
 import { Type } from "typebox";
 import { PROVIDER, requireSubscription } from "./auth.ts";
 import { check, drawErrors, type Checked } from "./checks.ts";
+import type { Failure, PaperInput, ReturnedFigure, SelectionContext, Stats } from "./contracts.ts";
 import { Figures, type Made } from "./figures.ts";
 import { BudgetError, buildHosts, NetworkError, pacer, RefusedError, type FetchRecord, type HostConfig, type StoreHit } from "./hosts.ts";
 import { RenderUnavailable, type Imaging, type RenderTarget, type RenderWidth, type Shot } from "./imaging.ts";
@@ -19,7 +20,7 @@ import { layout } from "./layout.ts";
 import { lengthLine, measure } from "./length.ts";
 import { headings } from "./paper.ts";
 import { PaperIndex } from "./places.ts";
-import { findingsMessage, systemPrompt, topicKey, userMessage, type PaperInput, type SelectionContext } from "./prompt.ts";
+import { findingsMessage, systemPrompt, topicKey, userMessage } from "./prompt.ts";
 import { draftErrors, readErrors, type Draft, type Read } from "./read.ts";
 import { Repl, type HostDetail, type HostFn } from "./repl.ts";
 import { follow } from "./blind.ts";
@@ -43,36 +44,23 @@ export type TraceEvent =
   | { t: number; type: "review"; round: number; passed?: boolean; error?: string; usage: TurnUsage }
   | { t: number; type: "system"; text: string };
 
-export interface TurnUsage {
-  input: number;
-  output: number;
-  reasoning: number;
-  cache_read: number;
-  list_cost: number;
-}
-
-export interface Stats extends TurnUsage {
-  cells: number;
-  turns: number;
-  seconds: number;
-}
+/** A job's usage (`contracts.ts`, which litwatch reads it by). */
+export type { Stats };
+/** One model turn's usage. */
+export type TurnUsage = Omit<Stats, "cells" | "turns" | "seconds">;
 
 /**
  * Whose failure a job's was: the service's when the model call failed (the sign-in, a usage limit, the provider), the
  * paper's when no valid read was submitted within the budget or the provider's content filter stopped the model.
  * litwatch counts only the paper's against it.
  */
-export type Failure = "service" | "paper";
+export type { Failure };
 
 /** A process note on the read: the model's, validated with it, or the service's, added after. */
 export type ProcessNote = NonNullable<Read["process_notes"]>[number];
 
 /** One of the read's figures as the job returns it (docs/integrations.md). */
-export interface ReturnedFigure {
-  name: string;
-  mime: "image/webp";
-  data: string; // base64
-}
+export type { ReturnedFigure };
 
 export interface Outcome {
   result: Read | null;
@@ -245,8 +233,8 @@ export async function processPaper(
   const figures = new Figures(paper, hostCfg, imaging, (shot) => shown.push(shot), pace, session.signal);
 
   // The paper's headings and places, read once: the session's sections() and the checks share them.
-  const heads = headings(paper.body, paper.body_source);
-  const index = new PaperIndex(paper.body, paper.body_source);
+  const heads = headings(paper);
+  const index = new PaperIndex(paper);
   // The collection's papers the agent was shown: among_collection may name only these.
   const collection = new Set<string>();
   const topics = spec.selections.map(topicKey);

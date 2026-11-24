@@ -34,7 +34,8 @@ asking the archive for a paper's files at urgent priority, as opening a PDF in t
 - **Digests.** A topic's digests over a date range, and one digest read in full: its text, the papers it puts
   forward and the updated papers listed under them.
 - **Reading.** Outline first (decision 85): the paper's sections with their sizes and where the text comes from
-  (LaTeX or the PDF), then a section, a range or the whole text, so an agent after the method does not spend its
+  (LaTeX or the PDF; a LaTeX source's sections with their numbers where LaTeX's defaults give them, and those of its
+  appendix marked), then a section, a range or the whole text, so an agent after the method does not spend its
   context on the related work. The text is the source a full-text pass reads, the LaTeX first and the PDF's text when
   there is none or the owner chose "Use the PDF", but whole: none of the Brief's trimming ([pipeline.md](pipeline.md),
   section 6), so the references and the end of a long appendix are there to read.

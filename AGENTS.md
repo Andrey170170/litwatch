@@ -62,8 +62,10 @@ CI (`.github/workflows/ci.yaml`) runs all of these; run the ones your change tou
   `.venv/bin/python -m unittest discover -s tests` (setup in its README).
 
 After an API change, regenerate the client types: `uv run litwatch openapi web/openapi.json`, then `pnpm generate` in
-`web/`. After a change to the Deep read's schema (`deep/src/read.ts`): `npm run read-schema` in `deep/`, then
-`pnpm generate:read` in `web/`.
+`web/`. After a change to the Deep read's schema (`deep/src/read.ts`) or to a contract litwatch shares with deep
+(`deep/src/contracts.ts`): `scripts/contracts.sh`, which runs `npm run read-schema` and `npm run contracts` in `deep/`
+and `pnpm generate:read` in `web/`, and generates litwatch's models (`src/litwatch/core/contracts/`). A new contract
+is one schema added to `CONTRACTS` there, then this. CI fails on a generated file that is not current.
 
 ## On the owner's server
 

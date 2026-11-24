@@ -932,7 +932,9 @@ def _outline_answer(
     after = first
     for p in parts[first : first + MAX_LISTED]:
         size = f"{p.end - p.start:,} characters" if p.end > p.start else "blank"
-        line = f"{'  ' * p.depth}{p.index}. {p.title} · {size} · offset {p.start}"
+        number = f"§{p.number} " if p.number is not None else ""
+        where = " · appendix" if p.appendix else ""
+        line = f"{'  ' * p.depth}{p.index}. {number}{p.title}{where} · {size} · offset {p.start}"
         if after > first and used + len(line) + 1 > mcp_reading.PAGE_CHARS - OUTLINE_FOOTER:
             break
         out.append(line)

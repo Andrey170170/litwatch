@@ -9,6 +9,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Models } from "@earendil-works/pi-ai";
 import type { RunOptions } from "../src/agent.ts";
+import type { PaperInput } from "../src/contracts.ts";
+import type { Text } from "../src/paper.ts";
 import { PROVIDER } from "../src/auth.ts";
 import { makeGuard, type HostConfig } from "../src/hosts.ts";
 import type { Box, Imaging, RenderTarget, RenderWidth } from "../src/imaging.ts";
@@ -54,10 +56,71 @@ The learning rate is 0.003 and training runs for 40 epochs.
 \end{document}
 `;
 
+const LEVELS: Record<string, number> = { section: 0, subsection: 1, subsubsection: 2, paragraph: 3 };
+
+/**
+ * A LaTeX fixture as litwatch sends it: with the outline litwatch parses of a source (src/litwatch/core/outline.py,
+ * whose tests hold the parsing), made here by its rules for what the fixtures have. Their \\section to \\paragraph
+ * headings (none on a comment line), the abstract and the bibliography; sections numbered as LaTeX's defaults do,
+ * lettered from \\appendix on, unless `numbered` is false, as litwatch leaves a source that numbers its own; the
+ * bibliography's environment, and where the appendix starts.
+ */
+export function latex(body: string, { numbered = true } = {}): Text {
+  const live = (at: number) => !/(^|[^\\])(\\\\)*%/.test(body.slice(body.lastIndexOf("\n", at - 1) + 1, at));
+  const first = (pattern: RegExp) => [...body.matchAll(pattern)].find((m) => live(m.index));
+  const lettering = first(/\\appendi(?:x|ces)(?![a-zA-Z])/g)?.index ?? Infinity;
+  const found: { title: string; depth: number; number?: string; start: number }[] = [];
+  const counters = [0, 0, 0];
+  let lettered = false;
+  for (const m of body.matchAll(/\\(section|subsection|subsubsection|paragraph)(\*?)\{([^}]*)\}/g)) {
+    if (!live(m.index)) continue;
+    const heading: (typeof found)[number] = { title: m[3]!, depth: LEVELS[m[1]!]!, start: m.index };
+    if (numbered && m[2] === "" && heading.depth < 3) {
+      if (!lettered && m.index > lettering) {
+        lettered = true;
+        counters.fill(0);
+      }
+      counters[heading.depth]! += 1;
+      counters.fill(0, heading.depth + 1);
+      const top = lettered ? String.fromCharCode(64 + counters[0]!) : String(counters[0]);
+      if (counters[0]! > 0) heading.number = [top, ...counters.slice(1, heading.depth + 1)].join(".");
+    }
+    found.push(heading);
+  }
+  for (const m of body.matchAll(/\\begin\s*\{(abstract|thebibliography)\}/g))
+    if (live(m.index)) found.push({ title: m[1] === "abstract" ? "Abstract" : "References", depth: 0, start: m.index });
+  found.sort((a, b) => a.start - b.start);
+  const sections = found.map((h, i) => ({ ...h, end: found.slice(i + 1).find((next) => next.depth <= h.depth)?.start ?? body.length }));
+  const opened = first(/\\begin\s*\{thebibliography\}/g);
+  const closed = opened && /\\end\s*\{thebibliography\}/.exec(body.slice(opened.index));
+  const appendix = first(/\\appendi(?:x|ces)(?![a-zA-Z])|\\section\*?\{\s*(?:Appendi(?:x|ces)|Supplementa(?:ry|l)\b)/g)?.index;
+  return {
+    body,
+    body_source: "latex",
+    outline: {
+      sections,
+      ...(opened ? { references: { start: opened.index, end: closed ? opened.index + closed.index + closed[0].length : body.length } } : {}),
+      ...(appendix === undefined ? {} : { appendix }),
+    },
+  };
+}
+
 /** BODY with a long Discussion, so the main text is a real paper's size against a read: a read's length check is
  * its share of the main text. */
 const DISCUSSION = `\\section{Discussion}\n${"The probe's accuracy holds across the tested layers. ".repeat(60)}\n`;
-export const PAPER = { id: "2610.00001", title: "Probes read the trace", abstract: "A.", authors: ["A. Author"], body: BODY.replace("\\begin{thebibliography}", `${DISCUSSION}\\begin{thebibliography}`), body_source: "latex", body_version: 2 };
+export const PAPER: PaperInput = {
+  id: "2610.00001",
+  title: "Probes read the trace",
+  abstract: "A.",
+  authors: ["A. Author"],
+  ...latex(BODY.replace("\\begin{thebibliography}", `${DISCUSSION}\\begin{thebibliography}`)),
+  body_version: 2,
+};
+/** `PAPER` with another text: a LaTeX source, outlined, unless the text is a PDF's. */
+export const paperWith = (body: string, source: "latex" | "pdf" = "latex"): PaperInput => {
+  const { outline: _, ...rest } = PAPER;
+  return { ...rest, ...(source === "latex" ? latex(body) : { body, body_source: "pdf" }) };
+};
 
 /** A draft that passes every check against `BODY`, with no figure and no lens. */
 export function draft(): Draft {

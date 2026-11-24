@@ -4,7 +4,7 @@ every client in the integration tests is built on one of these through `httpx.Mo
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import parse_qs, quote, unquote
 
 import httpx
@@ -257,7 +257,8 @@ class FakeDeep:
     with a status and its error (`answer_submits`, as it turns one down), keep a job running
     (`hold`) since `started_at`, or queued (`queued`), forget its jobs (`vanish`, as a restart
     does), or accept a submission and then lose the answer (`lose_answers`), as a dropped
-    connection would. Its health check reports the sign-in `auth`."""
+    connection would. Its health check reports the sign-in `auth`. Its jobs are the contract's
+    (`core.contracts.deep.Job`), `outcome` over a job of no usage yet."""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
         self.outcome = outcome
@@ -275,6 +276,7 @@ class FakeDeep:
         self.vanish = False
         self.lose_answers = 0
         self.auth: dict[str, Any] = {"state": "ok"}
+        self.paper: dict[str, Any] = {"id": "2610.00001", "title": "A paper"}
 
     def handle(self, req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and req.url.path == "/healthz":
@@ -291,6 +293,7 @@ class FakeDeep:
             key = self.keys_sent[-1]
             if key in self.keys:
                 return httpx.Response(200, json={"id": self.keys[key], "status": "running"})
+            self.paper = self.requests[-1]["paper"]
             self.keys[key], self.started, self.polls = "job-1", self.started + 1, 0
             if self.lose_answers:
                 self.lose_answers -= 1
@@ -301,20 +304,42 @@ class FakeDeep:
             if self.fail_polls:
                 self.fail_polls -= 1
                 return httpx.Response(503)
-            return httpx.Response(200, json={"id": job}) if job else httpx.Response(404)
+            ref = {"id": job, "status": "running"}
+            return httpx.Response(200, json=ref) if job else httpx.Response(404)
         if req.url.path == "/jobs/job-1" and not self.vanish:
             if self.fail_polls:
                 self.fail_polls -= 1
                 return httpx.Response(503)
             self.polls += 1
             if self.queued:
-                return httpx.Response(200, json={"status": "queued", "stats": {}})
+                return httpx.Response(200, json=self._job("queued"))
             if self.polls < 2 or self.hold:
-                job = {"status": "running", "stats": {"cells": 3}, "started_at": self.started_at}
-                return httpx.Response(200, json=job)
+                running = self._job("running", stats=FakeDeep.NO_USAGE | {"cells": 3})
+                if self.started_at:
+                    running["started_at"] = self.started_at
+                return httpx.Response(200, json=running)
             status = "error" if self.outcome.get("error") else "done"
-            return httpx.Response(200, json={"status": status, **self.outcome})
+            return httpx.Response(200, json=self._job(status) | self.outcome)
         return httpx.Response(404)
+
+    NO_USAGE: ClassVar[dict[str, Any]] = {
+        "cells": 0, "turns": 0, "input": 0, "output": 0, "reasoning": 0, "cache_read": 0,
+        "list_cost": 0, "seconds": 0,
+    }  # fmt: skip
+
+    def _job(self, status: str, **fields: Any) -> dict[str, Any]:
+        """The job as `GET /jobs/<id>` reports it, about the paper last submitted."""
+        at = "2026-11-23T00:00:00+00:00"
+        return {
+            "id": "job-1",
+            "paper_id": self.paper["id"],
+            "title": self.paper["title"],
+            "extensions": self.requests[-1].get("extensions", []) if self.requests else [],
+            "status": status,
+            "created_at": at,
+            "stats": FakeDeep.NO_USAGE,
+            "last_activity": at,
+        } | fields
 
 
 class FakeNotion:

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { headings } from "../src/paper.ts";
+import { headings, type Text } from "../src/paper.ts";
 import { Repl } from "../src/repl.ts";
+import { latex } from "./support.ts";
 
 const PAPER = `# A Title
 
@@ -17,8 +18,8 @@ We probe things.
 - [2] Second ref.
 `;
 
-/** A session's globals as the service sets them for a paper's text. */
-const globals = (paper: string) => ({ paper, __meta: JSON.stringify({ id: "2601.00001" }), __headings: JSON.stringify(headings(paper)) });
+/** A session's globals as the service sets them for a paper's text, a PDF's unless it is given as sent. */
+const globals = (paper: string, text: Text = { body: paper, body_source: "pdf" }) => ({ paper, __meta: JSON.stringify({ id: "2601.00001" }), __headings: JSON.stringify(headings(text)) });
 
 async function repl(hosts = {}, opts = {}) {
   return Repl.create(globals(PAPER), hosts, opts);
@@ -106,7 +107,7 @@ More.
 `;
 
 test("paper helpers read LaTeX source: sections, nesting, comments and the bibliography", async () => {
-  const r = await Repl.create(globals(LATEX), {}, {});
+  const r = await Repl.create(globals(LATEX, latex(LATEX)), {}, {});
   try {
     const titles = "Abstract|Introduction|Method & probes|Setup|Results|References|Extra";
     assert.equal((await r.run("sections().map(s => s.title).join('|')")).output, titles);

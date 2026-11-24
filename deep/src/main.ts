@@ -12,7 +12,7 @@ import { authState, buildModels, login } from "./auth.ts";
 import type { HostConfig } from "./hosts.ts";
 import { Studio } from "./imaging.ts";
 import { JobQueue } from "./jobs.ts";
-import type { PaperInput, SelectionContext } from "./prompt.ts";
+import type { PaperInput, SelectionContext } from "./contracts.ts";
 import { buildServer } from "./server.ts";
 
 const env = (name: string, fallback: string) => process.env[name] ?? fallback;
@@ -49,13 +49,19 @@ const config = {
     maxFetchBytes: whole("DEEP_MAX_FETCH_MB", 2, 1024 * 1024, MAX_BODY_BYTES),
   } satisfies HostConfig,
   run: {
-    model: env("DEEP_MODEL", "gpt-6.1-sol"),
+    model: env("DEEP_MODEL", "gpt-6.2-sol"),
     effort: env("DEEP_EFFORT", "high") as RunOptions["effort"],
     maxCells: whole("DEEP_MAX_CELLS", 100),
     cellTimeoutMs: whole("DEEP_CELL_TIMEOUT_S", 90, 1000, MAX_TIMER_MS),
     wallClockMs: whole("DEEP_WALL_CLOCK_MIN", 60, 60_000, MAX_TIMER_MS),
     maxOutputChars: whole("DEEP_MAX_OUTPUT_CHARS", 8000),
   } satisfies RunOptions,
+  /** The release-link finder's model and effort, its own: a lookup, not writing (docs/specs/architecture/a2-work-gate.md,
+   * "Release links"). Read by the finder, which P6 builds. */
+  links: {
+    model: env("DEEP_LINKS_MODEL", "gpt-6.2-sol"),
+    effort: env("DEEP_LINKS_EFFORT", "medium") as RunOptions["effort"],
+  },
 };
 
 const log = (msg: string) => console.log(`${new Date().toISOString()} ${msg}`);

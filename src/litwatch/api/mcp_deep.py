@@ -12,8 +12,10 @@ from __future__ import annotations
 from typing import Any
 
 from litwatch.core import deepread
+from litwatch.core.contracts import deep as contract
 
-KINDS = {
+# Each section kind of a read (the contract's), as the outline names it.
+KINDS: dict[contract.SectionKind, str] = {
     "glance": "at a glance",
     "problem": "problem",
     "method": "method",

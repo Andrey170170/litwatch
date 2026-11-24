@@ -5,13 +5,15 @@ import { test } from "node:test";
 import { check, drawErrors, type CheckContext } from "../src/checks.ts";
 import { PaperIndex, cites, figureLabel } from "../src/places.ts";
 import { draftErrors, type Draft } from "../src/read.ts";
-import { BODY, blocks, changed, draft } from "./support.ts";
+import { BODY, blocks, changed, draft, latex } from "./support.ts";
 
 type Loose = Record<string, unknown>;
-type Over = Partial<Omit<CheckContext, "figures">> & { paper?: string; source?: string; figures?: Record<string, { label?: string }> };
-/** The check's context: `BODY` as the paper, or another text; the session's figures by name. */
-const ctx = ({ paper = BODY, source = "latex", figures = {}, ...over }: Over = {}): CheckContext => ({
-  index: new PaperIndex(paper, source),
+type Over = Partial<Omit<CheckContext, "figures">> & { paper?: string; source?: "latex" | "pdf"; numbered?: boolean; figures?: Record<string, { label?: string }> };
+/** The check's context: `BODY` as the paper, or another text, a LaTeX one with the outline litwatch sends
+ * (`numbered` false for a source that numbers its sections itself, which litwatch leaves unnumbered); the session's
+ * figures by name. */
+const ctx = ({ paper = BODY, source = "latex", numbered, figures = {}, ...over }: Over = {}): CheckContext => ({
+  index: new PaperIndex(source === "pdf" ? { body: paper, body_source: "pdf" } : latex(paper, { numbered })),
   found: { collection: new Set(), self: "2610.00001" },
   topics: [],
   figures: new Map(Object.entries(figures)),
@@ -320,24 +322,24 @@ test("a place code does not look up is the reviewer's, by name: an equation, an 
   assert.deepEqual(left("Appendix", { paper: NO_APPENDIX }), [[], ["the appendix"]]);
   // a source that numbers its sections itself: no number is known to be the paper's
   const reset = BODY.replace("\\appendix", "\\setcounter{section}{0}\\renewcommand{\\thesection}{S\\arabic{section}}");
-  assert.deepEqual(left("§7", { paper: reset }), [[], ["§3", "§7"]], "the fixture's note cites §3");
+  assert.deepEqual(left("§7", { paper: reset, numbered: false }), [[], ["§3", "§7"]], "the fixture's note cites §3");
   // a subsection counter set: the one subsection of section 2 is 2.4, which LaTeX's defaults would call 2.1
   assert.deepEqual(left("§2.4", { paper: NESTED })[0], ["/sections/3/claims/0/where: cites §2.4, but the paper has no section 2.4"]);
   const fourth = NESTED.replace("\\subsection{Probe training}", "\\setcounter{subsection}{3}\n\\subsection{Probe training}");
-  assert.deepEqual(left("§2.4", { paper: fourth }), [[], ["§3", "§2.4"]]);
+  assert.deepEqual(left("§2.4", { paper: fourth, numbered: false }), [[], ["§3", "§2.4"]]);
   // a class that numbers its sections in Roman numerals: "Sec. IV" is a place, the reviewer's to look up
   const ieee = BODY.replace("\\documentclass{article}", "\\documentclass[journal]{IEEEtran}");
-  assert.deepEqual(left("Sec. IV", { paper: ieee }), [[], ["§3", "§IV"]]);
+  assert.deepEqual(left("Sec. IV", { paper: ieee, numbered: false }), [[], ["§3", "§IV"]]);
   // and its tables in Roman numerals, one or a list
-  assert.deepEqual(left("Table II", { paper: ieee }), [[], ["§3", "Table II"]]);
-  assert.deepEqual(left("Tables II and III", { paper: ieee }), [[], ["§3", "Tables II and III"]]);
+  assert.deepEqual(left("Table II", { paper: ieee, numbered: false }), [[], ["§3", "Table II"]]);
+  assert.deepEqual(left("Tables II and III", { paper: ieee, numbered: false }), [[], ["§3", "Tables II and III"]]);
   // a list, in any case, is named whole
   assert.deepEqual(left("equations 9999 and 8888"), [[], ["equations 9999 and 8888"]]);
   assert.deepEqual(left("pp. 3–9"), [[], ["pp. 3–9"]]);
   // a place's word in capitals is the same place
   assert.deepEqual(check(resting("SECTION 3"), ctx()), { errors: [], plots: [], unverified: [] });
   assert.deepEqual(check(resting("SEC. 3"), ctx()), { errors: [], plots: [], unverified: [] });
-  assert.deepEqual(left("TABLE II", { paper: ieee }), [[], ["§3", "TABLE II"]]);
+  assert.deepEqual(left("TABLE II", { paper: ieee, numbered: false }), [[], ["§3", "TABLE II"]]);
 });
 
 test("the paper's places in prose go to the reviewer where code cannot confirm them, and Related work's are other papers'", () => {

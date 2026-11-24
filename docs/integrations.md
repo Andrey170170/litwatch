@@ -244,29 +244,38 @@ Each module's docstring lists its options and environment variables.
 
 `deep` submits a paper (`POST /process`) and follows its job (`GET /jobs/<id>`) to its end;
 [`deep/README.md`](../deep/README.md) has the protocol, the trace and the failures. This is the
-part of it litwatch stores.
+part of it litwatch stores. The submission and the job are contracts the service declares
+(`deep/src/contracts.ts`, exported to `contracts/deep.schema.json`); litwatch's models of them
+are generated from it (`core.contracts.deep`, by `scripts/contracts.sh`), so the two sides read
+one definition.
 
 **The submission's `paper`** carries the paper's `body`, `body_source` (`latex` or `pdf`) and
-`body_version`: the arXiv version the text is of, or null when the archive cannot say (a text
-read from its historical LaTeX). The service takes the paper's figures from that version.
+`body_version`: the arXiv version the text is of, left out when the archive cannot say (a text
+read from its historical LaTeX). The service takes the paper's figures from that version. A
+LaTeX source goes with its `outline`, as litwatch parses it (`core.outline`, which the MCP
+server's outline lists too): its headings with their depths, spans and numbers, the
+bibliography's span and where the appendix starts. The service reads a LaTeX source by it, and
+turns down a LaTeX source without one, or a PDF's text with one, with a 422.
 
 **A finished job** (`status: "done"`) carries, beside its `stats` and `trace`:
 
 | Field | What it holds | Stored |
 | --- | --- | --- |
-| `result` | The Deep read, an object whose `format` is `"read"`, valid against the service's schema (`deep/src/read.ts`). A result with no `format` is a Deep card, the format from before | `deep_cards.card`, as returned |
+| `result` | The Deep read, an object whose `format` is `"read"`, valid against the service's schema (`deep/src/read.ts`). The Deep cards from before, with no `format`, are only in storage: the service writes none | `deep_cards.card`, as returned |
 | `figures` | The paper's figures the read shows, a list of `{"name", "mime", "data"}`: `name` as the read's `fig` blocks cite it (letters, digits, `.`, `_` and `-`, starting with a letter or digit, each name once), `mime` `image/webp`, `data` the image in base64, at most 1600 px wide. Absent or empty: no figures | `deep_figures`, one row per figure, replacing the paper's earlier ones in the transaction that writes the read |
 | `reviews` | The review rounds the read went through, in order, a list of `{"round", "passed", "scores", "checks", "findings", "retelling"}`: `scores` the rubric's (`faithfulness`, `clarity`, `depth`, `calibration`, 1 to 5) and the blind reader's `followability`, `retelling` the blind reader's account of the paper's argument from the read, `checks` the reviewer's structure checks by name (`anchors`, `experiments`, `why_boxes`, `voice`, `length`; true: passed), apart from the schema and code checks submit runs before any review, `findings` each `{"about", "where", "text"}` with an optional `rewrite` (`about` the score or check it counts against, `followability` for the blind reader's, `where` a section's id in the read, or `<section id>.<n>` for its n-th block). A round passed when every score is at least 4 and every check passed; the first write and at most two revisions make at most three rounds. Absent or null: no review gave a verdict | `deep_attempts.reviews`, as returned, for a failed job too |
 
 `figures` and `reviews` are the job's fields, not the read's: the read's schema takes no others.
 
-litwatch checks only this much before it stores anything (`core.deepread.received`), and leaves
-the read's own shape to the service that validated it. A `format` other than `"read"`, a result
-that is not an object, `figures` that are not such a list (an unknown `mime`, a name outside the
-pattern or given twice, data that is not base64 or not a WebP image, more than 32 MiB together)
-or `reviews` that are not a list end the job as the service's failure: nothing of the result is
-stored, the card and figures before it stay, the attempt keeps its usage, trace and reviews, and
-the Deep queue pauses and tries the pass again, as for any failure of the service.
+litwatch checks only this much before it stores anything (the job's contract, then
+`core.deepread.received` for the figures' bytes), and leaves the read's own shape to the service
+that validated it. A job that is not the contract's (a `format` other than `"read"` or none, a
+result that is not an object, `figures` that are not such a list, an unknown `mime`, a name
+outside the pattern, `reviews` that are not a list), or figures given twice, not base64, not a
+WebP image or more than 32 MiB together, end the job as the service's failure: nothing of the
+result is stored, the card and figures before it stay, the attempt keeps its usage and trace
+(and its reviews, but for a job that is not the contract's), and the Deep queue pauses and tries
+the pass again, as for any failure of the service.
 
 **A read that still failed its review** when the rounds ran out is stored and shown: the service
 adds a process note `{"kind": "review", "source": "service", "note": ...}` to it. Needs you lists
