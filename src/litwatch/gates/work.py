@@ -10,10 +10,12 @@ what is due, one item at a time per admission (a kind, or an integration for del
 claim has one supervisor, from the claim's commit to the item's settling: it runs the Worker in
 a task of its own under the work context (`gates.context`), where the item's lease fences the
 task's write units (`gates.database`) and its gate calls are attributed to the item, and it
-keeps the lease beating. A renewal is bounded by the lease it renews: one that finds the lease
-lost, or does not confirm it before it lapses, cancels the Worker, and whatever the Worker
-returns after that is ignored. An item whose lease expires (its process died, or lost the
-database) is taken back and run again, by this process or another.
+keeps the lease beating. A lease starts when its claim wins admission, and a claim whose lease
+ran out before its Worker could start is given back. A renewal is bounded by the lease it
+renews: one that fails, finds the lease lost, or does not confirm it before it lapses, cancels
+the Worker, and whatever the Worker returns after that is ignored. An item whose lease expires
+(its process died, or lost the database) is taken back and run again, by this process or
+another.
 
 A Worker returns how the item ended: `Done` (or None), or `Later` to have it wait and run again.
 One that raises fails the item, unless the database was lost under it: then the item is given
@@ -151,9 +153,19 @@ class WorkGate:
 
     async def take(self, kinds: list[str]) -> WorkItem | None:
         """Lease the next item of `kinds` that is due and admitted, if any."""
+        taken = await self._take(kinds)
+        return None if taken is None else taken[0]
+
+    async def _take(self, kinds: list[str]) -> tuple[WorkItem, float] | None:
+        """Lease the next item of `kinds` that is due and admitted, if any, with a time on the
+        event loop's clock no later than its lease's start: the lease runs from it."""
         try:
             async with self._write("take") as unit:
-                return await queue.take(unit, kinds, self.lease)
+                claimed = await queue.take(unit, kinds, self.lease)
+                if claimed is None:
+                    return None
+                since = asyncio.get_running_loop().time()
+                return await queue.stamp(unit, claimed, self.lease), since
         except psycopg.errors.UniqueViolation:
             # Another process took one for the same admission at once; its settling wakes us.
             return None
@@ -228,24 +240,30 @@ class WorkGate:
         self, kinds: list[str], workers: Mapping[str, Worker], claimed: asyncio.Future[bool]
     ) -> None:
         """Own one claim from its commit to its settling: take it, run its Worker, settle it."""
-        since = asyncio.get_running_loop().time()  # no later than the lease's start
-        taking = asyncio.create_task(self.take(kinds))
+        taking = asyncio.create_task(self._take(kinds))
         try:
             await _finished(taking)
         except asyncio.CancelledError:
             # The claim may have committed while we were stopped: it is ours to give back.
-            if not taking.cancelled() and taking.exception() is None and (item := taking.result()):
-                await self._give_back(item)
+            if not taking.cancelled() and taking.exception() is None and (taken := taking.result()):
+                await self._give_back(taken[0])
             if not claimed.done():
                 claimed.cancel()
             raise
         if (error := taking.exception()) is not None:
             claimed.set_exception(error)
             return
-        item = taking.result()
-        claimed.set_result(item is not None)
-        if item is not None:
-            await self._run(item, workers[item.kind], since)
+        taken = taking.result()
+        claimed.set_result(taken is not None)
+        if taken is None:
+            return
+        item, since = taken
+        if asyncio.get_running_loop().time() >= since + self.lease.total_seconds():
+            # Its lease ran out before it could start: whoever runs next takes it.
+            log.warning("work: %s %s (item %s) leased too late to start", *_name(item))
+            await self._give_back(item)
+            return
+        await self._run(item, workers[item.kind], since)
 
     async def _run(self, item: WorkItem, worker: Worker, since: float) -> None:
         """Run `item` by `worker` under its lease and settle it."""
@@ -323,16 +341,15 @@ class WorkGate:
     ) -> None:
         """Renew the item's lease every third of it. Each renewal, from asking the pool for a
         connection to its commit, must confirm the lease before the lease last confirmed lapses
-        (taken from `since`, a time no later than the lease's start). When a renewal finds the
-        lease lost, or the lease lapses first, set `lost` and cancel the handler at once."""
+        (counted from `since`, a time no later than the lease's start). When a renewal fails,
+        finds the lease lost, or the lease lapses first, set `lost` and cancel the handler at
+        once."""
         clock = asyncio.get_running_loop().time
         lease = self.lease.total_seconds()
-        lapses, next_try = since + lease, since + lease / 3
         while True:
-            await asyncio.sleep(max(0.0, min(next_try, lapses) - clock()))
+            lapses = since + lease
+            await asyncio.sleep(max(0.0, since + lease / 3 - clock()))
             asked = clock()
-            if asked >= lapses:
-                break
             renewal = asyncio.create_task(self.renew(item))
             try:
                 done, _ = await asyncio.wait({renewal}, timeout=lapses - asked)
@@ -346,11 +363,10 @@ class WorkGate:
                 break
             if (error := renewal.exception()) is not None:
                 log.warning("work: renewing item %s's lease failed: %s", item.id, error)
-                next_try = clock() + lease / 3
-                continue
+                break
             if not renewal.result():
                 break
-            lapses, next_try = asked + lease, asked + lease / 3
+            since = asked
         lost.set()
         handler.cancel()
 

@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -250,6 +251,26 @@ async def test_two_processes_claiming_for_one_admission_get_one(conn: Session, d
     assert [r["key"] for r in running] == ["webhook:1"]
 
 
+async def test_a_claim_kept_waiting_by_a_peer_starts_its_lease_when_it_wins(
+    conn: Session, db, other
+):
+    gate = WorkGate(db, lease=SHORT)
+    await submit(db, "deliver", "webhook:1", admission="deliver:webhook")
+    await submit(db, "deliver", "webhook:2", admission="deliver:webhook")
+    before = (await (await conn.execute("SELECT clock_timestamp() AS at")).fetchone())["at"]
+    async with other.transaction():
+        # A peer's claim, held open, then rolled back: the waiting claim wins after it.
+        assert await queue.take(staged(other), ["deliver"], LONG) is not None
+        peer = asyncio.create_task(gate.take(["deliver"]))
+        await until(lambda: waiting_on_a_lock(conn, "\n            WITH next"), "the claim waits")
+        await until(lambda: passed(conn, before + SHORT), "a lease from before the wait lapsed")
+        raise psycopg.Rollback()
+    async with asyncio.timeout(WAIT):
+        taken = await peer
+    assert taken is not None and taken.key == "webhook:2"
+    assert not await passed(conn, taken.lease_until)  # live as it starts
+
+
 # -- leases ----------------------------------------------------------------------------------------
 
 
@@ -374,6 +395,68 @@ async def test_a_heartbeat_blocked_by_a_unit_goes_through_once_it_ends(conn: Ses
     with working(Work(held)):
         async with db.write("still held"):
             pass
+
+
+async def test_a_write_waiting_on_a_paper_lock_does_not_deadlock_a_submitter(conn: Session, db):
+    gate = WorkGate(db)
+    submitted = await submit(db, "fulltext", "1")
+    held = await gate.take(["fulltext"])
+    assert held is not None
+    paper = f"{uuid4().hex}.paper"
+    locked, finish = asyncio.Event(), asyncio.Event()
+
+    async def producing() -> None:
+        # Settling a paper, it asks for the item's work again.
+        async with db.write("producer", taxonomy="shared", papers=[paper]) as unit:
+            locked.set()
+            await finish.wait()
+            await queue.submit(unit, "fulltext", "1")
+
+    async def working_on_it() -> None:
+        # The item's own write, for the same paper: its fence holds the item's row.
+        with working(Work(held)):
+            async with db.write("worker", taxonomy="shared", papers=[paper]):
+                pass
+
+    producer = asyncio.create_task(producing())
+    async with asyncio.timeout(WAIT):
+        await locked.wait()
+    worker = asyncio.create_task(working_on_it())
+    await until(lambda: waiting_on_a_lock(conn, "SELECT pg_advisory_xact_lock"), "the worker waits")
+    finish.set()
+    async with asyncio.timeout(WAIT):
+        await producer
+        await worker
+    async with db.write("end") as unit:
+        assert await queue.end(unit, held, Outcome.DONE)
+    assert (await item(conn, submitted.id)).state == ItemState.PENDING  # asked for again
+
+
+async def test_a_renewal_that_fails_cancels_the_items_task(conn: Session, db, monkeypatch):
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    renewals: list[int] = []
+
+    async def renew_lost(*args, **kwargs) -> bool:
+        renewals.append(1)
+        raise psycopg.OperationalError("the connection is lost")
+
+    await submit(db, "fulltext", "1")
+    async with serving(WorkGate(db, lease=SHORT, poll=60), {"fulltext": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+        monkeypatch.setattr(queue, "renew", renew_lost)
+        async with asyncio.timeout(WAIT):
+            await cancelled.wait()
+        assert len(renewals) == 1  # the first failure, not the lease's end
 
 
 async def test_a_failed_heartbeat_cancels_the_items_task(conn: Session, db):
@@ -533,16 +616,16 @@ async def test_a_stopping_gate_gives_its_items_back(conn: Session, db):
 
 async def test_a_gate_stopped_as_its_claim_commits_gives_it_back(conn: Session, db, monkeypatch):
     gate = WorkGate(db, poll=60)
-    take, committed, handed = gate.take, asyncio.Event(), asyncio.Event()
+    take, committed, handed = gate._take, asyncio.Event(), asyncio.Event()
 
-    async def slow_take(kinds: list[str]) -> WorkItem | None:
+    async def slow_take(kinds: list[str]) -> tuple[WorkItem, float] | None:
         claimed = await take(kinds)
         if claimed is not None:
             committed.set()
             await handed.wait()  # committed, not yet handed to the runner
         return claimed
 
-    monkeypatch.setattr(gate, "take", slow_take)
+    monkeypatch.setattr(gate, "_take", slow_take)
     ran = asyncio.Event()
     running = asyncio.create_task(gate.run({"fulltext": finished(ran)}))
     submitted = await submit(db, "fulltext", "1")
@@ -558,14 +641,21 @@ async def test_a_gate_stopped_as_its_claim_commits_gives_it_back(conn: Session, 
 
 
 async def test_a_gate_stopped_while_settling_finishes_the_settling(conn: Session, db, other):
-    gate, ran = WorkGate(db, poll=60), asyncio.Event()
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        await release.wait()
+
+    gate = WorkGate(db, poll=60)
     submitted = await submit(db, "fulltext", "1")
+    running = asyncio.create_task(gate.run({"fulltext": worker}))
+    async with asyncio.timeout(WAIT):
+        await started.wait()
     async with other.transaction():
-        running = asyncio.create_task(gate.run({"fulltext": finished(ran)}))
-        async with asyncio.timeout(WAIT):
-            await ran.wait()
         # The item's row is held as it settles: its end waits for the row.
         await other.execute("SELECT 1 FROM work_items WHERE id = %s FOR SHARE", (submitted.id,))
+        release.set()
         await until(lambda: waiting_on_a_lock(conn, "SELECT 1 FROM work_items"), "the end waits")
         running.cancel()
     with contextlib.suppress(asyncio.CancelledError):

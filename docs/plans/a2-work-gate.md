@@ -58,9 +58,10 @@ Found in a survey of the code at 548857e3:
   migration adds `work_items`: kind, key, scope, state, `not_before`, lease token and expiry, timings, outcome, cost,
   parent and run. It also adds `work_id` to `runs` and `inference_calls`.
 - **The lease and fence copy the passes'.** The Work gate generalizes `held()`. Each item has a lease token, renewed
-  by a heartbeat every third of the lease. A write unit opened under a work context takes the item's row `FOR SHARE`
-  where the token matches and has not expired, or it fails. A takeover updates that row, so it waits for the unit to
-  end. Lease changes (take, renew, take back, end) run in the Work gate's own units, which are not fenced. A path that
+  by a heartbeat every third of the lease. A write unit opened under a work context takes the item's row
+  `FOR KEY SHARE`, then checks that the token matches and has not expired, or it fails. A lease change locks that
+  row `FOR UPDATE`, so it waits for the unit to end; a submission's plain update does not, so a submitter holding a
+  paper lock the unit waits for cannot deadlock with it. Lease changes (take, renew, take back, end) run in the Work gate's own units, which are not fenced. A path that
   touches both an item's row and a pass's row takes the item's row first.
 - **The pass claim stays, with its lease.** A pass item claims its named pass through the shared claim (today's SQL,
   narrowed to one id). The nightly's inline passes and a re-run's passes claim the same way. An item that finds its
@@ -138,7 +139,7 @@ submitter's write unit ── store.work.submit(key, kind, scope, not_before) + 
 WorkGate (one per process) ◀── LISTEN / next not_before / 30 s poll ─────────────────┘
   admit: one per kind (per integration for deliveries); run lock still inside nightly and chunks
   lease ─▶ Worker sets context {item, lease, ceiling, deadline, attribution}
-             └─▶ Service ──▶ db.write(...)  fenced: item row FOR SHARE where token matches
+             └─▶ Service ──▶ db.write(...)  fenced: item row FOR KEY SHARE, token checked
                          └─▶ ModelGate.ask(role, request)  limits, batchers per (provider, deadline)
   heartbeat; lost ─▶ cancel task; expired ─▶ taken back, tried again
 CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a worker row for the kind
@@ -167,7 +168,7 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
   and after (V3), each kind run end to end on the sandbox (V2), rollback as a rehearsed handoff of live work until
   P7, and one checked weekday night after the last deploy (V9).
 - **R2. The fence's row lock makes heartbeats or takeovers wait.** Every write unit of an item holds its row
-  `FOR SHARE`, and a renewal updates it. Units are short since A1, the slow-unit warning surfaces a long one, and a
+  `FOR KEY SHARE`, and a renewal locks it `FOR UPDATE`. Units are short since A1, the slow-unit warning surfaces a long one, and a
   heartbeat every third of the lease makes a wait of seconds harmless.
 - **R3. One Model gate's limits slow the owner's work during a nightly.** The owner's passes now share per-provider
   limits with the nightly, as the spec intends (no provider's limit doubled). If an owner pass waits noticeably, the
@@ -235,12 +236,14 @@ Found while building, owned by the stage named.
   it forward to the sooner `not_before`, which is the owner's "run it now". One that finds it running marks it
   to run again: that run's settling puts the item back to pending (at the sooner of the asked `not_before`s)
   instead of ending it, so an owner's retry during a run is not lost, and a delivery arranges its next turn by
-  submitting its own key while it runs. A scheduled fire is `lasting=True`, keyed by its fire time, and never runs
-  again. A delivery passes `admission=f"deliver:{integration}"`.
+  submitting its own key while it runs. A scheduled fire is `lasting=True`, keyed by its fire time: its key dedupes
+  submissions for good, so a fire is never submitted twice, while a lease that expires still retries that same item.
+  A delivery passes `admission=f"deliver:{integration}"`.
 - **P2: two leases on a pass.** The item's lease is 3 minutes, renewed every minute (`gates.work.LEASE`). The
   pass's claim keeps its own: 30 minutes for an ordinary full-text claim, 90 by default for a Deep one, and a
-  batching nightly stretches its full-text claims. An item taken back from a dead process may find its pass still
-  claimed, and returns `Later` at the pass's stored `lease_until`, which covers all of these.
+  batching nightly stretches its full-text claims. A pass item that finds its pass claimed by another owner (a dead
+  process's claim not yet lapsed included) returns `Later(lease_until)` at the pass's stored `lease_until`, as the
+  plan says, which covers all of these; "ends with nothing to do" is for a pass done or no longer wanted.
 - **P4: work context.** `gates.context.current_work()` gives the item, with `ceiling` and `deadline` left
   `None` for P4 to fill.
 - **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the

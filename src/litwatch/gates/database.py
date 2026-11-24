@@ -20,11 +20,13 @@ own, outside the pool; so does `db.startup` the migration lock, and `db.listen` 
 LISTEN.
 
 A write unit opened under a work context (`gates.context.working`, set by the Work gate for a
-work item's task) is fenced: before its locks, it takes the item's row `FOR SHARE`, then
+work item's task) is fenced: before its locks, it takes the item's row `FOR KEY SHARE`, then
 checks that the item's lease is the task's and unexpired by the clock, or fails with
-`LeaseLostError`. It holds that row to its end, so no takeover, which locks the row to update
-it, can happen while the unit is open: no write made under a lease commits after a peer took
-the item (docs/plans/a2-work-gate.md, "The lease and fence"). Read
+`LeaseLostError`. It holds that row to its end, so no lease change, which locks the row
+`FOR UPDATE` first, can happen while the unit is open: no write made under a lease commits
+after a peer took the item. A plain update of the row (a submission marking the item to run
+again) does not wait for it, so a submitter holding a paper lock the unit waits for cannot
+deadlock with it (docs/plans/a2-work-gate.md, "The lease and fence"). Read
 units are not fenced.
 
 Transitional, until A2's Work gate replaces it with leases and heartbeats (docs/backlog.md, A2,
@@ -364,7 +366,7 @@ async def _fence(unit: WriteUnit, work: Work) -> None:
     clock: a locking statement that waited judges by the time it started, so a lease that
     lapsed while it waited would pass."""
     item = work.item
-    await unit.execute("SELECT 1 FROM work_items WHERE id = %s FOR SHARE", (item.id,))
+    await unit.execute("SELECT 1 FROM work_items WHERE id = %s FOR KEY SHARE", (item.id,))
     held = await (
         await unit.execute(
             "SELECT 1 FROM work_items WHERE id = %s AND lease_token = %s "

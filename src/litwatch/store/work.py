@@ -162,9 +162,11 @@ async def take_back(unit: WriteUnit, kinds: list[str]) -> list[WorkItem]:
 
 
 async def take(unit: WriteUnit, kinds: list[str], lease: timedelta) -> WorkItem | None:
-    """Lease the pending item of `kinds` that has waited longest past its `not_before` and
-    whose admission has no item running, for `lease`. None when there is none. Two processes
-    taking for one admission at once: the later fails on `work_items_admitted`."""
+    """Claim the pending item of `kinds` that has waited longest past its `not_before` and
+    whose admission has no item running. None when there is none. Two processes claiming for
+    one admission at once: the later waits for the earlier's commit, then fails on
+    `work_items_admitted`. The lease it is given is stamped by `stamp`, in the same unit: this
+    statement may have waited for that admission."""
     row = await (
         await unit.execute(
             f"""
@@ -184,6 +186,19 @@ async def take(unit: WriteUnit, kinds: list[str], lease: timedelta) -> WorkItem 
         )
     ).fetchone()
     return _item(row) if row else None
+
+
+async def stamp(unit: WriteUnit, item: WorkItem, lease: timedelta) -> WorkItem:
+    """Start the lease of an item `take` claimed in this unit: `lease` from the clock now."""
+    row = await (
+        await unit.execute(
+            f"UPDATE work_items SET lease_until = clock_timestamp() + %s WHERE id = %s "
+            f"RETURNING {_COLUMNS}",
+            (lease, item.id),
+        )
+    ).fetchone()
+    assert row is not None  # claimed in this unit
+    return _item(row)
 
 
 async def _held(unit: WriteUnit, item_id: int, token: UUID, *, live: bool) -> datetime | None:
