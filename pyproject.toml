@@ -113,9 +113,12 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "gates import only core and themselves"
+name = "gates import only core and themselves, but the Work gate its queue"
 type = "forbidden"
 source_modules = ["litwatch.gates"]
+# The Work gate keeps its bookkeeping through the Database gate, in units of its own, with the
+# SQL in its Repository (docs/specs/architecture.md, "Gates are leaves").
+ignore_imports = ["litwatch.gates.work -> litwatch.store.work"]
 forbidden_modules = [
     "litwatch.analysis",
     "litwatch.api",
