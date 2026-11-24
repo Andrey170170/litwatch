@@ -141,6 +141,10 @@ Built between milestones, on whatever structure exists then.
   (A2's spec, "Release links"), which switching on sets too. Then: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the
   prose rules shared between `writing.py` and the deep prompt instead of copied.
 
+- **Release links in the digests and the Notion export,** once A2's finder has run long enough to show how often
+  links are found (A2's spec, "Not in A2"). The Notion export's contract changes with it, so the PI's view is
+  checked first.
+
 - **Frontend polish and speed** (review, project 2): elements jumping when a topic tab or paper loads the first
   time; windowed rendering with scroll restoration and paper order kept; lean shelf pages; mutations with their own
   effects; integration Retry's stacked refreshes; Settings split out of the main chunk.

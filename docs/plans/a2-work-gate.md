@@ -109,6 +109,8 @@ Found in a survey of the code at 548857e3:
   `serve` first; the receiving version resumes from the current pass, job, run and cursor records (the old image takes
   back sessionless jobs and lapsed passes; the new one's startup sweep submits what is queued or runnable). P2 and P3
   each rehearse upgrade, rollback and upgrade again with unfinished work on a migrated sandbox.
+  A switch is not made while a nightly runs. One interrupted anyway counts its fire as served, as a nightly whose
+  process dies does today, and its work waits for the next night or a nightly run by hand.
 - **The scheduler's handoff.** A fire the old scheduler already served (a run started after it) stays served when P3
   starts inside the catch-up window: the submitter checks the runs as today before using the key.
 - **Release links:**
