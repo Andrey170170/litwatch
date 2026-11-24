@@ -258,8 +258,7 @@ Found while building, owned by the stage named.
   task. P1 keeps the supervisor taking its own claim; a simplification worth making when P2 changes the loop.
 - **P4: work context.** `gates.context.current_work()` gives the item, with `ceiling` and `deadline` left
   `None` for P4 to fill.
-- **P4: a batch's outcome is settled in pieces, not once.** T2's review found five edge cases, each rare and each
-  bounded by the Ceiling or by a fallback to normal calls:
+- **P4: a batch's outcome is settled in pieces, not once.** T2's review found five edge cases, each rare:
   a batch can still be created after the deadline, since `staged()` checks the clock before its row writes, not
   after (`llm/batches.py:292`);
   the window for finding a batch whose creation may have failed can start late, behind the poller

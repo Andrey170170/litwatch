@@ -178,6 +178,7 @@ async def test_a_batch_refused_before_it_is_staged_goes_as_normal_calls(monkeypa
     await asyncio.gather(gw.ask("brief", ask(0)), gw.ask("brief", ask(1)))
     assert len(anthropic.calls) == 2
     assert "was not made; its calls go as normal calls" in caplog.text
+    assert "BadRequestError: too large" in caplog.text  # the refusal, not a mismatched fake
     await gw.close()
 
 
