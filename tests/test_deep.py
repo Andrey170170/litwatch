@@ -1680,6 +1680,24 @@ async def test_a_deep_pass_waits_out_the_services_pause_as_the_same_item(
     assert (fake.started, await attempts(db)) == (0, [])  # the pass never claimed
 
 
+async def test_the_owners_request_runs_before_automatic_passes_already_due(db: Session, gate):
+    async with Bridge(db).write("queue automatic") as unit:
+        first = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
+        mine = await fulltext_store.queue_deep(unit, P.id, 1, FOCUS)
+    assert await ask(db, P.id) == mine  # takes over its automatic pass, queued after Q's
+    taken: list[str] = []
+
+    async def worker(item) -> None:
+        taken.append(item.key)
+
+    async def both_ran() -> bool:
+        return len(taken) == 2
+
+    async with serving(WorkGate(gate), {"deep": worker}):
+        await until(both_ran, "both items run")
+    assert taken == [str(mine), str(first)]
+
+
 async def _waits_until(conn: Session, pass_id: int | None, at: datetime) -> bool:
     items = await items_of(conn, "deep", str(pass_id))
     return bool(items) and items[-1]["state"] == "pending" and items[-1]["not_before"] == at

@@ -48,9 +48,20 @@ PICK = "pick"
 AWAITING_TOO_LONG = timedelta(days=7)
 # A pass awaiting its text is tried again this long after, when the archive is asked again.
 TEXT_WAIT = timedelta(seconds=30)
+# Text passes worked at once: a wave's `brief` calls and archive reads, and the text passes'
+# work items the service runs at once.
+TEXT_WAVE = 4
 # The nightly reconcile also looks at verdicts and labels this recent, whose settle may have
 # been missed: more than a night, so a missed trigger costs at most one.
 RECONCILE_LOOKBACK = timedelta(days=2)
+
+
+def owners_pass(kind: PassKind, priority: int) -> bool:
+    """Whether a pass of `kind` at `priority` is the owner's: a text pass they ran now, a Deep
+    pass they asked for or had processed. Their passes go before the automatic ones."""
+    if kind == PassKind.DEEP:
+        return priority <= REQUEST_PRIORITY
+    return priority < TEXT_PRIORITY
 
 
 @dataclass(frozen=True)

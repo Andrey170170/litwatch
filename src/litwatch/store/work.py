@@ -278,15 +278,17 @@ async def again(
     unit: WriteUnit, item: WorkItem, not_before: datetime | None = None, *, live: bool = True
 ) -> bool:
     """Put the item, held under its lease, back to pending, to run again no earlier than
-    `not_before` (now when not given; sooner if it was resubmitted meanwhile). The lease must
-    be unexpired but without `live`, which is for an item whose Worker has stopped (the gate
-    giving it back as it stops). False when the lease is no longer held."""
+    `not_before` (sooner if it was resubmitted meanwhile); when not given, at once, in the place
+    in line it had (its `not_before`, as `take_back` keeps it). The lease must be unexpired but
+    without `live`, which is for an item whose Worker has stopped (the gate giving it back as it
+    stops). False when the lease is no longer held."""
     assert item.lease_token is not None  # a taken item has its lease
     if await _held(unit, item.id, item.lease_token, live=live) is None:
         return False
+    wanted = "LEAST(not_before, now())" if not_before is None else _WANTED
     await unit.execute(
         f"UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
-        f"not_before = {_WANTED}, resubmitted = false WHERE id = %(id)s",
+        f"not_before = {wanted}, resubmitted = false WHERE id = %(id)s",
         {"at": not_before, "id": item.id},
     )
     await _notify(unit, item.kind)

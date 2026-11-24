@@ -6,16 +6,16 @@ and records how each ended.
     await gate.run({"fulltext": fulltext_worker, "deliver": deliver_worker})   # until cancelled
 
 Work is submitted elsewhere, by `store.work.submit` in the submitter's own unit. `run` takes
-what is due, one item at a time per admission (a kind, or an integration for deliveries). The
-run loop takes each claim through its commit and hands it to a supervisor of its own, which owns
-it to the item's settling: it runs the Worker in a task of its own under the work context
-(`gates.context`), where the item's lease fences the task's write units (`gates.database`) and
-its gate calls are attributed to the item, and it keeps the lease beating. A lease starts when
-its claim wins admission, and a claim whose lease ran out before its Worker could start is given
-back. A renewal is bounded by the lease it renews: one that fails, finds the lease lost, or does
-not confirm it before it lapses, cancels the Worker, and whatever the Worker returns after that
-is ignored. An item whose lease expires (its process died, or lost the database) is taken back
-and run again, by this process or another.
+what is due, one item at a time per admission (a kind, a slot of text passes, or an integration
+for deliveries). The run loop takes each claim through its commit and hands it to a supervisor
+of its own, which owns it to the item's settling: it runs the Worker in a task of its own under
+the work context (`gates.context`), where the item's lease fences the task's write units
+(`gates.database`) and its gate calls are attributed to the item, and it keeps the lease
+beating. A lease starts when its claim wins admission, and a claim whose lease ran out before
+its Worker could start is given back. A renewal is bounded by the lease it renews: one that
+fails, finds the lease lost, or does not confirm it before it lapses, cancels the Worker, and
+whatever the Worker returns after that is ignored. An item whose lease expires (its process
+died, or lost the database) is taken back and run again, by this process or another.
 
 A Worker returns how the item ended: `Done` (or None), or `Later` to have it wait and run again.
 One that raises fails the item, unless the database was lost under it: then the item is given

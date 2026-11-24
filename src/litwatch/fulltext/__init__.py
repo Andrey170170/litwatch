@@ -37,7 +37,7 @@ from litwatch.archive import (
 from litwatch.concurrency import bounded
 from litwatch.config import Config
 from litwatch.core import Cause
-from litwatch.core.fulltext import LEASE, TEXT_WAIT, PassKind, TextRead
+from litwatch.core.fulltext import LEASE, TEXT_WAIT, TEXT_WAVE, PassKind, TextRead
 from litwatch.feedback import word
 from litwatch.fulltext import brief
 from litwatch.gates.database import DatabaseGate, WriteUnit
@@ -53,7 +53,7 @@ from litwatch.store.fulltext import Claimed
 
 log = logging.getLogger(__name__)
 
-CONCURRENCY = 4  # `brief` calls at a time, and archive reads
+CONCURRENCY = TEXT_WAVE  # `brief` calls at a time, and archive reads
 # Passes claimed at a time: one wave of calls, which ends well within the lease even when each
 # call takes its whole timeout and retries. A batching run claims every pass due at once, held
 # until its deadline (models.md, batches).

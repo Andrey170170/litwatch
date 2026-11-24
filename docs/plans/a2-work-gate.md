@@ -268,10 +268,14 @@ Found while building, owned by the stage named.
   `Later(datetime.max)` for a key it does not load, so the item stays pending until a process that loads it
   submits it. An integration dropped from the configuration leaves one such row for good; P7's cleanup could end
   them, or `wake_all` could skip cursors no loaded integration names.
-- **P3 (from P2): items are taken by `not_before`, not by a pass's priority.** The regular queue's text and Deep
-  passes are each one item, so an owner's request no longer goes ahead of automatic passes already due, as
-  `claim`'s `priority` order did. Admission keeps one per kind running. Harmless while Deep reads are off and the
-  text queue is short; if it bites, the item needs a priority the take orders by.
+- **P3 (from P2): pass order and width, without a schema change.** An owner's pass due now is submitted at
+  `OWNERS_FIRST` (the epoch), so `take`'s `not_before` order runs it before every automatic one, as `claim`'s
+  priority order did; a pending automatic item is brought forward to it. One that waits (awaiting its text, the Deep
+  pause) keeps its wait's end instead, so after a wait it is ordered by that time, behind automatic passes already
+  due. Text-pass admission is spread over `TEXT_WAVE` slots (`fulltext:{id % 4}`), so up to four run at once as a
+  wave did; two passes in one slot wait for each other. Deep stays one per kind. Each text item opens its own
+  `fulltext` run and gateway, so four at once are four gateways until P4. `store.work.again` with no time now keeps
+  the item's place in line (`LEAST(not_before, now())`), so an owner's item given back stays first.
 - **P3 (from P2): `fulltext.worker` imports `jobs.worker.nightly_waits`.** That is on the `(fulltext, jobs)` pair
   of `CYCLES_BEFORE_THE_RULE`; when P3 moves the nightly gating into items, the import can go with it.
 - **P3 (from P2): re-run passes stay off the gate.** A pass with a `job_id` is the re-run's, worked inline by its

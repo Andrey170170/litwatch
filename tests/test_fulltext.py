@@ -26,6 +26,8 @@ from litwatch.core import (
 from litwatch.core.fulltext import (
     LEASE,
     RECONCILE_LOOKBACK,
+    TEXT_PRIORITY,
+    TEXT_WAVE,
     PassKind,
     PassState,
     TextPass,
@@ -70,7 +72,7 @@ from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive
 from tests.scripted import refusal
 from tests.sessions import Bridge, Session, in_read, in_write
-from tests.working import items_of, serving, until
+from tests.working import WAIT, items_of, serving, until
 
 
 @pytest.fixture
@@ -822,6 +824,34 @@ async def test_the_owners_run_now_runs_a_stopped_pass_while_the_gate_serves(db: 
             assert (await http.post(f"/api/settings/fulltext/{row['id']}/now")).status_code == 204
         await until(lambda: item_ended(db, row["id"]), "the owner's pass is tried")
     assert await state_is(db, "done") and len(writer.asked) == 1
+
+
+async def test_text_passes_run_as_many_at_once_as_a_wave_did(db: Session, gate):
+    other = paper("2610.00002", title="Another", abstract="Another.", version=1)
+    await in_write(db, papers_store.upsert, [other])
+    async with Bridge(db).write("queue two") as unit:
+        ids = [
+            await fulltext_store.queue(unit, pid, 1, PassKind.BRIEF, "focus", TEXT_PRIORITY)
+            for pid in (P.id, other.id)
+        ]
+    assert ids[0] % TEXT_WAVE != ids[1] % TEXT_WAVE  # two of the wave's slots
+    running: set[str] = set()
+    both = asyncio.Event()
+
+    async def worker(item) -> None:  # holds its item until the other one runs too
+        running.add(item.key)
+        if len(running) == 2:
+            both.set()
+        await asyncio.wait_for(both.wait(), WAIT)
+
+    async with serving(WorkGate(gate), {"fulltext": worker}):
+        await until(lambda: _ended_all(db, ids), "both items end")
+    assert running == {str(i) for i in ids}
+
+
+async def _ended_all(conn: Session, ids: list[int]) -> bool:
+    items = [i for p in ids for i in await items_of(conn, "fulltext", str(p))]
+    return len(items) == len(ids) and all(i["outcome"] == "done" for i in items)
 
 
 # -- revisions -------------------------------------------------------------------------------------
