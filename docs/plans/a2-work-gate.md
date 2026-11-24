@@ -224,6 +224,26 @@ with one parser, the deep update, the re-trigger fix, leases and fencing.
 
 Found while building, owned by the stage named.
 
+- **P2, P3 (from P1): the gate's interface.** `store.work.submit(unit, kind, key, scope=, not_before=,
+  admission=, lasting=)` in the caller's unit; `WorkGate(db).run({kind: worker})` serves until cancelled, and a
+  cancelled gate gives its running items back at once. A Worker returns `Done(cost)` (or None) or `Later(at)`,
+  which puts the item back to pending until `at` (a pass claimed by another owner, the run lock taken, text
+  awaited). Raising fails the item; only a lost database (a dropped connection, a server shutting down, an empty
+  pool) gives it back to try again. `LeaseLostError` from a write unit means the item is no longer the task's.
+- **P2, P3: keys.** A key is unique within its kind while open, so a running item that submits its own key (a
+  delivery arranging its next turn while it runs) gets itself back. Submit the next turn under a fresh key, or
+  have the Worker return `Later`. A submission that finds its key pending brings it forward to the sooner
+  `not_before`, which is the owner's "run it now". A scheduled fire is `lasting=True`, keyed by its fire time.
+  A delivery passes `admission=f"deliver:{integration}"`.
+- **P2: two leases on a pass.** The item's lease is 3 minutes, renewed every minute (`gates.work.LEASE`). The
+  pass's claim keeps its own 30 minutes. An item taken back from a dead process may find its pass still claimed
+  for up to 27 minutes, and should return `Later(lease_until)` as the plan says.
+- **P4: work context.** `gates.context.current_work()` gives the item, with `ceiling` and `deadline` left
+  `None` for P4 to fill.
+- **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the
+  request one and the check. The `workers` rows are written and beat, but no one reads them yet: P5 adds the
+  CLI's reader, which counts a row whose `heartbeat_at` is within a lease as alive.
+
 ## Evidence
 
 Filled in as stages land.
