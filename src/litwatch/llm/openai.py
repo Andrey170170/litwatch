@@ -66,7 +66,8 @@ def _status(status: str) -> str:
 def responses_request(role: RoleConfig, request: Request) -> dict[str, Any]:
     """The Responses API call for a request. Only the system prompt is cached: it repeats across
     a run's papers, and in explicit mode the paper after its breakpoint is never written to the
-    cache, which bills a write (OpenAI's prompt-caching guide). Nothing is stored."""
+    cache, which bills a write (OpenAI's prompt-caching guide). `store` is off, so the response
+    is not kept for later retrieval; a batch's input and output files are kept as files."""
     body: dict[str, Any] = {
         "model": role.model,
         "input": [

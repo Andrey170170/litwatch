@@ -272,6 +272,11 @@ Found while building, owned by the stage named.
   The reviewer's shape, for the gate: one journal settlement operation that takes usage, a failure or a stop, and an
   explicit reply flag. The batcher persists that outcome and gives waiters the source row's ID, and the gateway
   validates and saves the output on that row.
+  The PR's bot review added two more for the same operation: a journal failure partway through `staged()` leaves
+  the rows it already opened without a batch ID or a settlement (`llm/batches.py:298`); and an unknown charge
+  keeps its ceiling reservation only in the run that made it, so a resumed re-run, which starts from the job's
+  known spend (`jobs_store.spent`), no longer counts it (`llm/gateway.py:276`). It belongs with the ceiling
+  across a job's chunks (V4): count an unknown charge at its reservation until it is known.
 - **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the
   request one and the check. The `workers` rows are written and beat, but no one reads them yet: P5 adds the
   CLI's reader, which counts a row whose `heartbeat_at` is within a lease as alive.
