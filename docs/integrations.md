@@ -275,9 +275,8 @@ that validated it. A job that is not the contract's (a `format` other than `"rea
 result that is not an object, `figures` that are not such a list, an unknown `mime`, a name
 outside the pattern, `reviews` that are not a list), or figures given twice, not base64, not a
 WebP image or more than 32 MiB together, end the job as the service's failure: nothing of the
-result is stored, the card and figures before it stay, the attempt keeps its usage and trace
-(and its reviews, but for a job that is not the contract's), and the Deep queue pauses and tries
-the pass again, as for any failure of the service. A failed job's `result` is left out, or null
+result is stored, the card and figures before it stay, the attempt keeps its usage, trace and
+reviews where they are the contract's, and the Deep queue pauses and tries the pass again, as for any failure of the service. A failed job's `result` is left out, or null
 from a service from before. A reply to a poll for a job still queued or running that is not the
 contract's, or that gives a status the contract does not name, is a failed poll: the job is
 followed again, never ended or sent again.

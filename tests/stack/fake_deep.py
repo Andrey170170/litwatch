@@ -1,33 +1,44 @@
 """A stand-in for the deep service in the stack smoke test: the same job protocol (POST /process,
-GET /jobs/{id}), no model. Like the real service's agent, it searches litwatch's collection with
-the read token ($LITWATCH_URL, $LITWATCH_TOKEN) and places the paper among the hits, so what it
-returns has live "Among the collection" rows and shows the stack's wiring end to end.
+GET /jobs/{id}, GET /keys/{key}), no model. Its answers are built from litwatch's models of the
+service's contracts (`litwatch.core.contracts.deep`, generated from deep/src/contracts.ts), so
+they are what the service sends and cannot drift from it. Like the real service's agent, it
+searches litwatch's collection with the read token ($LITWATCH_URL, $LITWATCH_TOKEN) and places
+the paper among the hits, so what it returns has live "Among the collection" rows and shows the
+stack's wiring end to end.
 
 It returns a Deep read (docs/integrations.md, deep's result): the web app's fixture read
-($READ_FIXTURE), with a small figure under every name the read cites and one review round. The
-fixture's second paper (papers.json) gets a Deep card instead, the format from before Deep
-reads, so the walk still sees a page that holds one. Standard library only: it runs on the
-litwatch image's Python."""
+($READ_FIXTURE), with a small figure under every name the read cites and one review round. A
+job is queued when submitted, running once picked up, then done. It runs on the litwatch image's
+Python, with litwatch installed. A Deep card in the format from before is seeded into the
+database instead (`legacy_card.py`): the service writes none."""
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import threading
 import urllib.parse
 import urllib.request
 import uuid
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
-HERE = Path(__file__).parent
-JOBS: dict[str, dict] = {}
-# The paper that gets a Deep card, the format from before: the fixture's second (pages.py).
-CARD_PAPER = json.loads((HERE / "papers.json").read_text())[1]["id"]
+from litwatch.core.contracts import deep as contract
+
+JOBS: dict[str, contract.Job] = {}
+KEYS: dict[str, str] = {}
+LOCK = threading.Lock()
 # A 320 x 180 WebP of one colour, sent as each of the read's figures.
 FIGURE = "UklGRiQAAABXRUJQVlA4TBgAAAAvP8EsAAdQt6IUuf8BAEX6/58i+p/6/wM="
-STOP = {"a", "an", "and", "for", "in", "of", "on", "the", "to", "with", "via", "do", "how"}
+NO_USAGE = contract.Stats(
+    cells=0, turns=0, input=0, output=0, reasoning=0, cache_read=0, list_cost=0.0, seconds=0
+)
+
+
+def now() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def search(query: str) -> list[dict]:
@@ -40,21 +51,21 @@ def search(query: str) -> list[dict]:
         return json.load(response)["rows"]
 
 
-def among(paper: dict, relation: str) -> list[dict]:
+def among(paper_id: str) -> list[dict]:
     """Up to three of the collection's papers, placed beside this one."""
-    hits = [r for r in search("language model") if r["id"] != paper["id"]][:3]
+    hits = [r for r in search("language model") if r["id"] != paper_id][:3]
     return [
         {
             "arxiv_id": hit["id"],
             "title": hit["title"],
-            "relation": relation,
+            "relation": "agrees",
             "note": "Placed by the smoke test from litwatch's own search.",
         }
         for hit in hits
     ]
 
 
-def figure_names(block: object) -> list[str]:
+def figure_names(block: Any) -> list[str]:
     """The names of the figures a read cites, in its `fig` blocks at any depth."""
     if isinstance(block, list):
         return [name for b in block for name in figure_names(b)]
@@ -64,15 +75,15 @@ def figure_names(block: object) -> list[str]:
     return own + [name for b in block.values() for name in figure_names(b)]
 
 
-def read(paper: dict) -> dict:
-    """What the service returns with a finished read: the fixture read, about another paper, with
+def read(paper_id: str) -> dict[str, Any]:
+    """What a finished job carries with its read: the fixture read, about another paper, with
     this stack's collection papers beside it, its figures and its one review round."""
     result = json.loads(Path(os.environ["READ_FIXTURE"]).read_text())
-    result["among_collection"] = among(paper, "agrees")
+    result["among_collection"] = among(paper_id)
     return {
-        "result": result,
+        "result": contract.Result.model_validate(result),
         "figures": [
-            {"name": name, "mime": "image/webp", "data": FIGURE}
+            contract.Figure(name=name, mime="image/webp", data=FIGURE)
             for name in dict.fromkeys(figure_names(result["sections"]))
         ],
         "reviews": [
@@ -87,41 +98,27 @@ def read(paper: dict) -> dict:
     }
 
 
-def card(paper: dict) -> dict:
-    """A Deep card, the format from before, with up to three collection papers it extends."""
-    words = [w for w in re.findall(r"[A-Za-z]+", paper["title"]) if w.lower() not in STOP]
-    return {
-        "summary": "A stand-in card written by the stack smoke test. " * 8,
-        "key_claim": f"The smoke test read {len(paper['body'])} characters of its text.",
-        "paper_kind": "method",
-        "evaluation_setup": {
-            "models": [],
-            "tasks": words[:2],
-            "generalization": "Not judged: no model wrote this card.",
-        },
-        "prior_work": [
-            {"title": "The paper's own references", "relation": "Not read by the smoke test."}
-        ],
-        "among_collection": among(paper, "extends"),
-        "code_available": False,
-        "weights_available": False,
-        "limitations": ["No model read the paper; this card only shows the wiring."],
-    }
+def update(job_id: str, **fields: Any) -> None:
+    """The job with `fields` changed, checked against the contract again."""
+    with LOCK:
+        JOBS[job_id] = contract.Job.model_validate(
+            JOBS[job_id].model_copy(update=fields | {"last_activity": now()}).model_dump()
+        )
 
 
-def run(job_id: str, submission: dict) -> None:
-    job = JOBS[job_id]
+def run(job_id: str) -> None:
+    update(job_id, status="running", started_at=now(), model="smoke-test")
     try:
-        paper = submission["paper"]
-        job |= {"result": card(paper)} if paper["id"] == CARD_PAPER else read(paper)
-        job["status"] = "done"
+        done = read(JOBS[job_id].paper_id)
     except Exception as exc:  # reported to litwatch as the job's error, as deep does
-        job["status"], job["error"] = "error", f"{type(exc).__name__}: {exc}"
-    job["stats"] = {"turns": 0, "input": 0, "output": 0, "list_cost": 0.0, "cells": 0}
+        error = f"{type(exc).__name__}: {exc}"
+        update(job_id, status="error", error=error, failure="service", finished_at=now())
+        return
+    update(job_id, status="done", finished_at=now(), trace=[], **done)
 
 
 class Handler(BaseHTTPRequestHandler):
-    def _json(self, status: int, body: dict) -> None:
+    def _json(self, status: int, body: Any) -> None:
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -129,22 +126,51 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _ref(self, status: int, job: contract.Job) -> None:
+        self._json(status, contract.JobRef(id=job.id, status=job.status).model_dump(mode="json"))
+
     def do_GET(self) -> None:  # noqa: N802 - http.server's name
         if self.path == "/healthz":
-            return self._json(200, {"status": "ok"})
+            return self._json(200, {"ok": True, "auth": {"state": "ok"}})
+        if self.path.startswith("/keys/"):
+            job_id = KEYS.get(urllib.parse.unquote(self.path.removeprefix("/keys/")))
+            if job_id is None:
+                return self._json(404, {"error": "no job for that key"})
+            return self._ref(200, JOBS[job_id])
         job = JOBS.get(self.path.removeprefix("/jobs/"))
         if job is None:
             return self._json(404, {"error": "no such job"})
-        return self._json(200, job)
+        return self._json(200, job.model_dump(mode="json", exclude_none=True))
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path != "/process":
             return self._json(404, {"error": "no such route"})
-        submission = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        job_id = str(uuid.uuid4())
-        JOBS[job_id] = {"id": job_id, "status": "running", "model": "smoke-test"}
-        threading.Thread(target=run, args=(job_id, submission), daemon=True).start()
-        return self._json(202, {"id": job_id})
+        raw = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        try:
+            submission = contract.JobInput.model_validate(raw)
+        except ValueError as exc:
+            return self._json(422, {"error": f"not a job's input: {exc}"})
+        key = self.headers.get("Idempotency-Key")
+        with LOCK:
+            if key in KEYS:
+                return self._ref(200, JOBS[KEYS[key]])
+            at = now()
+            job = contract.Job(
+                id=str(uuid.uuid4()),
+                paper_id=submission.paper.id,
+                title=submission.paper.title,
+                extensions=submission.extensions or [],
+                status="queued",
+                created_at=at,
+                stats=NO_USAGE,
+                last_activity=at,
+                key=key,
+            )
+            JOBS[job.id] = job
+            if key is not None:
+                KEYS[key] = job.id
+        threading.Thread(target=run, args=(job.id,), daemon=True).start()
+        return self._ref(202, job)
 
 
 if __name__ == "__main__":

@@ -52,7 +52,7 @@ const OutlineSchema = Type.Object(
 
 const PAPER = {
   id: Type.String({ minLength: 1 }),
-  title: Type.String({ minLength: 1 }),
+  title: Type.String({ description: "The paper's title, which arXiv may give empty." }),
   abstract: Type.String(),
   authors: Type.Array(Type.String()),
   published: nullable(Type.String()),
@@ -159,6 +159,7 @@ const SectionKind = enumOf(
 const NoteKind = enumOf(READ_NOTE_KINDS, "A read's process note's kind.");
 const Relation = enumOf(RELATIONS, "How a paper stands to one of the collection's.");
 const LimitationBy = enumOf(LIMITATION_BY, "Whose a limitation is: the paper's own, or the read's.");
+const ReadFormat = ReadSchema.properties.format;
 
 /** Every contract, by the name its definition has in `contracts/deep.schema.json`. A schema nested in another that
  * is one of these is exported as a reference to it. */
@@ -179,6 +180,7 @@ export const CONTRACTS: Record<string, TSchema> = {
   NoteKind,
   Relation,
   LimitationBy,
+  ReadFormat,
 };
 
 export type JobInput = Static<typeof JobInputSchema>;

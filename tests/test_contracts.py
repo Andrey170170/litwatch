@@ -29,3 +29,19 @@ def test_deep_input_writes_the_job_a_paper_s_text_is_sent_as(tmp_path, monkeypat
     sent = contract.JobInput.model_validate_json(result.output)
     assert isinstance(sent.paper, contract.LatexPaper)
     assert [s.number for s in sent.paper.outline.sections] == [None, "1", "2", None, "A"]
+
+
+async def test_a_paper_arxiv_gives_no_title_is_still_sent_to_deep(monkeypatch):
+    """An owner's request may bring in a paper whose arXiv entry has an empty title: its
+    submission is built, and says so, rather than failing before its attempt exists."""
+    from litwatch.archive import PaperText  # noqa: PLC0415
+    from litwatch.intake import search  # noqa: PLC0415
+    from litwatch.integrations.deep import job_input  # noqa: PLC0415
+    from tests.test_intake_search import arxiv_answering, feed  # noqa: PLC0415
+
+    monkeypatch.delenv("ARXIV_PACING_DIR", raising=False)
+    client, _ = arxiv_answering((200, feed().replace(b"<title>Test</title>", b"<title></title>")))
+    (paper,) = await search.fetch_by_ids(["2609.10001"], client)
+    assert paper.title == ""
+    sent = job_input(paper, PaperText("\\section{Method} Probes.", 1, "latex"))
+    assert sent.model_dump(mode="json")["paper"]["title"] == ""

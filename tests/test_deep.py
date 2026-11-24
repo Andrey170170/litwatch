@@ -704,8 +704,8 @@ async def test_a_result_litwatch_cannot_store_is_the_services_failure_and_stores
     db: Session, sent, said
 ):
     """A result of an unknown format or of none (a Deep card, which the service writes no
-    longer), or figures and reviews that are not the contract's: an error with the job's usage
-    and trace kept, never a card with something missing (P14)."""
+    longer), or figures and reviews that are not the contract's: an error with the job's usage,
+    trace and reviews kept, never a card with something missing (P14)."""
     await grade(db, Fit.CENTRAL)
     fake = FakeDeep(WROTE_READ | {"trace": trace("wrote")} | sent)
     assert await work(db, with_text(P), make(fake)) == {"card_service_failed": 1}
@@ -715,6 +715,7 @@ async def test_a_result_litwatch_cannot_store_is_the_services_failure_and_stores
     (attempt,) = await attempts(db)
     assert attempt["failure"] == "service" and said in attempt["error"]
     assert attempt["usage"] == USAGE and attempt["trace"] == trace("wrote")
+    assert attempt["reviews"] == (REVIEWS if "reviews" not in sent else None)  # when a list
     # The service's failure counts against nothing: the pass is back in the queue, which pauses.
     (row,) = await deep_rows(db)
     assert (row["state"], row["failed_runs"]) == ("ready", 0)

@@ -5,7 +5,10 @@ the bibliography and the appendix are, and what is not a heading. MCP's own outl
 
 import pytest
 
+from litwatch.api import mcp_reading
+from litwatch.archive import PaperText
 from litwatch.core.outline import latex
+from litwatch.integrations import deep
 
 # deep's fixture (deep/tests/support.ts): a commented-out number, a bibliography before its
 # appendix, and an appendix.
@@ -74,6 +77,8 @@ def test_sections_are_counted_lettered_from_the_appendix_on_and_starred_ones_lef
         "\\setcounter{secnumdepth}{1}",
         "\\usepackage{chngcntr}",
         "\\chapter{Background}",
+        # deep's checks fixture before D3: the appendix numbered S1, S2, ... by its own counter
+        "\\setcounter{section}{0}\\renewcommand{\\thesection}{S\\arabic{section}}",
     ],
 )
 def test_a_source_that_numbers_its_sections_its_own_way_is_not_guessed_at(custom):
@@ -160,4 +165,16 @@ def test_a_heading_whose_title_runs_past_the_scan_is_kept_and_counted():
     long = "\\section[Short]{" + "a long title " * 170 + "}\nText.\n\\section{Next}\n"
     parts = latex(long).parts
     assert [(p.number, p.title[:10]) for p in parts] == [("1", "a long tit"), ("2", "Next")]
-    assert len(parts[0].title) <= 200
+    assert len(parts[0].title) < len(long)  # what the scan read of it
+
+
+def test_a_title_is_parsed_whole_for_deep_and_cut_only_where_mcp_shows_it():
+    """deep finds a section by its whole title (`section(title)`), as it did with its own
+    parser; MCP's outline shows at most TITLE_CHARS of it."""
+    title = "Bounds on " + "\\emph{the} norm " * 30
+    body = f"\\section{{{title}}}\nText.\n"
+    (part,) = latex(body).parts
+    assert part.title == " ".join(title.split()) and len(part.title) > mcp_reading.TITLE_CHARS
+    assert deep.outline(body).sections[0].title == part.title
+    (shown,) = mcp_reading.outline(PaperText(body, 1, "latex"))
+    assert shown.title == part.title[: mcp_reading.TITLE_CHARS]

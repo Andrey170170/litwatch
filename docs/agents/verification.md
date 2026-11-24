@@ -87,8 +87,9 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
 - Evidence: CI's container smoke test and the stack smoke test (`tests/stack/smoke.sh`): a fresh stack from
   `deploy/compose.yaml` under its own project name, an empty archive seeded with real papers
   (`tests/stack/papers.json`) and their text, the day read into litwatch from the archive, a Deep read with its
-  figures (and, for a second paper, a Deep card in the format from before) from a fake deep service that searched
-  litwatch with the read token, then headless Playwright visiting every page at both widths, the paper page of each
+  figures from a fake deep service that searched litwatch with the read token and answers as the service's contract
+  says (it builds its answers from litwatch's models of it), a second paper's Deep card in the format from before
+  seeded into the database, then headless Playwright visiting every page at both widths, the paper page of each
   among them, failing on console errors, uncaught exceptions, an answer of 400 or more or an empty page. Screenshots
   and the stack's logs are CI artifacts.
 - How: CI; locally `tests/stack/smoke.sh OUT` (needs Playwright's Chromium:

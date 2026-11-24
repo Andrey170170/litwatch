@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { headings, type Text } from "../src/paper.ts";
 import { Repl } from "../src/repl.ts";
-import { latex } from "./support.ts";
+import { latex, type Stated } from "./support.ts";
 
 const PAPER = `# A Title
 
@@ -110,9 +110,19 @@ Numbers.
 \section{Extra}
 More.
 `;
+/** LATEX's headings as litwatch's outline gives them: the commented-out one is none. */
+const LATEX_HEADINGS: Stated[] = [
+  ["\\begin{abstract}", 0],
+  ["\\section{Introduction}", 0, "1"],
+  ["\\section{Method \\& \\texttt{probes}}", 0, "2"],
+  ["\\subsection*{Setup}", 1],
+  ["\\section{Results}", 0, "3"],
+  ["\\begin{thebibliography}", 0],
+  ["\\section{Extra}", 0, "A"],
+];
 
 test("paper helpers read LaTeX source: sections, nesting, comments and the bibliography", async () => {
-  const r = await Repl.create(globals(LATEX, latex(LATEX)), {}, {});
+  const r = await Repl.create(globals(LATEX, latex(LATEX, LATEX_HEADINGS)), {}, {});
   try {
     const titles = "Abstract|Introduction|Method & probes|Setup|Results|References|Extra";
     assert.equal((await r.run("sections().map(s => s.title).join('|')")).output, titles);
@@ -134,7 +144,7 @@ test("paper helpers read LaTeX source: sections, nesting, comments and the bibli
 test("refs() reads the bibliography where litwatch's outline found it, inside the appendix too", async () => {
   const bibliography = LATEX.slice(LATEX.indexOf("\\begin{thebibliography}"), LATEX.indexOf("\\appendix"));
   const inside = LATEX.replace(bibliography, "") + bibliography;
-  const r = await Repl.create(globals(inside, latex(inside)), {}, {});
+  const r = await Repl.create(globals(inside, latex(inside, LATEX_HEADINGS)), {}, {});
   try {
     const refs = JSON.parse((await r.run("JSON.stringify(refs())")).output) as string[];
     assert.equal(refs.length, 2);

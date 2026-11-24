@@ -22,7 +22,10 @@ class PdfPaper(BaseModel):
         extra="forbid",
     )
     id: Annotated[str, Field(min_length=1)]
-    title: Annotated[str, Field(min_length=1)]
+    title: str
+    """
+    The paper's title, which arXiv may give empty.
+    """
     abstract: str
     authors: list[str]
     published: str | None = None
@@ -141,20 +144,6 @@ class Figure(BaseModel):
     """
 
 
-class Result(BaseModel):
-    """
-    The Deep read (read.ts; its JSON Schema is web/src/deepread/read.schema.json), told by its format tag.
-    """
-
-    model_config = ConfigDict(
-        extra="allow",
-    )
-    format: Literal["read"]
-    """
-    Marks a Deep read; a Deep card from before has no format.
-    """
-
-
 type SectionKind = Literal[
     "glance", "problem", "method", "finding", "claims", "lens", "limits", "related", "repro"
 ]
@@ -181,6 +170,12 @@ Whose a limitation is: the paper's own, or the read's.
 """
 
 
+type ReadFormat = Literal["read"]
+"""
+Marks a Deep read; a Deep card from before has no format.
+"""
+
+
 class Outline(BaseModel):
     """
     A LaTeX source's outline, as litwatch parses it (src/litwatch/core/outline.py); the service reads a LaTeX paper by it.
@@ -201,6 +196,43 @@ class Outline(BaseModel):
     """
     Where the appendix starts (\\appendix, or a section named for it), which runs to the end, in UTF-16 code units.
     """
+
+
+class Result(BaseModel):
+    """
+    The Deep read (read.ts; its JSON Schema is web/src/deepread/read.schema.json), told by its format tag.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    format: ReadFormat
+
+
+class LatexPaper(BaseModel):
+    """
+    A paper read from its LaTeX source, which comes with its outline.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    id: Annotated[str, Field(min_length=1)]
+    title: str
+    """
+    The paper's title, which arXiv may give empty.
+    """
+    abstract: str
+    authors: list[str]
+    published: str | None = None
+    url: str | None = None
+    body: str
+    """
+    The paper's full text, as the archive gives it.
+    """
+    body_version: BodyVersion | None = None
+    body_source: Literal["latex"]
+    outline: Outline
 
 
 class Job(BaseModel):
@@ -239,29 +271,6 @@ class Job(BaseModel):
     Whose failure an error job's was: the service's, or the paper's.
     """
     key: str | None = None
-
-
-class LatexPaper(BaseModel):
-    """
-    A paper read from its LaTeX source, which comes with its outline.
-    """
-
-    model_config = ConfigDict(
-        extra="forbid",
-    )
-    id: Annotated[str, Field(min_length=1)]
-    title: Annotated[str, Field(min_length=1)]
-    abstract: str
-    authors: list[str]
-    published: str | None = None
-    url: str | None = None
-    body: str
-    """
-    The paper's full text, as the archive gives it.
-    """
-    body_version: BodyVersion | None = None
-    body_source: Literal["latex"]
-    outline: Outline
 
 
 type Paper = LatexPaper | PdfPaper

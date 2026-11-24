@@ -20,7 +20,7 @@ from typing import Any
 from litwatch.core.contracts import deep as contract
 
 # A read's format tag; a Deep card from before has none.
-FORMAT = "read"
+FORMAT: contract.ReadFormat = "read"
 # The process note the service leaves on a read that still failed its review.
 REVIEW: contract.NoteKind = "review"
 # The most one read's figures may weigh, decoded: far above any read's (about 1 MB).

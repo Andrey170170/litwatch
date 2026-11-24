@@ -58,7 +58,7 @@
         },
         "title": {
           "type": "string",
-          "minLength": 1
+          "description": "The paper's title, which arXiv may give empty."
         },
         "abstract": {
           "type": "string"
@@ -133,7 +133,7 @@
         },
         "title": {
           "type": "string",
-          "minLength": 1
+          "description": "The paper's title, which arXiv may give empty."
         },
         "abstract": {
           "type": "string"
@@ -568,9 +568,7 @@
       ],
       "properties": {
         "format": {
-          "type": "string",
-          "const": "read",
-          "description": "Marks a Deep read; a Deep card from before has no format."
+          "$ref": "#/$defs/ReadFormat"
         }
       },
       "additionalProperties": true,
@@ -675,6 +673,11 @@
         }
       ],
       "description": "Whose a limitation is: the paper's own, or the read's."
+    },
+    "ReadFormat": {
+      "type": "string",
+      "const": "read",
+      "description": "Marks a Deep read; a Deep card from before has no format."
     }
   }
 }

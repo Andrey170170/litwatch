@@ -80,7 +80,6 @@ _MASKED = re.compile(
     r"|\\begin\s*\{(verbatim|Verbatim|lstlisting|minted)(\*?)\}[\s\S]*?\\end\s*\{\1\2\}"
     r"|\\verb\*?([^A-Za-z\s*])[^\n]*?\3"
 )
-TITLE_CHARS = 200  # the most of a heading's title an outline shows
 _TITLE_SCAN = 2_000  # how far a title's closing brace is looked for
 
 
@@ -122,7 +121,7 @@ def _title(text: str, start: int) -> str:
     within `_TITLE_SCAN` characters when it does not close by then, which is still a heading."""
     end = _close(text, start, "}")
     inner = _COMMENT.sub("", text[start + 1 : start + _TITLE_SCAN if end is None else end])
-    return " ".join(inner.split())[:TITLE_CHARS] or "(untitled)"
+    return " ".join(inner.split()) or "(untitled)"
 
 
 @dataclass

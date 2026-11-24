@@ -68,7 +68,7 @@ and `pnpm generate:read` in `web/`, generates litwatch's models (`src/litwatch/c
 API's schema and client as above, `litwatch openapi` run in an empty directory and environment. A new contract is one
 schema added to `CONTRACTS` there, then this. CI fails on a generated file that is not current. After a change to the
 LaTeX parser (`core/outline.py`) or to what litwatch sends deep: `uv run python -m tests.deep_fixtures --rewrite`,
-which rewrites the fixtures deep's tests read of it (`deep/tests/fixtures/`).
+which rewrites the submissions deep's tests read of it (`deep/tests/fixtures/job-*.json`).
 
 ## On the owner's server
 

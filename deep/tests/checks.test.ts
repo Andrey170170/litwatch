@@ -5,14 +5,14 @@ import { test } from "node:test";
 import { check, drawErrors, type CheckContext } from "../src/checks.ts";
 import { PaperIndex, cites, figureLabel } from "../src/places.ts";
 import { draftErrors, type Draft } from "../src/read.ts";
-import { BODY, blocks, changed, draft, latex } from "./support.ts";
+import { BODY, HEADINGS, blocks, changed, draft, latex, unnumbered, type Stated } from "./support.ts";
 
 type Loose = Record<string, unknown>;
-type Over = Partial<Omit<CheckContext, "figures">> & { paper?: string; source?: "latex" | "pdf"; figures?: Record<string, { label?: string }> };
-/** The check's context: `BODY` as the paper, or another text, a LaTeX one with the outline litwatch sends; the
- * session's figures by name. */
-const ctx = ({ paper = BODY, source = "latex", figures = {}, ...over }: Over = {}): CheckContext => ({
-  index: new PaperIndex(source === "pdf" ? { body: paper, body_source: "pdf" } : latex(paper)),
+type Over = Partial<Omit<CheckContext, "figures">> & { paper?: string; source?: "latex" | "pdf"; headings?: Stated[]; figures?: Record<string, { label?: string }> };
+/** The check's context: `BODY` as the paper, or another text, a LaTeX one with the outline litwatch would send
+ * (`headings`, `BODY`'s by default); the session's figures by name. */
+const ctx = ({ paper = BODY, source = "latex", headings, figures = {}, ...over }: Over = {}): CheckContext => ({
+  index: new PaperIndex(source === "pdf" ? { body: paper, body_source: "pdf" } : latex(paper, headings)),
   found: { collection: new Set(), self: "2610.00001" },
   topics: [],
   figures: new Map(Object.entries(figures)),
@@ -27,6 +27,8 @@ const has = (list: string[], start: string, part = "") => list.some((e) => e.sta
 
 /** `BODY` with a subsection under its second section, with a figure in its appendix, and without its appendix. */
 const NESTED = BODY.replace("\\section{Results}", "\\subsection{Probe training}\nThe probe trains.\n\\section{Results}");
+const NESTED_HEADINGS: Stated[] = [...HEADINGS.slice(0, 3), ["\\subsection{Probe training}", 1, "2.1"], ...HEADINGS.slice(3)];
+const nested = { paper: NESTED, headings: NESTED_HEADINGS };
 const APPENDIX_FIGURE = BODY.replace("The learning rate is", "\\begin{figure}\n\\includegraphics{figs/loss.pdf}\n\\caption{Training loss.}\n\\end{figure}\nThe learning rate is");
 const NO_APPENDIX = BODY.slice(0, BODY.indexOf("\\appendix")) + "\\end{document}\n";
 /** A PDF's text of the same paper, numbered as a PDF's headings are. */
@@ -290,8 +292,8 @@ test("a location names a place the paper has: a numbered one that exists, or a s
   assert.deepEqual(errors(resting("§7")), ["/sections/3/claims/0/where: cites §7, but the paper has no section 7"]);
   assert.deepEqual(errors(resting("§2.999")), ["/sections/3/claims/0/where: cites §2.999, but the paper has no section 2.999"]);
   assert.deepEqual(errors(resting("Sections 2.1 and 3")), ["/sections/3/claims/0/where: cites §2.1, but the paper has no section 2.1"], "section 2 has no subsection");
-  assert.deepEqual(errors(resting("§2.1"), { paper: NESTED }), [], "it has one here");
-  assert.deepEqual(errors(resting("§2.2"), { paper: NESTED }), ["/sections/3/claims/0/where: cites §2.2, but the paper has no section 2.2"]);
+  assert.deepEqual(errors(resting("§2.1"), nested), [], "it has one here");
+  assert.deepEqual(errors(resting("§2.2"), nested), ["/sections/3/claims/0/where: cites §2.2, but the paper has no section 2.2"]);
   assert.deepEqual(errors(resting("Appendix B")), ["/sections/3/claims/0/where: cites Appendix B, but the paper has no appendix B"]);
   assert.deepEqual(errors(resting("Appendix A.1")), ["/sections/3/claims/0/where: cites Appendix A.1, but the paper has no appendix A.1"]);
   // places it has
@@ -300,11 +302,15 @@ test("a location names a place the paper has: a numbered one that exists, or a s
 });
 
 test("a section's whole title is a place however short, and a part of one only when long enough", () => {
-  const short = BODY.replace("\\section{Method}", "\\section{PPO}").replace("\\section{Results}", "\\section{RL and SFT}");
-  for (const where of ["PPO", "the PPO section", "PPO, second paragraph", "RL and SFT"]) assert.deepEqual(check(resting(where), ctx({ paper: short })), { errors: [], plots: [], unverified: [] }, where);
+  const renamed = (from: string, to: string) => (headings: Stated[]): Stated[] => headings.map(([c, d, n]) => [c === from ? to : c, d, n]);
+  const short = {
+    paper: BODY.replace("\\section{Method}", "\\section{PPO}").replace("\\section{Results}", "\\section{RL and SFT}"),
+    headings: renamed("\\section{Results}", "\\section{RL and SFT}")(renamed("\\section{Method}", "\\section{PPO}")(HEADINGS)),
+  };
+  for (const where of ["PPO", "the PPO section", "PPO, second paragraph", "RL and SFT"]) assert.deepEqual(check(resting(where), ctx(short)), { errors: [], plots: [], unverified: [] }, where);
   // "RL" is no title, and too short to count as part of one
-  assert.ok(has(errors(resting("RL"), { paper: short }), '/sections/3/claims/0/where: "RL" names no place in the paper'));
-  assert.ok(has(errors(resting("SAC"), { paper: short }), '/sections/3/claims/0/where: "SAC" names no place in the paper'));
+  assert.ok(has(errors(resting("RL"), short), '/sections/3/claims/0/where: "RL" names no place in the paper'));
+  assert.ok(has(errors(resting("SAC"), short), '/sections/3/claims/0/where: "SAC" names no place in the paper'));
 });
 
 test("a place code does not look up is the reviewer's, by name: an equation, an algorithm, a page, an appendix no command starts", () => {
@@ -321,24 +327,24 @@ test("a place code does not look up is the reviewer's, by name: an equation, an 
   assert.deepEqual(left("Appendix", { paper: NO_APPENDIX }), [[], ["the appendix"]]);
   // a source that numbers its sections itself: no number is known to be the paper's
   const reset = BODY.replace("\\appendix", "\\setcounter{section}{0}\\renewcommand{\\thesection}{S\\arabic{section}}");
-  assert.deepEqual(left("§7", { paper: reset }), [[], ["§3", "§7"]], "the fixture's note cites §3");
+  assert.deepEqual(left("§7", { paper: reset, headings: unnumbered(HEADINGS) }), [[], ["§3", "§7"]], "the fixture's note cites §3");
   // a subsection counter set: the one subsection of section 2 is 2.4, which LaTeX's defaults would call 2.1
-  assert.deepEqual(left("§2.4", { paper: NESTED })[0], ["/sections/3/claims/0/where: cites §2.4, but the paper has no section 2.4"]);
+  assert.deepEqual(left("§2.4", nested)[0], ["/sections/3/claims/0/where: cites §2.4, but the paper has no section 2.4"]);
   const fourth = NESTED.replace("\\subsection{Probe training}", "\\setcounter{subsection}{3}\n\\subsection{Probe training}");
-  assert.deepEqual(left("§2.4", { paper: fourth }), [[], ["§3", "§2.4"]]);
+  assert.deepEqual(left("§2.4", { paper: fourth, headings: unnumbered(NESTED_HEADINGS) }), [[], ["§3", "§2.4"]]);
   // a class that numbers its sections in Roman numerals: "Sec. IV" is a place, the reviewer's to look up
   const ieee = BODY.replace("\\documentclass{article}", "\\documentclass[journal]{IEEEtran}");
-  assert.deepEqual(left("Sec. IV", { paper: ieee }), [[], ["§3", "§IV"]]);
+  assert.deepEqual(left("Sec. IV", { paper: ieee, headings: unnumbered(HEADINGS) }), [[], ["§3", "§IV"]]);
   // and its tables in Roman numerals, one or a list
-  assert.deepEqual(left("Table II", { paper: ieee }), [[], ["§3", "Table II"]]);
-  assert.deepEqual(left("Tables II and III", { paper: ieee }), [[], ["§3", "Tables II and III"]]);
+  assert.deepEqual(left("Table II", { paper: ieee, headings: unnumbered(HEADINGS) }), [[], ["§3", "Table II"]]);
+  assert.deepEqual(left("Tables II and III", { paper: ieee, headings: unnumbered(HEADINGS) }), [[], ["§3", "Tables II and III"]]);
   // a list, in any case, is named whole
   assert.deepEqual(left("equations 9999 and 8888"), [[], ["equations 9999 and 8888"]]);
   assert.deepEqual(left("pp. 3–9"), [[], ["pp. 3–9"]]);
   // a place's word in capitals is the same place
   assert.deepEqual(check(resting("SECTION 3"), ctx()), { errors: [], plots: [], unverified: [] });
   assert.deepEqual(check(resting("SEC. 3"), ctx()), { errors: [], plots: [], unverified: [] });
-  assert.deepEqual(left("TABLE II", { paper: ieee }), [[], ["§3", "TABLE II"]]);
+  assert.deepEqual(left("TABLE II", { paper: ieee, headings: unnumbered(HEADINGS) }), [[], ["§3", "TABLE II"]]);
 });
 
 test("the paper's places in prose go to the reviewer where code cannot confirm them, and Related work's are other papers'", () => {

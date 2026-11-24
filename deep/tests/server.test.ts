@@ -184,6 +184,11 @@ test("a finished job carries the read, its figures and its reviews, and the text
   }
 });
 
+test("a paper arXiv gives no title is still a job's input", () => {
+  assert.equal(refusal({ paper: paper({ title: "" }) }), undefined);
+  assert.notEqual(refusal({ paper: paper({ title: undefined }) }), undefined, "but the title is never left out");
+});
+
 test("what litwatch's code sends of a LaTeX source and of a PDF's text is a job's input", () => {
   for (const name of ["job-latex.json", "job-pdf.json"] as const) {
     const sent = sentJob(name);

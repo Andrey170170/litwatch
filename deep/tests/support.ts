@@ -4,15 +4,12 @@
  */
 
 import { deflateSync, gzipSync } from "node:zlib";
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { fileURLToPath } from "node:url";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Models } from "@earendil-works/pi-ai";
 import type { RunOptions } from "../src/agent.ts";
-import type { Outline, PaperInput } from "../src/contracts.ts";
+import type { PaperInput } from "../src/contracts.ts";
 import type { Text } from "../src/paper.ts";
 import { PROVIDER } from "../src/auth.ts";
 import { makeGuard, type HostConfig } from "../src/hosts.ts";
@@ -60,33 +57,50 @@ The learning rate is 0.003 and training runs for 40 epochs.
 `;
 
 const FIXTURES = new URL("./fixtures/", import.meta.url);
-const ROOT = fileURLToPath(new URL("../../", import.meta.url));
+
+/** A heading as a test states it: its command as it stands in the body, its depth, and its number if it has one. */
+export type Stated = [command: string, depth: number, number?: string];
+/** `BODY`'s headings, numbered as LaTeX's defaults number them. */
+export const HEADINGS: Stated[] = [
+  ["\\begin{abstract}", 0],
+  ["\\section{Introduction}", 0, "1"],
+  ["\\section{Method}", 0, "2"],
+  ["\\section{Results}", 0, "3"],
+  ["\\begin{thebibliography}", 0],
+  ["\\section{Probe training details}", 0, "A"],
+];
+/** Headings stated as a source that numbers its sections itself has them: none numbered. */
+export const unnumbered = (headings: Stated[]): Stated[] => headings.map(([command, depth]) => [command, depth]);
 
 /**
- * A LaTeX source as litwatch sends it: with the outline litwatch's parser gives it (src/litwatch/core/outline.py),
- * which litwatch wrote to `fixtures/outlines/` (tests/deep_fixtures.py, keyed by the body's SHA-256). A body with no
- * fixture yet has one written by litwatch's code, where Python is (uv); CI's deep job has none, so it is committed
- * with the test that needs it.
+ * A LaTeX source with the outline a test states for it, as litwatch would send it (litwatch's parser is tested on
+ * real sources in tests/test_outline.py, and what it sends in `sentJob`). Each heading starts where its command stands
+ * in the body, and one the body lacks is left out; its title is the command's argument ("Abstract" and "References"
+ * for those environments). The bibliography is its environment, and the appendix starts at \\appendix.
  */
-export function latex(body: string): Text & { body_source: "latex" } {
-  const file = new URL(`outlines/${createHash("sha256").update(body).digest("hex").slice(0, 16)}.json`, FIXTURES);
-  if (!existsSync(file)) {
-    try {
-      execFileSync("uv", ["run", "--quiet", "python", "-m", "tests.deep_fixtures"], {
-        cwd: ROOT,
-        input: body,
-        env: { PATH: process.env.PATH, HOME: process.env.HOME },
-        stdio: ["pipe", "inherit", "inherit"],
-      });
-    } catch (e) {
-      throw new Error(`no outline fixture for a LaTeX body, and litwatch could not write one (${String(e)}): run the test where uv is, and commit deep/tests/fixtures/outlines/`);
-    }
-  }
-  const { outline } = JSON.parse(readFileSync(file, "utf8")) as { outline: Outline };
-  return { body, body_source: "latex", outline };
+export function latex(body: string, headings: Stated[] = HEADINGS): Text & { body_source: "latex" } {
+  const title = (command: string) =>
+    command.startsWith("\\begin{abstract") ? "Abstract" : command.startsWith("\\begin{thebibliography") ? "References" : command.slice(command.indexOf("{") + 1, command.lastIndexOf("}"));
+  const found = headings
+    .map(([command, depth, number]) => ({ title: title(command), depth, start: body.indexOf(command), ...(number === undefined ? {} : { number }) }))
+    .filter((h) => h.start >= 0)
+    .sort((a, b) => a.start - b.start);
+  const sections = found.map((h, i) => ({ ...h, end: found.slice(i + 1).find((next) => next.depth <= h.depth)?.start ?? body.length }));
+  const opened = body.indexOf("\\begin{thebibliography}");
+  const closed = body.indexOf("\\end{thebibliography}");
+  const appendix = body.indexOf("\\appendix");
+  return {
+    body,
+    body_source: "latex",
+    outline: {
+      sections,
+      ...(opened < 0 ? {} : { references: { start: opened, end: closed < 0 ? body.length : closed + "\\end{thebibliography}".length } }),
+      ...(appendix < 0 ? {} : { appendix }),
+    },
+  };
 }
 
-/** A whole submission litwatch's code wrote (tests/deep_fixtures.py, `JOBS`): `job-latex.json` or `job-pdf.json`. */
+/** A whole submission litwatch's code wrote (tests/deep_fixtures.py): `job-latex.json` or `job-pdf.json`. */
 export const sentJob = (name: "job-latex.json" | "job-pdf.json"): unknown => JSON.parse(readFileSync(new URL(name, FIXTURES), "utf8"));
 
 /** BODY with a long Discussion, so the main text is a real paper's size against a read: a read's length check is
@@ -97,7 +111,7 @@ export const PAPER: PaperInput = {
   title: "Probes read the trace",
   abstract: "A.",
   authors: ["A. Author"],
-  ...latex(BODY.replace("\\begin{thebibliography}", `${DISCUSSION}\\begin{thebibliography}`)),
+  ...latex(BODY.replace("\\begin{thebibliography}", `${DISCUSSION}\\begin{thebibliography}`), [...HEADINGS.slice(0, 4), ["\\section{Discussion}", 0, "4"], ...HEADINGS.slice(4)]),
   body_version: 2,
 };
 /** `PAPER` with another text: a LaTeX source, outlined, unless the text is a PDF's. */

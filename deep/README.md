@@ -180,12 +180,11 @@ node src/main.ts login    # sign in once; the auth file keeps the session
 node src/main.ts serve
 ```
 
-A LaTeX source in the tests is read by the outline litwatch's own parser gives it: `latex(body)` in
-`tests/support.ts` reads it from `tests/fixtures/outlines/`, which litwatch's code writes
-(`tests/deep_fixtures.py` at the repository's root; `tests/test_deep_fixtures.py` fails when one is stale). A body
-with no fixture yet gets one written by running that module, so a new LaTeX test needs `uv` and the dev extra
-(`uv sync --extra dev`) the first time it runs, and its fixture committed: CI's deep job has no Python.
-`tests/fixtures/job-*.json` are whole submissions litwatch's code wrote, which the service must take.
+A LaTeX source in the tests comes with the small outline each test states for it (`latex(body, headings)` in
+`tests/support.ts`); litwatch's parser, which writes the real ones, is tested at the repository's root
+(`tests/test_outline.py`). `tests/fixtures/job-*.json` are whole submissions litwatch's code wrote, one of each paper
+variant, which the service must take; the LaTeX one's offsets count characters past the Basic Multilingual Plane as
+JavaScript does (`tests/deep_fixtures.py` writes them; `tests/test_deep_fixtures.py` fails when one is stale).
 
 `node src/main.ts run FILE.json` reads one paper from a file and writes its outcome next to it, for trying a
 change on a paper without litwatch. The file is what `POST /process` is sent, checked the same way before the

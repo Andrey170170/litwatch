@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from litwatch.archive import (
     URGENT,
@@ -105,13 +105,18 @@ async def pdf_of(archive: ArchiveClient, paper: Paper, *, wait: float) -> tuple[
 # -- the outline -----------------------------------------------------------------------------------
 
 
+# The most of a heading's title the outline shows; the parsed title is whole, for the deep service.
+TITLE_CHARS = 200
+
+
 def outline(text: PaperText) -> list[Part]:
     """The text's outline: a PDF's text by page, every page as the PDF numbers them; LaTeX by
-    its sectioning commands, numbered, and its abstract and bibliography (`core.outline`)."""
+    its sectioning commands, numbered, and its abstract and bibliography (`core.outline`), each
+    title cut to TITLE_CHARS."""
     if text.source == "pdf":
         spans = text.pages if text.pages is not None else ((0, len(text.body)),)
         return [Part(n, f"Page {n}", 0, a, b) for n, (a, b) in enumerate(spans, 1)]
-    return latex(text.body).parts
+    return [replace(p, title=p.title[:TITLE_CHARS]) for p in latex(text.body).parts]
 
 
 # -- a part of the text ----------------------------------------------------------------------------

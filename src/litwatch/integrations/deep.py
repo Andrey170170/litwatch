@@ -106,14 +106,16 @@ def ended(job: contract.Job) -> Outcome:
 
 
 def _unreadable(job: dict[str, Any], exc: ValidationError) -> Outcome:
-    """A finished job that is not the contract's: the service's failure, with the usage and
-    trace it reported kept when they are the contract's."""
+    """A finished job that is not the contract's: the service's failure, with the usage, trace
+    and reviews it reported kept when they are the contract's."""
     try:
         usage = contract.Stats.model_validate(job.get("stats")).model_dump()
     except ValidationError:
         usage = None
-    trace = job.get("trace") if isinstance(job.get("trace"), list) else None
-    return _unstorable(Outcome(None, trace, usage, ""), _errors(exc))
+    trace, reviews = (
+        job.get(k) if isinstance(job.get(k), list) else None for k in ("trace", "reviews")
+    )
+    return _unstorable(Outcome(None, trace, usage, "", reviews=reviews), _errors(exc))
 
 
 def _unstorable(outcome: Outcome, why: str) -> Outcome:
