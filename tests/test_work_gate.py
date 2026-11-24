@@ -148,22 +148,54 @@ async def test_an_open_key_is_the_same_item(conn: Session, db):
     assert (await submit(db, "fulltext", "7")).id != first.id  # ended, the key is free
 
 
-async def test_a_running_item_submitted_again_runs_again(conn: Session, db):
+# A resubmitted item ended done, and the item that took its key.
+ENDED_THEN_NEXT = [("ended", "done", None, False), ("pending", None, None, False)]
+
+
+async def records(conn: Session, key: str) -> list[tuple]:
+    """Every item of the key, oldest first: its state, outcome, error and resubmission."""
+    rows = await (
+        await conn.execute(
+            "SELECT state, outcome, error, resubmitted FROM work_items WHERE key = %s ORDER BY id",
+            (key,),
+        )
+    ).fetchall()
+    return [(r["state"], r["outcome"], r["error"], r["resubmitted"]) for r in rows]
+
+
+async def test_a_resubmitted_item_that_ends_leaves_its_record_and_a_successor(conn: Session, db):
     gate = WorkGate(db)
-    first = await submit(db, "fulltext", "7")
+    first = await submit(db, "fulltext", "7", scope={"pass": 7}, admission="text")
     taken = await gate.take(["fulltext"])
     assert taken is not None
-    # The owner's retry while it runs: the same item, to run again once this run settles.
+    # The owner's retry while it runs: the same item, marked.
     assert (await submit(db, "fulltext", "7")).id == first.id
     async with db.write("end") as unit:
         assert await queue.end(unit, taken, Outcome.FAILED, error="no text")
-    found = await item(conn, first.id)
-    assert (found.state, found.outcome, found.error) == (ItemState.PENDING, None, "no text")
-    again = await gate.take(["fulltext"])
-    assert again is not None and (again.id, again.attempts) == (first.id, 2)
+    assert await records(conn, "7") == [
+        ("ended", "failed", "no text", False),
+        ("pending", None, None, False),
+    ]
+    successor = await gate.take(["fulltext"])
+    assert successor is not None and successor.id != first.id
+    assert (successor.scope, successor.admission, successor.attempts) == ({"pass": 7}, "text", 1)
+
+
+async def test_a_resubmission_during_a_claim_marks_the_claimed_item(conn: Session, db, other):
+    first = await submit(db, "fulltext", "7")
+    async with other.transaction():
+        # A claim in flight: the submitter, which finds the item pending, waits for it.
+        claimed = await queue.take(staged(other), ["fulltext"], LONG)
+        assert claimed is not None
+        claimed = await queue.stamp(staged(other), claimed, LONG)
+        submitting = asyncio.create_task(submit(db, "fulltext", "7"))
+        await until(lambda: waiting_on_a_lock(conn, "SELECT id, kind"), "the submitter waits")
+    async with asyncio.timeout(WAIT):
+        found = await submitting
+    assert (found.id, found.state) == (first.id, ItemState.RUNNING)
     async with db.write("end") as unit:
-        assert await queue.end(unit, again, Outcome.DONE)
-    assert (await item(conn, first.id)).state == ItemState.ENDED
+        assert await queue.end(unit, claimed, Outcome.DONE)
+    assert await records(conn, "7") == ENDED_THEN_NEXT
 
 
 async def test_a_resubmission_open_while_the_item_settles_is_not_lost(conn: Session, db, other):
@@ -180,7 +212,40 @@ async def test_a_resubmission_open_while_the_item_settles_is_not_lost(conn: Sess
         await until(lambda: waiting_on_a_lock(conn, "SELECT 1 FROM work_items"), "settling waits")
     async with asyncio.timeout(WAIT):
         await settling
-    assert (await item(conn, first.id)).state == ItemState.PENDING
+    assert await records(conn, "7") == ENDED_THEN_NEXT
+
+
+async def test_a_resubmitted_item_that_runs_again_stays_one_item(conn: Session, db):
+    gate = WorkGate(db, lease=SHORT)
+    first = await submit(db, "fulltext", "7")
+    soon = datetime.now(UTC) + timedelta(minutes=5)
+
+    async def taken_and_resubmitted(wanted: datetime | None = None) -> WorkItem:
+        taken = await gate.take(["fulltext"])
+        assert taken is not None and taken.id == first.id
+        await submit(db, "fulltext", "7", not_before=wanted)
+        return taken
+
+    # It waits (`Later`): the sooner of the two times.
+    taken = await taken_and_resubmitted()
+    async with db.write("later") as unit:
+        assert await queue.again(unit, taken, datetime.now(UTC) + timedelta(hours=1))
+    assert await records(conn, "7") == [("pending", None, None, False)]
+    assert (await item(conn, first.id)).not_before < soon
+
+    # It is given back as the gate stops.
+    taken = await taken_and_resubmitted()
+    async with db.write("give back") as unit:
+        assert await queue.again(unit, taken, live=False)
+    assert await records(conn, "7") == [("pending", None, None, False)]
+
+    # Its lease expires and it is taken back, a later wish brought forward to now.
+    taken = await taken_and_resubmitted(datetime.now(UTC) + timedelta(hours=1))
+    await until(lambda: passed(conn, taken.lease_until), "the lease lapsed")
+    assert [t.id for t in await gate.take_back(["fulltext"])] == [first.id]
+    assert await records(conn, "7") == [("pending", None, None, False)]
+    assert (await item(conn, first.id)).not_before < soon
+    assert (await gate.take(["fulltext"])) is not None
 
 
 async def test_a_scheduled_key_holds_after_its_item_ends(conn: Session, db):
@@ -429,7 +494,7 @@ async def test_a_write_waiting_on_a_paper_lock_does_not_deadlock_a_submitter(con
         await worker
     async with db.write("end") as unit:
         assert await queue.end(unit, held, Outcome.DONE)
-    assert (await item(conn, submitted.id)).state == ItemState.PENDING  # asked for again
+    assert [r[0] for r in await records(conn, submitted.key)] == ["ended", "pending"]  # asked again
 
 
 async def test_a_renewal_that_fails_cancels_the_items_task(conn: Session, db, monkeypatch):

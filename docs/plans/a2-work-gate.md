@@ -234,9 +234,11 @@ Found while building, owned by the stage named.
   `LeaseLostError` from a write unit means the item is no longer the task's.
 - **P2, P3: keys.** A key is unique within its kind while open. A submission that finds its key pending brings
   it forward to the sooner `not_before`, which is the owner's "run it now". One that finds it running marks it
-  to run again: that run's settling puts the item back to pending (at the sooner of the asked `not_before`s)
-  instead of ending it, so an owner's retry during a run is not lost, and a delivery arranges its next turn by
-  submitting its own key while it runs. A scheduled fire is `lasting=True`, keyed by its fire time: its key dedupes
+  resubmitted: when that item ends (done or failed), it keeps its own record, and a fresh pending item with its
+  kind, key, scope and admission takes the key, at the sooner of the asked `not_before`s, so an owner's retry
+  during a run is not lost. When it goes back to pending instead (`Later`, given back as the gate stops, taken
+  back after its lease expired, a lost database), it is the same item running again, at the sooner time. A delivery
+  arranges its next turn by submitting its own key while it runs, and each turn has its own record. A scheduled fire is `lasting=True`, keyed by its fire time: its key dedupes
   submissions for good, so a fire is never submitted twice, while a lease that expires still retries that same item.
   A delivery passes `admission=f"deliver:{integration}"`.
 - **P2: two leases on a pass.** The item's lease is 3 minutes, renewed every minute (`gates.work.LEASE`). The

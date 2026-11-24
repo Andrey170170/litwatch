@@ -33,7 +33,8 @@ _COLUMNS = (
 )
 # An item whose key is taken: open, or lasting. As the unique index `work_items_key` says.
 _TAKEN = "(lasting OR state <> 'ended')"
-# When an item settled with a resubmission is wanted again: the sooner of the two.
+# When an item put back to pending is wanted again: at `at` (now when not given), or sooner if a
+# resubmission asked for that.
 _WANTED = (
     "CASE WHEN resubmitted THEN LEAST(not_before, COALESCE(%(at)s::timestamptz, now())) "
     "ELSE COALESCE(%(at)s::timestamptz, now()) END"
@@ -74,15 +75,19 @@ async def submit(
     """Submit the work `key` of `kind`, to run no earlier than `not_before` (now when not
     given), admitted one at a time per `admission` (its kind when not given). Returns the item.
 
-    A key is the work within its kind (a pass's id, an integration's name). While an item with
-    the key is open it is the one returned, and its scope stays: a pending one is brought
-    forward to `not_before` when that is sooner; a running one is marked to run again once this
-    run settles, at `not_before` or the sooner of two such submissions, so work asked for while
-    it ran is not lost. A `lasting` key, a scheduled occurrence's (the fire time), holds for
-    good: once submitted, it returns its item, running or ended, and never runs it again.
+    A key is the work within its kind (a pass's id, an integration's name). A submission whose
+    key is still open is the same item, and its scope stays: a pending one is brought forward
+    to `not_before` when that is sooner; a running one is marked as resubmitted, wanted again
+    at `not_before` (the sooner of two such submissions), so work asked for while it ran is not
+    lost: when that run ends, a fresh item takes the key (`end`). A `lasting` key, a scheduled
+    occurrence's (the fire time), holds for good: once submitted, it returns its item, running
+    or ended, unchanged, and never runs it again.
 
-    Marking a running item takes its row, so it waits for a unit fenced on it to end; the item's
-    own unit may mark it, as a delivery arranging its next turn does."""
+    The open item's row is locked `FOR NO KEY UPDATE` before its state is read, so a claim or a
+    settling of it in flight is waited for and the item returned is as it stands. That lock
+    does not wait for a unit fenced on the item, which holds it `FOR KEY SHARE`: the item's own
+    unit may submit its key, as a delivery arranging its next turn does, and a submitter holding
+    a paper lock that unit waits for does not deadlock with it."""
     params = {
         "kind": kind,
         "key": key,
@@ -91,67 +96,65 @@ async def submit(
         "admission": kind if admission is None else admission,
         "lasting": lasting,
     }
-    # The insert yields to an item holding the key; one that ends between the insert and the
-    # change of it leaves the key free again, so the insert is tried once more.
-    for _ in range(3):
-        row = await (
-            await unit.execute(
-                f"INSERT INTO work_items (kind, key, scope, not_before, admission, lasting) "
-                f"VALUES (%(kind)s, %(key)s, %(scope)s, COALESCE(%(at)s::timestamptz, now()), "
-                f"%(admission)s, %(lasting)s) "
-                f"ON CONFLICT (kind, key) WHERE {_TAKEN} DO NOTHING RETURNING {_COLUMNS}",
-                params,
-            )
-        ).fetchone()
-        if row is not None:
-            await _notify(unit, kind)
-            return _item(row)
+    # A key found free may be taken by a concurrent insert before ours: then it is looked up again.
+    for _ in range(2):
         row = await (
             await unit.execute(
                 f"SELECT {_COLUMNS}, lasting FROM work_items "
-                f"WHERE kind = %(kind)s AND key = %(key)s AND {_TAKEN}",
+                f"WHERE kind = %(kind)s AND key = %(key)s AND {_TAKEN} FOR NO KEY UPDATE",
                 params,
             )
         ).fetchone()
         if row is None:
-            continue
+            inserted = await (
+                await unit.execute(
+                    f"INSERT INTO work_items (kind, key, scope, not_before, admission, lasting) "
+                    f"VALUES (%(kind)s, %(key)s, %(scope)s, "
+                    f"COALESCE(%(at)s::timestamptz, now()), %(admission)s, %(lasting)s) "
+                    f"ON CONFLICT (kind, key) WHERE {_TAKEN} DO NOTHING RETURNING {_COLUMNS}",
+                    params,
+                )
+            ).fetchone()
+            if inserted is None:
+                continue
+            await _notify(unit, kind)
+            return _item(inserted)
         if row["state"] == "ended" or (row["state"] == "running" and row["lasting"]):
             return _item(row)
         if row["state"] == "pending":
-            changed = await (
+            sooner = await (
                 await unit.execute(
                     "UPDATE work_items SET not_before = COALESCE(%(at)s::timestamptz, now()) "
-                    "WHERE id = %(id)s AND state = 'pending' "
-                    "AND not_before > COALESCE(%(at)s::timestamptz, now()) "
+                    "WHERE id = %(id)s AND not_before > COALESCE(%(at)s::timestamptz, now()) "
                     f"RETURNING {_COLUMNS}",
                     {"id": row["id"], "at": not_before},
                 )
             ).fetchone()
-            if changed is None:  # not sooner, or leased meanwhile
+            if sooner is None:
                 return _item(row)
             await _notify(unit, kind)
-            return _item(changed)
-        changed = await (
+            return _item(sooner)
+        marked = await (
             await unit.execute(
                 f"UPDATE work_items SET not_before = {_WANTED}, resubmitted = true "
-                f"WHERE id = %(id)s AND state = 'running' RETURNING {_COLUMNS}",
+                f"WHERE id = %(id)s RETURNING {_COLUMNS}",
                 {"id": row["id"], "at": not_before},
             )
         ).fetchone()
-        if changed is not None:
-            return _item(changed)
-        # It settled meanwhile: pending again, or ended and the key free.
+        assert marked is not None  # locked above
+        return _item(marked)
     raise RuntimeError(f"work item {kind} {key!r} could be neither submitted nor found")
 
 
 async def take_back(unit: WriteUnit, kinds: list[str]) -> list[WorkItem]:
-    """Put the running items of `kinds` whose lease expired back to pending, to be taken again:
-    their worker died or lost the database. One whose row a unit holds (one fenced on it, or a
-    settling) is left for a later call. Returns those taken back."""
+    """Put the running items of `kinds` whose lease expired back to pending, to be taken again
+    at once (a resubmission's later wish included): their worker died or lost the database. One
+    whose row a unit holds (one fenced on it, or a settling) is left for a later call. Returns
+    those taken back."""
     rows = await (
         await unit.execute(
             "UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
-            "resubmitted = false "
+            "not_before = LEAST(not_before, now()), resubmitted = false "
             "WHERE id IN (SELECT id FROM work_items WHERE kind = ANY(%s) AND state = 'running' "
             "AND lease_until < now() FOR UPDATE SKIP LOCKED) "
             f"RETURNING {_COLUMNS}",
@@ -201,30 +204,31 @@ async def stamp(unit: WriteUnit, item: WorkItem, lease: timedelta) -> WorkItem:
     return _item(row)
 
 
-async def _held(unit: WriteUnit, item_id: int, token: UUID, *, live: bool) -> datetime | None:
+async def _held(unit: WriteUnit, item_id: int, token: UUID, *, live: bool) -> dict[str, Any] | None:
     """Lock the item's row and say whether `token` holds it, its lease unexpired with `live`:
-    the clock's reading when it does, None when it does not."""
+    when it does, the clock's reading (`at`) and whether the item was resubmitted; None when it
+    does not."""
     await unit.execute("SELECT 1 FROM work_items WHERE id = %s FOR UPDATE", (item_id,))
     row = await (
         await unit.execute(
-            "SELECT c.at, COALESCE(w.lease_token = %s AND (NOT %s OR w.lease_until > c.at), "
-            "false) AS held FROM work_items w, (SELECT clock_timestamp() AS at) c "
-            "WHERE w.id = %s",
+            "SELECT c.at, w.resubmitted, "
+            "COALESCE(w.lease_token = %s AND (NOT %s OR w.lease_until > c.at), false) AS held "
+            "FROM work_items w, (SELECT clock_timestamp() AS at) c WHERE w.id = %s",
             (token, live, item_id),
         )
     ).fetchone()
-    return row["at"] if row and row["held"] else None
+    return row if row and row["held"] else None
 
 
 async def renew(unit: WriteUnit, item_id: int, token: UUID, lease: timedelta) -> bool:
     """Renew the lease `token` on the item for `lease` from now. False when it is no longer
     held: it expired or was taken back. Waits for a unit fenced on the item to end."""
-    at = await _held(unit, item_id, token, live=True)
-    if at is None:
+    held = await _held(unit, item_id, token, live=True)
+    if held is None:
         return False
     await unit.execute(
         "UPDATE work_items SET lease_until = %s::timestamptz + %s WHERE id = %s",
-        (at, lease, item_id),
+        (held["at"], lease, item_id),
     )
     return True
 
@@ -237,27 +241,26 @@ async def end(
     error: str | None = None,
     cost: Decimal | None = None,
 ) -> bool:
-    """End the run of the item held under its live lease, with `outcome`: the item ends, or,
-    resubmitted while it ran, goes back to pending, keeping `error`. False when the lease is
-    no longer held: the item is not this worker's to settle."""
+    """End the item held under its live lease, with `outcome`. One resubmitted while it ran
+    ends as itself, its record kept, and a fresh pending item takes its key, with its scope and
+    admission, wanted when the resubmission asked. False when the lease is no longer held: the
+    item is not this worker's to settle."""
     assert item.lease_token is not None  # a taken item has its lease
-    if await _held(unit, item.id, item.lease_token, live=True) is None:
+    held = await _held(unit, item.id, item.lease_token, live=True)
+    if held is None:
         return False
     await unit.execute(
-        "UPDATE work_items SET "
-        "state = CASE WHEN resubmitted THEN 'pending' ELSE 'ended' END, "
-        "outcome = CASE WHEN resubmitted THEN NULL ELSE %(outcome)s END, "
-        "ended_at = CASE WHEN resubmitted THEN NULL ELSE now() END, "
-        "cost = CASE WHEN resubmitted THEN cost ELSE %(cost)s END, "
-        "error = %(error)s, lease_token = NULL, lease_until = NULL, resubmitted = false "
-        "WHERE id = %(id)s",
-        {
-            "outcome": outcome,
-            "cost": cost,
-            "error": error[:2000] if error is not None else None,
-            "id": item.id,
-        },
+        "UPDATE work_items SET state = 'ended', outcome = %s, error = %s, cost = %s, "
+        "ended_at = now(), lease_token = NULL, lease_until = NULL, resubmitted = false "
+        "WHERE id = %s",
+        (outcome, error[:2000] if error is not None else None, cost, item.id),
     )
+    if held["resubmitted"]:
+        await unit.execute(
+            "INSERT INTO work_items (kind, key, scope, admission, not_before) "
+            "SELECT kind, key, scope, admission, not_before FROM work_items WHERE id = %s",
+            (item.id,),
+        )
     await _notify(unit, item.kind)
     return True
 

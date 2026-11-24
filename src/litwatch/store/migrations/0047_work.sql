@@ -7,9 +7,11 @@
 -- or a delivery's integration. `state`: pending waits for `not_before` and its admission;
 -- running is held by the lease `lease_token` until `lease_until`, which the worker's heartbeat
 -- renews, and is taken back once that passes; ended has its `outcome`. A submission that finds
--- its key running sets `resubmitted` (and `not_before` to when it is wanted again): that run's
--- end puts the item back to pending instead of ending it. `attempts` counts its leases. `cost` is in dollars, NULL when unknown. A job's chunks name the job's run (`run_id`);
--- a standalone run names its item (`runs.work_id`).
+-- its key running sets `resubmitted` (and `not_before` to when it is wanted again): when that
+-- item ends, a fresh pending item takes the key, so each run keeps its own record; when it goes
+-- back to pending instead, it is the same item running again. `attempts` counts its leases.
+-- `cost` is in dollars, NULL when unknown. A job's chunks name the job's run (`run_id`); a
+-- standalone run names its item (`runs.work_id`).
 CREATE TABLE work_items (
     id            bigserial PRIMARY KEY,
     kind          text NOT NULL,
