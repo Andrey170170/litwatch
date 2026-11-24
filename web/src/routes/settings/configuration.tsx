@@ -10,9 +10,11 @@ export function ConfigurationPage() {
   const config = useQuery(configQuery);
   const models = (config.data?.models ?? {}) as Record<string, Role>;
   const roles = Object.entries(models).filter(([, r]) => r && typeof r === "object" && "model" in r);
-  // The lab that trained a role's model, as the backend reads it: Anthropic's own, else the model's prefix on
-  // OpenRouter ("openai/gpt-6.1-sol" is OpenAI's).
-  const lab = (role: string) => (models[role]?.provider === "anthropic" ? "anthropic" : (models[role]?.model ?? "").split("/")[0] ?? "");
+  // The lab that trained a role's model, as the backend reads it (`config.lab`): a lab's own provider (Anthropic,
+  // OpenAI), else the model's prefix on OpenRouter ("openai/gpt-6.1-sol" is OpenAI's).
+  const own = (provider?: string) => provider === "anthropic" || provider === "openai";
+  const lab = (role: string) =>
+    own(models[role]?.provider) ? (models[role]?.provider ?? "") : ((models[role]?.model ?? "").split("/")[0] ?? "");
   const judge = lab("judge");
   const check = lab("check");
   return (

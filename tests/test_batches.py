@@ -24,7 +24,7 @@ from litwatch.llm import CallError, Gateway, Provider, ProviderError, Reply, Req
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.batches import DRAIN, MAX_REQUESTS, Batcher
 from litwatch.llm.openai import OpenAIProvider, responses_request
-from litwatch.llm.prices import anthropic_cost, openai_cost
+from litwatch.llm.prices import anthropic_cost
 from litwatch.store import calls as calls_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
@@ -41,8 +41,10 @@ from tests.fakes import (
     BatchingProvider,
     OpenAIBatches,
     ScriptedProvider,
+    SdkClient,
     anthropic_message,
     openai_body,
+    openai_response,
 )
 from tests.fakes_http import FakeArchive
 from tests.sessions import Session, in_read, in_write
@@ -59,6 +61,10 @@ BRIEF = RoleConfig(provider="anthropic", model="test-brief", effort="high", fall
 MODELS = Models(brief=BRIEF)
 START = datetime(2026, 10, 16, 9, tzinfo=UTC)  # 03:00 in Denver
 DEADLINE = START + timedelta(hours=4, minutes=30)
+
+
+async def unstaged(reference: str) -> None:
+    raise AssertionError(f"staged {reference}")
 
 
 def ask(n: int | str) -> Request:
@@ -197,7 +203,7 @@ async def test_a_batch_the_account_kept_from_being_sent_fails_its_calls_on_the_a
 ):
     gw, anthropic, openrouter, _ = batching()
 
-    async def unauthorized(requests):
+    async def unauthorized(requests, staged):
         raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
 
     monkeypatch.setattr(anthropic, "submit", unauthorized)
@@ -433,10 +439,10 @@ async def test_a_journal_that_fails_on_one_batch_lets_the_others_checks_end_firs
     gw, _, _, _ = batching(journal, provider=anthropic)
     answered, results, ended = journal.answered, anthropic.results, []
 
-    async def fails_on_the_first(batch_id, key, usage):
+    async def fails_on_the_first(batch_id, key, usage, error=None):
         if batch_id == "msgbatch_1":
             raise OSError("the database went away")
-        await answered(batch_id, key, usage)
+        await answered(batch_id, key, usage, error)
 
     async def slow_second(batch_id):
         if batch_id == "msgbatch_2":
@@ -560,12 +566,14 @@ async def test_anthropic_batches_carry_the_request_key_and_are_priced_at_half():
     batches = Batches(message)
     provider = AnthropicProvider(client=SimpleNamespace(messages=SimpleNamespace(batches=batches)))
     request = ask(1)
-    batch_id = await provider.submit([("k1", haiku, request)])
+    batch_id = await provider.submit([("k1", haiku, request)], staged=unstaged)
     assert batches.created == [[{"custom_id": "k1", "params": messages_request(haiku, request)}]]
     assert await provider.status(batch_id) == "ended"
     found = await provider.results(batch_id)
     assert found["expired"] is None
-    usage = found["k1"].usage
+    reply = found["k1"]
+    assert isinstance(reply, Reply)
+    usage = reply.usage
     full = anthropic_cost("claude-haiku-5-5", 400, 3000, 0, 200)
     assert (usage.cost, usage.service_tier) == (pytest.approx(full / 2), "batch")
 
@@ -752,7 +760,9 @@ async def test_a_run_past_the_drain_reads_a_dead_runs_ended_batch_before_giving_
     dead = await started(conn, "nightly")
     gw, anthropic, _, clock = batching(CallJournal(db, dead))
     await asyncio.gather(*(gw.ask("brief", ask(n)) for n in range(2)))
-    await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")  # unread
+    await conn.execute(
+        "UPDATE inference_calls SET output = NULL, usage = usage - 'cost', responded_at = NULL"
+    )  # unread
     await gw.close()
 
     clock.now = DEADLINE + DRAIN + timedelta(hours=1)
@@ -772,7 +782,9 @@ async def dead_batches(conn: Session, db, n: int) -> tuple[BatchingProvider, Clo
     gw, anthropic, _, clock = batching(CallJournal(db, await started(conn, "nightly")))
     for i in range(n):
         await gw.ask("brief", ask(i))
-    await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")
+    await conn.execute(
+        "UPDATE inference_calls SET output = NULL, usage = usage - 'cost', responded_at = NULL"
+    )
     await gw.close()
     return anthropic, clock
 
@@ -1221,8 +1233,17 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
 # -- OpenAI's Batch API ----------------------------------------------------------------------------
 
 SOL = RoleConfig(provider="openai", model="gpt-6.2-sol", effort="high")
-# What the fake's answer to a batched request is charged: half of a normal call's.
-SOL_BATCHED = openai_cost("gpt-6.2-sol", 4000, 3000, 0, 200, batch=True)
+# What the fake's answer to a batched request is charged: half of a normal call's 1000 fresh
+# input tokens at $2, 3000 cached at $0.10 and 200 output at $10.
+SOL_BATCHED = 0.00215
+FAILED = {"code": "server_error", "message": "x"}
+
+
+class Staged(list):
+    """A `staged` that records the references it was told."""
+
+    async def __call__(self, reference: str) -> None:
+        self.append(reference)
 
 
 def openai_batching(journal=None, client=None, clock=None, models=None):
@@ -1238,10 +1259,12 @@ def openai_batching(journal=None, client=None, clock=None, models=None):
 
 
 async def test_openai_batches_carry_the_request_key_and_are_priced_at_half():
-    client = OpenAIBatches()
-    provider = OpenAIProvider(client=client)
-    request = ask(1)
-    batch_id = await provider.submit([("k1", SOL, request)])
+    # A U+2028 inside an answer's string does not end its line.
+    answer = openai_body(json.dumps({"yes": True, "why": "a\u2028b"}, ensure_ascii=False))
+    client = OpenAIBatches(lambda body: answer)
+    provider, staged, request = OpenAIProvider(client=client), Staged(), ask(1)
+    batch_id = await provider.submit([("k1", SOL, request)], staged)
+    assert staged == ["openai-file:file-1"]  # before the batch was made
     body = responses_request(SOL, request)
     assert client.uploaded["file-1"] == [
         {"custom_id": "k1", "method": "POST", "url": "/v1/responses", "body": body}
@@ -1250,54 +1273,106 @@ async def test_openai_batches_carry_the_request_key_and_are_priced_at_half():
     client.end(batch_id)
     assert await provider.status(batch_id) == "ended"
     reply = (await provider.results(batch_id))["k1"]
-    assert isinstance(reply, Reply)
-    usage, full = reply.usage, openai_cost("gpt-6.2-sol", 4000, 3000, 0, 200, batch=False)
-    assert full is not None and usage.cost == pytest.approx(full / 2)
+    assert isinstance(reply, Reply) and json.loads(reply.text)["why"] == "a\u2028b"
+    usage = reply.usage
     # Priced by the alias its snapshot answered as.
     assert (usage.model, usage.service_tier, usage.via) == ("gpt-6.2-sol", "batch", "openai")
+    assert usage.cost == pytest.approx(SOL_BATCHED)
     assert await provider.status("batch_deleted") == "gone"
 
 
-async def test_openai_batch_lines_that_failed_are_asked_again_or_fail_on_the_account():
+async def test_openai_batch_lines_that_failed_are_asked_again_refused_or_fail_on_the_account():
     answers = {
         "paper ok": openai_body(GOOD),
         "paper refused": openai_body("", refusal="I can't help with that."),
-        "paper server": (500, {"code": "server_error"}),
+        "paper declined": (400, {"code": "invalid_prompt", "message": "flagged"}),
+        "paper flagged": openai_body(status="failed", error={"code": "bio_policy"}),
+        "paper server": (500, FAILED),
         "paper rate": (429, {"code": "rate_limit_exceeded"}),
         "paper expired": (None, {"code": "batch_expired"}),
-        "paper failed": openai_body(status="failed", error={"code": "server_error"}),
+        "paper failed": openai_body(status="failed", error=FAILED),
         "paper key": (401, {"code": "invalid_api_key"}),
         "paper credit": (429, {"code": "credit_balance_exhausted", "type": "insufficient_quota"}),
     }
     client = OpenAIBatches(lambda body: answers[body["input"][1]["content"]])
     provider = OpenAIProvider(client=client)
     requests = [(user, SOL, Request(system="rubric", user=user, output=Answer)) for user in answers]
-    batch_id = await provider.submit(requests)
+    batch_id = await provider.submit(requests, Staged())
     client.end(batch_id)
     found = await provider.results(batch_id)
-    stops = [
-        r.stop if isinstance(r, Reply) else r for r in (found["paper ok"], found["paper refused"])
+    replies = [found[f"paper {n}"] for n in ("ok", "refused", "declined", "flagged")]
+    assert [(r.stop, r.refusal) if isinstance(r, Reply) else r for r in replies] == [
+        (Stop.COMPLETE, None),
+        (Stop.REFUSED, "unspecified"),
+        (Stop.REFUSED, "invalid_prompt"),
+        (Stop.REFUSED, "bio_policy"),
     ]
-    assert stops == [Stop.COMPLETE, Stop.REFUSED]
-    for user in ("paper server", "paper rate", "paper expired", "paper failed"):
+    assert isinstance(replies[3], Reply) and replies[3].usage.cost == pytest.approx(SOL_BATCHED)
+    for user in ("paper server", "paper rate", "paper expired"):
         assert found[user] is None  # asked again as a normal call
+    billed = found["paper failed"]  # billed and failed: asked again, its charge kept
+    assert isinstance(billed, ProviderError) and not billed.account and billed.usage is not None
+    assert billed.usage.cost == pytest.approx(SOL_BATCHED)
     for user in ("paper key", "paper credit"):
         error = found[user]
         assert isinstance(error, ProviderError) and error.account
 
 
-async def test_an_openai_batch_whose_creation_lost_its_reply_is_found_again_not_sent_twice():
-    client = OpenAIBatches()
+async def test_an_openai_batch_whose_creation_lost_its_reply_is_found_by_its_file_not_sent_twice():
+    client = OpenAIBatches(page=1)
     client.lost = 1  # created, and the reply lost on the way back
-    provider = OpenAIProvider(client=client)
-    requests = [("k1", SOL, ask(1)), ("k2", SOL, ask(2))]
-    batch_id = await provider.submit(requests)
-    assert list(client.made) == [batch_id]
-    # Submitted again while it runs, in any order, it is the same batch, and nothing is uploaded.
-    assert await provider.submit(list(reversed(requests))) == batch_id
-    assert (list(client.made), len(client.uploaded)) == ([batch_id], 1)
-    client.end(batch_id)  # one that ended is asked anew
-    assert await provider.submit(requests) != batch_id
+    provider, staged = OpenAIProvider(client=client), Staged()
+    batch_id = await provider.submit([("k1", SOL, ask(1)), ("k2", SOL, ask(2))], staged)
+    assert (list(client.made), staged) == ([batch_id], ["openai-file:file-1"])
+    for n in (3, 4):  # newer batches, listed before it
+        await provider.submit([(f"k{n}", SOL, ask(n))], Staged())
+    client.end(batch_id)
+    # A run that has only the reference finds it, ended, pages down.
+    later = OpenAIProvider(client=client)
+    assert await later.status("openai-file:file-1") == "ended"
+    assert set(await later.results("openai-file:file-1")) == {"k1", "k2"}
+    assert await later.status("openai-file:file-9") == "gone"  # no batch was made of it
+
+
+async def test_an_openai_batch_whose_creation_cannot_be_confirmed_is_left_to_recovery(
+    conn: Session, db
+):
+    client = OpenAIBatches()
+    client.lost, client.unlisted = 1, True  # created, its reply lost, and the lookup fails
+    gw, _, clock = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    with pytest.raises(CallError) as raised:
+        await gw.ask("brief", ask(1))
+    assert raised.value.kind == "provider"
+    await gw.close()
+    (row,) = await calls(conn)
+    assert (row["batch_id"], row["error"]) == ("openai-file:file-1", None)  # nothing paid twice
+
+    client.unlisted = False
+    client.end("batch_1")
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client, clock)
+    await gw.recover()
+    await gw.settle()
+    (row,) = await calls(conn)
+    assert row["cost"] == pytest.approx(SOL_BATCHED) and list(client.made) == ["batch_1"]
+    await gw.close()
+
+
+async def test_an_openai_batch_line_billed_and_failed_is_settled_on_its_row_and_asked_again(
+    conn: Session, db
+):
+    client = OpenAIBatches(lambda body: openai_body(status="failed", error=FAILED))
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: len(client.made) == 1)
+    client.end("batch_1")
+    assert (await asked).value.yes
+    batched, normal = await calls(conn)
+    assert (batched["batch_id"], batched["cost"]) == ("batch_1", pytest.approx(SOL_BATCHED))
+    assert batched["error"].startswith("provider: response failed")
+    assert (normal["batch_id"], normal["error"], normal["answered"]) == (None, None, True)
+    assert normal["cost"] == pytest.approx(2 * SOL_BATCHED)  # the normal call's full price
+    await gw.close()
 
 
 async def test_an_openai_batch_holds_one_model_so_a_step_of_two_models_goes_in_two():
@@ -1313,39 +1388,87 @@ async def test_an_openai_batch_holds_one_model_so_a_step_of_two_models_goes_in_t
     answers = await asyncio.gather(*asked)
     sent = sorted([line["body"]["model"] for line in lines] for lines in client.uploaded.values())
     assert sent == [["gpt-6-luna"], ["gpt-6.2-sol", "gpt-6.2-sol"]]
-    usage = answers[0].usage
-    assert (usage.cost, usage.service_tier) == (pytest.approx(SOL_BATCHED), "batch")
+    # Each priced as its own model: Luna's 1000 fresh at $0.10, 3000 cached at $0.01, 200 out
+    # at $0.50, halved.
+    assert [(a.usage.model, a.usage.service_tier) for a in answers[:2]] == [
+        ("gpt-6.2-sol", "batch"),
+        ("gpt-6-luna", "batch"),
+    ]
+    assert [a.usage.cost for a in answers[:2]] == [
+        pytest.approx(SOL_BATCHED),
+        pytest.approx(0.000115),
+    ]
     await gw.close()
 
 
-async def test_an_openai_batch_a_dead_run_left_is_read_once_and_credited_to_its_calls(
-    conn: Session, db
-):
+async def dead_batch(conn: Session, db, client: OpenAIBatches, models=None):
+    """Two calls a dead run left in an open batch; then a gateway of a later run, recovering
+    it. The gateway, its clock and the batch's id."""
     dead = await started(conn, "nightly")
-    gw, client, clock = openai_batching(Together(db, dead, 2))
+    gw, _, clock = openai_batching(Together(db, dead, 2), client, models=models)
     asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
 
     async def recorded():
         rows = await calls(conn)
-        return len(rows) == 2 and all(c["batch_id"] for c in rows)
+        return len(rows) == 2 and all(c["batch_id"] == "batch_1" for c in rows)
 
     await until(recorded)
     for t in asked:  # the run dies with its batch open
         t.cancel()
     await asyncio.gather(*asked, return_exceptions=True)
     await gw.close()
-
-    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client, clock)
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, _, _ = openai_batching(journal, client, clock, models=models)
     await gw.recover()
+    return gw, journal, dead
+
+
+async def test_an_openai_batch_a_dead_run_left_is_read_once_and_credited_to_its_calls(
+    conn: Session, db
+):
+    client = OpenAIBatches()
+    gw, _, dead = await dead_batch(conn, db, client)
     settling = asyncio.create_task(gw.settle())  # as a nightly does before it ends
     await asyncio.sleep(0.05)
     assert not settling.done()
-    (batch_id,) = client.made
-    client.end(batch_id)
+    client.end("batch_1")
     await settling
     assert [(c["run_id"], c["batch_id"], c["answered"]) for c in await calls(conn)] == [
-        (dead, batch_id, False)
+        (dead, "batch_1", False)
     ] * 2
     assert [c["cost"] for c in await calls(conn)] == [pytest.approx(SOL_BATCHED)] * 2
-    assert client.read == [client.made[batch_id].output_file_id]  # read once, nothing paid again
+    assert client.read == [client.made["batch_1"].output_file_id]  # read once, nothing paid again
+    await gw.close()
+
+
+async def test_an_openai_batch_that_failed_with_no_answers_settles_a_dead_runs_calls(
+    conn: Session, db
+):
+    client = OpenAIBatches()
+    gw, journal, _ = await dead_batch(conn, db, client)
+    client.end("batch_1", failed=True)  # its input refused: no files at all
+    await gw.settle()
+    errors = [c["error"] for c in await calls(conn)]
+    assert errors == ["provider: the batch did not answer it"] * 2
+    assert await journal.open_batches() == []
+    await gw.close()
+
+
+async def test_an_openai_answer_of_unknown_charge_is_read_once_and_still_given_to_its_call(
+    conn: Session, db
+):
+    unlisted = Models(brief=RoleConfig(provider="openai", model="gpt-9"))
+    client = OpenAIBatches()
+    gw, journal, _ = await dead_batch(conn, db, client, unlisted)
+    client.end("batch_1")
+    await gw.settle()
+    assert [c["cost"] for c in await calls(conn)] == [None, None]
+    assert await journal.open_batches() == []  # accounted for, though its charge is unknown
+    await gw.close()
+    # A run asking for one of them again is given its answer, not a new call.
+    gw, _, _ = openai_batching(
+        CallJournal(db, await started(conn, "nightly")), client, None, unlisted
+    )
+    assert (await gw.ask("brief", ask(0))).value.yes
+    assert (len(client.made), len(await calls(conn))) == (1, 2)
     await gw.close()

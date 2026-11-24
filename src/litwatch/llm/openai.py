@@ -1,13 +1,16 @@
 """OpenAI's models on OpenAI's own API: the Responses API with structured output for normal
-calls, and the Batch API for batched ones (`llm.batches`), each priced from `llm.prices`."""
+calls, and the Batch API for batched ones (`llm.batches`), each priced from `llm.prices`.
+
+Its explicit cache controls need GPT-5.6 or later; the models priced (`prices.OPENAI`) are the
+GPT-6 and GPT-6.x families litwatch may route. A model without a listed price is answered with
+its charge unknown."""
 
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import logging
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from typing import Any
 
 import httpx2  # the HTTP client this SDK is built on
@@ -16,7 +19,7 @@ from openai import AsyncOpenAI
 from openai.lib._pydantic import to_strict_json_schema
 
 from litwatch.config import RoleConfig
-from litwatch.llm.batches import Answered
+from litwatch.llm.batches import Answered, Staged
 from litwatch.llm.prices import openai_cost, openai_model
 from litwatch.llm.types import ACCOUNT_STATUSES, ProviderError, Reply, Request, Stop, Usage
 
@@ -25,6 +28,8 @@ log = logging.getLogger(__name__)
 # Explicit, so an `OPENAI_BASE_URL` in the environment never sends the calls elsewhere.
 BASE_URL = "https://api.openai.com/v1"
 ENDPOINT = "/v1/responses"
+# Normal calls ask for it, so a reply is priced only at the rate it was served at.
+TIER = "default"
 # A 429 that is the account's rather than the rate's: its credit, spend or usage limit used up
 # (OpenAI's error codes guide). Asking again does not help.
 BILLING = frozenset(
@@ -48,17 +53,16 @@ STATUSES = {
     "completed": "ended",
     "expired": "ended",
     "cancelled": "ended",
-    "failed": "ended",  # its input was refused: nothing is answered, all goes as normal calls
+    "failed": "ended",  # its input was refused: nothing is answered
 }
+# A batch before its id is known: its input file's, which the batch names (`_find`).
+FILE_REF = "openai-file:"
+LISTED = 100  # batches per page, looking for the one made from a file
 
 
 def _status(status: str) -> str:
     """A status this module does not know is read as still running: polled until it ends."""
     return STATUSES.get(status, "in_progress")
-
-
-TAG = "litwatch_requests"  # a batch's metadata: the digest of its request keys (`_tag`)
-LISTED = 100  # the newest batches looked through for one sent already
 
 
 def responses_request(role: RoleConfig, request: Request) -> dict[str, Any]:
@@ -112,10 +116,14 @@ def _billing(error: Any) -> bool:
 
 
 def reply_of(body: dict[str, Any], role: RoleConfig | None, *, batch: bool = False) -> Reply:
-    """The reply of a response, as the API sends it, priced at the batch rate for an answer
-    from a batch. Without the role (an answer of a batch no call awaits) the model is the
-    response's and the effort unknown. A response that failed is a provider error."""
+    """The reply of a response, as the API sends it. It is priced at the rate it was served at:
+    the batch rate for an answer from a batch, the standard one for a normal call served at
+    `TIER`; at any other tier its charge is unknown. Without the role (an answer of a batch no
+    call awaits) the model is the response's and the effort unknown. A response that failed is
+    a provider error that carries its usage, but for one declined for its content, which is a
+    refusal."""
     model = role.model if role else openai_model(body.get("model") or "")
+    tier = "batch" if batch else body.get("service_tier")
     u = body.get("usage")
     cost = None
     cache_read = cache_write = reasoning = None
@@ -124,9 +132,12 @@ def reply_of(body: dict[str, Any], role: RoleConfig | None, *, batch: bool = Fal
         cache_read = details.get("cached_tokens", 0)
         cache_write = details.get("cache_write_tokens", 0)
         reasoning = (u.get("output_tokens_details") or {}).get("reasoning_tokens")
-        cost = openai_cost(
-            model, u["input_tokens"], cache_read, cache_write, u["output_tokens"], batch=batch
-        )
+        if batch or tier == TIER:
+            cost = openai_cost(
+                model, u["input_tokens"], cache_read, cache_write, u["output_tokens"], batch=batch
+            )
+        else:
+            log.warning("%s served at the %s tier, its cost is not recorded", model, tier)
     usage = Usage(
         model=model,
         via="openai",
@@ -136,7 +147,7 @@ def reply_of(body: dict[str, Any], role: RoleConfig | None, *, batch: bool = Fal
         cost=cost,
         generation_id=body.get("id"),
         provider="openai",
-        service_tier="batch" if batch else body.get("service_tier"),
+        service_tier=tier,
         cached_tokens=cache_read,
         cache_write_tokens=cache_write,
         reasoning_tokens=reasoning,
@@ -144,8 +155,10 @@ def reply_of(body: dict[str, Any], role: RoleConfig | None, *, batch: bool = Fal
     status = body.get("status")
     if status == "failed":
         error = body.get("error") or {}
+        if refused := _refusal(error, usage):
+            return refused
         transient = error.get("code") in ("server_error", "rate_limit_exceeded")
-        raise ProviderError(f"response failed: {error}", transient=transient, cost=usage.cost)
+        raise ProviderError(f"response failed: {error}", transient=transient, usage=usage)
     parts = [
         part
         for item in body.get("output") or []
@@ -162,8 +175,16 @@ def reply_of(body: dict[str, Any], role: RoleConfig | None, *, batch: bool = Fal
             return Reply(text, Stop.REFUSED, usage, refusal="content_filter")
         return Reply(text, Stop.TRUNCATED, usage)
     if status != "completed":
-        raise ProviderError(f"the response is {status}", transient=True, cost=usage.cost)
+        raise ProviderError(f"the response is {status}", transient=True, usage=usage)
     return Reply(text, Stop.COMPLETE, usage)
+
+
+def _refusal(error: Any, usage: Usage) -> Reply | None:
+    """An error about the request's content as the refusal it is, with what it was billed: an
+    HTTP 400's, a failed response's, a batch's error line's alike."""
+    if (category := _declined(error)) is None:
+        return None
+    return Reply("", Stop.REFUSED, usage, refusal=category, raw=json.dumps(error, default=str))
 
 
 @contextlib.contextmanager
@@ -189,24 +210,23 @@ def _errors() -> Generator[None]:
         raise ProviderError(f"{type(exc).__name__}: {exc}", account=account) from exc
 
 
-def _tag(keys: Iterable[str]) -> str:
-    """What identifies a submission: its request keys, in any order."""
-    return hashlib.sha256("\n".join(sorted(keys)).encode()).hexdigest()
-
-
-def _answer(line: dict[str, Any], batch_id: str) -> Answered:
-    """One line of a batch's output or error file: the reply; an account error, never asked
-    again; None for one the batch did not answer otherwise (failed, expired, cancelled, declined
-    for its content), which is asked again as a normal call."""
+def _answer(line: dict[str, Any], batch_id: str, model: str) -> Answered:
+    """One line of a batch's output or error file, of `model`'s batch: the reply, or a refusal
+    for a request declined for its content; a failure it billed (`ProviderError.usage`); an
+    account error, never asked again; None for one the batch did not answer otherwise (failed,
+    expired, cancelled), which is asked again as a normal call."""
     response = line.get("response") or {}
     code = response.get("status_code")
     body = response.get("body") or {}
     if code == 200:
         try:
             return reply_of(body, None, batch=True)
-        except ProviderError:
-            return None
+        except ProviderError as exc:
+            return exc
     error = body.get("error") or line.get("error") or {}
+    # An answered error, not billed.
+    if refused := _refusal(error, Usage(model=model, via="openai", cost=0.0)):
+        return refused
     if code in ACCOUNT_STATUSES or (code == 429 and _billing(error)):
         return ProviderError(f"{error.get('code') or code} in batch {batch_id}", account=True)
     return None
@@ -219,95 +239,126 @@ class OpenAIProvider:
     def __init__(self, api_key: str | None = None, client: Any = None) -> None:
         # The gateway owns retries; the SDK's own would multiply them.
         self.client = client or AsyncOpenAI(base_url=BASE_URL, api_key=api_key, max_retries=0)
+        self._made: dict[str, str] = {}  # a file reference's batch, once found (`_find`)
 
     def routing(self, role: RoleConfig) -> tuple[str, ...]:
         return ()
 
     async def complete(self, role: RoleConfig, request: Request) -> Reply:
+        body: dict[str, Any] = {**responses_request(role, request), "service_tier": TIER}
         with _errors():
             try:
-                response = await self.client.responses.create(**responses_request(role, request))
+                response = await self.client.responses.create(**body)
             except openai.BadRequestError as exc:
-                if (category := _declined(exc.body)) is None:
-                    raise
-                # An answered error, not billed.
                 usage = Usage(model=role.model, via="openai", effort=role.effort, cost=0.0)
-                said = json.dumps(exc.body, default=str)
-                return Reply("", Stop.REFUSED, usage, refusal=category, raw=said)
+                if (refused := _refusal(exc.body, usage)) is None:  # an answered error, not billed
+                    raise
+                return refused
         return reply_of(response.model_dump(), role)
 
     # The Batch API (models.md, batches): `custom_id` is the gateway's request key.
 
-    async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str:
-        """The batch's id. A submission whose reply was lost is found again by its tag rather than
-        sent twice (P24): before it is sent, and once more when the batch's creation got no
-        reply."""
-        tag = _tag(key for key, _, _ in requests)
+    async def submit(self, requests: list[tuple[str, RoleConfig, Request]], staged: Staged) -> str:
+        """The batch's id. Its input file is uploaded first and its reference `staged`, so a
+        batch whose creation lost its reply is found again by its file rather than sent twice
+        (P24). A lookup that cannot tell whether it was created raises `unanswered`, leaving the
+        reference for recovery to resolve."""
+        lines = [
+            json.dumps(
+                {
+                    "custom_id": key,
+                    "method": "POST",
+                    "url": ENDPOINT,
+                    "body": responses_request(role, request),
+                },
+                ensure_ascii=False,
+            )
+            for key, role, request in requests
+        ]
+        upload = ("requests.jsonl", "\n".join(lines).encode(), "application/jsonl")
+        try:
+            with _errors():
+                file = await self.client.files.create(file=upload, purpose="batch")
+        except ProviderError as exc:
+            if exc.account:
+                raise
+            # No batch can come of a file not known to be uploaded: the calls go normally.
+            raise ProviderError(f"the batch's file was not uploaded: {exc}") from exc
+        await staged(FILE_REF + file.id)
         with _errors():
-            if (found := await self._sent(tag)) is not None:
-                return found
-            lines = [
-                json.dumps(
-                    {
-                        "custom_id": key,
-                        "method": "POST",
-                        "url": ENDPOINT,
-                        "body": responses_request(role, request),
-                    },
-                    ensure_ascii=False,
-                )
-                for key, role, request in requests
-            ]
-            upload = ("requests.jsonl", "\n".join(lines).encode(), "application/jsonl")
-            file = await self.client.files.create(file=upload, purpose="batch")
             try:
                 batch = await self.client.batches.create(
-                    input_file_id=file.id,
-                    endpoint=ENDPOINT,
-                    completion_window="24h",
-                    metadata={TAG: tag},
+                    input_file_id=file.id, endpoint=ENDPOINT, completion_window="24h"
                 )
-            except (openai.APITimeoutError, openai.APIConnectionError):
-                if (found := await self._sent(tag)) is not None:
-                    return found
-                raise
+            except (openai.APITimeoutError, openai.APIConnectionError) as lost:
+                try:
+                    made = await self._find(file.id)
+                except Exception as exc:
+                    raise ProviderError(
+                        f"batch of {file.id} may have been made: {exc}", unanswered=True
+                    ) from lost
+                if made is None:
+                    raise ProviderError(f"no batch was made of {file.id}") from lost
+                return made
         return batch.id
 
-    async def _sent(self, tag: str) -> str | None:
-        """A batch of these requests already sent and still running, among the newest."""
-        page = await self.client.batches.list(limit=LISTED)
-        for batch in page.data:
-            if (batch.metadata or {}).get(TAG) == tag and _status(batch.status) == "in_progress":
-                return batch.id
-        return None
+    async def _find(self, file_id: str) -> str | None:
+        """The batch made of the file, in any state, looking through every page; None when no
+        batch was."""
+        after = ""
+        while True:
+            page = await self.client.batches.list(limit=LISTED, after=after or openai.omit)
+            for batch in page.data:
+                if batch.input_file_id == file_id:
+                    return batch.id
+            if not page.data or not page.has_more:
+                return None
+            after = page.data[-1].id
+
+    async def _batch(self, handle: str) -> Any:
+        """The batch by its id or its file reference (`FILE_REF`); None when there is none."""
+        batch_id: str | None = self._made.get(handle, handle)
+        if batch_id is not None and batch_id.startswith(FILE_REF):
+            batch_id = await self._find(batch_id.removeprefix(FILE_REF))
+            if batch_id is None:
+                return None
+            self._made[handle] = batch_id
+        try:
+            return await self.client.batches.retrieve(batch_id)
+        except openai.NotFoundError:
+            return None
 
     async def status(self, batch_id: str) -> str:
-        """`in_progress`, `canceling` or `ended`; `gone` when the API no longer has it."""
+        """`in_progress`, `canceling` or `ended`; `gone` when the API has no such batch, by its
+        id or its file (never made, deleted, or the key is another project's)."""
         with _errors():
-            try:
-                batch = await self.client.batches.retrieve(batch_id)
-            except openai.NotFoundError:
-                return "gone"
-        return _status(batch.status)
+            batch = await self._batch(batch_id)
+        return "gone" if batch is None else _status(batch.status)
 
     async def cancel(self, batch_id: str) -> None:
         with _errors():
-            await self.client.batches.cancel(batch_id)
+            if (batch := await self._batch(batch_id)) is not None:
+                await self.client.batches.cancel(batch.id)
 
     async def results(self, batch_id: str) -> dict[str, Answered]:
         """Each request's answer, by its key, from the batch's output and error files
         (`_answer`). A request neither file names was not answered."""
         found: dict[str, Answered] = {}
         with _errors():
-            batch = await self.client.batches.retrieve(batch_id)
+            batch = await self._batch(batch_id)
+            if batch is None:
+                raise ProviderError(f"batch {batch_id} is gone")
             if batch.status == "failed":
                 log.warning("batch %s failed: %s", batch_id, batch.errors)
+            model = openai_model(batch.model or "")
             for file_id in (batch.output_file_id, batch.error_file_id):
                 if file_id is None:
                     continue
                 content = await self.client.files.content(file_id)
-                for text in content.text.splitlines():
+                # JSON Lines end with "\n" alone: `splitlines` would also break a line at a
+                # U+2028 inside one of its strings.
+                for text in content.text.split("\n"):
                     if text.strip():
                         line = json.loads(text)
-                        found[line["custom_id"]] = _answer(line, batch_id)
+                        found[line["custom_id"]] = _answer(line, batch_id, model)
         return found

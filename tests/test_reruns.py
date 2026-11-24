@@ -445,6 +445,8 @@ async def test_an_openai_call_under_a_ceiling_reserves_its_listed_bound_and_is_c
     # Every input token at the cache-write price ($2.50), the cap's output at $10.
     bound = ceilings.listed_bound(role, tokens_in)
     assert bound == ceilings.Bound(2.5e-6, 1e-5, 16000)
+    dated = role.model_copy(update={"model": "gpt-6.2-sol-2026-11-01"})
+    assert ceilings.listed_bound(dated, tokens_in) == bound  # a snapshot, priced as its alias
     answer = await gateway.ask("writer", request)
     (sent,) = sdk.sent
     assert sent["max_output_tokens"] == 16000  # the role sets no cap: the bound's

@@ -11,6 +11,7 @@ import httpx2  # the HTTP client this SDK is built on
 from anthropic import AsyncAnthropic, transform_schema
 
 from litwatch.config import RoleConfig
+from litwatch.llm.batches import Staged
 from litwatch.llm.prices import anthropic_cost
 from litwatch.llm.types import (
     ACCOUNT_STATUSES,
@@ -121,7 +122,9 @@ class AnthropicProvider:
 
     # Message Batches (models.md, batches): `custom_id` is the gateway's request key.
 
-    async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str:
+    async def submit(self, requests: list[tuple[str, RoleConfig, Request]], staged: Staged) -> str:
+        """The batch's id. Created in one step, it has no reference before its id: `staged` is
+        not called."""
         with _account_errors():
             batch = await self.client.messages.batches.create(
                 requests=[

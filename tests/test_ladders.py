@@ -76,6 +76,11 @@ def test_ladders_and_cases_load_from_their_files(tmp_path):
         ladder(tmp_path, LADDERS.replace("price_max = [2.0, 2.0]", "price_max = [0.5, 2.0]"))
     with pytest.raises(ValueError, match="not negative"):
         ladder(tmp_path, LADDERS.replace("price = [1.0, 1.0]", "price = [-1.0, 1.0]"))
+    # Only a candidate sent uncapped needs to say how much it can return.
+    with pytest.raises(ValueError, match="needs its max_output"):
+        ladder(tmp_path, LADDERS.replace("max_output = 1000\n", ""))
+    capped = ladder(tmp_path, LADDERS.replace("max_output = 1000\n", "max_output_tokens = 500\n"))
+    assert capped["judge"].candidates[1].max_output is None
     cases = tmp_path / "cases.csv"
     cases.write_text(
         "set,role,paper,subject,label,note\n"

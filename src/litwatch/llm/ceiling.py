@@ -66,9 +66,10 @@ def openai_bound(role: RoleConfig, tokens_in: int) -> Bound | None:
     long-prompt rates once the input may pass their threshold, and the output cap sent when the
     role sets none (a Responses call has no cap of its own). None for a model without a listed
     price."""
-    if role.model not in prices.OPENAI:
+    model = prices.openai_model(role.model)  # a dated snapshot is priced as its alias
+    if model not in prices.OPENAI:
         return None
-    price_in, price_out, _ = prices.OPENAI[role.model]
+    price_in, price_out, _ = prices.OPENAI[model]
     threshold, scale_in, scale_out = prices.OPENAI_LONG_PROMPT
     if tokens_in <= threshold:
         scale_in = scale_out = 1.0

@@ -177,7 +177,7 @@ def reply_of(completion: Any, role: RoleConfig) -> Reply:
     )
     choices = getattr(completion, "choices", None)
     if not choices:
-        raise ProviderError("the completion has no choices", transient=True, cost=usage.cost)
+        raise ProviderError("the completion has no choices", transient=True, usage=usage)
     choice = choices[0]
     text = choice.message.content or ""
     if said := getattr(choice.message, "refusal", None):

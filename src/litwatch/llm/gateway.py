@@ -99,6 +99,8 @@ class Journal(Protocol):
     async def answered(
         self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
     ) -> None: ...
+    async def gone(self, batch_id: str) -> None: ...
+    async def ended(self, batch_id: str, keys: list[str]) -> None: ...
     async def account_error(self, provider: str, error: str) -> None: ...
 
 
@@ -229,8 +231,11 @@ class Gateway:
         role: RoleConfig,
         request: Request,
         send: Callable[..., Awaitable[Reply]] | None = None,
+        billed: Callable[[ProviderError], Awaitable[None]] | None = None,
     ) -> Reply:
-        """`complete`, for a caller that checked the nesting itself (`ask`)."""
+        """`complete`, for a caller that checked the nesting itself (`ask`). `billed` is told of
+        each failed attempt that carries its usage before the next attempt is sent; the last
+        one's usage is the `CallError`'s."""
         provider = self._provider(role)
         role, limits = self._limits(role, request)
         for delay in (*self.retry_delays, None):
@@ -247,15 +252,20 @@ class Gateway:
             except TimeoutError as exc:
                 raise CallError("timeout", f"{role.timeout_seconds:g}s") from exc
             except ProviderError as exc:
-                # A provider's answered error is not billed unless it says so; a timeout or a
-                # lost connection may have been, so its reservation is kept.
-                cost = None if exc.timeout or exc.unanswered else (exc.cost or 0.0)
+                # A provider's answered error is not billed unless it carries its usage; a
+                # timeout, a lost connection or an unknown charge keeps its reservation.
+                if exc.timeout or exc.unanswered:
+                    cost = None
+                else:
+                    cost = exc.usage.cost if exc.usage is not None else 0.0
                 if exc.timeout:
                     raise CallError("timeout", str(exc)) from exc
                 if exc.account:
-                    raise CallError("account", str(exc)) from exc
+                    raise CallError("account", str(exc), exc.usage) from exc
                 if delay is None or not exc.transient:
-                    raise CallError("provider", str(exc)) from exc
+                    raise CallError("provider", str(exc), exc.usage) from exc
+                if billed is not None and exc.usage is not None:
+                    await billed(exc)
                 log.warning("role=%s %s, trying again in %ss", role_name, exc, delay)
             finally:
                 if reserved is not None and self.ceiling is not None:
@@ -398,11 +408,25 @@ class Gateway:
         key = self.request_key(role, request)
         journal = self.journal
         call_id, reply = await self._batched(role_name, role, key, request, paper_id, send)
+
+        async def billed(exc: ProviderError) -> None:
+            """A billed attempt that failed is settled on its own row; the retry gets a new one."""
+            nonlocal call_id
+            if journal and call_id is not None and exc.usage is not None:
+                await journal.record(call_id, exc.usage)
+                await journal.reject(call_id, f"provider: {exc}")
+                call_id = await journal.start(role_name, role.model, key, paper_id, role.provider)
+
         try:
             if isinstance(reply, ProviderError):  # the account kept the batch from answering
                 raise CallError("account", str(reply))
             if reply is None:
-                reply = await self._complete(role_name, role, request, send)
+                try:
+                    reply = await self._complete(role_name, role, request, send, billed)
+                except CallError as exc:
+                    if journal and call_id is not None and exc.usage is not None:
+                        await journal.record(call_id, exc.usage)  # the last attempt's charge
+                    raise
             reply.usage.source_call_id = call_id
             if journal:
                 await journal.record(call_id, reply.usage)
@@ -458,13 +482,22 @@ class Gateway:
         send it as a normal call). A key a dead run left in an open batch waits on that batch,
         on its row, past the deadline too (the batch is cancelled then); one the batch did not
         answer is sent as a normal call. A normal call has a row of its own when the batch it
-        was given up on may still answer it on its row. A fallback is batched as the role's
-        model is."""
+        was given up on may still answer it on its row, or when the batch billed its request
+        and failed it, which is settled on its batch row. A batch that may have been sent with
+        the call (`_unsettled_submission`) raises, its rows left for recovery to settle. A
+        fallback is batched as the role's model is."""
         journal = self.journal
 
         async def row_of_its_own() -> int:
             assert journal is not None
             return await journal.start(role_name, role.model, key, paper_id, role.provider)
+
+        async def failed(row_id: int, error: ProviderError) -> tuple[int, None]:
+            """A request the batch billed and failed: settled on its row, sent again normally."""
+            assert journal is not None and error.usage is not None
+            await journal.record(row_id, error.usage)
+            await journal.reject(row_id, f"provider: {error}")
+            return await row_of_its_own(), None
 
         batcher = self.batchers.get(role.provider) if send is None else None
         if batcher and journal and (row := await journal.in_batch(key)):
@@ -474,17 +507,27 @@ class Gateway:
                     return await row_of_its_own(), reply
                 return row["id"], _of_role(reply, role)
             if row["id"] in batcher.unsettled:  # the batch may still answer it on that row
-                return await row_of_its_own(), reply
-            if isinstance(reply, ProviderError):
+                return await row_of_its_own(), _account(reply)
+            if isinstance(reply, ProviderError) and reply.account:
                 return row["id"], reply
+            if isinstance(reply, ProviderError) and reply.usage is not None:
+                return await failed(row["id"], reply)
             await journal.reject(row["id"], "provider: the batch did not answer it")
             return await row_of_its_own(), None
         call_id = await row_of_its_own() if journal else None
         if batcher is None or not batcher.open():
             return call_id, None
         reply = await batcher.ask(key, role, request, call_id)
+        if _unsettled_submission(reply):
+            raise CallError(
+                "provider", f"{reply}; its batch is left for recovery", None, role.label
+            )
         if not isinstance(reply, Reply) and journal and call_id in batcher.unsettled:
-            return await row_of_its_own(), reply
+            return await row_of_its_own(), _account(reply)
+        if isinstance(reply, ProviderError) and reply.usage is not None:
+            return (
+                await failed(call_id, reply) if journal and call_id is not None else (call_id, None)
+            )
         return call_id, _of_role(reply, role) if isinstance(reply, Reply) else reply
 
 
@@ -492,6 +535,17 @@ def _max_output(role: RoleConfig, request: Request) -> int:
     """The most output tokens a call can be billed: its cap, or Anthropic's default one (a route
     without a default is given its cap by `Gateway._limits`, or bills no output)."""
     return request.max_output_tokens or role.max_output_tokens or DEFAULT_MAX_TOKENS
+
+
+def _account(answer: Answered) -> ProviderError | None:
+    """A batch's account error, or None for any other answer that is not a reply."""
+    return answer if isinstance(answer, ProviderError) and answer.account else None
+
+
+def _unsettled_submission(answer: Answered) -> bool:
+    """Whether the batch the call was sent in may exist with no id to read it by: the provider
+    neither confirmed nor ruled out its creation (`llm.batches`, unanswered)."""
+    return isinstance(answer, ProviderError) and answer.unanswered and not answer.account
 
 
 def _of_role(reply: Reply, role: RoleConfig) -> Reply:

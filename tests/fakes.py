@@ -71,6 +71,8 @@ def openai_body(
     text="{}",
     status="completed",
     *,
+    model="gpt-6.2-sol",
+    tier="default",
     incomplete=None,
     refusal=None,
     error=None,
@@ -79,7 +81,8 @@ def openai_body(
     write=0,
     output=200,
 ):
-    """A Responses API response as the API sends it (a batch's output line carries this body)."""
+    """A Responses API response as the API sends it (a batch's output line carries this body),
+    from the snapshot of `model` that served it."""
     content = [{"type": "output_text", "text": text, "annotations": []}]
     if refusal is not None:
         content = [{"type": "refusal", "refusal": refusal}]
@@ -87,7 +90,8 @@ def openai_body(
         "id": "resp_1",
         "object": "response",
         "created_at": 1.0,
-        "model": "gpt-6.2-sol-2026-11-01",  # the snapshot that served it
+        "model": f"{model}-2026-11-01",
+        "service_tier": tier,
         "status": status,
         "error": error,
         "incomplete_details": {"reason": incomplete} if incomplete else None,
@@ -121,15 +125,21 @@ def openai_response(*args, **kwargs):
     return Response.model_validate(openai_body(*args, **kwargs))
 
 
+def openai_answer(body):
+    """A batch's answer to a request: a good one, from the request's own model."""
+    return openai_body('{"yes": true, "why": "it says so"}', model=body["model"], tier=None)
+
+
 class OpenAIBatches:
     """The SDK's `files` and `batches` as the Batch API serves them. A batch's requests are
     answered once the test ends it (`end`), each by `respond(body)`: a response body (status
     200), or a `(status_code, error)` pair for a request the API failed, the status None for
-    one it never ran (expired). `lost` creations are made and then lose their reply. `read`
-    lists the files whose content was read."""
+    one it never ran (expired). `lost` creations are made and then lose their reply; while
+    `unlisted`, listing the batches fails. Listed newest first, `page` at a time. `read` lists
+    the files whose content was read."""
 
-    def __init__(self, respond=lambda body: openai_body('{"yes": true, "why": "it says so"}')):
-        self.respond, self.lost = respond, 0
+    def __init__(self, respond=openai_answer, *, page: int = 100):
+        self.respond, self.page, self.lost, self.unlisted = respond, page, 0, False
         self.uploaded: dict[str, list[dict[str, Any]]] = {}
         self.made: dict[str, SimpleNamespace] = {}
         self.contents: dict[str, str] = {}
@@ -138,21 +148,23 @@ class OpenAIBatches:
         self.batches = SimpleNamespace(
             create=self._create, list=self._list, retrieve=self._retrieve, cancel=self._cancel
         )
+        self.responses: Any = None  # normal calls, for a test that makes them (`SdkClient`)
 
     async def _upload(self, *, file, purpose):
         assert purpose == "batch"
         name, data, _ = file
         file_id = f"file-{len(self.uploaded) + 1}"
-        self.uploaded[file_id] = [json.loads(line) for line in data.decode().splitlines()]
+        self.uploaded[file_id] = [json.loads(line) for line in data.decode().split("\n")]
         return SimpleNamespace(id=file_id)
 
-    async def _create(self, *, input_file_id, endpoint, completion_window, metadata):
+    async def _create(self, *, input_file_id, endpoint, completion_window):
+        (model,) = {line["body"]["model"] for line in self.uploaded[input_file_id]}  # one only
         batch_id = f"batch_{len(self.made) + 1}"
         self.made[batch_id] = SimpleNamespace(
             id=batch_id,
             status="in_progress",
-            metadata=metadata,
             endpoint=endpoint,
+            model=f"{model}-2026-11-01",
             input_file_id=input_file_id,
             output_file_id=None,
             error_file_id=None,
@@ -163,8 +175,13 @@ class OpenAIBatches:
             raise openai.APIConnectionError(request=httpx2.Request("POST", "https://x.org"))
         return self.made[batch_id]
 
-    async def _list(self, *, limit):
-        return SimpleNamespace(data=list(reversed(self.made.values()))[:limit])
+    async def _list(self, *, limit, after=openai.omit):
+        if self.unlisted:
+            raise openai.APIConnectionError(request=httpx2.Request("GET", "https://x.org"))
+        newest = list(reversed(self.made.values()))
+        start = 0 if after is openai.omit else [b.id for b in newest].index(after) + 1
+        data = newest[start : start + min(limit, self.page)]
+        return SimpleNamespace(data=data, has_more=start + len(data) < len(newest))
 
     async def _retrieve(self, batch_id):
         if batch_id not in self.made:
@@ -178,8 +195,13 @@ class OpenAIBatches:
         self.read.append(file_id)
         return SimpleNamespace(text=self.contents[file_id])
 
-    def end(self, batch_id: str) -> None:
+    def end(self, batch_id: str, *, failed: bool = False) -> None:
+        """The batch completes with its answers; `failed`, its input refused with none."""
         batch = self.made[batch_id]
+        if failed:
+            batch.status = "failed"
+            batch.errors = {"data": [{"code": "token_limit_exceeded"}]}
+            return
         out, errors = [], []
         for request in self.uploaded[batch.input_file_id]:
             answer = self.respond(request["body"])
@@ -197,7 +219,9 @@ class OpenAIBatches:
         for kind, lines in (("output", out), ("error", errors)):
             if lines:
                 file_id = f"file-{kind}-{batch_id}"
-                self.contents[file_id] = "\n".join(json.dumps(line) for line in lines) + "\n"
+                self.contents[file_id] = (
+                    "\n".join(json.dumps(x, ensure_ascii=False) for x in lines) + "\n"
+                )
                 setattr(batch, f"{kind}_file_id", file_id)
         batch.status = "completed"
 
@@ -269,7 +293,7 @@ class BatchingProvider(ScriptedProvider):
         """Each batch's keys, in the order sent."""
         return [[key for key, _, _ in b["requests"]] for b in self.batches.values()]
 
-    async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str:
+    async def submit(self, requests: list[tuple[str, RoleConfig, Request]], staged=None) -> str:
         batch_id = f"msgbatch_{len(self.batches) + 1}"
         replies = {}
         for key, role, request in requests:

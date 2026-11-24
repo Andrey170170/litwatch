@@ -106,14 +106,15 @@ class CallJournal:
         )
 
     async def open_batches(self) -> list[dict[str, Any]]:
-        """The batches with calls not yet answered or charged, with the provider each went to:
-        a dead run's, or one given up on after a deadline, whose charges are read when they
+        """The batches with calls not yet answered or accounted for (`responded_at`, set by the
+        reply's accounting even when its charge is unknown), with the provider each went to: a
+        dead run's, or one given up on after a deadline, whose charges are read when they
         end."""
         return await self._all(
             "open batches",
             "SELECT batch_id, min(usage->>'via') AS provider FROM inference_calls "
             "WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
-            "AND usage->>'cost' IS NULL AND started_at > now() - %s "
+            "AND responded_at IS NULL AND started_at > now() - %s "
             "GROUP BY batch_id ORDER BY batch_id",
             (RESULTS_KEPT,),
         )
@@ -124,34 +125,51 @@ class CallJournal:
         await self._write(
             "batch gone",
             "UPDATE inference_calls SET error = 'provider: the batch is gone' "
-            "WHERE batch_id = %s AND output IS NULL AND error IS NULL "
-            "AND usage->>'cost' IS NULL",
+            "WHERE batch_id = %s AND output IS NULL AND error IS NULL AND responded_at IS NULL",
             (batch_id,),
+        )
+
+    async def ended(self, batch_id: str, keys: list[str]) -> None:
+        """Batch `batch_id` ended without naming the calls of its not in `keys` (those it
+        answered, or whose calls settle them): it never answers them, so they are settled with
+        that, their charge unknown."""
+        await self._write(
+            "batch ended",
+            "UPDATE inference_calls SET error = 'provider: the batch did not answer it' "
+            "WHERE batch_id = %s AND output IS NULL AND error IS NULL AND responded_at IS NULL "
+            "AND request_key <> ALL(%s)",
+            (batch_id, keys),
         )
 
     async def answered(
         self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
     ) -> None:
-        """An answer of batch `batch_id` that no call awaited: its charge, on the calls that
-        asked for it and have none yet, so the batch is accounted for in full. None: the batch
-        did not answer it, and its call is settled with that, or with `error` (an account
+        """An answer of batch `batch_id` that no call awaited: its charge, on the first call that
+        asked for it and is not yet accounted for (`responded_at`), so the batch is accounted for
+        in full; with `error`, a request it billed and failed, which settles that call. None: the
+        batch did not answer it, and its call is settled with that, or with `error` (an account
         error)."""
         if usage is None:
             await self._write(
                 "batch answered nothing",
                 "UPDATE inference_calls SET error = %s "
                 "WHERE batch_id = %s AND request_key = %s AND output IS NULL AND error IS NULL "
-                "AND usage->>'cost' IS NULL",
+                "AND responded_at IS NULL",
                 (error or "provider: the batch did not answer it", batch_id, key),
             )
             return
         row = await self._write(
             "batch answered",
-            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
+            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, error = %(error)s, "
             "responded_at = clock_timestamp() WHERE id = (SELECT min(id) FROM inference_calls "
-            "WHERE batch_id = %(batch)s AND request_key = %(key)s AND usage->>'cost' IS NULL) "
+            "WHERE batch_id = %(batch)s AND request_key = %(key)s AND responded_at IS NULL) "
             f"RETURNING run_id, responded_at), {_REPLIED} SELECT run_id FROM c",
-            {"usage": Jsonb(usage.model_dump(mode="json")), "batch": batch_id, "key": key}
+            {
+                "usage": Jsonb(usage.model_dump(mode="json")),
+                "error": error,
+                "batch": batch_id,
+                "key": key,
+            }
             | self._reply(usage),
         )
         await self._retally(row)

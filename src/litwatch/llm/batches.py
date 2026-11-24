@@ -17,7 +17,7 @@ import dataclasses
 import json
 import logging
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
@@ -34,19 +34,29 @@ POLL_SECONDS = 60.0
 OPERATION_SECONDS = 600.0  # a submission, status, cancel or results read, as a whole
 DRAIN = timedelta(minutes=30)  # how long cancelled batches are waited for after the deadline
 
-# What a batch gives a call: its reply, the account error it got instead, or None (not answered).
+# What a batch gives a call: its reply; a provider error, the account's, or one the provider
+# billed (its `usage`), or a submission that may have been made (`unanswered`); or None (not
+# answered).
 type Answered = Reply | ProviderError | None
+# Told the batch's reference before the provider creates it, so its calls' rows point at it
+# should the creation's reply be lost (`BatchProvider.submit`).
+type Staged = Callable[[str], Awaitable[None]]
 
 
 @runtime_checkable
 class BatchProvider(Protocol):
     """A provider that batches (`anthropic.AnthropicProvider`, `openai.OpenAIProvider`).
-    `custom_id` is the request key. `one_model`: each batch holds one model's requests only."""
+    `custom_id` is the request key. `one_model`: each batch holds one model's requests only.
+    `submit` gives the batch's id, calling `staged` first with a reference that `status`,
+    `cancel` and `results` also take when the batch is created in more than one step; it raises
+    `unanswered` when it can neither confirm nor rule out the batch's creation."""
 
     name: str
     one_model: bool
 
-    async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str: ...
+    async def submit(
+        self, requests: list[tuple[str, RoleConfig, Request]], staged: Staged
+    ) -> str: ...
     async def status(self, batch_id: str) -> str: ...  # in_progress, canceling, ended or gone
     async def cancel(self, batch_id: str) -> None: ...
     async def results(self, batch_id: str) -> dict[str, Answered]: ...
@@ -58,6 +68,7 @@ class BatchJournal(Protocol):
         self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
     ) -> None: ...
     async def gone(self, batch_id: str) -> None: ...
+    async def ended(self, batch_id: str, keys: list[str]) -> None: ...
     async def account_error(self, provider: str, error: str) -> None: ...
 
 
@@ -149,9 +160,11 @@ class Batcher:
 
     @staticmethod
     async def _shared(future: asyncio.Future[Answered]) -> Answered:
+        """What an identical call shares: the reply, free; the account error; otherwise None, as
+        a failure the batch billed is its first call's to settle."""
         reply = await asyncio.shield(future)
         if not isinstance(reply, Reply):
-            return reply
+            return reply if isinstance(reply, ProviderError) and reply.account else None
         usage = reply.usage.model_copy(
             update={"cost": 0.0, "reused": True, "original_cost": reply.usage.cost}
         )
@@ -238,26 +251,36 @@ class Batcher:
             for h in held:
                 self._resolve(h.key, None)
             return
+        ids = [h.call_id for h in held if h.call_id is not None]
+
+        async def staged(reference: str) -> None:
+            if self.journal:
+                await self.journal.batched(ids, reference, held[0].role.provider)
+
         try:
             batch_id = await self._bounded(
-                self.provider.submit([(h.key, h.role, h.request) for h in held])
+                self.provider.submit([(h.key, h.role, h.request) for h in held], staged)
             )
         except Exception as exc:
             account = isinstance(exc, ProviderError) and exc.account
+            # Sent or not, nobody knows: the rows keep the batch's reference for a later run's
+            # recovery, and the calls fail now rather than paying for it twice.
+            pending = isinstance(exc, ProviderError) and exc.unanswered and not account
             if account:  # never asked again: the calls fail on the account
                 log.error("a batch of %d calls was refused for the account: %s", len(held), exc)
                 if self.journal:
                     await self.journal.account_error(self.provider.name, f"account: {exc}")
+            elif pending:
+                log.error("a batch of %d calls may have been sent: %s", len(held), exc)
             else:
                 log.exception(
                     "a batch of %d calls could not be sent; they go as normal calls", len(held)
                 )
             for h in held:
-                self._resolve(h.key, exc if account else None)
+                self._resolve(h.key, exc if account or pending else None)
             return
         log.info("batch %s sent with %d calls", batch_id, len(held))
         if self.journal:
-            ids = [h.call_id for h in held if h.call_id is not None]
             await self.journal.batched(ids, batch_id, held[0].role.provider)
         self._open[batch_id] = _Open(
             {h.key: self._futures[h.key] for h in held},
@@ -327,19 +350,26 @@ class Batcher:
         if self.journal:  # the batch is accounted for before it is let go
             if status == "gone":
                 await self.journal.gone(batch_id)
+            settled = []  # the keys whose rows are its calls' to settle, or settled here
             for key, reply in replies.items():
-                if isinstance(reply, ProviderError):  # seen here, whoever waits on it
+                account = isinstance(reply, ProviderError) and reply.account
+                if account:  # seen here, whoever waits on it
                     await self.journal.account_error(self.provider.name, f"account: {reply}")
+                settled.append(key)
                 # A call settles its row with the answer, but for a row given up on before: a
                 # reply settles it still, anything else is its call's on a row of its own.
                 if key in batch.waiting and (
                     isinstance(reply, Reply) or batch.rows.get(key) not in self.unsettled
                 ):
                     continue
-                if isinstance(reply, ProviderError):
-                    await self.journal.answered(batch_id, key, None, f"account: {reply}")
+                if isinstance(reply, ProviderError):  # the account's, or billed and failed
+                    kind = "account" if account else "provider"
+                    await self.journal.answered(batch_id, key, reply.usage, f"{kind}: {reply}")
                 else:
                     await self.journal.answered(batch_id, key, reply and reply.usage)
+            if status == "ended":  # what it named no answer for, and no call settles, ends here
+                settled += [k for k in batch.waiting if batch.rows.get(k) not in self.unsettled]
+                await self.journal.ended(batch_id, settled)
         del self._open[batch_id]
         for key in batch.waiting:  # None too for a request the results did not name
             self._resolve(key, replies.get(key))

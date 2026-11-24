@@ -178,6 +178,11 @@ async def test_an_unusable_reply_is_an_error_that_says_which_kind(reply, kind, d
             "truncated",
             None,
         ),
+        (
+            openai_response(status="failed", error={"code": "bio_policy", "message": "no"}),
+            "refused",
+            "bio_policy",
+        ),
     ],
 )
 async def test_an_openai_refusal_or_incomplete_reply_is_the_error_the_others_give(
@@ -202,6 +207,26 @@ async def test_an_openai_request_declined_for_its_content_is_a_refusal_that_goes
     refused, answered = await calls(conn)
     assert refused["error"] == "refused: invalid_prompt" and answered["error"] is None
     assert refused["usage"]["via"] == "openai" and refused["usage"]["cost"] == 0.0
+
+
+async def test_an_openai_call_asks_for_the_default_tier_and_another_tiers_charge_is_unknown():
+    client = SdkClient(openai_response(GOOD, tier="flex"))
+    usage = (await gateway(MODELS, openai=client).ask("brief", REQUEST)).usage
+    assert client.sent[0]["service_tier"] == "default"
+    assert (usage.service_tier, usage.cost) == ("flex", None)
+
+
+async def test_an_openai_attempt_billed_and_failed_is_settled_on_a_row_of_its_own(
+    conn: Session, journal
+):
+    failed = openai_response(status="failed", error={"code": "server_error", "message": "x"})
+    client = SdkClient(failed, openai_response(GOOD))
+    assert (await gateway(MODELS, openai=client, journal=journal).ask("brief", REQUEST)).value.yes
+    first, second = await calls(conn)
+    # Each billed: 1000 fresh at $2, 3000 cached at $0.10, 200 output at $10.
+    assert first["error"].startswith("provider: response failed")
+    assert [first["usage"]["cost"], second["usage"]["cost"]] == [pytest.approx(0.0043)] * 2
+    assert (second["error"], second["output"] is not None) == (None, True)
 
 
 async def test_an_openai_429_for_the_rate_is_tried_again_and_for_the_accounts_limit_is_not():
