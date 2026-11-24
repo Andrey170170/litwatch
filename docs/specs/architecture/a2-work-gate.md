@@ -1,6 +1,7 @@
 # A2. Work gate
 
-Status (2026-11-23): **shaped, not planned.** This is milestone A2 of [the architecture](../architecture.md): every
+Status (2026-11-23): **planned, not built.** The build plan is
+[`plans/a2-work-gate.md`](../../plans/a2-work-gate.md). This is milestone A2 of [the architecture](../architecture.md): every
 background loop becomes a Worker over one Work gate, one Model gate serves the whole process, and every gate call
 knows what it serves. It also builds one new kind of work, the release-link finder, on the gate. Decisions from the
 shaping talk of 2026-11-23 (Q1–Q15).

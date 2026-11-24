@@ -11,7 +11,8 @@ it are merged. A note leaves `docs/notes/` once every item it holds is merged.
 
 ## Now
 
-The rework's A2, below: shaped ([`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md)), blueprint next.
+The rework's A2, below: shaped ([`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md)) and planned
+([`plans/a2-work-gate.md`](plans/a2-work-gate.md)); building.
 
 ## The rework
 
@@ -23,7 +24,8 @@ time. A0, the role checks and the baseline, was merged on 2026-11-10
 
 ### A2. Work gate
 
-Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md). Blueprint, drive.
+Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md). Planned:
+[`plans/a2-work-gate.md`](plans/a2-work-gate.md). Drive.
 
 - **The OpenAI adapter** in the Model gate, for the owner's OpenAI credit: normal calls and the Batch API. Which
   roles use it is decided by an evaluation once it is in.
