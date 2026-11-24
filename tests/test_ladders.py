@@ -270,7 +270,7 @@ async def test_a_directory_with_a_call_of_unknown_cost_and_no_reservation_is_not
     work = [t for t in todo(found, judged(P, Q), []) if t.candidate.name == "other"]
 
     def down(role, request):
-        raise ProviderError("the completion has no choices", transient=True)
+        raise ProviderError("APIConnectionError", transient=True, unanswered=True)  # charge unknown
 
     providers = {"openrouter": ScriptedProvider("openrouter", down)}
     await ladders.run(work[:1], providers, out, ceiling=5.0)

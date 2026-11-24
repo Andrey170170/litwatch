@@ -93,7 +93,7 @@ class Journal(Protocol):
         via: str | None = None,
         effort: str | None = None,
     ) -> int: ...
-    async def record(self, call_id: int, usage: Usage) -> None: ...
+    async def record(self, call_id: int, usage: Usage, *, replied: bool = True) -> None: ...
     async def accept(self, call_id: int, output: dict[str, Any]) -> None: ...
     async def reject(
         self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
@@ -105,7 +105,8 @@ class Journal(Protocol):
     async def answered(
         self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
     ) -> None: ...
-    async def gone(self, batch_id: str) -> None: ...
+    async def gone(self, batch_id: str, error: str = ...) -> None: ...
+    async def adopted(self, reference: str, batch_id: str) -> None: ...
     async def ended(self, batch_id: str, keys: list[str]) -> None: ...
     async def unsent(self, call_ids: list[int], error: str) -> None: ...
     async def account_error(self, provider: str, error: str) -> None: ...
@@ -239,12 +240,12 @@ class Gateway:
         request: Request,
         send: Callable[..., Awaitable[Reply]] | None = None,
         opened: Callable[[], Awaitable[None]] | None = None,
-        failed: Callable[[ProviderError], Awaitable[None]] | None = None,
+        failed: Callable[[ProviderError, Usage | None], Awaitable[None]] | None = None,
     ) -> Reply:
         """`complete`, for a caller that checked the nesting itself (`ask`), which keeps a
         journal row per send: `opened` before each attempt is sent, once the ceiling admits
-        it, and `failed` told of each attempt that failed and is tried again. The last one's
-        usage, when it carries one, is the `CallError`'s."""
+        it, and `failed` told of each attempt that failed and is tried again, with what it was
+        charged (`_failure_usage`), as the last one's `CallError` carries it."""
         provider = self._provider(role)
         role, limits = self._limits(role, request)
         for delay in (*self.retry_delays, None):
@@ -264,20 +265,17 @@ class Gateway:
             except TimeoutError as exc:
                 raise CallError("timeout", f"{role.timeout_seconds:g}s") from exc
             except ProviderError as exc:
-                # A provider's answered error is not billed unless it carries its usage; a
-                # timeout, a lost connection or an unknown charge keeps its reservation.
-                if exc.timeout or exc.unanswered:
-                    cost = None
-                else:
-                    cost = exc.usage.cost if exc.usage is not None else 0.0
+                # A timeout, a lost connection, a 5xx or an unknown charge keeps its reservation.
+                usage = _failure_usage(exc, role)
+                cost = usage.cost if usage is not None else None
                 if exc.timeout:
                     raise CallError("timeout", str(exc)) from exc
                 if exc.account:
-                    raise CallError("account", str(exc), exc.usage) from exc
+                    raise CallError("account", str(exc), usage) from exc
                 if delay is None or not exc.transient:
-                    raise CallError("provider", str(exc), exc.usage) from exc
+                    raise CallError("provider", str(exc), usage) from exc
                 if failed is not None:
-                    await failed(exc)
+                    await failed(exc, usage)
                 log.warning("role=%s %s, trying again in %ss", role_name, exc, delay)
             finally:
                 if reserved is not None and self.ceiling is not None:
@@ -420,18 +418,22 @@ class Gateway:
         key = self.request_key(role, request)
         journal = self.journal
         call_id, reply = await self._batched(role_name, role, key, request, paper_id, send)
+        batched = isinstance(reply, Reply)  # its row settled by the batcher, if it has one
 
         async def opened() -> None:
             """Each normal send on a row of its own."""
             nonlocal call_id
             call_id = await self._start(role_name, role, key, paper_id)
 
-        async def failed(exc: ProviderError) -> None:
-            """A send that failed and is tried again, settled with its charge if it says one."""
+        async def failed(exc: ProviderError, usage: Usage | None) -> None:
+            """A send that failed and is tried again, settled with its charge where known, and
+            let go: the next send has a row of its own once admitted."""
+            nonlocal call_id
             if journal and call_id is not None:
-                if exc.usage is not None:
-                    await journal.record(call_id, exc.usage)
+                if usage is not None:
+                    await journal.record(call_id, usage, replied=False)
                 await journal.reject(call_id, f"provider: {exc}")
+            call_id = None
 
         try:
             if isinstance(reply, ProviderError):  # the account kept the batch from answering
@@ -441,10 +443,12 @@ class Gateway:
                     reply = await self._complete(role_name, role, request, send, opened, failed)
                 except CallError as exc:
                     if journal and call_id is not None and exc.usage is not None:
-                        await journal.record(call_id, exc.usage)  # the last attempt's charge
+                        # The last attempt's charge; a failure, not a reply.
+                        await journal.record(call_id, exc.usage, replied=False)
                     raise
-            reply.usage.source_call_id = call_id
-            if journal:
+            if call_id is not None:  # else shared: the usage names the row it was answered on
+                reply.usage.source_call_id = call_id
+            if journal and call_id is not None and not batched:
                 await journal.record(call_id, reply.usage)
             log.info("inference role=%s usage=%s", role_name, reply.usage.model_dump_json())
             if reply.stop == Stop.REFUSED:
@@ -482,7 +486,7 @@ class Gateway:
                     call_id, str(exc), kept, account=role.provider if normal else None
                 )
             raise
-        if journal:
+        if journal and call_id is not None:
             await journal.accept(call_id, value.model_dump(mode="json"))
         return Answer(value, reply.usage, role.label)
 
@@ -505,11 +509,12 @@ class Gateway:
         paper_id: str | None,
         send: Callable[..., Awaitable[Reply]] | None,
     ) -> tuple[int | None, Answered]:
-        """A batch's reply and the journal row it settles, or the account error a batch gave
-        the call; (None, None) to send it as a normal call. The batcher settles the row of every
-        other answer before it gives it, so a normal call is on rows of its own. A key a dead run
-        left in an open batch waits on that batch, on its row, past the deadline too (the batch
-        is cancelled then). A fallback is batched as the role's model is."""
+        """A batch's reply and the journal row it was answered on, its charge settled by the
+        batcher (None for a reply shared with an identical call, journalled on that call's row
+        alone, as a reused answer is), or the account error a batch gave the call; (None, None)
+        to send it as a normal call, on rows of its own. A key a dead run left in an open batch
+        waits on that batch, on its row, past the deadline too (the batch is cancelled then). A
+        fallback is batched as the role's model is."""
         batcher = self.batchers.get(role.provider) if send is None else None
         if batcher is None:
             return None, None
@@ -529,9 +534,7 @@ class Gateway:
             return None, None
         if not isinstance(reply, Reply):
             return None, reply
-        if reply.usage.reused:  # shared with an identical call: a row of its own
-            return await self._start(role_name, role, key, paper_id), reply
-        return call_id, _of_role(reply, role)
+        return None if reply.usage.reused else call_id, _of_role(reply, role)
 
 
 def _max_output(role: RoleConfig, request: Request) -> int:
@@ -541,9 +544,20 @@ def _max_output(role: RoleConfig, request: Request) -> int:
 
 
 def _of_role(reply: Reply, role: RoleConfig) -> Reply:
-    """A batch's reply knows its model, not the effort it was asked at."""
-    reply.usage.effort = role.effort
+    """A batch's reply as the role asked it: its model as configured and its effort, which the
+    reply does not know."""
+    reply.usage.model, reply.usage.effort = role.model, role.effort
     return reply
+
+
+def _failure_usage(exc: ProviderError, role: RoleConfig) -> Usage | None:
+    """What a failed attempt was charged: the usage it carries; nothing, for one the provider
+    rejected (a 4xx); None when unknown (a timeout, a lost connection, a 5xx)."""
+    if exc.usage is not None:
+        return exc.usage
+    if exc.timeout or exc.unanswered:
+        return None
+    return Usage(model=role.model, via=role.provider, effort=role.effort, cost=0.0)
 
 
 # Each provider's key, read with `secret` (the variable or its `_FILE`).

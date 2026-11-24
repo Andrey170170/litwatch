@@ -60,10 +60,13 @@ Providers: `anthropic` (prompt caching, cost from a price table), `openrouter`, 
 owner's credit: the Responses API with a strict schema, the system prompt cached, cost from a price table; no role is
 on it by default). Its explicit cache controls need GPT-5.6 or later, and the price table lists the GPT-6 and GPT-6.x
 models only; a normal call asks for the default service tier, and a reply served at any other tier, or by a model
-without a listed price, is journalled with its charge unknown. Each send has a journal row of its own, opened once the
-ceiling admits it and before it goes, with the model and effort configured: an attempt tried again is settled with its
-charge (an OpenAI response that failed carries one), or none when unknown (its reply was lost), and the retry, or the
-normal call after a batch that did not answer, gets a new row. A call that sends nothing has none.
+without a listed price, is journalled with its charge unknown; a reply is priced as the model the response names,
+and journalled as the model configured. Each send has a journal row of its own, opened once the ceiling admits it and
+before it goes, with the model and effort configured: an attempt tried again is settled with its charge (an OpenAI
+response that failed carries one; a request the provider rejected, a 4xx, is charged nothing), or none when unknown
+(a timeout, a lost connection, a 5xx, which keeps its reservation under a ceiling), and the retry, or the normal call
+after a batch that did not answer, gets a new row. A call that sends nothing has none, nor does one given a reply
+shared with an identical call. A failure is accounted for, never counted as the provider's reply.
 
 A provider's 401, 402 or 403 is an **`account` error** (a key revoked, credits used up, access withdrawn), in normal
 and batched calls alike: never retried, never counted against a paper, and shown on the provider's component of the
@@ -113,8 +116,8 @@ service's workers, the CLI's other commands and a nightly started outside that w
 - **Nothing is paid twice once a batch is recorded.** A batched call's journal row is written before the batch is
   sent and given the batch id once the provider accepts it; its request key is its id in the batch. A run that asks a
   key already in an open batch waits on that batch, so a run started again after a crash attaches to its batches
-  instead of resubmitting. A call whose batch was sent but whose id was not recorded (the process died in between) is
-  sent again: that one batch may be paid twice.
+  instead of resubmitting. A call whose batch was sent with neither its id nor a reference to find it by recorded (the
+  process died in between) is sent again: that one batch may be paid twice.
 - **The deadline.** `[schedule] deadline` (07:30 in the schedule's zone) is the nightly's: the first after the
   schedule's nightly time that the run belongs to, kept by a run started again the same night. At the deadline the
   run sends no more batches (calls held but not yet sent go as normal calls), cancels its open batches and waits for them to end (cancelling takes minutes; requests in flight may still be
@@ -135,13 +138,15 @@ service's workers, the CLI's other commands and a nightly started outside that w
 - **Providers.** Batching is a provider capability (submit, poll, cancel, results with usage per call). `anthropic`
   and `openai` (the Batch API, also at half price) have it; a role on a provider without it is sent as normal calls in
   any job. An OpenAI batch holds one model's requests, so a step whose calls go to two models is two batches. Its
-  input file is uploaded first and its calls' rows given the file's reference (`openai-file:<file id>`) before the
-  batch is created. A creation whose outcome is unknown (it timed out, lost its connection or failed with a 5xx) is
-  looked for, a few times over about two minutes: found, it is the batch; not found by then, its rows are settled and
-  its calls go as normal calls, with a warning naming the batch, at the risk of paying for both. A creation the
-  provider rejected (a 4xx) made no batch: its calls go as normal calls at once. An OpenAI batch is found by its input
-  file; a Message Batch carries nothing of ours to find it by, so Anthropic's is not looked for: its calls go as
-  normal calls at once, with the warning. A batch that ends without answering some of a dead run's calls (one that
+  input file is uploaded first; past the deadline then, no batch is made and its calls go as normal calls, else its
+  calls' rows are given the file's reference (`staged:<file id>`) just before the batch is created. A creation whose
+  outcome is unknown (it timed out, lost its connection or failed with a 5xx), and a dead run's rows still on a
+  reference, are looked for, a few times within two minutes: found, the batch's id goes on the rows before it is
+  polled; not found by then, the rows are settled and the calls go as normal calls, with a warning naming the batch,
+  at the risk of paying for both; refused for the account, the calls fail on it and the rows wait for a later run. A
+  creation the provider rejected (a 4xx, or a connection that never opened) made no batch: its calls go as normal
+  calls at once. An OpenAI batch is found by its input file; a Message Batch carries nothing of ours to find it by,
+  so Anthropic's is not looked for: its calls go as normal calls at once, with the warning. A batch that ends without answering some of a dead run's calls (one that
   failed has no answers at all) settles them as unanswered. OpenRouter's calls are not batched: its batch API has no
   Decisions endpoint and reports cost per batch, not per call.
 

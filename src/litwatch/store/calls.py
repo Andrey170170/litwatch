@@ -126,14 +126,23 @@ class CallJournal:
             (RESULTS_KEPT,),
         )
 
-    async def gone(self, batch_id: str) -> None:
+    async def gone(self, batch_id: str, error: str = "provider: the batch is gone") -> None:
         """Batch `batch_id` is gone from its provider (deleted, or the key is another
-        workspace's): it never answers, so its calls not yet settled are settled with that."""
+        workspace's), or a staged reference's batch was not found: it never answers, so its
+        calls not yet settled are settled with `error`."""
         await self._write(
             "batch gone",
-            "UPDATE inference_calls SET error = 'provider: the batch is gone' "
+            "UPDATE inference_calls SET error = %s "
             "WHERE batch_id = %s AND output IS NULL AND error IS NULL AND responded_at IS NULL",
-            (batch_id,),
+            (error, batch_id),
+        )
+
+    async def adopted(self, reference: str, batch_id: str) -> None:
+        """The batch staged as `reference` was found: its calls' rows name its id."""
+        await self._write(
+            "batch adopted",
+            "UPDATE inference_calls SET batch_id = %s WHERE batch_id = %s",
+            (batch_id, reference),
         )
 
     async def ended(self, batch_id: str, keys: list[str]) -> None:
@@ -190,25 +199,28 @@ class CallJournal:
                 "batch": batch_id,
                 "key": key,
             }
-            | self._reply(usage),
+            | self._reply(usage, replied=error is None),
         )
         await self._retally(row)
 
-    async def record(self, call_id: int, usage: Usage) -> None:
-        """A reply came for the call: its accounting, whether or not the answer is usable, and
-        that the provider replied."""
+    async def record(self, call_id: int, usage: Usage, *, replied: bool = True) -> None:
+        """The call's accounting, whether or not the answer is usable; with `replied` (an answer,
+        a refusal, an invalid one), that the provider replied. A failure the provider billed, or
+        a rejection it billed nothing for, is accounted for and not a reply."""
         row = await self._write(
             "record",
             "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
             "responded_at = clock_timestamp() WHERE id = %(id)s RETURNING run_id, responded_at), "
             f"{_REPLIED} SELECT run_id FROM c",
-            {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id} | self._reply(usage),
+            {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id}
+            | self._reply(usage, replied=replied),
         )
         await self._retally(row)
 
-    def _reply(self, usage: Usage) -> dict[str, Any]:
-        """`_REPLIED`'s parameters: a reply shared from another call is not the provider's."""
-        own = self.observes and usage.via is not None and not usage.reused
+    def _reply(self, usage: Usage, *, replied: bool) -> dict[str, Any]:
+        """`_REPLIED`'s parameters: a reply shared from another call is not the provider's, nor
+        is an error."""
+        own = self.observes and replied and usage.via is not None and not usage.reused
         return {"via": usage.via, "own": own}
 
     async def account_error(self, provider: str, error: str) -> None:
@@ -384,8 +396,8 @@ async def observations(unit: ReadUnit) -> dict[str, dict[str, Any]]:
 async def outcomes(unit: ReadUnit, run: dict[str, Any]) -> dict[str, dict[str, int]]:
     """Per provider, the run's calls that failed without an answer (provider errors and
     timeouts), and the replies it sent while the run went on, whichever run's calls they
-    settled (a dead run's batch, read in this one; reused replies and evaluation runs' calls, a
-    replay job's included, left out)."""
+    settled (a dead run's batch, read in this one; reused replies, errors the provider billed or
+    rejected unbilled, and evaluation runs' calls, a replay job's included, left out)."""
     rows = await (
         await unit.execute(
             "SELECT provider, sum(failed)::int AS failed, sum(replied)::int AS replied FROM ("
@@ -394,6 +406,7 @@ async def outcomes(unit: ReadUnit, run: dict[str, Any]) -> dict[str, dict[str, i
             "UNION ALL SELECT usage->>'via', 0, 1 FROM inference_calls "
             "WHERE responded_at BETWEEN %(since)s AND %(until)s "
             "AND NOT coalesce((usage->>'reused')::boolean, false) "
+            "AND NOT coalesce(error LIKE 'provider%%' OR error LIKE 'account%%', false) "
             "AND run_id NOT IN (SELECT id FROM runs WHERE kind = %(eval)s)) seen "
             "WHERE provider IS NOT NULL GROUP BY provider",
             {

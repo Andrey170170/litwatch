@@ -72,7 +72,7 @@ def openai_body(
     text="{}",
     status="completed",
     *,
-    model="gpt-6.2-sol",
+    model="gpt-6.2-sol-2026-11-01",
     tier="default",
     incomplete=None,
     refusal=None,
@@ -83,7 +83,7 @@ def openai_body(
     output=200,
 ):
     """A Responses API response as the API sends it (a batch's output line carries this body),
-    from the snapshot of `model` that served it."""
+    from `model`, the id as the API names it."""
     content = [{"type": "output_text", "text": text, "annotations": []}]
     if refusal is not None:
         content = [{"type": "refusal", "refusal": refusal}]
@@ -91,7 +91,7 @@ def openai_body(
         "id": "resp_1",
         "object": "response",
         "created_at": 1.0,
-        "model": f"{model}-2026-11-01",
+        "model": model,
         "service_tier": tier,
         "status": status,
         "error": error,
@@ -127,7 +127,7 @@ def openai_response(*args, **kwargs):
 
 
 def openai_answer(body):
-    """A batch's answer to a request: a good one, from the request's own model."""
+    """A batch's answer to a request: a good one, from the model the request named, as named."""
     return openai_body('{"yes": true, "why": "it says so"}', model=body["model"], tier=None)
 
 
@@ -138,11 +138,16 @@ class OpenAIBatches:
     one it never ran (expired). Each of `creating`, in turn, is how a creation fails: whether
     the batch is made, and the error raised then (`"hang"`: it never returns). The list is the
     SDK's own, its pages served `page` at a time, newest first, through a mock transport:
-    while `unlisted` it cannot be read, and the next `misses` listings miss the newest batch.
-    `listings` counts them; `read` lists the files whose content was read."""
+    while `unlisted` it cannot be read, while `listed` is an HTTP status it answers with it, and
+    while `hanging` it never answers; the next `misses` listings miss the newest batch.
+    `listings` counts them; `read` lists the files whose content was read; `uploaded_then` runs
+    once a file is uploaded."""
 
     def __init__(self, respond=openai_answer, *, page: int = 100):
         self.respond, self.page, self.misses, self.unlisted = respond, page, 0, False
+        self.listed: int | None = None
+        self.hanging = False
+        self.uploaded_then: Any = None
         self.creating: list[tuple[bool, Any]] = []
         self.listings = 0
         self._hiding: str | None = None
@@ -167,6 +172,8 @@ class OpenAIBatches:
         name, data, _ = file
         file_id = f"file-{len(self.uploaded) + 1}"
         self.uploaded[file_id] = [json.loads(line) for line in data.decode().split("\n")]
+        if self.uploaded_then is not None:
+            self.uploaded_then()
         return SimpleNamespace(id=file_id)
 
     async def _create(self, *, input_file_id, endpoint, completion_window):
@@ -178,7 +185,7 @@ class OpenAIBatches:
                 id=batch_id,
                 status="in_progress",
                 endpoint=endpoint,
-                model=f"{model}-2026-11-01",
+                model=model,
                 input_file_id=input_file_id,
                 output_file_id=None,
                 error_file_id=None,
@@ -190,11 +197,16 @@ class OpenAIBatches:
             raise error
         return self.made[batch_id]
 
-    def _serve(self, request: httpx2.Request) -> httpx2.Response:
+    async def _serve(self, request: httpx2.Request) -> httpx2.Response:
         """`GET /batches`, as the API pages it."""
         assert request.method == "GET" and request.url.path == "/v1/batches"
+        if self.hanging:
+            await asyncio.Event().wait()
         if self.unlisted:
             raise httpx2.ConnectError("unlisted", request=request)
+        if self.listed is not None:
+            error = {"message": "no", "type": "invalid_request_error", "code": None}
+            return httpx2.Response(self.listed, json={"error": error})
         after, limit = request.url.params.get("after"), int(request.url.params["limit"])
         newest = list(reversed(self.made.values()))
         if after is None:
@@ -308,6 +320,8 @@ class BatchingProvider(ScriptedProvider):
     answers only the keys `end` names; `unanswered(request)` picks requests it never answers.
     Normal calls are `calls`; batched ones `batched`."""
 
+    find = None  # finding a batch is the OpenAI fake's (`OpenAIBatches`)
+
     def __init__(self, name: str, respond, *, hold: bool = False, one_model: bool = False) -> None:
         super().__init__(name, respond)
         self.hold, self.one_model = hold, one_model
@@ -322,6 +336,8 @@ class BatchingProvider(ScriptedProvider):
         return [[key for key, _, _ in b["requests"]] for b in self.batches.values()]
 
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]], staged=None) -> str:
+        if staged is not None:
+            await staged(None)
         batch_id = f"msgbatch_{len(self.batches) + 1}"
         replies = {}
         for key, role, request in requests:
@@ -343,9 +359,6 @@ class BatchingProvider(ScriptedProvider):
         if batch_id in self.cancelled:
             b["replies"] = {k: r for k, r in b["replies"].items() if k in (answered or set())}
         b["status"] = "ended"
-
-    async def find(self, reference: str | None) -> None:
-        return None
 
     async def status(self, batch_id: str) -> str:
         return self.batches[batch_id]["status"] if batch_id in self.batches else "gone"
@@ -369,7 +382,12 @@ def unavailable(*args, **kwargs):
 
 
 # The batcher's timings in tests.
-FAST: dict[str, Any] = {"quiet": 0.02, "poll": 0.01, "find_delays": (0.01, 0.01, 0.01)}
+FAST: dict[str, Any] = {
+    "quiet": 0.02,
+    "poll": 0.01,
+    "find_seconds": 1.0,
+    "find_delays": (0.01, 0.01, 0.01),
+}
 
 
 def status_error(sdk, code: int, body: dict | None = None) -> Exception:

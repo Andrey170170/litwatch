@@ -93,17 +93,30 @@ def _account_errors() -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _creating() -> Generator[None]:
-    """A batch's creation that timed out, lost its connection once sent, or failed on the
-    server may have made the batch (`unanswered`); any other error made none."""
+def _errors() -> Generator[None]:
+    """The SDK's failures as provider errors, for a call or a batch's creation. One that timed
+    out, lost its connection once sent, or failed on the server (any 5xx) may have run, billed
+    or not (`timeout`, `unanswered`); one whose connection never opened sent nothing."""
     try:
         yield
-    except (anthropic.APIConnectionError, anthropic.APIStatusError) as exc:
-        if isinstance(exc, anthropic.APIStatusError) and exc.status_code < 500:
-            raise
-        if isinstance(exc.__cause__, httpx2.ConnectTimeout):  # never sent
-            raise
-        raise ProviderError(f"{type(exc).__name__} creating a batch", unanswered=True) from exc
+    except anthropic.APITimeoutError as exc:
+        if isinstance(exc.__cause__, httpx2.ConnectTimeout):
+            # The connection never opened, so nothing was sent: worth another attempt.
+            raise ProviderError("APITimeoutError while connecting", transient=True) from exc
+        raise ProviderError(type(exc).__name__, timeout=True) from exc
+    except anthropic.APIConnectionError as exc:
+        if isinstance(exc.__cause__, httpx2.ConnectError):
+            raise ProviderError("APIConnectionError while connecting", transient=True) from exc
+        raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
+    except anthropic.RateLimitError as exc:
+        raise ProviderError(type(exc).__name__, transient=True) from exc
+    except anthropic.APIStatusError as exc:
+        if exc.status_code >= 500:
+            raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
+        account = exc.status_code in ACCOUNT_STATUSES
+        raise ProviderError(f"{type(exc).__name__}: {exc}", account=account) from exc
+    except anthropic.APIError as exc:
+        raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
 
 
 class AnthropicProvider:
@@ -122,28 +135,17 @@ class AnthropicProvider:
         return ()
 
     async def complete(self, role: RoleConfig, request: Request) -> Reply:
-        try:
+        with _errors():
             message = await self.client.messages.create(**messages_request(role, request))
-        except anthropic.APITimeoutError as exc:
-            if isinstance(exc.__cause__, httpx2.ConnectTimeout):
-                # The connection never opened, so nothing was sent: worth another attempt.
-                raise ProviderError("APITimeoutError while connecting", transient=True) from exc
-            raise ProviderError(type(exc).__name__, timeout=True) from exc
-        except anthropic.APIConnectionError as exc:  # it may have been sent: billed or not
-            raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
-        except (anthropic.InternalServerError, anthropic.RateLimitError) as exc:
-            raise ProviderError(type(exc).__name__, transient=True) from exc
-        except anthropic.APIError as exc:
-            account = getattr(exc, "status_code", None) in ACCOUNT_STATUSES
-            raise ProviderError(f"{type(exc).__name__}: {exc}", account=account) from exc
         return reply_of(message, role)
 
     # Message Batches (models.md, batches): `custom_id` is the gateway's request key.
 
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]], staged: Staged) -> str:
         """The batch's id. Created in one step, it has no reference before its id: `staged` is
-        not called (`_creating`)."""
-        with _creating(), _account_errors():
+        told none. A creation may have made the batch as a call may have run (`_errors`)."""
+        await staged(None)
+        with _errors():
             batch = await self.client.messages.batches.create(
                 requests=[
                     {"custom_id": key, "params": messages_request(role, request)}
