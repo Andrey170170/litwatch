@@ -140,9 +140,10 @@ service's workers, the CLI's other commands and a nightly started outside that w
   looked for, a few times over about two minutes: found, it is the batch; not found by then, its rows are settled and
   its calls go as normal calls, with a warning naming the batch, at the risk of paying for both. A creation the
   provider rejected (a 4xx) made no batch: its calls go as normal calls at once. An OpenAI batch is found by its input
-  file; a Message Batch carries nothing of ours to find it by, so Anthropic's is never found. A batch that ends
-  without answering some of a dead run's calls (one that failed has no answers at all) settles them as unanswered. OpenRouter's
-  calls are not batched: its batch API has no Decisions endpoint and reports cost per batch, not per call.
+  file; a Message Batch carries nothing of ours to find it by, so Anthropic's is not looked for: its calls go as
+  normal calls at once, with the warning. A batch that ends without answering some of a dead run's calls (one that
+  failed has no answers at all) settles them as unanswered. OpenRouter's calls are not batched: its batch API has no
+  Decisions endpoint and reports cost per batch, not per call.
 
 ## Lab diversity
 

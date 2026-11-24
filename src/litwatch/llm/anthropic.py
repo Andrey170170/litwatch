@@ -109,6 +109,10 @@ def _creating() -> Generator[None]:
 class AnthropicProvider:
     name = "anthropic"
     one_model = False  # a Message Batch may mix models
+    # A Message Batch carries nothing of ours to find it by (no metadata, no idempotency key,
+    # its requests readable only once it ends): a creation whose outcome is unknown is not
+    # looked for, its calls sent again as normal calls at once.
+    find = None
 
     def __init__(self, api_key: str | None = None, client: Any = None) -> None:
         # The gateway owns retries; the SDK's own would multiply them.
@@ -147,12 +151,6 @@ class AnthropicProvider:
                 ]
             )
         return batch.id
-
-    async def find(self, reference: str | None) -> None:
-        """Never found: a Message Batch carries nothing of ours to know it by (no metadata, no
-        idempotency key, its requests readable only once it ends), so a creation whose outcome
-        is unknown is sent again as normal calls."""
-        return None
 
     async def status(self, batch_id: str) -> str:
         """`in_progress`, `canceling` or `ended`; `gone` when the API no longer has it (deleted,

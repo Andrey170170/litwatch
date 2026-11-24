@@ -11,8 +11,9 @@ may still answer: the journal rows its requests are on are `unsettled`, left for
 account for.
 
 A submission whose outcome is unknown (a timeout, a lost connection, a 5xx) is looked for a
-while (`FIND_DELAYS`): found, it is the batch; not found, its calls go as normal calls, at the
-risk of paying for both. One the provider rejected (any other error) made no batch."""
+while (`FIND_DELAYS`), by a provider that can find one: found, it is the batch; not found, its
+calls go as normal calls, at the risk of paying for both. One the provider rejected (any other
+error) made no batch."""
 
 from __future__ import annotations
 
@@ -61,15 +62,15 @@ class BatchProvider(Protocol):
     `cancel` and `results` also take when the batch is created in more than one step; it raises
     `unanswered` (or `timeout`) when the creation's outcome is unknown. `find` gives the id of
     the batch a submission made, by its reference (None when it has none), or None when not
-    found (yet)."""
+    found (yet); a provider that cannot find one has `find = None`."""
 
     name: str
     one_model: bool
+    find: Callable[[str | None], Coroutine[None, None, str | None]] | None
 
     async def submit(
         self, requests: list[tuple[str, RoleConfig, Request]], staged: Staged
     ) -> str: ...
-    async def find(self, reference: str | None) -> str | None: ...
     async def status(self, batch_id: str) -> str: ...  # in_progress, canceling, ended or gone
     async def cancel(self, batch_id: str) -> None: ...
     async def results(self, batch_id: str) -> dict[str, Answered]: ...
@@ -342,11 +343,13 @@ class Batcher:
 
     async def _find(self, reference: str | None) -> str | None:
         """The batch a submission whose outcome is unknown made, looked for over `find_delays`;
-        None when not found by then."""
+        None when not found by then, at once for a provider that cannot find one."""
+        if (find := self.provider.find) is None:
+            return None
         for delay in self.find_delays:
             await asyncio.sleep(delay)
             try:
-                if (batch_id := await self._bounded(self.provider.find(reference))) is not None:
+                if (batch_id := await self._bounded(find(reference))) is not None:
                     return batch_id
             except Exception as exc:
                 log.warning("looking for batch %s failed: %r", reference, exc)

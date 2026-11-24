@@ -1447,16 +1447,17 @@ async def test_an_anthropic_batch_that_may_not_have_been_made_sends_its_calls_no
     client.messages.batches = Unmade(status_error(anthropic, code))
     journal = CallJournal(db, await started(conn, "nightly"))
     providers: dict[str, Provider] = {"anthropic": AnthropicProvider(client=client)}
-    options = FAST | {"now": Clock()}
+    # A window far longer than the test may take: Anthropic cannot find a batch, so never waits.
+    options = FAST | {"now": Clock(), "find_delays": (60.0,)}
     gw = Gateway(Models(brief=haiku), providers, journal, batch_options=options)
     gw.batch_until(DEADLINE)
-    assert (await gw.ask("brief", ask(1))).value.yes
+    assert (await asyncio.wait_for(gw.ask("brief", ask(1)), 5)).value.yes
     assert (client.messages.batches.created, len(client.sent)) == (1, 1)
     batched, normal = await calls(conn)
     assert batched["error"].startswith(f"provider: the batch {made}")
     assert (normal["batch_id"], normal["answered"]) == (None, True)
-    # Never found (a Message Batch has nothing of ours to know it by): told once the window ends.
-    assert ("was not found" in caplog.text) == (code != 400)
+    # Never looked for (a Message Batch has nothing of ours to know it by), and told so.
+    assert ("may have been made and was not found" in caplog.text) == (code != 400)
     await gw.close()
 
 
