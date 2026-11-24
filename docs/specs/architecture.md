@@ -70,14 +70,16 @@ One gate per shared resource. Nothing reaches the resource except through its ga
 
 - **Gates are leaves.** No gate calls another, with one exception: any gate may use the Database gate for its own
   bookkeeping (the Work gate's queue, the Model gate's call log and budgets, cross-process limiters), in short units
-  of its own.
+  of its own. A submission is not a gate call: it is a row written through the work Repository in the submitter's
+  own unit, so work commits with the data that calls for it, as an event does.
 - **Slow work outside, saving inside.** Fetching, parsing and model calls happen outside Database-gate units; a unit
   only reads or saves.
 - **Coordination across processes goes through Postgres,** not Redis or files: arXiv pacing, shared by intake and
   the download worker, is the first case.
-- **Every gate call knows what it serves:** a work item, or an API request. The Work gate sets the work item in a
+- **Every gate call knows what it serves:** a work item, an API request, or a named system attribution for startup
+  work and the gates' own bookkeeping. The Work gate sets the work item in a
   context variable when a worker takes one; an API request sets its own attribution for everything it does, reads
-  included. A request is not a work item: it is attributed, not admitted. A gate call with neither, or a gate
+  included. A request is not a work item: it is attributed, not admitted. A gate call with none of these, or a gate
   entered while a Database-gate unit is open, raises in tests and development, and in production is logged as an
   error and carries on. The nesting check arrives with A1, the attribution check with A2.
 
@@ -139,8 +141,8 @@ merged; [`../backlog.md`](../backlog.md) lists them under each milestone.
 |---|---|---|---|
 | **A0** | Rules and baseline | this spec merged; the role checks in CI with today's violations listed; what production no longer uses found, so nothing dead is migrated | blueprint |
 | **A1** | Database gate | one pool; short units, snapshot reads; locks named, ordered and owned by the gate; the runtime nesting check; settling a paper cheap and done once per paper | shape → blueprint → drive |
-| **A2** | Work gate | every loop is a Worker taking items from the Work gate; one work record per item; one Model gate per process, with the OpenAI adapter; work and request attribution in context, with its runtime check; the CLI submits and waits. Behaviour otherwise unchanged | shape → blueprint → drive |
-| **A3** | Lanes and the Orchestrator | no run lock; the nightly submits child work; the owner's work runs during it; taxonomy edits commit, then re-settle; deliveries are work items | shape → blueprint → drive |
+| **A2** | Work gate | every loop is a Worker taking items from the Work gate; one work record per item; one Model gate per process, with the OpenAI adapter; deliveries are work items; work and request attribution in context, with its runtime check; the CLI submits and waits. Behaviour otherwise unchanged, but for one new kind of work, the release-link finder | shape → blueprint → drive |
+| **A3** | Lanes and the Orchestrator | no run lock; the nightly submits child work; the owner's work runs during it; taxonomy edits commit, then re-settle | shape → blueprint → drive |
 | **A4** | Telemetry and the activity log | gate events on work records; normal and debug levels; the Jobs page as the log of all work | shape (with sketches) → blueprint → drive |
 | **A5** | Fetch, Compute and Files gates | all HTTP, blocking work and paper files behind their gates; the Postgres limiter; the bypass checks with empty lists | blueprint each; shape for Files |
 | **A6** | The archive folded in | catalog and downloads in litwatch's Postgres on the ParadeDB image; the download worker a second process from the same image; search as good as today's; everything in compose; one cutover night | shape → blueprint → drive, with a switch plan |

@@ -95,6 +95,11 @@ A topic's icon on a paper, saying which followed topics it belongs to.
 **Facet**:
 A fact about a paper that is not a judgement: its kind of contribution, and whether it released code or weights.
 
+**Release link**:
+A link to a paper's released code or weights, with its access state: public, gated (behind a request form), placeholder (a repository with only
+a README) or missing (the paper gives it, and it leads nowhere).
+_Avoid_: code link, repo link
+
 **Effective Fit**, **effective grade**:
 The Fit and grade every page, export and integration uses: the owner's word on Fit where there is one, otherwise the
 verdict's, with the grade derived from that Fit and the current Weight.
@@ -176,6 +181,11 @@ passes, integration deliveries and downloads are all work items. Work items and 
 rework's A2 ([specs/architecture.md](docs/specs/architecture.md)); from A4 the Jobs page shows every work item, not
 only jobs.
 _Avoid_: task, background job
+
+**Lease**:
+A worker's hold on a work item, renewed while it works. An item whose lease lapses is taken back and tried again,
+and no write made under the lost lease commits.
+_Avoid_: claim, presence
 
 ## The Notion export
 
