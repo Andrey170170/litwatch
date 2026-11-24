@@ -579,6 +579,11 @@ def test_fallbacks_may_share_their_roles_lab_but_judge_and_check_share_none():
             MUSE,
         ),
         (OPUS, MUSE.model_copy(update={"fallbacks": (SONNET,)})),
+        # OpenAI's model is OpenAI's lab whether reached directly or through OpenRouter.
+        (
+            SOL,
+            MUSE.model_copy(update={"fallbacks": (MUSE.model_copy(update={"model": "openai/x"}),)}),
+        ),
     ):
         with pytest.raises(ValueError, match="share no lab"):
             Models(judge=judge, check=check)

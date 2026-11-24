@@ -23,6 +23,7 @@ from litwatch.gates.database import identity_of
 from litwatch.jobs import reruns, worker
 from litwatch.llm import CallError, Gateway, Request, Usage, prices
 from litwatch.llm import ceiling as ceilings
+from litwatch.llm.openai import OpenAIProvider
 from litwatch.llm.openrouter import OpenRouterProvider
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
@@ -34,7 +35,7 @@ from tests import settling
 from tests.briefs import BODY, analysed
 from tests.conftest import AGENTS, FAITH, TREE, AppClient, paper, started
 from tests.deep_service import DONE, make
-from tests.fakes import SdkClient, openrouter_completion
+from tests.fakes import SdkClient, openai_response, openrouter_completion
 from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.priced import AFTERNOON, CONFIG, COST, ZONE, Priced, charged, work_out
 from tests.scripted import LISTS, ROLES, refusal
@@ -430,6 +431,26 @@ async def test_an_openrouter_call_under_a_ceiling_carries_its_max_price_and_a_ca
     with pytest.raises(CallError) as refused:
         await gateway.ask("check", Request(system="s", user="v", output=Output))
     assert refused.value.kind == "unpriced" and len(sdk.sent) == 1
+
+
+async def test_an_openai_call_under_a_ceiling_reserves_its_listed_bound_and_is_capped():
+    from litwatch.grading import Output  # noqa: PLC0415
+
+    sdk = SdkClient(openai_response(json.dumps({"reason": "r", "fit": "related"})))
+    role = RoleConfig(provider="openai", model="gpt-6.2-sol")
+    gateway = Gateway(Models(writer=role), {"openai": OpenAIProvider(client=sdk)})
+    gateway.ceiling = ceilings.Ceiling(1.0, {})  # no charged history needed: its prices are listed
+    request = Request(system="s", user="u", output=Output)
+    tokens_in = ceilings.input_tokens(request)
+    # Every input token at the cache-write price ($2.50), the cap's output at $10.
+    bound = ceilings.listed_bound(role, tokens_in)
+    assert bound == ceilings.Bound(2.5e-6, 1e-5, 16000)
+    answer = await gateway.ask("writer", request)
+    (sent,) = sdk.sent
+    assert sent["max_output_tokens"] == 16000  # the role sets no cap: the bound's
+    assert gateway.ceiling.spent == pytest.approx(answer.usage.cost)
+    unlisted = RoleConfig(provider="openai", model="gpt-next")
+    assert ceilings.listed_bound(unlisted, tokens_in) is None  # not sent under a ceiling
 
 
 async def test_a_charge_an_error_reports_counts_against_the_ceiling():
