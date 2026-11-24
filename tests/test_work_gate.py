@@ -498,17 +498,19 @@ async def test_a_unit_holding_an_item_keeps_it_from_a_takeover(conn: Session, db
                 await finish.wait()
 
     unit = asyncio.create_task(writing())
-    async with asyncio.timeout(WAIT):
-        await inside.wait()
-    await until(lambda: passed(conn, held.lease_until), "the lease lapsed")
-    # Not taken back while the unit holds it, and the queue goes on meanwhile.
-    async with asyncio.timeout(WAIT):
-        assert await gate.take_back(["fulltext", "deep"]) == []
-    started = await take(gate, ["fulltext", "deep"])
-    assert started is not None and started.kind == "deep"
-    finish.set()
-    async with asyncio.timeout(WAIT):
-        await unit
+    try:
+        async with asyncio.timeout(WAIT):
+            await inside.wait()
+        await until(lambda: passed(conn, held.lease_until), "the lease lapsed")
+        # Not taken back while the unit holds it, and the queue goes on meanwhile.
+        async with asyncio.timeout(WAIT):
+            assert await gate.take_back(["fulltext", "deep"]) == []
+        started = await take(gate, ["fulltext", "deep"])
+        assert started is not None and started.kind == "deep"
+    finally:  # a failure here must not leave the unit open while the schema is dropped
+        finish.set()
+        async with asyncio.timeout(WAIT):
+            await unit
     assert [t.id for t in await gate.take_back(["fulltext"])] == [held.id]
     assert await probed(conn) == [1]  # the unit's write, under its lease, committed
 
@@ -745,14 +747,14 @@ async def test_a_heartbeat_kept_waiting_past_the_lease_cancels_and_revives_nothi
             await other.execute("SELECT 1 FROM work_items WHERE id = %s FOR SHARE", (held.id,))
             async with asyncio.timeout(WAIT):
                 await cancelled.wait()
-        row = await (
-            await conn.execute(
-                "SELECT lease_token = %s AND lease_until > %s AS revived FROM work_items "
-                "WHERE id = %s",
-                (held.lease_token, held.lease_until, held.id),
-            )
-        ).fetchone()
-        assert not row["revived"]
+    # Read once the gate has stopped, which waits for the cut-off renewal to end.
+    row = await (
+        await conn.execute(
+            "SELECT lease_token = %s AND lease_until > %s AS revived FROM work_items WHERE id = %s",
+            (held.lease_token, held.lease_until, held.id),
+        )
+    ).fetchone()
+    assert not row["revived"]
 
 
 async def test_a_lost_pooled_connection_leaves_the_item_to_be_tried_again(conn: Session, db):

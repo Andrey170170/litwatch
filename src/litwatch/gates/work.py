@@ -294,7 +294,11 @@ class WorkGate:
             await self._settle(item, handler)
         finally:
             beat.cancel()
-            await asyncio.wait({beat})
+            try:
+                await asyncio.wait({beat})
+            except asyncio.CancelledError:  # its renewal still ends before `run` returns
+                await asyncio.wait({beat})
+                raise
 
     async def _handle(self, item: WorkItem, worker: Worker) -> Result | None:
         """The Worker, in the item's own task, under its work context and attribution."""
