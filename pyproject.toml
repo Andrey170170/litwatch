@@ -69,12 +69,13 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 # The role rules (docs/specs/architecture.md, "Roles"), by package: `core` is Records and
-# Policies, `store` Repositories, `gates` the gates (the Database gate so far), `llm` the Model
+# Policies, `store` Repositories, `gates` the gates (the Database and Work gates), `llm` the Model
 # gate, `api` and `cli` Entries, and every other package a Service. `store` may import `gates`
 # for the unit types, and `llm` for the nesting check. `config`, `logs`, `concurrency` and `writing` are shared modules: they import
 # only `core`, and any role but `core` and `store` may import them. `tests/test_roles.py` keeps the lists below in step with the
-# packages, and checks that Services form no cycle. No contract has an `ignore_imports`: a
-# violation is fixed, not listed.
+# packages, and checks that Services form no cycle. One contract has an `ignore_imports`, and
+# for one import that is no violation: the Work gate's of `store.work`, the Repository of its
+# own queue. Any other violation is fixed, not listed.
 [tool.importlinter]
 root_package = "litwatch"
 

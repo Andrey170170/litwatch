@@ -6,8 +6,9 @@
 -- good, its item ended or not. `admission` is what one item at a time is admitted for: its kind,
 -- or a delivery's integration. `state`: pending waits for `not_before` and its admission;
 -- running is held by the lease `lease_token` until `lease_until`, which the worker's heartbeat
--- renews, and is taken back once that passes; ended has its `outcome`. `attempts` counts its
--- leases. `cost` is in dollars, NULL when unknown. A job's chunks name the job's run (`run_id`);
+-- renews, and is taken back once that passes; ended has its `outcome`. A submission that finds
+-- its key running sets `resubmitted` (and `not_before` to when it is wanted again): that run's
+-- end puts the item back to pending instead of ending it. `attempts` counts its leases. `cost` is in dollars, NULL when unknown. A job's chunks name the job's run (`run_id`);
 -- a standalone run names its item (`runs.work_id`).
 CREATE TABLE work_items (
     id            bigserial PRIMARY KEY,
@@ -20,6 +21,7 @@ CREATE TABLE work_items (
     not_before    timestamptz NOT NULL DEFAULT now(),
     lease_token   uuid,
     lease_until   timestamptz,
+    resubmitted   boolean NOT NULL DEFAULT false,
     attempts      integer NOT NULL DEFAULT 0,
     submitted_at  timestamptz NOT NULL DEFAULT now(),
     started_at    timestamptz,

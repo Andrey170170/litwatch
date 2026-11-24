@@ -20,10 +20,11 @@ own, outside the pool; so does `db.startup` the migration lock, and `db.listen` 
 LISTEN.
 
 A write unit opened under a work context (`gates.context.working`, set by the Work gate for a
-work item's task) is fenced: before its locks, it takes the item's row `FOR SHARE` where the
-item's lease is the task's and has not expired, or fails with `LeaseLostError`. It holds that
-row to its end, so a takeover, which updates the row, waits for it: no write made under a lease
-commits after a peer took the item (docs/plans/a2-work-gate.md, "The lease and fence"). Read
+work item's task) is fenced: before its locks, it takes the item's row `FOR SHARE`, then
+checks that the item's lease is the task's and unexpired by the clock, or fails with
+`LeaseLostError`. It holds that row to its end, so no takeover, which locks the row to update
+it, can happen while the unit is open: no write made under a lease commits after a peer took
+the item (docs/plans/a2-work-gate.md, "The lease and fence"). Read
 units are not fenced.
 
 Transitional, until A2's Work gate replaces it with leases and heartbeats (docs/backlog.md, A2,
@@ -357,12 +358,17 @@ class WriteUnit(ReadUnit):
 async def _fence(unit: WriteUnit, work: Work) -> None:
     """Hold the work item's row for the unit, if the task's lease on it is the current one and
     has not expired; otherwise `LeaseLostError`. The row comes first, before any lock the unit
-    takes, as on every path that touches an item's row and a pass's."""
+    takes, as on every path that touches an item's row and a pass's.
+
+    The row is locked first and the lease checked after, in a statement of its own against the
+    clock: a locking statement that waited judges by the time it started, so a lease that
+    lapsed while it waited would pass."""
     item = work.item
+    await unit.execute("SELECT 1 FROM work_items WHERE id = %s FOR SHARE", (item.id,))
     held = await (
         await unit.execute(
             "SELECT 1 FROM work_items WHERE id = %s AND lease_token = %s "
-            "AND lease_until > now() FOR SHARE",
+            "AND lease_until > clock_timestamp()",
             (item.id, item.lease_token),
         )
     ).fetchone()
