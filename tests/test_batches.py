@@ -20,10 +20,11 @@ from litwatch.core.fulltext import LEASE
 from litwatch.gates.database import LOCKS, DatabaseGate
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
-from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm import CallError, Gateway, Provider, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.batches import DRAIN, MAX_REQUESTS, Batcher
-from litwatch.llm.prices import anthropic_cost
+from litwatch.llm.openai import OpenAIProvider, responses_request
+from litwatch.llm.prices import anthropic_cost, openai_cost
 from litwatch.store import calls as calls_store
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
@@ -35,7 +36,14 @@ from tests import digesting as dg
 from tests import scripted as steps
 from tests import sessions, settling
 from tests.conftest import TREE, gate_on, started
-from tests.fakes import FAST, BatchingProvider, ScriptedProvider, anthropic_message
+from tests.fakes import (
+    FAST,
+    BatchingProvider,
+    OpenAIBatches,
+    ScriptedProvider,
+    anthropic_message,
+    openai_body,
+)
 from tests.fakes_http import FakeArchive
 from tests.sessions import Session, in_read, in_write
 
@@ -1208,3 +1216,136 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
     assert found == expected
     assert sum(r[3] == "written" for r in found) >= 3
     assert anthropic.calls == [] and len(anthropic.batches) <= 3  # rounds, not one per digest
+
+
+# -- OpenAI's Batch API ----------------------------------------------------------------------------
+
+SOL = RoleConfig(provider="openai", model="gpt-6.2-sol", effort="high")
+# What the fake's answer to a batched request is charged: half of a normal call's.
+SOL_BATCHED = openai_cost("gpt-6.2-sol", 4000, 3000, 0, 200, batch=True)
+
+
+def openai_batching(journal=None, client=None, clock=None, models=None):
+    """A gateway batching on `openai` until DEADLINE, over a faked Batch API."""
+    clock, client = clock or Clock(), client or OpenAIBatches()
+    providers: dict[str, Provider] = {"openai": OpenAIProvider(client=client)}
+    options = FAST | {"now": clock}
+    gw = Gateway(
+        models or Models(brief=SOL), providers, journal, retry_delays=(0.0,), batch_options=options
+    )
+    gw.batch_until(DEADLINE)
+    return gw, client, clock
+
+
+async def test_openai_batches_carry_the_request_key_and_are_priced_at_half():
+    client = OpenAIBatches()
+    provider = OpenAIProvider(client=client)
+    request = ask(1)
+    batch_id = await provider.submit([("k1", SOL, request)])
+    body = responses_request(SOL, request)
+    assert client.uploaded["file-1"] == [
+        {"custom_id": "k1", "method": "POST", "url": "/v1/responses", "body": body}
+    ]
+    assert await provider.status(batch_id) == "in_progress"
+    client.end(batch_id)
+    assert await provider.status(batch_id) == "ended"
+    reply = (await provider.results(batch_id))["k1"]
+    assert isinstance(reply, Reply)
+    usage, full = reply.usage, openai_cost("gpt-6.2-sol", 4000, 3000, 0, 200, batch=False)
+    assert full is not None and usage.cost == pytest.approx(full / 2)
+    # Priced by the alias its snapshot answered as.
+    assert (usage.model, usage.service_tier, usage.via) == ("gpt-6.2-sol", "batch", "openai")
+    assert await provider.status("batch_deleted") == "gone"
+
+
+async def test_openai_batch_lines_that_failed_are_asked_again_or_fail_on_the_account():
+    answers = {
+        "paper ok": openai_body(GOOD),
+        "paper refused": openai_body("", refusal="I can't help with that."),
+        "paper server": (500, {"code": "server_error"}),
+        "paper rate": (429, {"code": "rate_limit_exceeded"}),
+        "paper expired": (None, {"code": "batch_expired"}),
+        "paper failed": openai_body(status="failed", error={"code": "server_error"}),
+        "paper key": (401, {"code": "invalid_api_key"}),
+        "paper credit": (429, {"code": "credit_balance_exhausted", "type": "insufficient_quota"}),
+    }
+    client = OpenAIBatches(lambda body: answers[body["input"][1]["content"]])
+    provider = OpenAIProvider(client=client)
+    requests = [(user, SOL, Request(system="rubric", user=user, output=Answer)) for user in answers]
+    batch_id = await provider.submit(requests)
+    client.end(batch_id)
+    found = await provider.results(batch_id)
+    stops = [
+        r.stop if isinstance(r, Reply) else r for r in (found["paper ok"], found["paper refused"])
+    ]
+    assert stops == [Stop.COMPLETE, Stop.REFUSED]
+    for user in ("paper server", "paper rate", "paper expired", "paper failed"):
+        assert found[user] is None  # asked again as a normal call
+    for user in ("paper key", "paper credit"):
+        error = found[user]
+        assert isinstance(error, ProviderError) and error.account
+
+
+async def test_an_openai_batch_whose_creation_lost_its_reply_is_found_again_not_sent_twice():
+    client = OpenAIBatches()
+    client.lost = 1  # created, and the reply lost on the way back
+    provider = OpenAIProvider(client=client)
+    requests = [("k1", SOL, ask(1)), ("k2", SOL, ask(2))]
+    batch_id = await provider.submit(requests)
+    assert list(client.made) == [batch_id]
+    # Submitted again while it runs, in any order, it is the same batch, and nothing is uploaded.
+    assert await provider.submit(list(reversed(requests))) == batch_id
+    assert (list(client.made), len(client.uploaded)) == ([batch_id], 1)
+    client.end(batch_id)  # one that ended is asked anew
+    assert await provider.submit(requests) != batch_id
+
+
+async def test_an_openai_batch_holds_one_model_so_a_step_of_two_models_goes_in_two():
+    luna = RoleConfig(provider="openai", model="gpt-6-luna")
+    gw, client, _ = openai_batching(models=Models(brief=SOL, writer=luna))
+    asked = [
+        asyncio.create_task(gw.ask(role, ask(n)))
+        for n, role in enumerate(("brief", "writer", "brief"))
+    ]
+    await until(lambda: len(client.made) == 2)
+    for batch_id in list(client.made):
+        client.end(batch_id)
+    answers = await asyncio.gather(*asked)
+    sent = sorted([line["body"]["model"] for line in lines] for lines in client.uploaded.values())
+    assert sent == [["gpt-6-luna"], ["gpt-6.2-sol", "gpt-6.2-sol"]]
+    usage = answers[0].usage
+    assert (usage.cost, usage.service_tier) == (pytest.approx(SOL_BATCHED), "batch")
+    await gw.close()
+
+
+async def test_an_openai_batch_a_dead_run_left_is_read_once_and_credited_to_its_calls(
+    conn: Session, db
+):
+    dead = await started(conn, "nightly")
+    gw, client, clock = openai_batching(Together(db, dead, 2))
+    asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
+
+    async def recorded():
+        rows = await calls(conn)
+        return len(rows) == 2 and all(c["batch_id"] for c in rows)
+
+    await until(recorded)
+    for t in asked:  # the run dies with its batch open
+        t.cancel()
+    await asyncio.gather(*asked, return_exceptions=True)
+    await gw.close()
+
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client, clock)
+    await gw.recover()
+    settling = asyncio.create_task(gw.settle())  # as a nightly does before it ends
+    await asyncio.sleep(0.05)
+    assert not settling.done()
+    (batch_id,) = client.made
+    client.end(batch_id)
+    await settling
+    assert [(c["run_id"], c["batch_id"], c["answered"]) for c in await calls(conn)] == [
+        (dead, batch_id, False)
+    ] * 2
+    assert [c["cost"] for c in await calls(conn)] == [pytest.approx(SOL_BATCHED)] * 2
+    assert client.read == [client.made[batch_id].output_file_id]  # read once, nothing paid again
+    await gw.close()

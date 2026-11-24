@@ -93,6 +93,7 @@ def _account_errors() -> Iterator[None]:
 
 class AnthropicProvider:
     name = "anthropic"
+    one_model = False  # a Message Batch may mix models
 
     def __init__(self, api_key: str | None = None, client: Any = None) -> None:
         # The gateway owns retries; the SDK's own would multiply them.

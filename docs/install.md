@@ -28,9 +28,10 @@ It needs:
   | --- | --- |
   | Anthropic (`ANTHROPIC_API_KEY`) | `analyse`, `judge`, `field_grade`, `brief`, `writer`; Sonnet fallbacks of `judge` and `writer` |
   | OpenRouter (`OPENROUTER_API_KEY`) | `classify`, `area_check`, `check`; the other fallbacks of `analyse`, `judge`, `brief`, `writer` |
+  | OpenAI (`OPENAI_API_KEY`), optional | none; a role moved there with `provider = "openai"` |
 
   Without the OpenRouter key nothing is classified, so nothing goes further. The roles and their defaults are in
-  [`docs/specs/v1/models.md`](specs/v1/models.md); moving a role to the other provider is configuration (step 3).
+  [`docs/specs/v1/models.md`](specs/v1/models.md); moving a role to another provider is configuration (step 3).
   The default three categories bring 700 to 1,550 papers on a weekday; measured costs are in
   [`docs/specs/v1/pipeline.md`](specs/v1/pipeline.md), section 11.
 - **An email address** arXiv can write to (`ARXIV_CONTACT`).
@@ -63,6 +64,7 @@ Compose reads `.env` beside `compose.yaml`. Fill in:
 | `LITWATCH_MCP_TOKEN` | no | The MCP server's token, for research agents; unset, `/mcp` is not served (step 10) | generate |
 | `ANTHROPIC_API_KEY` | for the nightly run | Anthropic API key | from the Anthropic console |
 | `OPENROUTER_API_KEY` | for the nightly run | OpenRouter API key | from openrouter.ai |
+| `OPENAI_API_KEY` | for a role on `openai` | OpenAI API key | from the OpenAI platform |
 | `ARXIV_CONTACT` | yes | An address arXiv can write to, sent by the archive worker's downloads and by `deep`'s fetches | a real, monitored address |
 | `LITWATCH_BIND` | no | The host address the web app listens on (`127.0.0.1`) | leave it unless a proxy elsewhere must reach it (step 9) |
 | `LITWATCH_PORT` | no | The host port of the web app (`8080`) | any free port |

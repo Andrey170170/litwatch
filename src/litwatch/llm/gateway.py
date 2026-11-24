@@ -1,5 +1,5 @@
 """Roles to providers, with retries, a timeout, the call journal and reuse, and in a batching
-job Message Batches (`llm.batches`)."""
+job the providers' batches (`llm.batches`)."""
 
 from __future__ import annotations
 
@@ -501,15 +501,24 @@ def _of_role(reply: Reply, role: RoleConfig) -> Reply:
 
 
 # Each provider's key, read with `secret` (the variable or its `_FILE`).
-KEYS = {"anthropic": "ANTHROPIC_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
+KEYS = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
 
 
 def build(models: Models, journal: Journal | None = None, *, debug: bool = False) -> Gateway:
     """A gateway over the providers that have credentials in the environment."""
     from litwatch.llm.anthropic import AnthropicProvider  # noqa: PLC0415
+    from litwatch.llm.openai import OpenAIProvider  # noqa: PLC0415
     from litwatch.llm.openrouter import OpenRouterProvider  # noqa: PLC0415
 
-    kinds = {"anthropic": AnthropicProvider, "openrouter": OpenRouterProvider}
+    kinds = {
+        "anthropic": AnthropicProvider,
+        "openrouter": OpenRouterProvider,
+        "openai": OpenAIProvider,
+    }
     providers: dict[str, Provider] = {
         name: kinds[name](key) for name, variable in KEYS.items() if (key := secret(variable))
     }

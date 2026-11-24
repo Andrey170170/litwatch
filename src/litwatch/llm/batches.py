@@ -1,12 +1,13 @@
-"""Message Batches inside the gateway (docs/specs/v1/models.md, batches). A batching gateway hands
-each call it cannot reuse to its provider's `Batcher`, which holds the calls until none has joined
-for a while, sends them as one batch, polls it, and answers each held call with its reply, or with
-the account error the provider gave the request instead, which is never asked again. A call
-it cannot answer from a batch (the deadline passed, the batch did not answer it, the provider
-failed) gets None, and the gateway sends it as a normal call. A batch given up on while still open
-(the drain ran out, the gateway closed) may still answer: the journal rows its requests are on
-are `unsettled`, left for a later run to account for, and their normal calls get rows of their
-own."""
+"""Batches inside the gateway (docs/specs/v1/models.md, batches): Anthropic's Message Batches,
+OpenAI's Batch API. A batching gateway hands each call it cannot reuse to its provider's
+`Batcher`, which holds the calls until none has joined for a while, sends them as one batch (one
+per model, for a provider whose batches hold one), polls it, and answers each held call with its
+reply, or with the account error the provider gave the request instead, which is never asked
+again. A call it cannot answer from a batch (the deadline passed, the batch did not answer it,
+the provider failed) gets None, and the gateway sends it as a normal call. A batch given up on
+while still open (the drain ran out, the gateway closed) may still answer: the journal rows its
+requests are on are `unsettled`, left for a later run to account for, and their normal calls get
+rows of their own."""
 
 from __future__ import annotations
 
@@ -27,8 +28,8 @@ from litwatch.llm.types import ProviderError, Reply, Request, Usage
 log = logging.getLogger(__name__)
 
 QUIET_SECONDS = 10.0  # a batch goes out once no call has joined it for this long
-MAX_REQUESTS = 10_000  # or once it holds this many (Anthropic allows 100,000)
-MAX_BYTES = 200_000_000  # or this much (Anthropic allows 256 MB)
+MAX_REQUESTS = 10_000  # or once it holds this many (Anthropic allows 100,000, OpenAI 50,000)
+MAX_BYTES = 200_000_000  # or this much (Anthropic allows 256 MB, OpenAI a 200 MB file)
 POLL_SECONDS = 60.0
 OPERATION_SECONDS = 600.0  # a submission, status, cancel or results read, as a whole
 DRAIN = timedelta(minutes=30)  # how long cancelled batches are waited for after the deadline
@@ -39,9 +40,11 @@ type Answered = Reply | ProviderError | None
 
 @runtime_checkable
 class BatchProvider(Protocol):
-    """A provider that batches (anthropic.AnthropicProvider). `custom_id` is the request key."""
+    """A provider that batches (`anthropic.AnthropicProvider`, `openai.OpenAIProvider`).
+    `custom_id` is the request key. `one_model`: each batch holds one model's requests only."""
 
     name: str
+    one_model: bool
 
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str: ...
     async def status(self, batch_id: str) -> str: ...  # in_progress, canceling, ended or gone
@@ -211,13 +214,24 @@ class Batcher:
             if left > 0 and not self._full() and self.open():
                 await asyncio.sleep(min(left, 1.0))
                 continue
-            count, size = 0, 0  # a batch within both ceilings, of one call at least
-            for h in self._held[: self.max_requests]:
-                if count and size + h.size > self.max_bytes:
-                    break
-                count, size = count + 1, size + h.size
-            take, self._held = self._held[:count], self._held[count:]
-            await self._send(take)
+            await self._send(self._take())
+
+    def _take(self) -> list[_Held]:
+        """The next batch, taken from the held calls in order: within both ceilings, of one call
+        at least, and of the first call's model where a batch holds one model only."""
+        first = self._held[0].role.model
+        take: list[_Held] = []
+        size = 0
+        for h in self._held:
+            if self.provider.one_model and h.role.model != first:
+                continue
+            if len(take) == self.max_requests or (take and size + h.size > self.max_bytes):
+                break
+            take.append(h)
+            size += h.size
+        taken = {id(h) for h in take}
+        self._held = [h for h in self._held if id(h) not in taken]
+        return take
 
     async def _send(self, held: list[_Held]) -> None:
         if not self.open():

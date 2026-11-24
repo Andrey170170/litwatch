@@ -13,7 +13,7 @@ enabled = true
 # to yours (an IANA name).
 nightly = "0 2 * * *"
 timezone = "UTC"
-# Its Anthropic calls go in batches at half price until then; what is left goes as normal calls.
+# Its Anthropic and OpenAI calls go in batches at half price until then; what is left goes as normal calls.
 deadline = "07:30"
 
 # The archive is part of the stack: every paper intake stores is registered with it, and it

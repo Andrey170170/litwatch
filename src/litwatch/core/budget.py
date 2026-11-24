@@ -14,7 +14,7 @@ class Usage(BaseModel):
     """One model call's accounting. `cost` is in USD; None means unknown, never zero."""
 
     model: str
-    via: str | None = None  # the account the call went through: anthropic | openrouter
+    via: str | None = None  # the account the call went through: anthropic | openrouter | openai
     effort: str | None = None
     prompt_tokens: int = 0  # all input tokens, cached ones included
     completion_tokens: int = 0

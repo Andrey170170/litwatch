@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from types import SimpleNamespace
 from typing import Any
 
 import anthropic
+import httpx2
+import openai
 
 from litwatch.config import RoleConfig
 from litwatch.intake.http import SourceError
@@ -64,14 +67,150 @@ def openrouter_completion(text="{}", finish_reason="stop", refusal=None, cost=0.
     )
 
 
+def openai_body(
+    text="{}",
+    status="completed",
+    *,
+    incomplete=None,
+    refusal=None,
+    error=None,
+    tokens_in=4000,
+    read=3000,
+    write=0,
+    output=200,
+):
+    """A Responses API response as the API sends it (a batch's output line carries this body)."""
+    content = [{"type": "output_text", "text": text, "annotations": []}]
+    if refusal is not None:
+        content = [{"type": "refusal", "refusal": refusal}]
+    return {
+        "id": "resp_1",
+        "object": "response",
+        "created_at": 1.0,
+        "model": "gpt-6.2-sol-2026-11-01",  # the snapshot that served it
+        "status": status,
+        "error": error,
+        "incomplete_details": {"reason": incomplete} if incomplete else None,
+        "output": [
+            {"type": "reasoning", "id": "rs_1", "summary": []},
+            {
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "status": "completed",
+                "content": content,
+            },
+        ],
+        "parallel_tool_calls": True,
+        "tool_choice": "auto",
+        "tools": [],
+        "usage": {
+            "input_tokens": tokens_in,
+            "input_tokens_details": {"cached_tokens": read, "cache_write_tokens": write},
+            "output_tokens": output,
+            "output_tokens_details": {"reasoning_tokens": 150},
+            "total_tokens": tokens_in + output,
+        },
+    }
+
+
+def openai_response(*args, **kwargs):
+    """The SDK's `Response` for `openai_body`, as `responses.create` returns it."""
+    from openai.types.responses import Response  # noqa: PLC0415
+
+    return Response.model_validate(openai_body(*args, **kwargs))
+
+
+class OpenAIBatches:
+    """The SDK's `files` and `batches` as the Batch API serves them. A batch's requests are
+    answered once the test ends it (`end`), each by `respond(body)`: a response body (status
+    200), or a `(status_code, error)` pair for a request the API failed, the status None for
+    one it never ran (expired). `lost` creations are made and then lose their reply. `read`
+    lists the files whose content was read."""
+
+    def __init__(self, respond=lambda body: openai_body('{"yes": true, "why": "it says so"}')):
+        self.respond, self.lost = respond, 0
+        self.uploaded: dict[str, list[dict[str, Any]]] = {}
+        self.made: dict[str, SimpleNamespace] = {}
+        self.contents: dict[str, str] = {}
+        self.read: list[str] = []
+        self.files = SimpleNamespace(create=self._upload, content=self._content)
+        self.batches = SimpleNamespace(
+            create=self._create, list=self._list, retrieve=self._retrieve, cancel=self._cancel
+        )
+
+    async def _upload(self, *, file, purpose):
+        assert purpose == "batch"
+        name, data, _ = file
+        file_id = f"file-{len(self.uploaded) + 1}"
+        self.uploaded[file_id] = [json.loads(line) for line in data.decode().splitlines()]
+        return SimpleNamespace(id=file_id)
+
+    async def _create(self, *, input_file_id, endpoint, completion_window, metadata):
+        batch_id = f"batch_{len(self.made) + 1}"
+        self.made[batch_id] = SimpleNamespace(
+            id=batch_id,
+            status="in_progress",
+            metadata=metadata,
+            endpoint=endpoint,
+            input_file_id=input_file_id,
+            output_file_id=None,
+            error_file_id=None,
+            errors=None,
+        )
+        if self.lost:
+            self.lost -= 1
+            raise openai.APIConnectionError(request=httpx2.Request("POST", "https://x.org"))
+        return self.made[batch_id]
+
+    async def _list(self, *, limit):
+        return SimpleNamespace(data=list(reversed(self.made.values()))[:limit])
+
+    async def _retrieve(self, batch_id):
+        if batch_id not in self.made:
+            raise status_error(openai, 404)
+        return self.made[batch_id]
+
+    async def _cancel(self, batch_id):
+        self.made[batch_id].status = "cancelling"
+
+    async def _content(self, file_id):
+        self.read.append(file_id)
+        return SimpleNamespace(text=self.contents[file_id])
+
+    def end(self, batch_id: str) -> None:
+        batch = self.made[batch_id]
+        out, errors = [], []
+        for request in self.uploaded[batch.input_file_id]:
+            answer = self.respond(request["body"])
+            line = {"id": "batch_req", "custom_id": request["custom_id"], "error": None}
+            if isinstance(answer, tuple):
+                code, error = answer
+                if code is None:
+                    line |= {"response": None, "error": error}
+                else:
+                    line["response"] = {"status_code": code, "body": {"error": error}}
+                errors.append(line)
+            else:
+                line["response"] = {"status_code": 200, "request_id": "req", "body": answer}
+                out.append(line)
+        for kind, lines in (("output", out), ("error", errors)):
+            if lines:
+                file_id = f"file-{kind}-{batch_id}"
+                self.contents[file_id] = "\n".join(json.dumps(line) for line in lines) + "\n"
+                setattr(batch, f"{kind}_file_id", file_id)
+        batch.status = "completed"
+
+
 class SdkClient:
-    """Both SDK surfaces at once; `replies` are returned in order, exceptions raised."""
+    """Every SDK surface at once; `replies` are returned in order, exceptions raised."""
 
     def __init__(self, *replies: Any) -> None:
         self.replies = list(replies)
         self.sent: list[dict[str, Any]] = []
         self.messages = SimpleNamespace(create=self._create)
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+        self.responses = SimpleNamespace(create=self._create)
 
     async def post(self, url: str, *, body: dict[str, Any], cast_to: Any) -> Any:
         """OpenRouter's Decisions endpoint, through the OpenAI SDK's raw `post`."""
@@ -117,9 +256,9 @@ class BatchingProvider(ScriptedProvider):
     answers only the keys `end` names; `unanswered(request)` picks requests it never answers.
     Normal calls are `calls`; batched ones `batched`."""
 
-    def __init__(self, name: str, respond, *, hold: bool = False) -> None:
+    def __init__(self, name: str, respond, *, hold: bool = False, one_model: bool = False) -> None:
         super().__init__(name, respond)
-        self.hold = hold
+        self.hold, self.one_model = hold, one_model
         self.unanswered = lambda request: False
         self.batches: dict[str, dict[str, Any]] = {}
         self.batched: list[tuple[RoleConfig, Request]] = []

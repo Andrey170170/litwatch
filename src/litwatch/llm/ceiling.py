@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from litwatch.config import RoleConfig
 from litwatch.llm import prices
-from litwatch.llm.types import Request
+from litwatch.llm.types import DEFAULT_MAX_TOKENS, Request
 
 # Tokens a provider adds around a request (tool and schema framing), beyond its bytes.
 OVERHEAD = 1024
@@ -61,6 +61,31 @@ def anthropic_bound(role: RoleConfig, tokens_in: int) -> Bound | None:
     return Bound(scale * price_in * prices.CACHE_WRITE / 1e6, scale * price_out / 1e6)
 
 
+def openai_bound(role: RoleConfig, tokens_in: int) -> Bound | None:
+    """`llm.prices` at its worst, as Anthropic's: every input token at the cache-write price, the
+    long-prompt rates once the input may pass their threshold, and the output cap sent when the
+    role sets none (a Responses call has no cap of its own). None for a model without a listed
+    price."""
+    if role.model not in prices.OPENAI:
+        return None
+    price_in, price_out, _ = prices.OPENAI[role.model]
+    threshold, scale_in, scale_out = prices.OPENAI_LONG_PROMPT
+    if tokens_in <= threshold:
+        scale_in = scale_out = 1.0
+    worst_in = scale_in * price_in * prices.OPENAI_CACHE_WRITE / 1e6
+    return Bound(worst_in, scale_out * price_out / 1e6, DEFAULT_MAX_TOKENS)
+
+
+def listed_bound(role: RoleConfig, tokens_in: int) -> Bound | None:
+    """The bound of a provider priced from `llm.prices` (Anthropic, OpenAI); None for any other,
+    whose bound comes from what its calls were charged (`jobs.reruns.bound`)."""
+    if role.provider == "anthropic":
+        return anthropic_bound(role, tokens_in)
+    if role.provider == "openai":
+        return openai_bound(role, tokens_in)
+    return None
+
+
 class Ceiling:
     """What a job may still spend, shared by every call of its gateway. A call that does not
     fit waits while others are in flight, since their charges are usually far below their
@@ -75,8 +100,8 @@ class Ceiling:
         self._room = asyncio.Condition()
 
     def bound(self, role: RoleConfig, tokens_in: int) -> Bound | None:
-        if role.provider == "anthropic":
-            return anthropic_bound(role, tokens_in)
+        if role.provider in ("anthropic", "openai"):
+            return listed_bound(role, tokens_in)
         return self.bounds.get(route(role))
 
     @staticmethod
