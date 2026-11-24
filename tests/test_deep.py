@@ -55,7 +55,7 @@ from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests import sessions, settling
+from tests import settling
 from tests.conftest import (
     AGENTS,
     BLUE,
@@ -1630,7 +1630,8 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
     assert missing.status_code == 404
     assert asked.status_code == 202
     items = await items_of(db, "deep", str(asked.json()["pass_id"]))
-    assert [i["state"] for i in items] == ["pending"]  # worked here inline, by `work`
+    # Worked here inline, by `work`, which retires its item.
+    assert [(i["state"], i["outcome"]) for i in items] == [("ended", "done")]
     assert queued["card_pass"]["reason"] == "request" and not queued["card_requestable"]
     assert queued["card_pass"]["state"] == "awaiting_text" and queued["card"] is None
     card = written["card"]
@@ -1681,7 +1682,10 @@ async def test_a_deep_pass_waits_out_the_services_pause_as_the_same_item(
     assert (fake.started, await attempts(db)) == (0, [])  # the pass never claimed
 
 
-async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns(db: Session, gate):
+@pytest.mark.parametrize("paused", [False, True])
+async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns(
+    db: Session, gate, paused
+):
     rerun = paper("2610.00003", title="Re-run", abstract="Graded again.", version=1)
     await in_write(db, papers_store.upsert, [rerun])
     async with Bridge(db).write("queue in reverse") as unit:  # each submitted before the next
@@ -1689,6 +1693,8 @@ async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns
         automatic = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
         mine = await fulltext_store.queue_deep(unit, P.id, 1, FOCUS)
     assert await ask(db, P.id) == mine  # takes over its automatic pass, queued last
+    if paused:  # each waited out the service's pause, and is due at its end, all at once
+        await db.execute("UPDATE work_items SET not_before = now() - interval '1 second'")
     taken: list[str] = []
 
     async def worker(item) -> None:
@@ -1705,8 +1711,3 @@ async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns
 async def _waits_until(conn: Session, pass_id: int | None, at: datetime) -> bool:
     items = await items_of(conn, "deep", str(pass_id))
     return bool(items) and items[-1]["state"] == "pending" and items[-1]["not_before"] == at
-
-
-async def test_connect_reaches_the_test_schema(db: Session):
-    async with await sessions.connect(f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"):
-        pass

@@ -5,13 +5,15 @@ one it does not load waits for a process that does.
 
 A turn sets the integration up, the first time in this process, then delivers one batch; one
 that hands nothing over calls the integration's `idle` hook, at most once every
-`dispatch.IDLE_SECONDS`. Then the turn arranges the next itself, and alone: it forgets what was
-submitted for it while it ran (`store.work.forget_resubmission`), reads the cursor and the
-outbox, and submits its own key, which runs once this turn ends: at once while settled events
-wait, a little later while only events an older transaction holds back wait (`RETRY`), when a
-backoff ends while a failure or a failed setup waits one out, and after `dispatch.IDLE_SECONDS`
-for an integration with an `idle` hook. With nothing left, the next event's commit wakes it
-(`store.outbox.emit`), no sooner than a backoff recorded by then; the owner's retry or skip
+`dispatch.IDLE_SECONDS`. Then the turn arranges the next itself, and alone: under the cursor's
+row lock, which every write that schedules a turn takes first (`store.outbox`), it forgets what
+was submitted for it while it ran (`store.work.forget_resubmission`), reads the cursor and the
+outbox, and submits its own key, which runs once this turn ends, at the sooner of two times:
+when events may be delivered (at once while settled events wait, a little later while only
+events an older transaction holds back wait, `RETRY`, when a backoff ends while a failure or a
+failed setup waits one out), and, for an integration with an `idle` hook, when it is due again.
+With nothing left, the next event's commit wakes it (`store.outbox.emit`), bringing a turn
+that waits for the hook forward but none past the backoff it reads; the owner's retry or skip
 wakes it at once."""
 
 from __future__ import annotations
@@ -59,23 +61,31 @@ class DeliveryWorker:
             if not passed and idles and self._idle_due(item.key):
                 await dispatch.idle(self.db, integration)
         async with self.db.write(f"dispatch {item.key}: next turn") as unit:
+            cursor = await outbox.cursor(unit, item.key, lock=True)
             await work.forget_resubmission(unit, item)
-            cursor = await outbox.cursor(unit, item.key)
             settled, waiting = await outbox.waiting(unit, item.key)
             now = datetime.now(UTC)
             if item.key not in self.set_up:
-                at = cursor.setup_retry_at or now + RETRY
-            elif cursor.failing is not None and cursor.retry_at:
-                at = cursor.retry_at
-            elif settled:
-                at = now
-            elif waiting:
-                at = now + RETRY
-            elif idles:
-                at = now + timedelta(seconds=dispatch.IDLE_SECONDS)
+                times = [cursor.setup_retry_at or now + RETRY]
             else:
-                return
-            await outbox.wake(unit, item.key, at=at)
+                times = [self._idle_at(item.key, now)] if idles else []
+                if cursor.failing is not None and cursor.retry_at:
+                    times.append(cursor.retry_at)
+                elif settled:
+                    times.append(now)
+                elif waiting:
+                    times.append(now + RETRY)
+            if times:
+                await outbox.wake(unit, item.key, at=min(times))
+
+    def _idle_at(self, name: str, now: datetime) -> datetime:
+        """When the integration's `idle` is due again: `dispatch.IDLE_SECONDS` after it last
+        ran, now if it never has."""
+        last = self.idled.get(name)
+        if last is None:
+            return now
+        since = asyncio.get_running_loop().time() - last
+        return now + timedelta(seconds=max(0.0, dispatch.IDLE_SECONDS - since))
 
     def _idle_due(self, name: str) -> bool:
         """Whether the integration's `idle` may run now, counting it as run if so."""

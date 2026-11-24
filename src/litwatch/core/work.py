@@ -38,3 +38,4 @@ class WorkItem:
     lease_until: datetime | None = None
     outcome: Outcome | None = None
     error: str | None = None
+    priority: int = 0  # its place in line among those due: the lowest first

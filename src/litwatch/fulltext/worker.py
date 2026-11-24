@@ -2,9 +2,11 @@
 kind `fulltext` or `deep` is one try of one pass of the regular queue, keyed by the pass's id
 (`store.fulltext`, which submits them).
 
-An item claims its pass as every worker does, with the pass's own lease, and works it as the
-queue's workers did: a text pass as a wave of one on a `fulltext` run of its own, a Deep pass
-as one job on the deep service. A pass it cannot claim says what follows:
+An item decides what to do with its pass under the pass's row lock, waiting for a unit that
+holds it (a settle relabelling it), and claims it there as every worker does, with the pass's
+own lease (`store.fulltext.decide`); it works it as the queue's workers did: a text pass as a
+wave of one on a `fulltext` run of its own, a Deep pass as one job on the deep service. A pass
+it does not claim says what follows:
 - one another owner holds (the nightly inline, or a process gone whose claim has not lapsed):
   the item waits until that claim's lease ends, and then takes it over or finds it done;
 - one held back while a nightly runs (an automatic text pass, which the nightly batches) or is
@@ -12,9 +14,8 @@ as one job on the deep service. A pass it cannot claim says what follows:
   again;
 - one done, gone, or no longer the regular queue's: there is nothing to do.
 
-A pass whose row a unit holds as the item tries to claim it (a settle relabelling it) is looked
-at again after `BUSY`, as the same item. A pass awaiting its text is tried again after
-`TEXT_WAIT`, and a Deep pass the service failed after its pause, as the same item. An item whose
+A pass awaiting its text is tried again after `TEXT_WAIT`, and a Deep pass the service failed
+after its pause, as the same item. An item whose
 try raised (but for a lost database, which the gate tries again) is failed, and its pass's next
 try submitted for when its claim lapses."""
 
@@ -22,12 +23,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from litwatch import fulltext
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
-from litwatch.core.fulltext import LEASE, TEXT_WAIT, PassState
+from litwatch.core.fulltext import LEASE, TEXT_WAIT
 from litwatch.core.work import WorkItem
 from litwatch.feedback import word
 from litwatch.fulltext import deep as deep_passes
@@ -39,29 +40,16 @@ from litwatch.jobs.worker import nightly_waits
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
 from litwatch.store import work
-from litwatch.store.fulltext import Claimed, Standing
-
-# How soon an item looks again at a pass whose row a unit held as it tried to claim it (a
-# settle relabelling it): that unit is short, and the pass may well be claimable after it.
-BUSY = timedelta(seconds=1)
+from litwatch.store.fulltext import Claimed, Decision
 
 
-def _unclaimed(standing: Standing | None, held_back: bool) -> Later | None:
-    """What follows for an item whose pass was not claimed, as it stands (`store.fulltext.
-    standing`): another look after `BUSY` while a unit holds its row; the end of another owner's
-    claim; another look after `TEXT_WAIT` when a claim could take it but for what holds it back
-    (`held_back`); else nothing to do."""
-    if standing is None:
-        return None
-    if standing.locked:
-        return Later(datetime.now(UTC) + BUSY)
-    if standing.held_until is not None:
-        return Later(standing.held_until)
-    if held_back and standing.state in (
-        PassState.READY,
-        PassState.AWAITING_TEXT,
-        PassState.RUNNING,
-    ):
+def _unclaimed(decision: Decision) -> Later | None:
+    """What follows for an item that did not claim its pass (`store.fulltext.decide`): the end
+    of another owner's claim; another look after `TEXT_WAIT` when a claim could take it but for
+    what holds it back; else nothing to do."""
+    if decision.held_until is not None:
+        return Later(decision.held_until)
+    if decision.held_back:
         return Later(datetime.now(UTC) + TEXT_WAIT)
     return None
 
@@ -101,16 +89,15 @@ class TextPassWorker:
         # alone (models.md, batches).
         owners = True if await self.db.held_elsewhere("run") else None
         async with self.db.write("claim a text pass") as unit:
-            claimed = await store_.claim(unit, LEASE, 1, owners=owners, pass_id=int(item.key))
-            standing = None if claimed else await store_.standing(unit, int(item.key))
-        if not claimed:
-            return _unclaimed(standing, held_back=owners is True)
-        async with _tried_again(self.db, item, claimed[0]):
+            decision = await store_.decide(unit, int(item.key), LEASE, owners=owners)
+        if (c := decision.claimed) is None:
+            return _unclaimed(decision)
+        async with _tried_again(self.db, item, c):
             done = await fulltext.wave(
                 self.db,
                 self.config,
                 self.archive,
-                claimed,
+                [c],
                 run=None,
                 gateway=self.gateway,
                 owners=owners,
@@ -137,16 +124,15 @@ class DeepPassWorker:
         now = datetime.now(self.config.schedule.zone)
         background = not await nightly_waits(self.db, self.config, now)
         async with self.db.write("claim a deep pass") as unit:
-            claimed = await store_.claim(
-                unit, self.deep.lease, 1, deep=True, background=background, pass_id=int(item.key)
+            decision = await store_.decide(
+                unit, int(item.key), self.deep.lease, deep=True, background=background
             )
             # A pass with an attempt open has started: its job is followed whatever the paper
             # wants.
-            attempt = await cards.open_attempt(unit, claimed[0].id) if claimed else None
-            standing = None if claimed else await store_.standing(unit, int(item.key))
-        if not claimed:
-            return _unclaimed(standing, held_back=not background)
-        (c,) = claimed
+            c = decision.claimed
+            attempt = await cards.open_attempt(unit, c.id) if c else None
+        if c is None:
+            return _unclaimed(decision)
         async with _tried_again(self.db, item, c):
             why = await deep_passes.work_one(
                 self.db, self.archive, self.deep, c, attempt, word.rules(self.config)

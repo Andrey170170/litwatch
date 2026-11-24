@@ -4,19 +4,20 @@ full-text rows of `weights` and `gists`).
 Each pass of the regular queue (not a re-run's, which its job works) has a work item, keyed by
 the pass's id, of the kind its Worker runs (`work_kind`; docs/plans/a2-work-gate.md, P2): every
 write here that leaves such a pass where a claim can take it (ready, awaiting its text, or
-running with its claim let go) submits the item in its unit, for when it may be taken, and
-`submit_open` submits what is open when a process starts serving them. The item claims its
-pass as every worker does (`claim`), so a pass worked inline by the nightly leaves its item
-nothing to do. As in the queue before: due passes run in `claim`'s order of priorities
-(`_place`), text passes a wave's width at once, and Deep passes one at a time (`_admission`).
-A paper brought back after a withdrawal has its passes submitted again (`submit_restored`)."""
+running with its claim let go) submits the item in its unit, for when it may be taken, at its
+pass's priority, and `submit_open` submits what is open when a process starts serving them.
+The item decides what to do with its pass under the pass's row lock, and claims it as every
+worker does (`decide`); a pass worked inline (the nightly) retires its item as it ends
+(`done`, `failed`). As in the queue before: due passes run in `claim`'s order of priorities,
+text passes a wave's width at once, and Deep passes one at a time (`_admission`). A paper
+brought back after a withdrawal has its passes submitted again (`submit_restored`)."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, LiteralString
 
 from litwatch.core import FAILED_RUNS, Paper, TaxonomyClass, Weight
 from litwatch.core.digests import PUBLISHED
@@ -37,6 +38,7 @@ from litwatch.core.fulltext import (
     TextPass,
     TextRead,
 )
+from litwatch.gates.context import current_work
 from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import work
 from litwatch.store.papers import COLUMNS, row_to_paper
@@ -47,19 +49,6 @@ TEXT_WORK = "fulltext"
 DEEP_WORK = "deep"
 # The states in which a claim can take a pass (a running one once its claim's lease lapsed).
 _CLAIMABLE = [PassState.READY.value, PassState.AWAITING_TEXT.value, PassState.RUNNING.value]
-
-
-# Where in line a pass's item that is due now goes: `take` runs due items in `not_before` order,
-# so it is submitted at a time long past that stands for the pass's priority, a day apart from
-# the next, as `claim` takes passes: the owner's, then the automatic ones, then a re-run's. A
-# pending item submitted again is brought forward to it (the owner's request jumping the line).
-# One that waits (for its text, out the Deep pause) is due at its wait's end instead.
-_LINE = datetime(1970, 1, 1, tzinfo=UTC)
-
-
-def _place(priority: int) -> datetime:
-    """The `not_before` of a pass due now at `priority`."""
-    return _LINE + timedelta(days=priority - TEXT_REQUEST_PRIORITY)
 
 
 def work_kind(kind: PassKind) -> str:
@@ -75,9 +64,10 @@ def _admission(kind: PassKind, pass_id: int) -> str | None:
 
 
 async def _submit(unit: WriteUnit, pass_id: int, at: datetime | None = None) -> None:
-    """Submit the pass's work item, to run no earlier than `at`; when not given, now, in its
-    priority's place in line (`_place`). A pass gone meanwhile (a sweep reads its passes
-    without locking them) has none."""
+    """Submit the pass's work item, to run no earlier than `at` (now when not given), in line
+    by the pass's priority, as `claim` takes passes: the owner's, then the automatic ones, then
+    a re-run's. A pass gone meanwhile (a sweep reads its passes without locking them) has
+    none."""
     row = await (
         await unit.execute("SELECT kind, priority FROM fulltext_passes WHERE id = %s", (pass_id,))
     ).fetchone()
@@ -88,20 +78,63 @@ async def _submit(unit: WriteUnit, pass_id: int, at: datetime | None = None) -> 
         unit,
         work_kind(kind),
         str(pass_id),
-        not_before=_place(row["priority"]) if at is None else at,
+        not_before=at,
         admission=_admission(kind, pass_id),
+        priority=row["priority"],
     )
+
+
+async def _retire(unit: WriteUnit, c: Claimed) -> None:
+    """The pass ended where it was claimed: its work item has nothing left to do, unless it is
+    the item doing this (`store.work.done_elsewhere`)."""
+    work_ = current_work()
+    await work.done_elsewhere(
+        unit, work_kind(c.kind), str(c.id), besides=work_.item.id if work_ else None
+    )
+
+
+# Of `fulltext_passes f` and its paper `p`: the passes a claim of `deep` ones may take at all,
+# with the parameter `job` (the re-run's whose text passes it takes; None for the regular
+# queue). A text pass is for its paper's current revision and the paper not dropped; a Deep
+# pass of any revision, and one whose job was submitted whatever a dismissal says.
+def _eligible(deep: bool) -> LiteralString:
+    if deep:
+        return f"f.kind = 'deep' AND ({STARTED} OR NOT p.dropped)"
+    return (
+        "f.kind <> 'deep' AND f.paper_revision = p.revision AND NOT p.dropped "
+        "AND f.job_id IS NOT DISTINCT FROM %(job)s"
+    )
+
+
+# ...those a claim may take now, as it is run: text passes the owner ran only (`owners` True),
+# or none of them (False); no background Deep pass but one whose job was submitted, without
+# `background`.
+def _allowed(deep: bool, owners: bool | None, background: bool) -> LiteralString:
+    if not deep and owners is not None:
+        return f"f.priority {'<' if owners else '>='} {TEXT_PRIORITY}"
+    if deep and not background:
+        return f"(f.priority < {BACKGROUND_PRIORITY} OR {STARTED})"
+    return "true"
+
+
+# ...and those it may take as they stand: to try, or running under a claim whose lease lapsed.
+_TAKEABLE = (
+    "(f.state IN ('awaiting_text', 'ready') OR (f.state = 'running' AND f.lease_until < now()))"
+)
 
 
 async def submit_open(unit: WriteUnit, *, deep: bool = False) -> int:
     """Submit the work item of each text pass of the regular queue that a claim can take, or
     with `deep` of each Deep pass: what a process that starts serving them finds queued or
-    runnable, a pass claimed by a process now gone included. Returns how many."""
+    runnable, a pass claimed by a process now gone included, and that a claim may take at all
+    (`_eligible`: not a dropped paper's, nor a text pass of an older revision). Returns how
+    many."""
     rows = await (
         await unit.execute(
-            "SELECT id FROM fulltext_passes WHERE job_id IS NULL AND state = ANY(%s) "
-            "AND (kind = 'deep') = %s ORDER BY id",
-            (_CLAIMABLE, deep),
+            "SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
+            f"WHERE {_eligible(deep)} AND f.job_id IS NULL AND f.state = ANY(%(claimable)s) "
+            "ORDER BY f.id",
+            {"job": None, "claimable": _CLAIMABLE},
         )
     ).fetchall()
     for r in rows:
@@ -117,9 +150,10 @@ async def submit_restored(unit: WriteUnit, paper_ids: Sequence[str]) -> None:
     rows = await (
         await unit.execute(
             "SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
-            "WHERE f.paper_id = ANY(%s) AND NOT p.dropped AND f.job_id IS NULL "
-            "AND f.state = ANY(%s) ORDER BY f.id",
-            (list(paper_ids), _CLAIMABLE),
+            f"WHERE f.paper_id = ANY(%(papers)s) AND (({_eligible(False)}) "
+            f"OR ({_eligible(True)})) AND f.job_id IS NULL AND f.state = ANY(%(claimable)s) "
+            "ORDER BY f.id",
+            {"papers": list(paper_ids), "job": None, "claimable": _CLAIMABLE},
         )
     ).fetchall()
     for r in rows:
@@ -412,27 +446,15 @@ async def claim(
     the owner ran now only when `owners` is True, none of them when it is False. Text passes a
     re-run works only for that `job`, and none of them without it. Without `background`, no
     Deep pass at a background priority but one whose job was submitted (a nightly is running
-    or due, pipeline.md, section 10). With `pass_id`, that pass alone (its work item's
-    claim)."""
-    which = (
-        f"f.kind = 'deep' AND ({STARTED} OR NOT p.dropped)"
-        if deep
-        else "f.kind <> 'deep' AND f.paper_revision = p.revision AND NOT p.dropped "
-        "AND f.job_id IS NOT DISTINCT FROM %(job)s"
-    )
-    if not deep and owners is not None:
-        which += f" AND f.priority {'<' if owners else '>='} {TEXT_PRIORITY}"
-    if deep and not background:
-        which += f" AND (f.priority < {BACKGROUND_PRIORITY} OR {STARTED})"
+    or due, pipeline.md, section 10). With `pass_id`, that pass alone (`decide`)."""
     rows = await (
         await unit.execute(
             f"""
             WITH taken AS (
                 SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
-                WHERE {which} AND NOT f.id = ANY(%(besides)s)
-                  AND (%(pass)s::bigint IS NULL OR f.id = %(pass)s)
-                  AND (f.state IN ('awaiting_text', 'ready')
-                       OR (f.state = 'running' AND f.lease_until < now()))
+                WHERE {_eligible(deep)} AND {_allowed(deep, owners, background)}
+                  AND NOT f.id = ANY(%(besides)s)
+                  AND (%(pass)s::bigint IS NULL OR f.id = %(pass)s) AND {_TAKEABLE}
                 ORDER BY f.priority, f.tried_at NULLS FIRST, f.id
                 LIMIT %(limit)s FOR UPDATE OF f SKIP LOCKED
             ), claimed AS (
@@ -480,34 +502,53 @@ async def claim(
 
 
 @dataclass(frozen=True)
-class Standing:
-    """A pass as a claim that did not take it finds it: its state, and the end of its claim's
-    lease while it runs under a live one (`held_until`); or `locked`, its row held by a unit
-    still open (a settle relabelling it), when what it will be is not known yet."""
+class Decision:
+    """What a pass's work item finds to do with its pass (`decide`): work it, `claimed`; wait
+    for another owner's live claim to end at `held_until`; look again later, `held_back`, as a
+    claim could take it but for what holds it back now (a nightly batching the automatic text
+    passes, or due before a background Deep pass); or nothing, as it is done, failed, gone, or
+    not the regular queue's to take."""
 
-    state: PassState | None
+    claimed: Claimed | None = None
     held_until: datetime | None = None
-    locked: bool = False
+    held_back: bool = False
 
 
-async def standing(unit: WriteUnit, pass_id: int) -> Standing | None:
-    """How the pass stands (`Standing`), in the unit of a claim that did not take it; None when
-    the pass is gone. A claim skips a row another unit holds, so the row is read the same way:
-    one held is `locked`, not judged by the state it had before that unit."""
+async def decide(
+    unit: WriteUnit,
+    pass_id: int,
+    lease: timedelta,
+    *,
+    deep: bool = False,
+    owners: bool | None = None,
+    background: bool = True,
+) -> Decision:
+    """Decide what the pass's work item does with it (`Decision`), claiming it for `lease` when
+    a claim on these terms (`claim`'s `deep`, `owners` and `background`) takes it. The pass's
+    row is locked first, a unit that holds it (a settle relabelling it) waited for, and then
+    read in a statement of its own, so the decision is on the pass as it stands, and the claim
+    of a pass found runnable is made under that same lock: one never ends untried."""
+    await unit.execute("SELECT 1 FROM fulltext_passes WHERE id = %s FOR UPDATE", (pass_id,))
     row = await (
         await unit.execute(
-            "SELECT state, CASE WHEN state = 'running' AND lease_until > now() "
-            "THEN lease_until END AS held_until FROM fulltext_passes WHERE id = %s "
-            "FOR UPDATE SKIP LOCKED",
-            (pass_id,),
+            f"SELECT {_eligible(deep)} AND f.state = ANY(%(claimable)s) AS open, "
+            f"{_TAKEABLE} AS takeable, {_allowed(deep, owners, background)} AS allowed, "
+            "CASE WHEN f.state = 'running' THEN f.lease_until END AS held_until "
+            "FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id WHERE f.id = %(pass)s",
+            {"job": None, "claimable": _CLAIMABLE, "pass": pass_id},
         )
     ).fetchone()
-    if row is not None:
-        return Standing(PassState(row["state"]), row["held_until"])
-    there = await (
-        await unit.execute("SELECT 1 FROM fulltext_passes WHERE id = %s", (pass_id,))
-    ).fetchone()
-    return Standing(None, locked=True) if there else None
+    if row is None or not row["open"]:
+        return Decision()
+    if not row["takeable"]:
+        return Decision(held_until=row["held_until"])
+    if not row["allowed"]:
+        return Decision(held_back=True)
+    claimed = await claim(
+        unit, lease, 1, deep=deep, owners=owners, background=background, pass_id=pass_id
+    )
+    assert claimed, f"pass {pass_id} was found runnable under its lock"
+    return Decision(claimed=claimed[0])
 
 
 async def job_open(unit: ReadUnit, job_id: int) -> int:
@@ -584,30 +625,34 @@ async def label_of(unit: ReadUnit, pass_id: int) -> tuple[PassKind, str] | None:
 
 
 async def release(unit: WriteUnit, c: Claimed) -> None:
-    """Give a claimed pass back unworked: it awaits its next claim, behind those not tried. One
+    """Give a claimed pass back unworked: it awaits its next claim, behind those not tried. Its
+    work item is submitted if the pass is the regular queue's now (here and below, by its job
+    as it stands: the owner's Process may have taken it from a re-run since the claim). One
     whose paper is dropped has no work item until the paper comes back (`submit_restored`): no
     claim takes it meanwhile."""
     row = await (
         await unit.execute(
             "UPDATE fulltext_passes f SET state = 'awaiting_text', lease_until = NULL "
             "FROM papers p WHERE f.id = %s AND f.state = 'running' AND f.lease_until = %s "
-            "AND p.id = f.paper_id RETURNING p.dropped",
+            "AND p.id = f.paper_id RETURNING p.dropped, f.job_id",
             (c.id, c.lease_until),
         )
     ).fetchone()
-    if row is not None and not row["dropped"] and c.job is None:
+    if row is not None and not row["dropped"] and row["job_id"] is None:
         await _submit(unit, c.id)
 
 
 async def let_go(unit: WriteUnit, c: Claimed, error: str, again: datetime) -> None:
     """End the worker's lease on a pass it started, now: it stays running, so no settle drops
     it, and the next claim takes it over at once, its work item from `again`."""
-    cur = await unit.execute(
-        "UPDATE fulltext_passes SET lease_until = now(), last_error = %s "
-        "WHERE id = %s AND state = 'running' AND lease_until = %s",
-        (error[:2000], c.id, c.lease_until),
-    )
-    if cur.rowcount and c.job is None:
+    row = await (
+        await unit.execute(
+            "UPDATE fulltext_passes SET lease_until = now(), last_error = %s "
+            "WHERE id = %s AND state = 'running' AND lease_until = %s RETURNING job_id",
+            (error[:2000], c.id, c.lease_until),
+        )
+    ).fetchone()
+    if row is not None and row["job_id"] is None:
         await _submit(unit, c.id, again)
 
 
@@ -618,12 +663,14 @@ async def wait_again(
     failed, with no job of it left; a re-run's pass its ceiling stopped): back in the queue,
     the failure not counted, behind those tried less recently, its work item from `again`
     (now when not given). Call it in a transaction that `held` it."""
-    await unit.execute(
-        "UPDATE fulltext_passes SET state = 'ready', lease_until = NULL, last_error = %s "
-        "WHERE id = %s",
-        (error[:2000], c.id),
-    )
-    if c.job is None:
+    row = await (
+        await unit.execute(
+            "UPDATE fulltext_passes SET state = 'ready', lease_until = NULL, last_error = %s "
+            "WHERE id = %s RETURNING job_id",
+            (error[:2000], c.id),
+        )
+    ).fetchone()
+    if row is not None and row["job_id"] is None:
         await _submit(unit, c.id, again)
 
 
@@ -635,12 +682,15 @@ async def retry_asked(unit: WriteUnit, c: Claimed) -> None:
 async def awaiting(unit: WriteUnit, c: Claimed, error: str | None = None) -> None:
     """The archive has no text for it yet (or cannot be reached: `error`): it waits again, and
     is tried again after `TEXT_WAIT`."""
-    cur = await unit.execute(
-        "UPDATE fulltext_passes SET state = 'awaiting_text', lease_until = NULL, "
-        "last_error = %s WHERE id = %s AND state = 'running' AND lease_until = %s",
-        (error, c.id, c.lease_until),
-    )
-    if cur.rowcount and c.job is None:
+    row = await (
+        await unit.execute(
+            "UPDATE fulltext_passes SET state = 'awaiting_text', lease_until = NULL, "
+            "last_error = %s WHERE id = %s AND state = 'running' AND lease_until = %s "
+            "RETURNING job_id",
+            (error, c.id, c.lease_until),
+        )
+    ).fetchone()
+    if row is not None and row["job_id"] is None:
         await _submit(unit, c.id, datetime.now(UTC) + TEXT_WAIT)
 
 
@@ -668,7 +718,9 @@ async def failed(
     starts the next try one model further down `brief`'s list; one every model of `brief`
     `refused` stops at once, counted as `FAILED_RUNS`. A pass left for the owner is not run
     again but on their word, or while it awaits its text, so a failure here is a new one: it
-    clears the owner's Acknowledge. Call it in a transaction that `held` the pass."""
+    clears the owner's Acknowledge. Call it in a transaction that `held` the pass. Its work item,
+    if another's, is retired (`_retire`): a failed pass waits for its next run's retry."""
+    await _retire(unit, c)
     await unit.execute(
         """
         UPDATE fulltext_passes SET state = 'failed', lease_until = NULL, last_error = %(error)s,
@@ -744,7 +796,9 @@ async def add(
 
 
 async def done(unit: WriteUnit, c: Claimed, text: TextRead) -> None:
-    """The pass wrote what it writes from `text`. Call it in a transaction that `held` it."""
+    """The pass wrote what it writes from `text`. Call it in a transaction that `held` it. Its
+    work item, if another's, is retired (`_retire`)."""
+    await _retire(unit, c)
     await unit.execute(
         """
         UPDATE fulltext_passes SET state = 'done', lease_until = NULL, last_error = NULL,

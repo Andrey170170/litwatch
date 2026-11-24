@@ -30,7 +30,7 @@ CHANNEL = "litwatch_work"
 
 _COLUMNS = (
     "id, kind, key, admission, state, not_before, attempts, scope, lease_token, lease_until, "
-    "outcome, error"
+    "outcome, error, priority"
 )
 # An item whose key is taken: open, or lasting. As the unique index `work_items_key` says.
 _TAKEN = "(lasting OR state <> 'ended')"
@@ -79,6 +79,7 @@ def _item(row: dict[str, Any]) -> WorkItem:
         lease_until=row["lease_until"],
         outcome=Outcome(row["outcome"]) if row["outcome"] else None,
         error=row["error"],
+        priority=row["priority"],
     )
 
 
@@ -95,19 +96,20 @@ async def submit(
     not_before: datetime | None = None,
     admission: str | None = None,
     lasting: bool = False,
-    keep: bool = False,
+    priority: int = 0,
 ) -> WorkItem:
     """Submit the work `key` of `kind`, to run no earlier than `not_before` (now when not
-    given), admitted one at a time per `admission` (its kind when not given). Returns the item.
+    given), admitted one at a time per `admission` (its kind when not given), in line among the
+    items due by `priority`, the lowest first (`take`). Returns the item.
 
     A key is the work within its kind (a pass's id, an integration's name). A submission whose
     key is still open is the same item, and its scope stays: a pending one is brought forward
-    to `not_before` when that is sooner; a running one is marked as resubmitted, wanted again
-    at `not_before` (the sooner of two such submissions), so work asked for while it ran is not
-    lost: when that run ends, a fresh item takes the key (`end`). A `lasting` key, a scheduled
+    to `not_before` when that is sooner, and up to `priority` when that is more urgent; a
+    running one is marked as resubmitted, wanted again at `not_before` (the sooner of two such
+    submissions, and the more urgent priority), so work asked for while it ran is not lost:
+    when that run ends, a fresh item takes the key (`end`). A `lasting` key, a scheduled
     occurrence's (the fire time), holds for good: once submitted, it returns its item, pending,
-    running or ended, unchanged, and never runs it again. With `keep`, a pending item keeps its
-    `not_before`: an event wakes a delivery, but never cuts short the backoff it waits out.
+    running or ended, unchanged, and never runs it again.
 
     The open item's row is locked `FOR NO KEY UPDATE` before its state is read, so a claim or a
     settling of it in flight is waited for and the item returned is as it stands. That lock
@@ -121,6 +123,7 @@ async def submit(
         "at": not_before,
         "admission": kind if admission is None else admission,
         "lasting": lasting,
+        "priority": priority,
     }
     # A key found free may be taken by a concurrent insert before ours, or the item found may end
     # and hand its key to a successor while we wait for its row: either way it is looked up
@@ -136,9 +139,10 @@ async def submit(
         if row is None:
             inserted = await (
                 await unit.execute(
-                    f"INSERT INTO work_items (kind, key, scope, not_before, admission, lasting) "
-                    f"VALUES (%(kind)s, %(key)s, %(scope)s, "
-                    f"COALESCE(%(at)s::timestamptz, now()), %(admission)s, %(lasting)s) "
+                    "INSERT INTO work_items (kind, key, scope, not_before, admission, lasting, "
+                    "priority) VALUES (%(kind)s, %(key)s, %(scope)s, "
+                    "COALESCE(%(at)s::timestamptz, now()), %(admission)s, %(lasting)s, "
+                    "%(priority)s) "
                     f"ON CONFLICT (kind, key) WHERE {_TAKEN} DO NOTHING RETURNING {_COLUMNS}",
                     params,
                 )
@@ -147,15 +151,18 @@ async def submit(
                 continue
             await _notify(unit, kind)
             return _item(inserted)
-        if row["state"] == "ended" or row["lasting"] or (keep and row["state"] == "pending"):
+        if row["state"] == "ended" or row["lasting"]:
             return _item(row)
         if row["state"] == "pending":
             sooner = await (
                 await unit.execute(
-                    "UPDATE work_items SET not_before = COALESCE(%(at)s::timestamptz, now()) "
-                    "WHERE id = %(id)s AND not_before > COALESCE(%(at)s::timestamptz, now()) "
+                    "UPDATE work_items SET "
+                    "not_before = LEAST(not_before, COALESCE(%(at)s::timestamptz, now())), "
+                    "priority = LEAST(priority, %(priority)s) WHERE id = %(id)s "
+                    "AND (not_before > COALESCE(%(at)s::timestamptz, now()) "
+                    "OR priority > %(priority)s) "
                     f"RETURNING {_COLUMNS}",
-                    {"id": row["id"], "at": not_before},
+                    {"id": row["id"], "at": not_before, "priority": priority},
                 )
             ).fetchone()
             if sooner is None:
@@ -164,9 +171,10 @@ async def submit(
             return _item(sooner)
         marked = await (
             await unit.execute(
-                f"UPDATE work_items SET not_before = {_WANTED}, resubmitted = true "
+                f"UPDATE work_items SET not_before = {_WANTED}, resubmitted = true, "
+                "priority = LEAST(priority, %(priority)s) "
                 f"WHERE id = %(id)s RETURNING {_COLUMNS}",
-                {"id": row["id"], "at": not_before},
+                {"id": row["id"], "at": not_before, "priority": priority},
             )
         ).fetchone()
         assert marked is not None  # locked above
@@ -183,6 +191,49 @@ async def forget_resubmission(unit: WriteUnit, item: WorkItem) -> None:
         "UPDATE work_items SET resubmitted = false WHERE id = %s AND state = 'running'",
         (item.id,),
     )
+
+
+async def done_elsewhere(
+    unit: WriteUnit, kind: str, key: str, *, besides: int | None = None
+) -> None:
+    """The work `key` of `kind` was done elsewhere (a pass a nightly worked inline): its pending
+    item ends done, with nothing left to do, and a running one other than `besides` (the
+    caller's own item) is wanted again at once, so a Worker that is about to have it wait looks
+    again first, and finds the work done. In the unit that did the work.
+
+    Its row is locked as `submit` locks it, and its state read after, in a statement of its
+    own: a take or a settling in flight is waited for. One found ended meanwhile may have handed
+    its key to a successor, which is looked up again."""
+    while True:
+        found = await (
+            await unit.execute(
+                f"SELECT id FROM work_items WHERE kind = %s AND key = %s AND {_TAKEN} "
+                "AND NOT lasting",
+                (kind, key),
+            )
+        ).fetchone()
+        if found is None or found["id"] == besides:
+            return
+        await unit.execute(
+            "SELECT 1 FROM work_items WHERE id = %s FOR NO KEY UPDATE", (found["id"],)
+        )
+        row = await (
+            await unit.execute("SELECT state FROM work_items WHERE id = %s", (found["id"],))
+        ).fetchone()
+        assert row is not None  # items are never deleted
+        if row["state"] == "pending":
+            await unit.execute(
+                "UPDATE work_items SET state = 'ended', outcome = 'done', ended_at = now() "
+                "WHERE id = %s",
+                (found["id"],),
+            )
+            return
+        if row["state"] == "running":
+            await unit.execute(
+                "UPDATE work_items SET resubmitted = true, not_before = now() WHERE id = %s",
+                (found["id"],),
+            )
+            return
 
 
 async def take_back(
@@ -212,9 +263,9 @@ async def take(
     lease: timedelta,
     keys: Mapping[str, Collection[str]] | None = None,
 ) -> WorkItem | None:
-    """Claim the pending item of `kinds` (and of a kind in `keys`, only those keys) that has
-    waited longest past its `not_before` and whose admission has no item running. None when
-    there is none. Two processes claiming for
+    """Claim the pending item of `kinds` (and of a kind in `keys`, only those keys) that is due,
+    of the lowest `priority`, then the one that has waited longest past its `not_before`, whose
+    admission has no item running. None when there is none. Two processes claiming for
     one admission at once: the later waits for the earlier's commit, then fails on
     `work_items_admitted`. The lease it is given is stamped by `stamp`, in the same unit: this
     statement may have waited for that admission."""
@@ -226,7 +277,7 @@ async def take(
                 WHERE {_served("w")} AND state = 'pending' AND not_before <= now()
                   AND NOT EXISTS (SELECT 1 FROM work_items r
                                   WHERE r.admission = w.admission AND r.state = 'running')
-                ORDER BY not_before, id LIMIT 1 FOR UPDATE SKIP LOCKED
+                ORDER BY priority, not_before, id LIMIT 1 FOR UPDATE SKIP LOCKED
             )
             UPDATE work_items SET state = 'running', lease_token = gen_random_uuid(),
                                   lease_until = now() + %(lease)s,
@@ -306,8 +357,9 @@ async def end(
     )
     if held["resubmitted"]:
         await unit.execute(
-            "INSERT INTO work_items (kind, key, scope, admission, not_before) "
-            "SELECT kind, key, scope, admission, not_before FROM work_items WHERE id = %s",
+            "INSERT INTO work_items (kind, key, scope, admission, not_before, priority) "
+            "SELECT kind, key, scope, admission, not_before, priority FROM work_items "
+            "WHERE id = %s",
             (item.id,),
         )
     await _notify(unit, item.kind)

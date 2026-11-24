@@ -7,6 +7,11 @@ own. Only events whose transaction is older than every transaction still running
 Each integration with a cursor is delivered to by work items of its own (docs/plans/a2-work-gate.md,
 P2), one turn each, keyed and admitted by its name (`wake`): an event wakes every one of them as
 it commits (`wake_all`), as the owner's retry or skip wakes theirs.
+
+The cursor's row serializes when its delivery runs: every write that schedules a turn (an
+event's wake, the owner's retry or skip, a turn arranging the next) locks the cursor's row
+before the item's, and reads the backoff under that lock. A backoff is recorded and cleared on
+that row too, so no turn is scheduled by a backoff read before it changed.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, NamedTuple
+from typing import Any, LiteralString, NamedTuple
 
 from psycopg.types.json import Jsonb
 
@@ -99,26 +104,33 @@ async def emit(unit: WriteUnit, type: str, paper_id: str | None = None, **payloa
 
 
 async def wake_all(unit: WriteUnit) -> None:
-    """Wake the delivery of every integration with a cursor, no sooner than the backoff of a
-    failure or a failed setup it has recorded: the last write of a unit that emitted, since
-    every such unit locks those items' rows. One that waits keeps its time."""
+    """Wake the delivery of every integration with a cursor (`wake`), in the order of their
+    names, so two emitters lock the cursors in one order: the last write of a unit that
+    emitted, since every such unit locks those rows."""
     rows = await (
-        await unit.execute(
-            "SELECT name, GREATEST(CASE WHEN failing IS NOT NULL THEN retry_at END, "
-            "CASE WHEN setup_failures > 0 THEN setup_retry_at END) AS backoff "
-            "FROM integration_cursors ORDER BY name"
-        )
+        await unit.execute("SELECT name FROM integration_cursors ORDER BY name")
     ).fetchall()
     for r in rows:
-        await wake(unit, r["name"], at=r["backoff"], keep=True)
+        await wake(unit, r["name"])
 
 
-async def wake(
-    unit: WriteUnit, name: str, *, at: datetime | None = None, keep: bool = False
-) -> None:
-    """Submit the integration's delivery, to run no earlier than `at` (now when not given): one
-    pending keeps its time with `keep`, so an event never cuts its backoff short."""
-    await work.submit(unit, DELIVERY, name, admission=f"deliver:{name}", not_before=at, keep=keep)
+async def wake(unit: WriteUnit, name: str, *, at: datetime | None = None) -> None:
+    """Submit the integration's delivery, to run no earlier than `at`; when not given, once the
+    events may be delivered: now, or when the backoff of a failure or a failed setup the cursor
+    records ends. The cursor's row is locked first, and the backoff read under that lock. A
+    pending turn is brought forward to it, a turn waiting for the `idle` hook included; one due
+    sooner keeps its time."""
+    row = await (
+        await unit.execute(
+            "SELECT GREATEST(CASE WHEN failing IS NOT NULL THEN retry_at END, "
+            "CASE WHEN setup_failures > 0 THEN setup_retry_at END) AS backoff "
+            "FROM integration_cursors WHERE name = %s FOR NO KEY UPDATE",
+            (name,),
+        )
+    ).fetchone()
+    if at is None and row is not None:
+        at = row["backoff"]
+    await work.submit(unit, DELIVERY, name, admission=f"deliver:{name}", not_before=at)
 
 
 async def waiting(unit: ReadUnit, name: str) -> tuple[bool, bool]:
@@ -163,9 +175,10 @@ async def of_paper(unit: ReadUnit, paper_id: str, type: str) -> list[Event]:
     return [Event(**r) for r in rows]
 
 
-async def cursor(unit: WriteUnit, name: str) -> Cursor:
+async def cursor(unit: WriteUnit, name: str, *, lock: bool = False) -> Cursor:
     """The integration's cursor, made at the last settled event the first time it is asked
-    for: an integration enabled for the first time is not woken by what came before it.
+    for: an integration enabled for the first time is not woken by what came before it. With
+    `lock`, its row is locked for the unit, before any item's (a turn arranging the next).
 
     It is made under the outbox's SHARE lock, which waits for every unit that wrote an event to
     end, and makes each that writes one meanwhile wait for this unit: so every emitter either
@@ -173,8 +186,11 @@ async def cursor(unit: WriteUnit, name: str) -> Cursor:
     cursors to wake (`wake_all`) after it was made. Without it, an emitter that looked before
     and committed after the first turn would leave events no turn is arranged for. Taken once
     for an integration's lifetime; each emitting write waits for it meanwhile."""
+    locking: LiteralString = " FOR NO KEY UPDATE" if lock else ""
     found = await (
-        await unit.execute(f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s", (name,))
+        await unit.execute(
+            f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s{locking}", (name,)
+        )
     ).fetchone()
     if found is not None:
         return _cursor(found)
@@ -191,7 +207,9 @@ async def cursor(unit: WriteUnit, name: str) -> Cursor:
         (name,),
     )
     row = await (
-        await unit.execute(f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s", (name,))
+        await unit.execute(
+            f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s{locking}", (name,)
+        )
     ).fetchone()
     return _cursor(row)
 

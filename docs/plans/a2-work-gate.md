@@ -261,11 +261,20 @@ Found while building, owned by the stage named.
   `litwatch fulltext --deep` can work a Deep pass while `serve` serves its item. The pass claim keeps them off
   one pass, but no longer one at a time; P3's CLI-as-items closes it.
 - **P3 (from P2): events wake deliveries at commit.** `outbox.emit` registers `WriteUnit.at_commit`, which runs the
-  submit as the unit's last statement, once per unit for every integration with a cursor (`keep=True`, and no sooner
-  than a backoff the cursor has recorded). Submitting at emit time would hold the delivery item's row lock until
-  commit and queue every other emitter behind it. A P3 path that submits from a long unit should do the same. A first
-  cursor is made under `LOCK TABLE outbox IN SHARE MODE`, so no emitter looks up the cursors before it exists and
-  commits after its first turn.
+  submit as the unit's last statement, once per unit for every integration with a cursor. Submitting at emit time
+  would hold the delivery item's row lock until commit and queue every other emitter behind it. A P3 path that
+  submits from a long unit should do the same. A first cursor is made under `LOCK TABLE outbox IN SHARE MODE`, so no
+  emitter looks up the cursors before it exists and commits after its first turn.
+- **P3 (from P2): the cursor's row serializes a delivery's schedule.** Every write that schedules a turn locks the
+  integration's cursor row first and its item's row after, and reads the backoff under the cursor's lock: an event's
+  wake (`outbox.wake`, cursors in name order, so two emitters lock them alike), the owner's retry and skip (which
+  update the cursor first), and a turn arranging the next (`outbox.cursor(lock=True)` before
+  `work.forget_resubmission`). A backoff is recorded and cleared on that row, so no turn is scheduled by a backoff
+  read before it changed. An event's wake asks for the time the events may be delivered (now, or the backoff's
+  end): it brings forward a turn that waits for the `idle` hook, never one past its backoff. A turn asks for the
+  sooner of that time and, for an integration with an `idle` hook, when the hook is due, so the hook still runs
+  during a long backoff. A P3 Worker that schedules itself from state another write changes (job chunks) can take
+  the same order: the state's row, then the item's.
 - **P3 (from P2): a turn decides its next run alone.** A delivery turn calls `store.work.forget_resubmission` in its
   last unit, then reads the cursor and the outbox and submits its own key for when it wants to run again; what was
   submitted while it ran is forgotten, since that read sees it. A P3 Worker that arranges its own next run (the
@@ -274,16 +283,25 @@ Found while building, owned by the stage named.
   `serve` gives it the integrations it loads, so a process takes, takes back and waits on only its own deliveries.
   An integration no process loads keeps one pending item, never taken; one dropped from the configuration leaves it
   for good, which P7's cleanup could end.
-- **P3 (from P2): pass order and width, without a schema change.** A pass due now is submitted at a time long past
-  that stands for its priority (`store.fulltext._place`: 1970-01-01 plus a day per step from the owner's text
-  priority), so `take`'s `not_before` order runs due passes as `claim`'s priority order did: the owner's, then the
-  automatic ones, then a re-run's. A pending item submitted again is brought forward to its place, and only a write
-  that moves a pass (`owners_first` changing its priority or job) submits it, so a settle does not cut a try's wait
-  short. One that waits (for its text, out the Deep pause) is due at its wait's end instead, so after a wait it is
-  ordered by that time, behind passes already due. Text-pass admission is spread over `TEXT_WAVE` slots
-  (`fulltext:{id % 4}`), so up to four run at once as a wave did; two passes in one slot wait for each other. Deep
-  stays one per kind. Each text item opens its own `fulltext` run and gateway, so four at once are four gateways
-  until P4. `store.work.again` with no time keeps the item's place in line (`LEAST(not_before, now())`).
+- **P3 (from P2): pass order and width.** A work item carries a `priority` apart from its `not_before`
+  (migration 0048): `take` runs the due item of the lowest priority first, then the one due longest, and a
+  submission keeps the more urgent of two priorities, as it keeps the sooner of two times. A pass's item carries its
+  pass's priority, so due passes run as `claim`'s priority order did (the owner's, then the automatic ones, then a
+  re-run's), after a wait too: Deep items that waited out one pause, all due at its end, resume in that order. Only a
+  write that moves a pass (`owners_first` changing its priority or job) submits it, so a settle does not cut a try's
+  wait short. Text-pass admission is spread over `TEXT_WAVE` slots (`fulltext:{id % 4}`), so up to four run at once
+  as a wave did; two passes in one slot wait for each other. Deep stays one per kind. Each text item opens its own
+  `fulltext` run and gateway, so four at once are four gateways until P4. `store.work.again` with no time keeps the
+  item's place in line (`LEAST(not_before, now())`). Other kinds leave the priority 0.
+- **P3 (from P2): a pass item decides under the pass's lock.** Both pass Workers decide with
+  `store.fulltext.decide`: it locks the pass's row (waiting for a settle that holds it), reads it in a statement of
+  its own, and claims it under that lock when a claim may take it, so a runnable pass never ends untried; else the
+  item waits for another owner's claim (`held_until`), looks again later (`held_back`), or ends. The sweeps share
+  the claim's static predicates (`_eligible`). A pass worked inline (the nightly, the CLI) retires its item as it
+  ends (`done`, `failed` call `store.work.done_elsewhere`): a pending one ends, and a running one other than the
+  caller's is wanted again at once, so one that was about to wait looks again first, and finds the pass done; in
+  that race the look again is one more short item. A pass's writes submit its item by the pass's job as it stands
+  (`RETURNING job_id`), not the claim's, as the owner's Process may take a pass from a re-run meanwhile.
 - **P3 (from P2): `fulltext.worker` imports `jobs.worker.nightly_waits`.** That is on the `(fulltext, jobs)` pair
   of `CYCLES_BEFORE_THE_RULE`; when P3 moves the nightly gating into items, the import can go with it.
 - **P3 (from P2): re-run passes stay off the gate.** A pass with a `job_id` is the re-run's, worked inline by its

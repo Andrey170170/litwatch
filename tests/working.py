@@ -13,11 +13,14 @@ WAIT = 10.0  # how long a test waits on something that must happen
 
 
 async def until(check: Callable[[], Awaitable[bool]], what: str) -> None:
-    """Wait until `check` holds, looking again every 50 ms, for at most `WAIT`."""
-    async with asyncio.timeout(WAIT):
-        while not await check():
-            await asyncio.sleep(0.05)
-    del what  # named for the reader of a timeout's traceback
+    """Wait until `check` holds, looking again every 50 ms, for at most `WAIT`; a timeout says
+    `what` it waited for."""
+    try:
+        async with asyncio.timeout(WAIT):
+            while not await check():
+                await asyncio.sleep(0.05)
+    except TimeoutError:
+        raise TimeoutError(f"waited {WAIT:.0f}s for: {what}") from None
 
 
 @contextlib.asynccontextmanager

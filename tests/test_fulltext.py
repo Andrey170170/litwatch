@@ -4,9 +4,10 @@ lease, revisions, and what the owner sees of it."""
 
 import asyncio
 import contextlib
+import functools
 import json
 from collections import Counter
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -29,6 +30,7 @@ from litwatch.core.fulltext import (
     LEASE,
     RECONCILE_LOOKBACK,
     TEXT_PRIORITY,
+    TEXT_REQUEST_PRIORITY,
     TEXT_WAVE,
     PassKind,
     PassState,
@@ -818,18 +820,43 @@ async def test_a_claim_a_process_abandoned_is_taken_by_the_passs_item_once_it_la
     assert item["not_before"] >= taken.lease_until and len(writer.asked) == 1
 
 
-async def test_the_owners_run_now_runs_a_stopped_pass_while_the_gate_serves(db: Session, gate):
+@contextlib.asynccontextmanager
+async def serve(db: Session, monkeypatch, fake: FakeArchive, writer: Writer, *integrations):
+    """`litwatch serve`'s app, running for the block (its Work gate, the passes' Workers, swept
+    as it starts), with no nightly; yields an HTTP client on it, signed in."""
+
+    async def idle(*args):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(scheduler, "run_forever", idle)  # no nightly here
+    monkeypatch.setattr(jobs_worker, "run_forever", idle)
+    config = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    app = create_app(
+        dsn, "t", config, writer.gateway, archive=archive(fake), integrations=list(integrations)
+    )
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+            headers={"authorization": "Bearer t"},
+        ) as http,
+    ):
+        yield http
+
+
+async def test_the_owners_run_now_runs_a_stopped_pass_on_the_running_service(
+    db: Session, monkeypatch
+):
     await graded(db, "central")
     fake, writer = FakeArchive(status="failed"), Writer()
     await work(db, fake, writer)
     await db.execute("UPDATE fulltext_passes SET failed_runs = %s", (FAILED_RUNS,))
     await db.execute("DELETE FROM work_items")  # a stopped pass has none; the owner gives it one
     (row,) = await passes(db)
-    fake = ready(FakeArchive())
-    async with serving(WorkGate(gate), workers(gate, fake, writer)):
-        _, http = client(db)
-        async with http:
-            assert (await http.post(f"/api/settings/fulltext/{row['id']}/now")).status_code == 204
+    async with serve(db, monkeypatch, ready(FakeArchive()), writer) as http:
+        assert (await http.post(f"/api/settings/fulltext/{row['id']}/now")).status_code == 204
         await until(lambda: item_ended(db, row["id"]), "the owner's pass is tried")
     assert await state_is(db, "done") and len(writer.asked) == 1
 
@@ -876,7 +903,7 @@ async def test_settling_a_processed_paper_again_leaves_its_passs_wait_alone(db: 
     (row,) = await passes(db)
     await in_write(db, fulltext_store.owners_first, [P.id])  # the owner had it processed
     (item,) = await items_of(db, "fulltext", str(row["id"]))
-    assert item["not_before"].year == 1970  # first in line
+    assert item["priority"] == TEXT_REQUEST_PRIORITY  # first in line
     # As a try that left it awaiting its text leaves it: waiting half a minute.
     await db.execute("UPDATE work_items SET not_before = now() + interval '30 seconds'")
     (item,) = await items_of(db, "fulltext", str(row["id"]))
@@ -904,15 +931,18 @@ async def test_a_paper_brought_back_after_a_withdrawal_has_its_open_pass_run_aga
     assert [i["state"] for i in items] == ["ended", "pending"]
 
 
-async def test_a_pass_a_unit_holds_as_its_item_claims_it_is_looked_at_again(db: Session, gate):
+async def test_an_item_waits_for_a_unit_that_holds_its_pass_then_works_it(db: Session, gate):
     await graded(db, "central")
     (row,) = await passes(db)
     fake, writer = ready(FakeArchive()), Writer()
     other = await sessions.sibling(db)
 
-    async def tried() -> bool:
-        (item,) = await items_of(db, "fulltext", str(row["id"]))
-        return item["attempts"] >= 1 and item["state"] == "pending"
+    async def blocked() -> bool:  # the item's decision waits for the row
+        found = await db.execute(
+            "SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+            "AND query LIKE 'SELECT 1 FROM fulltext_passes WHERE id = % FOR UPDATE'"
+        )
+        return (await found.fetchone())["n"] == 1
 
     try:
         async with contextlib.AsyncExitStack() as held:
@@ -922,12 +952,70 @@ async def test_a_pass_a_unit_holds_as_its_item_claims_it_is_looked_at_again(db: 
                 "SELECT 1 FROM fulltext_passes WHERE id = %s FOR UPDATE", (row["id"],)
             )
             async with serving(WorkGate(gate), workers(gate, fake, writer)):
-                await until(tried, "the item finds the row held, and waits")
-                await held.aclose()
+                await until(blocked, "the item waits for the row")
+                await held.aclose()  # the settle commits, leaving the pass runnable
                 await until(lambda: item_ended(db, row["id"]), "the item ends")
     finally:
         await other.close()
     assert await state_is(db, "done") and len(writer.asked) == 1
+    # The pass's run is the item's (docs/specs/architecture/a2-work-gate.md, "Work records").
+    (item,) = await items_of(db, "fulltext", str(row["id"]))
+    linked = await db.execute("SELECT work_id FROM runs WHERE kind = 'fulltext'")
+    assert [r["work_id"] for r in await linked.fetchall()] == [item["id"]]
+
+
+@pytest.mark.parametrize("write", ["awaiting", "release", "let_go"])
+async def test_a_pass_the_owner_took_from_a_rerun_is_submitted_by_the_reruns_next_write(
+    db: Session, write
+):
+    await graded(db, "central")
+    (row,) = await passes(db)
+    job = await db.execute(
+        "INSERT INTO jobs (kind, scope, state, papers) VALUES ('process', '{}', 'running', 1) "
+        "RETURNING id"
+    )
+    job_id = (await job.fetchone())["id"]
+    await db.execute("UPDATE fulltext_passes SET job_id = %s", (job_id,))
+    await db.execute("DELETE FROM work_items")  # a re-run's pass has none
+    async with Bridge(db).write("the re-run claims it") as unit:
+        (c,) = await fulltext_store.claim(unit, LEASE, 1, job=job_id, pass_id=row["id"])
+    await in_write(db, fulltext_store.owners_first, [P.id])  # the owner's Process takes it
+    # Its item finds the re-run's claim live, and waits it out.
+    await db.execute("UPDATE work_items SET not_before = %s", (c.lease_until,))
+    async with Bridge(db).write(write) as unit:
+        if write == "let_go":
+            await fulltext_store.let_go(unit, c, "the service failed", datetime.now(UTC))
+        else:
+            await getattr(fulltext_store, write)(unit, c)
+    (item,) = await items_of(db, "fulltext", str(row["id"]))
+    assert item["not_before"] < c.lease_until - timedelta(minutes=20)  # not left on the lease
+
+
+async def test_the_sweep_submits_only_the_passes_a_claim_may_take(db: Session):
+    dropped = paper("2610.00002", title="Dismissed", abstract="Dismissed.", version=1)
+    await in_write(db, papers_store.upsert, [dropped])
+    async with Bridge(db).write("queue") as unit:
+        older = await fulltext_store.queue(unit, P.id, 1, PassKind.BRIEF, "focus", TEXT_PRIORITY)
+        gone = await fulltext_store.queue(
+            unit, dropped.id, 1, PassKind.BRIEF, "focus", TEXT_PRIORITY
+        )
+        deep = await fulltext_store.queue_deep(unit, dropped.id, 1, "focus")
+        unstarted = await fulltext_store.queue_deep(unit, P.id, 1, "focus")
+    await db.execute("UPDATE papers SET revision = 2 WHERE id = %s", (P.id,))  # rewritten
+    async with Bridge(db).write("queue the new revision's") as unit:
+        current = await fulltext_store.queue(unit, P.id, 2, PassKind.BRIEF, "focus", TEXT_PRIORITY)
+    await db.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (dropped.id,))
+    # The dismissed paper's Deep pass had its job submitted: it is followed whatever happens.
+    await db.execute(
+        "INSERT INTO deep_attempts (paper_id, automatic, pass_id) VALUES (%s, true, %s)",
+        (dropped.id, deep),
+    )
+    await db.execute("DELETE FROM work_items")  # as a process starting finds them
+    await in_write(db, fulltext_store.submit_open)
+    await in_write(db, functools.partial(fulltext_store.submit_open, deep=True))
+    keys = await (await db.execute("SELECT key FROM work_items ORDER BY id")).fetchall()
+    assert sorted(int(k["key"]) for k in keys) == sorted([current, deep, unstarted])
+    del older, gone  # an older revision's, and a dismissed paper's: no claim takes them
 
 
 async def test_a_pass_gone_while_the_sweep_runs_is_left_out(db: Session, monkeypatch):
@@ -958,25 +1046,16 @@ async def test_a_pass_gone_while_the_sweep_runs_is_left_out(db: Session, monkeyp
 
 
 async def test_serve_runs_text_and_deep_passes_as_its_work_items(db: Session, monkeypatch):
-    async def idle(*args):
-        await asyncio.sleep(3600)
-
-    monkeypatch.setattr(scheduler, "run_forever", idle)  # no nightly here
-    monkeypatch.setattr(jobs_worker, "run_forever", idle)
     fake, writer, service = ready(FakeArchive()), Writer(), FakeDeep(DONE)
-    config = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})
-    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
-    app = create_app(
-        dsn, "t", config, writer.gateway, archive=archive(fake), integrations=[make(service)]
-    )
 
     async def carded() -> bool:
         return bool((await in_read(db, cards.card, P.id) or {}).get("card"))
 
-    async with app.router.lifespan_context(app):
-        await graded(db, "central")  # a text pass, queued by the settle
-        async with settling.change(db, P.id, cause=Cause.OWNER) as change:
-            await deep_passes.request(change.unit, P.id)  # and the owner's Deep card
+    await graded(db, "central")  # a text pass, queued by the settle
+    async with settling.change(db, P.id, cause=Cause.OWNER) as change:
+        await deep_passes.request(change.unit, P.id)  # and the owner's Deep card
+    await db.execute("DELETE FROM work_items")  # queued before passes had items (rollback)
+    async with serve(db, monkeypatch, fake, writer, make(service)):  # its sweeps submit both
         await until(lambda: state_is(db, "done"), "the text pass is done")
         await until(carded, "the card is written")
     assert len(writer.asked) == 1 and service.started == 1
@@ -1010,10 +1089,15 @@ async def test_a_nightly_beside_the_gate_takes_over_an_abandoned_pass_and_works_
             async with model_run(gate, CONFIG, "nightly", gateway=writer.gateway) as run:
                 done = await nightly.text_passes(gate, CONFIG, run, None)
         assert done == {"briefs_written": 1}  # taken over by the nightly
-        # The item waits for whatever held its pass when it last looked (the nightly's claim,
-        # perhaps); due now, it finds the pass done.
-        await db.execute("UPDATE work_items SET not_before = now() WHERE state = 'pending'")
-        await until(lambda: item_ended(db, row["id"]), "the item finds its pass done")
+        # The item waited for whatever held its pass when it last looked (the nightly's claim,
+        # perhaps, for hours): the nightly's write retired it. One deciding as that write
+        # commits looks once more, and finds the pass done.
+
+        async def all_ended() -> bool:
+            items = await items_of(db, "fulltext", str(row["id"]))
+            return all(i["state"] == "ended" for i in items)
+
+        await until(all_ended, "the item ends with its pass done")
     assert await state_is(db, "done") and len(writer.asked) == 1  # one model call, not two
 
 

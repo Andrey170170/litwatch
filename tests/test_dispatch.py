@@ -3,8 +3,10 @@ as a work item of the Work gate."""
 
 import asyncio
 import contextlib
+import json
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import psycopg
 
 from litwatch import events
@@ -14,7 +16,9 @@ from litwatch.events.worker import DeliveryWorker
 from litwatch.gates.database import outside_unit
 from litwatch.gates.work import WorkGate
 from litwatch.integrations.deep import Deep, DeepClient
+from litwatch.integrations.webhook import Webhook
 from litwatch.store import outbox
+from litwatch.store import work as queue
 from tests import sessions
 from tests.conftest import deliver, settled, start
 from tests.sessions import Session, in_read, in_write, staged
@@ -497,6 +501,147 @@ async def test_an_event_during_a_failing_turn_does_not_cut_its_backoff_short(con
 
 async def _ended_before(conn: Session, name: str) -> bool:
     return any(t["state"] == "ended" for t in await turns(conn, name))
+
+
+async def test_an_emitter_kept_waiting_wakes_by_the_backoff_as_it_stands_then(conn: Session, db):
+    first, failing = Recorder("a"), Recorder("b")
+    for each in (first, failing):
+        await start(db, each)
+    failing.fail_all = True
+    (a,) = await emit(conn, events.PAPER_SAVED)
+    await deliver(db, failing)  # fails: half a minute's backoff
+    backoff = (await in_write(conn, outbox.cursor, failing.name)).retry_at
+    assert backoff is not None and backoff > datetime.now(UTC)
+    await in_write(conn, outbox.wake, first.name)
+    await conn.execute("DELETE FROM work_items WHERE key = %s", (failing.name,))
+    holder, emitter = await sessions.sibling(conn), await sessions.sibling(conn)
+
+    async def blocked() -> bool:  # the emitter waits for `a`'s item, before it reaches `b`
+        found = await conn.execute(
+            "SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+            "AND query LIKE 'SELECT%FROM work_items%FOR NO KEY UPDATE'"
+        )
+        return (await found.fetchone())["n"] == 1
+
+    try:
+        async with contextlib.AsyncExitStack() as held, emitter.transaction():
+            await held.enter_async_context(holder.transaction())  # a settling of `a`'s item
+            await holder.execute(
+                "SELECT 1 FROM work_items WHERE key = %s FOR UPDATE", (first.name,)
+            )
+            unit = staged(emitter)
+            await outbox.emit(unit, events.PAPER_SAVED, "2610.00001")
+            waking = asyncio.create_task(outbox.wake_all(unit))  # as its commit does
+            await until(blocked, "the emitter waits")
+            # Meanwhile the owner retries `b`, and its turn delivers.
+            failing.fail_all = False
+            assert await in_write(conn, outbox.retry, failing.name)
+            assert await deliver(db, failing) == 1
+            await conn.execute("DELETE FROM work_items WHERE key = %s", (failing.name,))
+            await held.aclose()
+            await waking
+    finally:
+        await holder.close()
+        await emitter.close()
+    (turn,) = await turns(conn, failing.name)
+    assert turn["not_before"] < backoff - timedelta(seconds=10)  # not the backoff cleared since
+    del a
+
+
+class Waiting(Recorder):
+    """An integration with an `idle` hook, which counts its calls."""
+
+    def __init__(self):
+        super().__init__("waiting")
+        self.idled = 0
+
+    async def idle(self, db):
+        self.idled += 1
+
+
+async def test_an_event_brings_forward_a_turn_that_waits_for_the_idle_hook(conn: Session, db):
+    rec = Waiting()  # `idle` every minute
+    gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()
+
+    async def idles() -> bool:  # it idled, and waits a minute to again
+        found = await turns(conn, rec.name)
+        return rec.idled == 1 and any(t["state"] == "pending" for t in found)
+
+    async with served(gate, workers):
+        await until(idles, "it idles, and waits")
+        ids = await emit(conn, events.PAPER_SAVED)
+        await until(lambda: _seen(rec, ids), "the event is delivered within the minute")
+
+
+async def test_the_idle_hook_is_called_while_a_failure_waits_out_its_backoff(
+    conn: Session, db, monkeypatch
+):
+    monkeypatch.setattr(dispatch, "IDLE_SECONDS", 0.05)
+    rec = Waiting()
+    await start(db, rec)
+    gate, workers = delivering(db, rec)
+    async with served(gate, workers):
+        rec.fail_all = True
+        (a,) = await emit(conn, events.PAPER_SAVED)
+
+        async def failing() -> bool:
+            return (await in_write(conn, outbox.cursor, rec.name)).failing == a
+
+        await until(failing, "the event fails, and waits half a minute")
+        idled = rec.idled
+
+        async def idles() -> bool:
+            return rec.idled >= idled + 2
+
+        await until(idles, "it idles meanwhile, again and again")
+    assert rec.seen == []
+
+
+async def test_serve_takes_back_and_delivers_its_own_turns_and_leaves_another_processs(
+    conn: Session, db, monkeypatch
+):
+    posted: list[int] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content)["id"])
+        return httpx.Response(200)
+
+    hook = Webhook(
+        "http://hook.test", http=httpx.AsyncClient(transport=httpx.MockTransport(answer))
+    )
+    gone = Recorder("gone")  # loaded by another process, now dead
+    for each in (hook, gone):
+        await start(db, each)
+    # A turn of each whose process died with it running, its lease lapsed.
+    for name in (hook.name, gone.name):
+        await conn.execute(
+            "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until, "
+            "attempts) VALUES (%s, %s, %s, 'running', gen_random_uuid(), "
+            "now() - interval '1 minute', 1)",
+            (outbox.DELIVERY, name, f"deliver:{name}"),
+        )
+    ids = await emit(conn, events.PAPER_SAVED)
+    waits: list[float | None] = []
+    wait_seconds = queue.wait_seconds
+
+    async def recording(*args, **kwargs):
+        waits.append(await wait_seconds(*args, **kwargs))
+        return waits[-1]
+
+    monkeypatch.setattr(queue, "wait_seconds", recording)
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    app = create_app(dsn, "t", integrations=[hook])
+
+    async def delivered() -> bool:  # and the gate sleeps with nothing of its own to wait for
+        return posted == ids and await _ended(conn, hook.name) and waits[-1:] == [None]
+
+    async with app.router.lifespan_context(app):
+        await until(delivered, "the webhook is posted the event, and the gate sleeps")
+    first, *_ = await turns(conn, hook.name)
+    assert first["attempts"] == 2  # taken back from the dead process, and run again
+    left = [(t["state"], t["attempts"]) for t in await turns(conn, gone.name)]
+    assert left == [("running", 1)]  # not this process's to take back
 
 
 async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_integration(

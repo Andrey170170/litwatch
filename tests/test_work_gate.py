@@ -129,25 +129,35 @@ async def test_an_open_key_is_the_same_item(conn: Session, db):
     assert (await submit(db, "fulltext", "7")).id != first.id  # ended, the key is free
 
 
-async def test_a_submission_that_keeps_leaves_a_pending_items_time_and_marks_a_running_one(
-    conn: Session, db
-):
+async def test_due_items_are_taken_by_priority_then_by_how_long_they_waited(conn: Session, db):
     gate = WorkGate(db)
-    backoff = datetime.now(UTC) + timedelta(hours=1)
-    first = await submit(db, "deliver", "zotero", not_before=backoff)
-    kept = await submit(db, "deliver", "zotero", keep=True)  # an event during the backoff
-    assert (kept.id, kept.not_before) == (first.id, backoff)
-    async with db.write("due") as unit:
-        await unit.execute("UPDATE work_items SET not_before = now() WHERE id = %s", (first.id,))
-    taken = await take(gate, ["deliver"])
-    assert taken is not None
-    await submit(db, "deliver", "zotero", keep=True)  # an event while it runs
+    past = datetime.now(UTC) - timedelta(minutes=5)
+    await submit(db, "pass", "old", not_before=past, admission="a", priority=1)
+    await submit(db, "pass", "urgent", admission="b")
+    await submit(
+        db, "pass", "newer", not_before=past + timedelta(minutes=1), admission="c", priority=1
+    )
+    await submit(db, "pass", "moved", not_before=past, admission="d", priority=2)
+    # Submitted again more urgently (the owner's request), a pending item moves up, and keeps
+    # its time; one later than it has keeps it too.
+    soon = datetime.now(UTC) + timedelta(hours=1)
+    moved = await submit(db, "pass", "moved", not_before=soon, priority=-1)
+    assert (moved.priority, moved.not_before) == (-1, past)
+    taken = [await take(gate, ["pass"]) for _ in range(4)]
+    assert [t.key for t in taken if t] == ["moved", "urgent", "old", "newer"]
+
+    # A resubmission while it runs is kept by the item that takes its key.
+    running = taken[0]
+    assert running is not None
+    await submit(db, "pass", "moved", priority=-3)
     async with db.write("end") as unit:
-        assert await queue.end(unit, taken, Outcome.DONE)
-    assert await records(conn, "zotero") == [
-        ("ended", "done", None, False),
-        ("pending", None, None, False),
-    ]
+        assert await queue.end(unit, running, Outcome.DONE)
+    successor = await (
+        await conn.execute(
+            "SELECT priority FROM work_items WHERE key = 'moved' AND state = 'pending'"
+        )
+    ).fetchone()
+    assert successor["priority"] == -3
 
 
 # A resubmitted item ended done, and the item that took its key.
