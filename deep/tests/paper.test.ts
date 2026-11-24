@@ -32,7 +32,7 @@ test("a paper with no appendix loses only its bibliography, and one with neither
   assert.ok(main.includes("\\section{Results}") && main.endsWith("\\end{document}\n"), "what follows the bibliography stays");
   assert.ok(!main.includes("Turpin"));
   const bare = "\\documentclass{article}\\begin{document}\\section{Method}We probe.\\end{document}";
-  assert.deepEqual(splitPaper(latex(bare)), { main: bare, cuts: [] });
+  assert.deepEqual(splitPaper(latex(bare, [["\\section{Method}", 0, "1"]])), { main: bare, cuts: [] });
 });
 
 test("a LaTeX paper's headings are its outline's: their numbers as sent, their titles as plain text, one level down per depth", () => {

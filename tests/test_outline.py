@@ -77,14 +77,24 @@ def test_sections_are_counted_lettered_from_the_appendix_on_and_starred_ones_lef
         "\\setcounter{secnumdepth}{1}",
         "\\usepackage{chngcntr}",
         "\\chapter{Background}",
-        # deep's checks fixture before D3: the appendix numbered S1, S2, ... by its own counter
-        "\\setcounter{section}{0}\\renewcommand{\\thesection}{S\\arabic{section}}",
     ],
 )
 def test_a_source_that_numbers_its_sections_its_own_way_is_not_guessed_at(custom):
     body = NESTED.replace(
         "\\subsection{Probe training}", f"{custom}\n\\subsection{{Probe training}}"
     )
+    assert all(p.number is None for p in latex(body).parts)
+
+
+RESET = "\\setcounter{section}{0}\\renewcommand{\\thesection}{S\\arabic{section}}"
+
+
+@pytest.mark.parametrize("at", [RESET, f"\\appendix{RESET}"])
+def test_a_numbering_set_after_the_bibliography_leaves_every_section_bare(at):
+    """deep's checks fixture before D3: the appendix numbered S1, S2, ... by its own counter,
+    set where the appendix starts, past the bibliography; it numbers the sections before too."""
+    body = BODY.replace("\\appendix", at)
+    assert body.index(RESET) > body.index("\\end{thebibliography}")
     assert all(p.number is None for p in latex(body).parts)
 
 
@@ -121,8 +131,13 @@ def test_the_bibliography_is_its_environment_and_the_appendix_runs_from_its_comm
     spaced = BODY.replace("\\begin{thebibliography}", "\\begin {thebibliography}").replace(
         "\\end{thebibliography}", "\\end {thebibliography}"
     )
-    start, end = latex(spaced).references or (0, 0)
-    assert spaced[start:end].endswith("\\end {thebibliography}")
+    found = latex(spaced)
+    closing = "\\end {thebibliography}"
+    assert found.references == (
+        spaced.index("\\begin {thebibliography}"),
+        spaced.index(closing) + len(closing),
+    )
+    assert found.appendix == spaced.index("\\appendix")
     # a bibliography that never closes runs to the end
     unclosed = "\\section{A}\nText.\n\\begin{thebibliography}{9}\n\\bibitem{a} A.\n"
     assert latex(unclosed).references == (unclosed.index("\\begin"), len(unclosed))

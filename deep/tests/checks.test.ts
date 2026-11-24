@@ -175,8 +175,8 @@ test("a figure code can neither find nor rule out is the reviewer's, by name: in
 });
 
 test("a LaTeX source that numbers its figures itself has no figure number refused or confirmed", () => {
-  const left = (text: string, paper: string) => {
-    const checked = check(saying(text), ctx({ paper }));
+  const left = (text: string, paper: string, headings?: Stated[]) => {
+    const checked = check(saying(text), ctx({ paper, headings }));
     return [checked.errors, checked.unverified];
   };
   // by LaTeX's defaults the one figure is Figure 1, and there is no Figure 11
@@ -194,9 +194,12 @@ test("a LaTeX source that numbers its figures itself has no figure number refuse
     assert.deepEqual(left("See Figures 1 and 11.", BODY.replace("\\begin{figure}", `${custom}\n\\begin{figure}`)), [[], ["Figure 1", "Figure 11"]], custom);
   // What renumbers every float: a continued one, the package that ties counters, chapters, a class that has
   // them. The fixture's own cite of Table 1 is then unknown as well, and with the last three its §3.
-  const all = (custom: string, paper: string) => assert.deepEqual(left("See Figures 1 and 11.", paper).map((list) => list.filter((name) => name !== "§3")), [[], ["Figure 1", "Figure 11", "Table 1"]], custom);
-  for (const custom of ["\\ContinuedFloat", "\\usepackage[nottoc]{chngcntr}", "\\chapter{One}"]) all(custom, BODY.replace("\\begin{figure}", `${custom}\n\\begin{figure}`));
-  all("report", BODY.replace("\\documentclass{article}", "\\documentclass[11pt]{report}"));
+  const all = (custom: string, paper: string, headings?: Stated[]) => assert.deepEqual(left("See Figures 1 and 11.", paper, headings).map((list) => list.filter((name) => name !== "§3")), [[], ["Figure 1", "Figure 11", "Table 1"]], custom);
+  // (the last three number no section LaTeX's way, and a chapter puts the sections a level down)
+  const chapter: Stated[] = [["\\begin{abstract}", 0], ["\\section{Introduction}", 1], ["\\section{Method}", 1], ["\\chapter{One}", 0], ["\\section{Results}", 1], ["\\begin{thebibliography}", 0], ["\\section{Probe training details}", 1]];
+  const headings: Record<string, Stated[]> = { "\\ContinuedFloat": HEADINGS, "\\usepackage[nottoc]{chngcntr}": unnumbered(HEADINGS), "\\chapter{One}": chapter };
+  for (const [custom, stated] of Object.entries(headings)) all(custom, BODY.replace("\\begin{figure}", `${custom}\n\\begin{figure}`), stated);
+  all("report", BODY.replace("\\documentclass{article}", "\\documentclass[11pt]{report}"), unnumbered(HEADINGS));
   // another counter's setting, or one in a comment, leaves the figures' numbering LaTeX's
   for (const other of ["\\setcounter{table}{4}", "% \\setcounter{figure}{10}", "\\setcounter{topnumber}{3}"])
     assert.equal(left("See Figure 11.", BODY.replace("\\begin{figure}", `${other}\n\\begin{figure}`))[0].length, 1, other);

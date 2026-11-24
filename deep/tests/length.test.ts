@@ -18,7 +18,7 @@ ${"z".repeat(500)}
 \end{document}
 `;
   const read = { format: "read", sections: [{ id: "method", kind: "method", title: "Method", blocks: [{ type: "p", text: "abcdefghij", where: "§1" }] }] };
-  const m = measure(read, latex(body));
+  const m = measure(read, latex(body, [["\\section{Method}", 0, "1"], ["\\begin{thebibliography}", 0], ["\\section{More}", 0, "A"]]));
   assert.equal(m.read, "Method".length + "abcdefghij".length, "ids, kinds, places and the format are no text");
   // the Method section alone, give or take the line break at a cut
   const method = body.slice(body.indexOf("\\section{Method}"), body.indexOf("\\begin{thebibliography}")).length;

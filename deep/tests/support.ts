@@ -106,18 +106,21 @@ export const sentJob = (name: "job-latex.json" | "job-pdf.json"): unknown => JSO
 /** BODY with a long Discussion, so the main text is a real paper's size against a read: a read's length check is
  * its share of the main text. */
 const DISCUSSION = `\\section{Discussion}\n${"The probe's accuracy holds across the tested layers. ".repeat(60)}\n`;
+/** `PAPER`'s headings: `BODY`'s and its Discussion. */
+export const PAPER_HEADINGS: Stated[] = [...HEADINGS.slice(0, 4), ["\\section{Discussion}", 0, "4"], ...HEADINGS.slice(4)];
 export const PAPER: PaperInput = {
   id: "2610.00001",
   title: "Probes read the trace",
   abstract: "A.",
   authors: ["A. Author"],
-  ...latex(BODY.replace("\\begin{thebibliography}", `${DISCUSSION}\\begin{thebibliography}`), [...HEADINGS.slice(0, 4), ["\\section{Discussion}", 0, "4"], ...HEADINGS.slice(4)]),
+  ...latex(BODY.replace("\\begin{thebibliography}", `${DISCUSSION}\\begin{thebibliography}`), PAPER_HEADINGS),
   body_version: 2,
 };
-/** `PAPER` with another text: a LaTeX source, outlined, unless the text is a PDF's. */
-export const paperWith = (body: string, source: "latex" | "pdf" = "latex"): PaperInput => {
+/** `PAPER` with another text: a LaTeX source, with the outline of its `headings` (`BODY`'s by default), unless
+ * the text is a PDF's. */
+export const paperWith = (body: string, source: "latex" | "pdf" = "latex", headings: Stated[] = HEADINGS): PaperInput => {
   const { outline: _, ...rest } = PAPER;
-  return { ...rest, ...(source === "latex" ? latex(body) : { body, body_source: "pdf" }) };
+  return { ...rest, ...(source === "latex" ? latex(body, headings) : { body, body_source: "pdf" }) };
 };
 
 /** A draft that passes every check against `BODY`, with no figure and no lens. */

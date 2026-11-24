@@ -12,7 +12,7 @@ import { RenderUnavailable, type Imaging } from "../src/imaging.ts";
 import type { PaperInput } from "../src/contracts.ts";
 import type { Draft } from "../src/read.ts";
 import { passes, type Verdict } from "../src/review.ts";
-import { BODY, blocks, cell, changed, draft, fakeImaging, HOSTS, imagesOf, models, OPEN, OPTS, PAPER, PASSING, paperWith, png, reviews, follows, JUDGED, READABLE, seeing, submits, textOf, WEBP, withSite, type Sent } from "./support.ts";
+import { BODY, HEADINGS, PAPER_HEADINGS, blocks, cell, changed, draft, fakeImaging, HOSTS, imagesOf, models, OPEN, OPTS, PAPER, PASSING, paperWith, png, reviews, follows, JUDGED, READABLE, seeing, submits, textOf, WEBP, withSite, type Sent, type Stated } from "./support.ts";
 
 const NONE: CardSpec = { extensions: [], selections: [] };
 interface Run {
@@ -118,11 +118,11 @@ test("the provider is asked for detailed reasoning summaries", async () => {
 // ── the first message ───────────────────────────────────────────────────────────────────────────────
 
 /** The writer's first message for a paper's text. */
-async function firstMessage(body: string, source: "latex" | "pdf" = "latex"): Promise<string> {
+async function firstMessage(body: string, source: "latex" | "pdf" = "latex", headings?: Stated[]): Promise<string> {
   const { models: m, faux } = models();
   const sent: Sent[] = [];
   faux.setResponses([seeing(fauxAssistantMessage("Done."), sent), ...stopping]);
-  await run(m, { paper: paperWith(body, source) });
+  await run(m, { paper: paperWith(body, source, headings) });
   assert.deepEqual(sent[0]!.messages.map((x) => x.role), ["system", "user"]);
   return textOf(sent[0]!.messages[1]!);
 }
@@ -141,7 +141,7 @@ test("the first message carries the main text and leaves out the bibliography an
 
 test("the first message of a paper with no appendix leaves out its bibliography alone, and one with neither is whole", async () => {
   const noAppendix = `${BODY.slice(0, BODY.indexOf("\\appendix"))}\\section{Conclusion}\nProbes read the trace.\n\\end{document}\n`;
-  const message = await firstMessage(noAppendix);
+  const message = await firstMessage(noAppendix, "latex", [...HEADINGS.slice(0, 5), ["\\section{Conclusion}", 0, "4"]]);
   assert.ok(!message.includes("Turpin"));
   assert.ok(message.includes("Probes read the trace.\n\\end{document}"), "what follows the bibliography stays");
   assert.match(message, /kept in `paper` in the session: the bibliography \(\d+ characters\); read/);
@@ -296,7 +296,7 @@ test("the reviewer reads the whole paper where the model's context has room, pas
   const sent: Sent[] = [];
   faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent), follows()]);
   const body = long(250_000);
-  const outcome = await run(m, { paper: paperWith(body) });
+  const outcome = await run(m, { paper: paperWith(body, "latex", PAPER_HEADINGS) });
   assert.ok(textOf(sent[0]!.messages[1]!).includes(body), "all of it, the appendix's last sentence included");
   assert.deepEqual(outcome.result, draft(), "a whole review leaves no note");
 });
@@ -307,7 +307,7 @@ test("a paper past the model's context reaches the reviewer cut, with what was l
   const sent: Sent[] = [];
   faux.setResponses([submits(draft()), seeing(reviews(PASSING), sent), follows()]);
   const body = long(40_000);
-  const outcome = await run(m, { paper: paperWith(body) });
+  const outcome = await run(m, { paper: paperWith(body, "latex", PAPER_HEADINGS) });
   const message = textOf(sent[0]!.messages[1]!);
   const bibliography = body.indexOf("\\appendix") - body.indexOf("\\begin{thebibliography}") - 1;
   // what is left once a line stands in for the bibliography, past the first 10,000 characters
@@ -395,7 +395,7 @@ test("a revision whose review cannot run is kept as unreviewed, not as failing t
   // what round 1's reviewer was not given of a long paper is no note on a revision no reviewer read
   const small = models(64_000);
   small.faux.setResponses([submits(draft()), reviews(FAILING), follows(), submits(revised(1)), fauxAssistantMessage("", { stopReason: "error", errorMessage: "usage limit reached" })]);
-  const cut = await run(small.models, { paper: paperWith(long(40_000)) });
+  const cut = await run(small.models, { paper: paperWith(long(40_000), "latex", PAPER_HEADINGS) });
   assert.deepEqual(cut.result?.process_notes?.map((n) => n.note.slice(0, 28)), ["The read was not reviewed: t"]);
 });
 
