@@ -63,7 +63,7 @@ async def _tried_again(db: DatabaseGate, item: WorkItem, c: Claimed) -> AsyncGen
         yield
     except Exception as exc:
         if not database_lost(exc):
-            async with db.write("full-text pass: tried again") as unit:
+            async with db.write(f"{item.kind} pass: tried again") as unit:
                 await work.submit(unit, item.kind, item.key, not_before=c.lease_until)
         raise
 

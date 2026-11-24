@@ -249,13 +249,33 @@ Found while building, owned by the stage named.
 - **P2: a lost database reaches the gate from a delivery.** Only a Worker that raises a lost database gets its item
   back to try again, but `events/dispatch.py`'s `deliver` catches every error of `integration.handle` and records
   it as a delivery failure with its backoff. Ported to a Worker, it lets a lost database (`gates.work._lost`)
-  propagate and keeps the backoff for the integration's own errors.
+  propagate and keeps the backoff for the integration's own errors. Done in P2, with `_lost` made public as
+  `gates.work.database_lost`.
 - **P3: a lost database reaches the gate from a job chunk.** `jobs/worker.py`'s `_next` catches every error of
   `_chunk` and ends the job failed. Ported to a Worker, it lets a lost database propagate, so the chunk's item is
   tried again, and fails the job only on the chunk's own errors.
-- **P2 (hindsight from P1's review): one task fewer per claim.** The run loop could own each claim through its
-  commit and hand the committed item straight to its supervisor, dropping the per-claim future and the `_take`
-  task. P1 keeps the supervisor taking its own claim; a simplification worth making when P2 changes the loop.
+- **P2 (hindsight from P1's review): one task fewer per claim.** Done in P2: the run loop owns each claim through
+  its commit and starts the item's supervisor with it. One shielded task per take is left, so a claim committing
+  as the gate stops is still given back.
+- **P3 (from P2): the CLI's Deep passes run beside `serve`'s.** The Deep session lock is gone, so
+  `litwatch fulltext --deep` can work a Deep pass while `serve` serves its item. The pass claim keeps them off
+  one pass, but no longer one at a time; P3's CLI-as-items closes it.
+- **P3 (from P2): events wake deliveries at commit.** `outbox.emit` registers `WriteUnit.at_commit`, which runs the
+  submit as the unit's last statement, once per unit for every integration with a cursor (`keep=True`, so a
+  backoff is not cut short). Submitting at emit time would hold the delivery item's row lock until commit and
+  queue every other emitter behind it. A P3 path that submits from a long unit should do the same.
+- **P3, P7 (from P2): items for an integration no process loads wait forever.** `DeliveryWorker` returns
+  `Later(datetime.max)` for a key it does not load, so the item stays pending until a process that loads it
+  submits it. An integration dropped from the configuration leaves one such row for good; P7's cleanup could end
+  them, or `wake_all` could skip cursors no loaded integration names.
+- **P3 (from P2): items are taken by `not_before`, not by a pass's priority.** The regular queue's text and Deep
+  passes are each one item, so an owner's request no longer goes ahead of automatic passes already due, as
+  `claim`'s `priority` order did. Admission keeps one per kind running. Harmless while Deep reads are off and the
+  text queue is short; if it bites, the item needs a priority the take orders by.
+- **P3 (from P2): `fulltext.worker` imports `jobs.worker.nightly_waits`.** That is on the `(fulltext, jobs)` pair
+  of `CYCLES_BEFORE_THE_RULE`; when P3 moves the nightly gating into items, the import can go with it.
+- **P3 (from P2): re-run passes stay off the gate.** A pass with a `job_id` is the re-run's, worked inline by its
+  chunk; only regular-queue passes are submitted. `owners_first` and `release_job` submit the passes a job lets go.
 - **P4: work context.** `gates.context.current_work()` gives the item, with `ceiling` and `deadline` left
   `None` for P4 to fill.
 - **P4: a batch's outcome is settled in pieces, not once.** T2's review found five edge cases, each rare:
