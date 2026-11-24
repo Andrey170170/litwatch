@@ -11,7 +11,8 @@ it are merged. A note leaves `docs/notes/` once every item it holds is merged.
 
 ## Now
 
-The rework's A2, below: shaped ([`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md)), blueprint next.
+The rework's A2, below: shaped ([`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md)) and planned
+([`plans/a2-work-gate.md`](plans/a2-work-gate.md)); building.
 
 ## The rework
 
@@ -23,7 +24,8 @@ time. A0, the role checks and the baseline, was merged on 2026-11-10
 
 ### A2. Work gate
 
-Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md). Blueprint, drive.
+Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md). Planned:
+[`plans/a2-work-gate.md`](plans/a2-work-gate.md). Drive.
 
 - **The OpenAI adapter** in the Model gate, for the owner's OpenAI credit: normal calls and the Batch API. Which
   roles use it is decided by an evaluation once it is in.
@@ -138,6 +140,10 @@ Built between milestones, on whatever structure exists then.
   Once A2 is in, the deep service also runs the release-link finder, and automatic reads have a switch of their own
   (A2's spec, "Release links"), which switching on sets too. Then: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the
   prose rules shared between `writing.py` and the deep prompt instead of copied.
+
+- **Release links in the digests and the Notion export,** once A2's finder has run long enough to show how often
+  links are found (A2's spec, "Not in A2"). The Notion export's contract changes with it, so the PI's view is
+  checked first.
 
 - **Frontend polish and speed** (review, project 2): elements jumping when a topic tab or paper loads the first
   time; windowed rendering with scroll restoration and paper order kept; lean shelf pages; mutations with their own
