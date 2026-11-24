@@ -168,15 +168,16 @@ async def test_a_batch_answer_is_handled_as_a_normal_one_the_fallback_included()
     await gw.close()
 
 
-async def test_a_batch_that_cannot_be_sent_goes_as_normal_calls(monkeypatch):
+async def test_a_batch_refused_before_it_is_staged_goes_as_normal_calls(monkeypatch, caplog):
     gw, anthropic, _, _ = batching()
 
-    async def refused(requests):
-        raise ProviderError("InternalServerError")
+    async def refused(requests, staged):
+        raise ProviderError("BadRequestError: too large")
 
     monkeypatch.setattr(anthropic, "submit", refused)
     await asyncio.gather(gw.ask("brief", ask(0)), gw.ask("brief", ask(1)))
     assert len(anthropic.calls) == 2
+    assert "was not made; its calls go as normal calls" in caplog.text
     await gw.close()
 
 
@@ -1464,6 +1465,23 @@ async def test_a_batch_whose_upload_outlasts_the_deadline_is_not_made(conn: Sess
     client.uploaded_then = lambda: setattr(clock, "now", DEADLINE)
     answer = await asyncio.wait_for(gw.ask("brief", ask(1)), 5)
     assert (answer.usage.service_tier, client.made) == ("default", {})
+    assert [(c["batch_id"], c["answered"]) for c in await calls(conn)] == [(None, True)]
+    await gw.close()
+
+
+async def test_an_openai_batch_timed_out_while_uploading_was_not_made(conn: Session, db, caplog):
+    client = OpenAIBatches()
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+
+    async def hanging(**_):
+        await asyncio.Event().wait()
+
+    client.files.create = hanging
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    gw.batchers["openai"].operation = 0.1
+    assert (await asyncio.wait_for(gw.ask("brief", ask(1)), 5)).value.yes
+    assert "was not made; its calls go as normal calls" in caplog.text
+    assert "may have been made" not in caplog.text and client.listings == 0
     assert [(c["batch_id"], c["answered"]) for c in await calls(conn)] == [(None, True)]
     await gw.close()
 

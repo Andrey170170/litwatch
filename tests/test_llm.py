@@ -140,6 +140,14 @@ async def test_an_openai_reply_is_priced_from_its_usage_its_cache_and_a_long_pro
     assert long.cost == pytest.approx((300_000 * 4.0 + 200 * 15.0) / 1e6)
 
 
+async def test_an_openai_reply_is_priced_as_the_model_that_served_it_and_kept_as_configured():
+    astra = openai_response(GOOD, read=3000, model="gpt-6.2-astra-2026-11-01")
+    usage = (await gateway(MODELS, openai=SdkClient(astra)).ask("brief", REQUEST)).usage
+    assert usage.model == SOL.model
+    # Astra's prices: 1000 fresh at $8, 3000 cached at $0.40, 200 output at $40.
+    assert usage.cost == pytest.approx((1000 * 8 + 3000 * 0.4 + 200 * 40) / 1e6)
+
+
 async def test_haiku_charges_a_long_prompt_five_times_and_an_unlisted_model_has_no_cost():
     long = SdkClient(anthropic_message(GOOD, fresh=1000, read=100_000, write=2000, output=100))
     usage = (await gateway(MODELS, long).ask("writer", REQUEST)).usage
@@ -269,6 +277,15 @@ async def test_a_5xx_may_have_been_billed_so_its_reservation_is_kept_and_its_row
     assert raised.value.kind == "ceiling"  # the retry did not fit beside the kept reservation
     (row,) = await calls(conn)  # the retry, never admitted, has no row, nor overwrites this one
     assert row["error"] == "provider: InternalServerError" and row["usage"]["cost"] is None
+
+
+async def test_an_openrouter_5xx_is_tried_again_and_its_charge_is_unknown(conn: Session, journal):
+    client = SdkClient(status_error(openai, 503), openrouter_completion(GOOD))
+    gw = gateway(Models(check=MUSE), openrouter=client, journal=journal)
+    assert (await gw.ask("check", REQUEST)).value.yes and len(client.sent) == 2
+    first, second = await calls(conn)  # it may have run, billed or not
+    assert (first["error"], first["usage"]["cost"]) == ("provider: InternalServerError", None)
+    assert (second["error"], second["usage"]["cost"]) == (None, 0.0021)
 
 
 async def test_failures_are_accounted_for_and_not_replies(conn: Session, journal):

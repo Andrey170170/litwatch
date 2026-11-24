@@ -154,16 +154,23 @@ class _Spent:
         self.calls.append((paper_id, None))
         return len(self.calls) - 1
 
-    async def record(self, call_id: int, usage: Usage, *, replied: bool = True) -> None:
+    async def record(self, call_id: int, usage: Usage) -> None:
         self.calls[call_id] = (self.calls[call_id][0], usage.cost)
 
     async def accept(self, call_id: int, output: dict) -> None:
         return None
 
     async def reject(
-        self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
+        self,
+        call_id: int,
+        error: str,
+        reply: str | None = None,
+        *,
+        account: str | None = None,
+        usage: Usage | None = None,
     ) -> None:
-        return None
+        if usage is not None:
+            self.calls[call_id] = (self.calls[call_id][0], usage.cost)
 
 
 def _usage(usage: Usage | None) -> dict:

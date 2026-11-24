@@ -93,10 +93,16 @@ class Journal(Protocol):
         via: str | None = None,
         effort: str | None = None,
     ) -> int: ...
-    async def record(self, call_id: int, usage: Usage, *, replied: bool = True) -> None: ...
+    async def record(self, call_id: int, usage: Usage) -> None: ...
     async def accept(self, call_id: int, output: dict[str, Any]) -> None: ...
     async def reject(
-        self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
+        self,
+        call_id: int,
+        error: str,
+        reply: str | None = None,
+        *,
+        account: str | None = None,
+        usage: Usage | None = None,
     ) -> None: ...
     async def refused(self, key: str, paper_id: str | None) -> bool: ...
     async def in_batch(self, key: str) -> dict[str, Any] | None: ...
@@ -419,6 +425,7 @@ class Gateway:
         journal = self.journal
         call_id, reply = await self._batched(role_name, role, key, request, paper_id, send)
         batched = isinstance(reply, Reply)  # its row settled by the batcher, if it has one
+        charged: Usage | None = None  # what a send that failed was charged, settled with it
 
         async def opened() -> None:
             """Each normal send on a row of its own."""
@@ -430,9 +437,7 @@ class Gateway:
             let go: the next send has a row of its own once admitted."""
             nonlocal call_id
             if journal and call_id is not None:
-                if usage is not None:
-                    await journal.record(call_id, usage, replied=False)
-                await journal.reject(call_id, f"provider: {exc}")
+                await journal.reject(call_id, f"provider: {exc}", usage=usage)
             call_id = None
 
         try:
@@ -442,9 +447,7 @@ class Gateway:
                 try:
                     reply = await self._complete(role_name, role, request, send, opened, failed)
                 except CallError as exc:
-                    if journal and call_id is not None and exc.usage is not None:
-                        # The last attempt's charge; a failure, not a reply.
-                        await journal.record(call_id, exc.usage, replied=False)
+                    charged = exc.usage  # the last attempt's charge; a failure, not a reply
                     raise
             if call_id is not None:  # else shared: the usage names the row it was answered on
                 reply.usage.source_call_id = call_id
@@ -483,7 +486,11 @@ class Gateway:
                 # A normal call's account error is observed with it; a batch's by its batcher.
                 normal = exc.kind == "account" and not isinstance(reply, ProviderError)
                 await journal.reject(
-                    call_id, str(exc), kept, account=role.provider if normal else None
+                    call_id,
+                    str(exc),
+                    kept,
+                    account=role.provider if normal else None,
+                    usage=charged,
                 )
             raise
         if journal and call_id is not None:

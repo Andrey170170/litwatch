@@ -287,11 +287,12 @@ class Batcher:
     async def _send(self, held: list[_Held]) -> None:
         rows: list[int | None] = []
         handle: str | None = None  # the batch's staged reference, as its rows name it
+        creating = False  # whether its creation was asked for: before that, none can be made
 
         async def staged(reference: str | None) -> None:
             """Just before the batch is created: past the deadline it is not; else its calls'
             rows are opened, naming its reference."""
-            nonlocal handle
+            nonlocal handle, creating
             if not self.open():
                 raise _ExpiredError
             rows[:] = await asyncio.gather(*(h.opened() for h in held))
@@ -299,6 +300,7 @@ class Batcher:
                 handle = STAGED + reference
                 if self.journal:
                     await self.journal.batched(self._ids(rows), handle, held[0].role.provider)
+            creating = True
 
         requests = [(h.key, h.role, h.request) for h in held]
         try:
@@ -310,8 +312,9 @@ class Batcher:
                 self._resolve(h.key, None)
             return
         except Exception as exc:
-            if not (_unknown(exc) and handle and self.provider.find):
-                await self._not_sent(held, rows, handle, exc)
+            unknown = creating and _unknown(exc)
+            if not (unknown and handle and self.provider.find):
+                await self._not_sent(held, rows, handle, exc, unknown=unknown)
                 return
             log.warning("batch %s may have been made (%s); looking for it", handle, exc)
             batch_id = handle  # found by `_check`, as a dead run's is
@@ -330,11 +333,17 @@ class Batcher:
         return [row for row in rows if row is not None]
 
     async def _not_sent(
-        self, held: list[_Held], rows: list[int | None], handle: str | None, exc: Exception
+        self,
+        held: list[_Held],
+        rows: list[int | None],
+        handle: str | None,
+        exc: Exception,
+        *,
+        unknown: bool,
     ) -> None:
-        """A submission that failed and made no batch, or may have made one that cannot be
-        found: its calls' rows settled, the calls given the account's error or None (a normal
-        call)."""
+        """A submission that failed and made no batch, or (`unknown`) may have made one that
+        cannot be found: its calls' rows settled, the calls given the account's error or None
+        (a normal call)."""
         identity = handle or f"of {held[0].key[:12]}…"
         account = isinstance(exc, ProviderError) and exc.account
         if account:  # never asked again: the calls fail on the account
@@ -342,7 +351,7 @@ class Batcher:
             error = f"account: {exc}"
             if self.journal:
                 await self.journal.account_error(self.provider.name, error)
-        elif _unknown(exc):
+        elif unknown:
             log.warning(
                 "batch %s may have been made and cannot be found; its %d calls go as normal "
                 "calls, which may pay for them twice: %s",

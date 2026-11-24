@@ -203,17 +203,16 @@ class CallJournal:
         )
         await self._retally(row)
 
-    async def record(self, call_id: int, usage: Usage, *, replied: bool = True) -> None:
-        """The call's accounting, whether or not the answer is usable; with `replied` (an answer,
-        a refusal, an invalid one), that the provider replied. A failure the provider billed, or
-        a rejection it billed nothing for, is accounted for and not a reply."""
+    async def record(self, call_id: int, usage: Usage) -> None:
+        """A reply came for the call: its accounting, whether or not the answer is usable, and
+        that the provider replied. A failure's charge is its `reject`'s."""
         row = await self._write(
             "record",
             "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
             "responded_at = clock_timestamp() WHERE id = %(id)s RETURNING run_id, responded_at), "
             f"{_REPLIED} SELECT run_id FROM c",
             {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id}
-            | self._reply(usage, replied=replied),
+            | self._reply(usage, replied=True),
         )
         await self._retally(row)
 
@@ -262,17 +261,34 @@ class CallJournal:
         )
 
     async def reject(
-        self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
+        self,
+        call_id: int,
+        error: str,
+        reply: str | None = None,
+        *,
+        account: str | None = None,
+        usage: Usage | None = None,
     ) -> None:
-        """The call got no usable answer; with `account`, that provider refused it for the
-        account, which is observed with it (`observes`)."""
+        """The call, this run's, got no usable answer; with `usage`, what the failure was
+        charged, accounted for in the same write and not a reply (`record`); with `account`,
+        that provider refused it for the account, which is observed with it (`observes`)."""
         account = account if self.observes else None
-        update = "UPDATE inference_calls SET error = %(error)s, reply = %(reply)s WHERE id = %(id)s"
+        charged = ", usage = %(usage)s, responded_at = clock_timestamp()" if usage else ""
+        update = (
+            f"UPDATE inference_calls SET error = %(error)s, reply = %(reply)s{charged} "
+            "WHERE id = %(id)s"
+        )
         observed = _ACCOUNT_ERROR.format(source="FROM c")
         await self._write(
             "reject",
             f"WITH c AS ({update} RETURNING id), o AS ({observed}) SELECT 1" if account else update,
-            {"error": error, "reply": reply, "id": call_id, "provider": account},
+            {
+                "error": error,
+                "reply": reply,
+                "id": call_id,
+                "provider": account,
+                "usage": Jsonb(usage.model_dump(mode="json")) if usage else None,
+            },
         )
 
     async def refused(self, key: str, paper_id: str | None) -> bool:

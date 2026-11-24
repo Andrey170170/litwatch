@@ -258,6 +258,21 @@ Found while building, owned by the stage named.
   task. P1 keeps the supervisor taking its own claim; a simplification worth making when P2 changes the loop.
 - **P4: work context.** `gates.context.current_work()` gives the item, with `ceiling` and `deadline` left
   `None` for P4 to fill.
+- **P4: a batch's outcome is settled in pieces, not once.** T2's review found five edge cases, each rare and each
+  bounded by the Ceiling or by a fallback to normal calls:
+  a batch can still be created after the deadline, since `staged()` checks the clock before its row writes, not
+  after (`llm/batches.py:292`);
+  the window for finding a batch whose creation may have failed can start late, behind the poller
+  (`llm/batches.py:314`, `:433`);
+  a definite batch rejection (a 400, or a connection that never opened) keeps a null charge, not 0, and so does a
+  per-request error (`llm/batches.py:335`, `store/calls.py:160`, `llm/openai.py:228`);
+  with its waiter cancelled, or in a recovery nobody attaches to, a batch refusal's stop and category are never
+  persisted (`llm/batches.py:490`, `llm/gateway.py:457`);
+  with the original waiter cancelled, a surviving shared waiter cannot save its validated output on
+  `source_call_id` (`llm/gateway.py:496`, `:542`).
+  The reviewer's shape, for the gate: one journal settlement operation that takes usage, a failure or a stop, and an
+  explicit reply flag. The batcher persists that outcome and gives waiters the source row's ID, and the gateway
+  validates and saves the output on that row.
 - **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the
   request one and the check. The `workers` rows are written and beat, but no one reads them yet: P5 adds the
   CLI's reader, which counts a row whose `heartbeat_at` is within a lease as alive.
