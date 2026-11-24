@@ -158,15 +158,15 @@ export async function processPaper(
   // The provider would fall back to OPENAI_API_KEY without a stored subscription credential.
   await requireSubscription(models);
 
-  const started = Date.now();
+  const started = performance.now(); // monotonic: a clock correction can't make a run's time negative
   const trace: TraceEvent[] = [];
   const stats: Stats = { cells: 0, turns: 0, input: 0, output: 0, reasoning: 0, cache_read: 0, list_cost: 0, seconds: 0 };
   const record = (event: TraceEvent) => {
     trace.push(event);
-    stats.seconds = Math.round((Date.now() - started) / 1000);
+    stats.seconds = Math.round((performance.now() - started) / 1000);
     progress(event, stats);
   };
-  const now = () => Date.now() - started;
+  const now = () => Math.round(performance.now() - started);
   /** Every model call counts, the reviewer's too. */
   const spent = (m: AssistantMessage): TurnUsage => {
     const usage: TurnUsage = { input: m.usage.input, output: m.usage.output, reasoning: m.usage.reasoning ?? 0, cache_read: m.usage.cacheRead, list_cost: m.usage.cost.total };
@@ -448,7 +448,7 @@ export async function processPaper(
     repl.dispose();
     await figures.dispose().catch(() => undefined);
   }
-  stats.seconds = Math.round((Date.now() - started) / 1000);
+  stats.seconds = Math.round((performance.now() - started) / 1000);
   if (figures.usedLatest) saw("latest");
   const kept = accepted as Accepted | null;
   // a review of part of the paper is not a silent pass: the read says what its reviewer did not see
