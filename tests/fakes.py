@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from types import SimpleNamespace
@@ -134,19 +135,30 @@ class OpenAIBatches:
     """The SDK's `files` and `batches` as the Batch API serves them. A batch's requests are
     answered once the test ends it (`end`), each by `respond(body)`: a response body (status
     200), or a `(status_code, error)` pair for a request the API failed, the status None for
-    one it never ran (expired). `lost` creations are made and then lose their reply; while
-    `unlisted`, listing the batches fails. Listed newest first, `page` at a time. `read` lists
-    the files whose content was read."""
+    one it never ran (expired). Each of `creating`, in turn, is how a creation fails: whether
+    the batch is made, and the error raised then (`"hang"`: it never returns). The list is the
+    SDK's own, its pages served `page` at a time, newest first, through a mock transport:
+    while `unlisted` it cannot be read, and the next `misses` listings miss the newest batch.
+    `listings` counts them; `read` lists the files whose content was read."""
 
     def __init__(self, respond=openai_answer, *, page: int = 100):
-        self.respond, self.page, self.lost, self.unlisted = respond, page, 0, False
+        self.respond, self.page, self.misses, self.unlisted = respond, page, 0, False
+        self.creating: list[tuple[bool, Any]] = []
+        self.listings = 0
+        self._hiding: str | None = None
         self.uploaded: dict[str, list[dict[str, Any]]] = {}
         self.made: dict[str, SimpleNamespace] = {}
         self.contents: dict[str, str] = {}
         self.read: list[str] = []
+        sdk = openai.AsyncOpenAI(
+            api_key="k",
+            base_url="https://batches.test/v1",
+            max_retries=0,
+            http_client=openai.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(self._serve)),
+        )
         self.files = SimpleNamespace(create=self._upload, content=self._content)
         self.batches = SimpleNamespace(
-            create=self._create, list=self._list, retrieve=self._retrieve, cancel=self._cancel
+            create=self._create, list=sdk.batches.list, retrieve=self._retrieve, cancel=self._cancel
         )
         self.responses: Any = None  # normal calls, for a test that makes them (`SdkClient`)
 
@@ -158,30 +170,46 @@ class OpenAIBatches:
         return SimpleNamespace(id=file_id)
 
     async def _create(self, *, input_file_id, endpoint, completion_window):
-        (model,) = {line["body"]["model"] for line in self.uploaded[input_file_id]}  # one only
-        batch_id = f"batch_{len(self.made) + 1}"
-        self.made[batch_id] = SimpleNamespace(
-            id=batch_id,
-            status="in_progress",
-            endpoint=endpoint,
-            model=f"{model}-2026-11-01",
-            input_file_id=input_file_id,
-            output_file_id=None,
-            error_file_id=None,
-            errors=None,
-        )
-        if self.lost:
-            self.lost -= 1
-            raise openai.APIConnectionError(request=httpx2.Request("POST", "https://x.org"))
+        made, error = self.creating.pop(0) if self.creating else (True, None)
+        if made:
+            (model,) = {line["body"]["model"] for line in self.uploaded[input_file_id]}
+            batch_id = f"batch_{len(self.made) + 1}"
+            self.made[batch_id] = SimpleNamespace(
+                id=batch_id,
+                status="in_progress",
+                endpoint=endpoint,
+                model=f"{model}-2026-11-01",
+                input_file_id=input_file_id,
+                output_file_id=None,
+                error_file_id=None,
+                errors=None,
+            )
+        if error == "hang":
+            await asyncio.Event().wait()
+        if error is not None:
+            raise error
         return self.made[batch_id]
 
-    async def _list(self, *, limit, after=openai.omit):
+    def _serve(self, request: httpx2.Request) -> httpx2.Response:
+        """`GET /batches`, as the API pages it."""
+        assert request.method == "GET" and request.url.path == "/v1/batches"
         if self.unlisted:
-            raise openai.APIConnectionError(request=httpx2.Request("GET", "https://x.org"))
+            raise httpx2.ConnectError("unlisted", request=request)
+        after, limit = request.url.params.get("after"), int(request.url.params["limit"])
         newest = list(reversed(self.made.values()))
-        start = 0 if after is openai.omit else [b.id for b in newest].index(after) + 1
+        if after is None:
+            self.listings += 1
+            self._hiding = newest[0].id if self.misses and newest else None
+            self.misses = max(self.misses - 1, 0)
+        newest = [b for b in newest if b.id != self._hiding]
+        start = 0 if after is None else [b.id for b in newest].index(after) + 1
         data = newest[start : start + min(limit, self.page)]
-        return SimpleNamespace(data=data, has_more=start + len(data) < len(newest))
+        body = {
+            "object": "list",
+            "data": [vars(b) | {"object": "batch", "completion_window": "24h"} for b in data],
+            "has_more": start + len(data) < len(newest),
+        }
+        return httpx2.Response(200, json=body)
 
     async def _retrieve(self, batch_id):
         if batch_id not in self.made:
@@ -316,6 +344,9 @@ class BatchingProvider(ScriptedProvider):
             b["replies"] = {k: r for k, r in b["replies"].items() if k in (answered or set())}
         b["status"] = "ended"
 
+    async def find(self, reference: str | None) -> None:
+        return None
+
     async def status(self, batch_id: str) -> str:
         return self.batches[batch_id]["status"] if batch_id in self.batches else "gone"
 
@@ -337,7 +368,8 @@ def unavailable(*args, **kwargs):
     raise SourceError("upstream unavailable")
 
 
-FAST = {"quiet": 0.02, "poll": 0.01}  # the batcher's timings in tests
+# The batcher's timings in tests.
+FAST: dict[str, Any] = {"quiet": 0.02, "poll": 0.01, "find_delays": (0.01, 0.01, 0.01)}
 
 
 def status_error(sdk, code: int, body: dict | None = None) -> Exception:

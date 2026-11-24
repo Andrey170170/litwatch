@@ -412,8 +412,9 @@ async def test_a_night_with_failed_calls_and_no_reply_from_a_provider_fails_it(
     assert provider(document, "anthropic")["status"] == "healthy"
     openrouter = provider(document, "openrouter")
     assert openrouter["status"] == "degraded"
+    # Each send is a call of its own: "down", tried again, failed twice.
     assert openrouter["reason"] == (
-        f"2 calls in nightly {run} failed and none had a reply; expected a reply"
+        f"3 calls in nightly {run} failed and none had a reply; expected a reply"
     )
     # An evaluation's reply in the night is not the provider's to the night.
     evaluation = await started(conn, "eval")

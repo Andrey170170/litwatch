@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from typing import Any
 
 import anthropic
@@ -92,6 +92,20 @@ def _account_errors() -> Iterator[None]:
         raise
 
 
+@contextlib.contextmanager
+def _creating() -> Generator[None]:
+    """A batch's creation that timed out, lost its connection once sent, or failed on the
+    server may have made the batch (`unanswered`); any other error made none."""
+    try:
+        yield
+    except (anthropic.APIConnectionError, anthropic.APIStatusError) as exc:
+        if isinstance(exc, anthropic.APIStatusError) and exc.status_code < 500:
+            raise
+        if isinstance(exc.__cause__, httpx2.ConnectTimeout):  # never sent
+            raise
+        raise ProviderError(f"{type(exc).__name__} creating a batch", unanswered=True) from exc
+
+
 class AnthropicProvider:
     name = "anthropic"
     one_model = False  # a Message Batch may mix models
@@ -124,8 +138,8 @@ class AnthropicProvider:
 
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]], staged: Staged) -> str:
         """The batch's id. Created in one step, it has no reference before its id: `staged` is
-        not called."""
-        with _account_errors():
+        not called (`_creating`)."""
+        with _creating(), _account_errors():
             batch = await self.client.messages.batches.create(
                 requests=[
                     {"custom_id": key, "params": messages_request(role, request)}
@@ -133,6 +147,12 @@ class AnthropicProvider:
                 ]
             )
         return batch.id
+
+    async def find(self, reference: str | None) -> None:
+        """Never found: a Message Batch carries nothing of ours to know it by (no metadata, no
+        idempotency key, its requests readable only once it ends), so a creation whose outcome
+        is unknown is sent again as normal calls."""
+        return None
 
     async def status(self, batch_id: str) -> str:
         """`in_progress`, `canceling` or `ended`; `gone` when the API no longer has it (deleted,

@@ -375,7 +375,7 @@ async def test_the_ceiling_is_never_passed_and_a_call_that_does_not_fit_is_not_s
     calls = await job_calls(conn, job)
     spent = sum(c["usage"]["cost"] or 0 for c in calls)
     assert spent == pytest.approx(2 * COST) and spent <= limit
-    assert [c["error"].split(":")[0] for c in calls if c["error"]] == ["ceiling"]
+    assert [c["error"] for c in calls if c["error"]] == []  # the third had no send to journal
     assert await in_read(conn, jobs_store.spent, job) == pytest.approx(2 * COST)
 
     async with api(conn) as http:

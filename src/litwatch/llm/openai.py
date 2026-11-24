@@ -55,7 +55,7 @@ STATUSES = {
     "cancelled": "ended",
     "failed": "ended",  # its input was refused: nothing is answered
 }
-# A batch before its id is known: its input file's, which the batch names (`_find`).
+# A batch before its id is known: its input file's, which the batch names (`find`).
 FILE_REF = "openai-file:"
 LISTED = 100  # batches per page, looking for the one made from a file
 
@@ -225,7 +225,8 @@ def _answer(line: dict[str, Any], batch_id: str, model: str) -> Answered:
             return exc
     error = body.get("error") or line.get("error") or {}
     # An answered error, not billed.
-    if refused := _refusal(error, Usage(model=model, via="openai", cost=0.0)):
+    unbilled = Usage(model=model, via="openai", cost=0.0, service_tier="batch")
+    if refused := _refusal(error, unbilled):
         return refused
     if code in ACCOUNT_STATUSES or (code == 429 and _billing(error)):
         return ProviderError(f"{error.get('code') or code} in batch {batch_id}", account=True)
@@ -239,7 +240,7 @@ class OpenAIProvider:
     def __init__(self, api_key: str | None = None, client: Any = None) -> None:
         # The gateway owns retries; the SDK's own would multiply them.
         self.client = client or AsyncOpenAI(base_url=BASE_URL, api_key=api_key, max_retries=0)
-        self._made: dict[str, str] = {}  # a file reference's batch, once found (`_find`)
+        self._made: dict[str, str] = {}  # a file reference's batch, once found (`find`)
 
     def routing(self, role: RoleConfig) -> tuple[str, ...]:
         return ()
@@ -260,9 +261,9 @@ class OpenAIProvider:
 
     async def submit(self, requests: list[tuple[str, RoleConfig, Request]], staged: Staged) -> str:
         """The batch's id. Its input file is uploaded first and its reference `staged`, so a
-        batch whose creation lost its reply is found again by its file rather than sent twice
-        (P24). A lookup that cannot tell whether it was created raises `unanswered`, leaving the
-        reference for recovery to resolve."""
+        batch whose creation lost its reply can be found by its file (`find`) rather than sent
+        twice (P24). A creation that timed out, lost its connection or failed on the server
+        may have made the batch (`unanswered`); any other error made none."""
         lines = [
             json.dumps(
                 {
@@ -282,45 +283,38 @@ class OpenAIProvider:
         except ProviderError as exc:
             if exc.account:
                 raise
-            # No batch can come of a file not known to be uploaded: the calls go normally.
+            # No batch can come of a file not known to be uploaded.
             raise ProviderError(f"the batch's file was not uploaded: {exc}") from exc
         await staged(FILE_REF + file.id)
-        with _errors():
-            try:
+        try:
+            with _errors():
                 batch = await self.client.batches.create(
                     input_file_id=file.id, endpoint=ENDPOINT, completion_window="24h"
                 )
-            except (openai.APITimeoutError, openai.APIConnectionError) as lost:
-                try:
-                    made = await self._find(file.id)
-                except Exception as exc:
-                    raise ProviderError(
-                        f"batch of {file.id} may have been made: {exc}", unanswered=True
-                    ) from lost
-                if made is None:
-                    raise ProviderError(f"no batch was made of {file.id}") from lost
-                return made
+        except ProviderError as exc:
+            server = isinstance(exc.__cause__, openai.InternalServerError)  # any 5xx
+            if exc.account or not (exc.timeout or exc.unanswered or server):
+                raise
+            raise ProviderError(f"batch of {file.id}: {exc}", unanswered=True) from exc
         return batch.id
 
-    async def _find(self, file_id: str) -> str | None:
-        """The batch made of the file, in any state, looking through every page; None when no
-        batch was."""
-        after = ""
-        while True:
-            page = await self.client.batches.list(limit=LISTED, after=after or openai.omit)
-            for batch in page.data:
+    async def find(self, reference: str | None) -> str | None:
+        """The batch made of the reference's file, in any state, through every page of the
+        list; None when there is none (yet)."""
+        if reference is None or not reference.startswith(FILE_REF):
+            return None
+        file_id = reference.removeprefix(FILE_REF)
+        with _errors():
+            async for batch in self.client.batches.list(limit=LISTED):
                 if batch.input_file_id == file_id:
                     return batch.id
-            if not page.data or not page.has_more:
-                return None
-            after = page.data[-1].id
+        return None
 
     async def _batch(self, handle: str) -> Any:
         """The batch by its id or its file reference (`FILE_REF`); None when there is none."""
         batch_id: str | None = self._made.get(handle, handle)
         if batch_id is not None and batch_id.startswith(FILE_REF):
-            batch_id = await self._find(batch_id.removeprefix(FILE_REF))
-            if batch_id is None:
+            if (batch_id := await self.find(batch_id)) is None:
                 return None
             self._made[handle] = batch_id
         try:

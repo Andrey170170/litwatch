@@ -41,6 +41,7 @@ provider = "openrouter"
 model = "lab-b/other"
 effort = "high"
 """
+OPENAI_OTHER = 'provider = "openai"\nmodel = "gpt-6.2-sol"'
 P = paper("2610.00001", title="Probes for hidden steps", abstract="Probes find hidden steps.")
 Q = paper("2610.00002", title="Monitors under pressure", abstract="Monitors fail under pressure.")
 FIT = grading.Output(reason="It is about the topic.", fit="central")
@@ -76,10 +77,13 @@ def test_ladders_and_cases_load_from_their_files(tmp_path):
         ladder(tmp_path, LADDERS.replace("price_max = [2.0, 2.0]", "price_max = [0.5, 2.0]"))
     with pytest.raises(ValueError, match="not negative"):
         ladder(tmp_path, LADDERS.replace("price = [1.0, 1.0]", "price = [-1.0, 1.0]"))
-    # Only a candidate sent uncapped needs to say how much it can return.
+    # An OpenRouter candidate says how much it can return; an OpenAI one only when uncapped.
     with pytest.raises(ValueError, match="needs its max_output"):
-        ladder(tmp_path, LADDERS.replace("max_output = 1000\n", ""))
-    capped = ladder(tmp_path, LADDERS.replace("max_output = 1000\n", "max_output_tokens = 500\n"))
+        ladder(tmp_path, LADDERS.replace("max_output = 1000\n", "max_output_tokens = 500\n"))
+    on_openai = LADDERS.replace('provider = "openrouter"\nmodel = "lab-b/other"', OPENAI_OTHER)
+    with pytest.raises(ValueError, match="needs its max_output"):
+        ladder(tmp_path, on_openai.replace("max_output = 1000\n", ""))
+    capped = ladder(tmp_path, on_openai.replace("max_output = 1000\n", "max_output_tokens = 500\n"))
     assert capped["judge"].candidates[1].max_output is None
     cases = tmp_path / "cases.csv"
     cases.write_text(

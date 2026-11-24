@@ -85,8 +85,8 @@ class Candidate(BaseModel):
     """One model asked as a role, with its prices in USD per million input and output tokens:
     `price` what a call is expected to cost (the estimate), `price_max` its dearest endpoint
     among those its routing allows (the reservation). `max_output` is the most output tokens
-    those endpoints can return, for an OpenRouter or OpenAI call whose role sets no cap, which
-    goes out uncapped as the pipeline's does."""
+    those endpoints can return, for an OpenRouter call, or an OpenAI one whose role sets no cap,
+    which goes out uncapped as the pipeline's does."""
 
     name: str
     role: RoleConfig
@@ -103,7 +103,9 @@ class Candidate(BaseModel):
             raise ValueError(f"{self.name}: prices are finite and not negative")
         if any(m < p for p, m in zip(self.price, self.price_max, strict=True)):
             raise ValueError(f"{self.name}: price_max is below price")
-        uncapped = self.role.provider != "anthropic" and self.role.max_output_tokens is None
+        uncapped = self.role.provider == "openrouter" or (
+            self.role.provider == "openai" and self.role.max_output_tokens is None
+        )
         if uncapped and self.max_output is None:
             raise ValueError(f"{self.name}: a candidate sent uncapped needs its max_output")
         return self

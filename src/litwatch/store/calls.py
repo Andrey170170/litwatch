@@ -66,9 +66,16 @@ class CallJournal:
         )
 
     async def start(
-        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
+        self,
+        role: str,
+        model: str,
+        key: str,
+        paper_id: str | None,
+        via: str | None = None,
+        effort: str | None = None,
     ) -> int:
-        """A call about to be sent, to `model` by provider `via`: its row, before any reply."""
+        """A call about to be sent, to `model` at `effort` by provider `via`: its row, before any
+        reply."""
         row = await self._write(
             "start",
             "INSERT INTO inference_calls (run_id, operation, request_key, usage, paper_id) "
@@ -77,7 +84,7 @@ class CallJournal:
                 self.run_id,
                 role,
                 key,
-                Jsonb(Usage(model=model, via=via).model_dump(mode="json")),
+                Jsonb(Usage(model=model, via=via, effort=effort).model_dump(mode="json")),
                 paper_id,
             ),
         )
@@ -141,14 +148,25 @@ class CallJournal:
             (batch_id, keys),
         )
 
+    async def unsent(self, call_ids: list[int], error: str) -> None:
+        """The calls' batch was not made, or may have been and was not found: settled with
+        `error`, their charge unknown; each is asked again on a row of its own."""
+        await self._write(
+            "unsent",
+            "UPDATE inference_calls SET error = %s "
+            "WHERE id = ANY(%s) AND output IS NULL AND error IS NULL",
+            (error, call_ids),
+        )
+
     async def answered(
         self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
     ) -> None:
-        """An answer of batch `batch_id` that no call awaited: its charge, on the first call that
-        asked for it and is not yet accounted for (`responded_at`), so the batch is accounted for
-        in full; with `error`, a request it billed and failed, which settles that call. None: the
-        batch did not answer it, and its call is settled with that, or with `error` (an account
-        error)."""
+        """An answer of batch `batch_id` its call does not settle: its charge, on the first call
+        that asked for it and is not yet accounted for (`responded_at`), so the batch is
+        accounted for in full, keeping the call's configured model and effort (the answer knows
+        its provider's name for the model, and no effort); with `error`, a request it billed and
+        failed, which settles that call. None: the batch did not answer it, and its call is
+        settled with that, or with `error` (an account error)."""
         if usage is None:
             await self._write(
                 "batch answered nothing",
@@ -160,7 +178,9 @@ class CallJournal:
             return
         row = await self._write(
             "batch answered",
-            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, error = %(error)s, "
+            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s || "
+            "jsonb_build_object('model', usage->'model', 'effort', usage->'effort'), "
+            "error = %(error)s, "
             "responded_at = clock_timestamp() WHERE id = (SELECT min(id) FROM inference_calls "
             "WHERE batch_id = %(batch)s AND request_key = %(key)s AND responded_at IS NULL) "
             f"RETURNING run_id, responded_at), {_REPLIED} SELECT run_id FROM c",
@@ -298,16 +318,20 @@ async def mean_cost(
     last: int = 200,
 ) -> float | None:
     """What a call of `role` on `provider`, `model` and `effort` alike cost on average over
-    its latest `last` billed calls (reused replies left out), or None when it has none: what an
-    estimate goes by. Calls under another provider or effort, or answered in a batch, are left
-    out, as they cost differently (an estimate is of normal calls)."""
+    its latest `last` billed calls (reused replies and requests rejected unbilled, free and of no
+    tokens, left out), or None when it has none: what an estimate goes by. Calls under another
+    provider or effort, or answered in a batch, are left out, as they cost differently (an
+    estimate is of normal calls)."""
     row = await (
         await unit.execute(
             "SELECT avg(cost) AS cost FROM (SELECT (usage->>'cost')::float AS cost "
             "FROM inference_calls WHERE operation = %s AND usage->>'model' = %s "
             "AND usage->>'via' = %s AND usage->>'effort' IS NOT DISTINCT FROM %s "
             "AND usage->>'cost' IS NOT NULL AND NOT coalesce((usage->>'reused')::boolean, false) "
-            "AND usage->>'service_tier' IS DISTINCT FROM 'batch' ORDER BY id DESC LIMIT %s) recent",
+            "AND usage->>'service_tier' IS DISTINCT FROM 'batch' "
+            "AND NOT ((usage->>'cost')::float = 0 "
+            "AND coalesce((usage->>'prompt_tokens')::int, 0) = 0) "
+            "ORDER BY id DESC LIMIT %s) recent",
             (role, model, provider, effort, last),
         )
     ).fetchone()

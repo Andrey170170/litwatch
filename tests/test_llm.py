@@ -5,6 +5,7 @@ import os
 import sys
 
 import anthropic
+import httpx2
 import openai
 import pytest
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.openai import BASE_URL, OpenAIProvider, responses_request
 from litwatch.llm.openrouter import OpenRouterProvider
+from litwatch.store import calls as calls_store
 from tests.conftest import calls
 from tests.fakes import (
     ScriptedProvider,
@@ -23,7 +25,7 @@ from tests.fakes import (
     openrouter_completion,
     status_error,
 )
-from tests.sessions import Session
+from tests.sessions import Session, in_read
 
 
 class Answer(BaseModel):
@@ -227,6 +229,31 @@ async def test_an_openai_attempt_billed_and_failed_is_settled_on_a_row_of_its_ow
     assert first["error"].startswith("provider: response failed")
     assert [first["usage"]["cost"], second["usage"]["cost"]] == [pytest.approx(0.0043)] * 2
     assert (second["error"], second["output"] is not None) == (None, True)
+
+
+async def test_an_attempt_whose_reply_was_lost_keeps_a_row_with_its_charge_unknown(
+    conn: Session, journal
+):
+    lost = openai.APIConnectionError(request=httpx2.Request("POST", "https://x.org"))
+    client = SdkClient(lost, openai_response(GOOD))
+    assert (await gateway(MODELS, openai=client, journal=journal).ask("brief", REQUEST)).value.yes
+    first, second = await calls(conn)  # one row per send
+    assert (first["error"], first["usage"]["cost"]) == ("provider: APIConnectionError", None)
+    assert (first["usage"]["model"], first["usage"]["effort"]) == ("gpt-6.2-sol", "medium")
+    assert (second["error"], second["usage"]["cost"]) == (None, pytest.approx(0.0043))
+
+
+async def test_a_requests_estimate_leaves_out_the_requests_rejected_unbilled(
+    conn: Session, journal
+):
+    declined = status_error(openai, 400, {"code": "invalid_prompt", "message": "flagged"})
+    client = SdkClient(declined, openai_response(GOOD))
+    gw = gateway(MODELS, openai=client, journal=journal)
+    with pytest.raises(CallError, match="refused"):
+        await gw.ask("brief", REQUEST)
+    await gw.ask("brief", Request(system="rubric", user="another", output=Answer))
+    mean = await in_read(conn, calls_store.mean_cost, "brief", "openai", SOL.model, SOL.effort)
+    assert mean == pytest.approx(0.0043)  # the billed call's, not halved by the free refusal
 
 
 async def test_an_openai_429_for_the_rate_is_tried_again_and_for_the_accounts_limit_is_not():
