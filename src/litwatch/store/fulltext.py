@@ -43,6 +43,7 @@ from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import work
 from litwatch.store.papers import COLUMNS, row_to_paper
 from litwatch.store.taxonomy import require_lock, row_to_class
+from litwatch.store.text import stored
 
 # The kinds of the passes' work items: text passes, and Deep passes, each run by its Worker.
 TEXT_WORK = "fulltext"
@@ -63,11 +64,12 @@ def _admission(kind: PassKind, pass_id: int) -> str | None:
     return None if kind == PassKind.DEEP else f"{TEXT_WORK}:{pass_id % TEXT_WAVE}"
 
 
-async def _submit(unit: WriteUnit, pass_id: int, at: datetime | None = None) -> None:
+async def submit(unit: WriteUnit, pass_id: int, at: datetime | None = None) -> None:
     """Submit the pass's work item, to run no earlier than `at` (now when not given), in line
     by the pass's priority, as `claim` takes passes: the owner's, then the automatic ones, then
-    a re-run's. A pass gone meanwhile (a sweep reads its passes without locking them) has
-    none."""
+    a re-run's: every submission of a pass's item, a Worker's retry after an error included,
+    comes through here, so its admission and priority come from one place. A pass gone
+    meanwhile has none."""
     row = await (
         await unit.execute("SELECT kind, priority FROM fulltext_passes WHERE id = %s", (pass_id,))
     ).fetchone()
@@ -82,6 +84,12 @@ async def _submit(unit: WriteUnit, pass_id: int, at: datetime | None = None) -> 
         admission=_admission(kind, pass_id),
         priority=row["priority"],
     )
+
+
+def _by_id(row: dict[str, Any]) -> int:
+    """A bulk write submits its passes' items in pass id order, as every unit that locks
+    several of them does, so no two lock them in opposite orders."""
+    return row["id"]
 
 
 async def _retire(unit: WriteUnit, c: Claimed) -> None:
@@ -123,23 +131,45 @@ _TAKEABLE = (
 )
 
 
-async def submit_open(unit: WriteUnit, *, deep: bool = False) -> int:
-    """Submit the work item of each text pass of the regular queue that a claim can take, or
-    with `deep` of each Deep pass: what a process that starts serving them finds queued or
-    runnable, a pass claimed by a process now gone included, and that a claim may take at all
-    (`_eligible`: not a dropped paper's, nor a text pass of an older revision). Returns how
-    many."""
+# Of `fulltext_passes f` and its paper `p`: the regular queue's passes of `deep` ones or not
+# that a claim can take, or will once another owner's claim lapses, with the parameters `job`
+# (None) and `claimable`.
+def _open(deep: bool) -> LiteralString:
+    return f"{_eligible(deep)} AND f.job_id IS NULL AND f.state = ANY(%(claimable)s)"
+
+
+async def open_ids(unit: ReadUnit, *, deep: bool = False) -> list[int]:
+    """The text passes of the regular queue that a claim can take, or with `deep` the Deep
+    passes, read without locking them: what a process that starts serving them looks at, each
+    in a unit of its own (`submit_open`), a pass claimed by a process now gone included, and
+    that a claim may take at all (`_eligible`: not a dropped paper's, nor a text pass of an
+    older revision)."""
     rows = await (
         await unit.execute(
             "SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
-            f"WHERE {_eligible(deep)} AND f.job_id IS NULL AND f.state = ANY(%(claimable)s) "
-            "ORDER BY f.id",
+            f"WHERE {_open(deep)} ORDER BY f.id",
             {"job": None, "claimable": _CLAIMABLE},
         )
     ).fetchall()
-    for r in rows:
-        await _submit(unit, r["id"])
-    return len(rows)
+    return [r["id"] for r in rows]
+
+
+async def submit_open(unit: WriteUnit, pass_id: int, *, deep: bool = False) -> bool:
+    """Submit the work item of a pass `open_ids` found, if it is still open: its row is locked
+    first and read again under the lock, so a pass worked inline meanwhile (its item retired)
+    is not given another, and the unit locks one item alone. Returns whether it submitted."""
+    await unit.execute("SELECT 1 FROM fulltext_passes WHERE id = %s FOR UPDATE", (pass_id,))
+    row = await (
+        await unit.execute(
+            "SELECT 1 FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
+            f"WHERE f.id = %(pass)s AND {_open(deep)}",
+            {"pass": pass_id, "job": None, "claimable": _CLAIMABLE},
+        )
+    ).fetchone()
+    if row is None:
+        return False
+    await submit(unit, pass_id)
+    return True
 
 
 async def submit_restored(unit: WriteUnit, paper_ids: Sequence[str]) -> None:
@@ -147,6 +177,8 @@ async def submit_restored(unit: WriteUnit, paper_ids: Sequence[str]) -> None:
     of the papers not dropped: for papers withdrawn and brought back by a later version, in the
     unit that stores it. While a paper was dropped no claim took its passes, and their items
     ended with nothing to do; a version that changes neither title nor abstract queues none."""
+    if not paper_ids:
+        return
     rows = await (
         await unit.execute(
             "SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
@@ -157,7 +189,7 @@ async def submit_restored(unit: WriteUnit, paper_ids: Sequence[str]) -> None:
         )
     ).fetchall()
     for r in rows:
-        await _submit(unit, r["id"])
+        await submit(unit, r["id"])
 
 
 # Whether text pass `f` read paper `p`'s text for its latest arXiv update, or none is known: what
@@ -288,7 +320,7 @@ async def request_card(unit: WriteUnit, paper_id: str, revision: int) -> int:
             "state = CASE WHEN state = 'failed' THEN 'ready' ELSE state END WHERE id = %s",
             (REQUESTED, REQUEST_PRIORITY, open_pass.id),
         )
-        await _submit(unit, open_pass.id)
+        await submit(unit, open_pass.id)
         return open_pass.id
     return await queue(unit, paper_id, revision, PassKind.DEEP, REQUESTED, REQUEST_PRIORITY)
 
@@ -323,9 +355,9 @@ async def owners_first(unit: WriteUnit, paper_ids: Sequence[str]) -> None:
             },
         )
     ).fetchall()
-    for r in rows:
+    for r in sorted(rows, key=_by_id):  # items locked in pass order
         if r["state"] in _CLAIMABLE:
-            await _submit(unit, r["id"])
+            await submit(unit, r["id"])
 
 
 async def open_deep(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
@@ -359,7 +391,7 @@ async def queue(
     ).fetchone()
     assert row is not None  # the insert returns it
     if job_id is None:
-        await _submit(unit, row["id"])
+        await submit(unit, row["id"])
     return row["id"]
 
 
@@ -527,28 +559,32 @@ async def decide(
     a claim on these terms (`claim`'s `deep`, `owners` and `background`) takes it. The pass's
     row is locked first, a unit that holds it (a settle relabelling it) waited for, and then
     read in a statement of its own, so the decision is on the pass as it stands, and the claim
-    of a pass found runnable is made under that same lock: one never ends untried."""
+    is made under that same lock: a runnable pass never ends untried."""
     await unit.execute("SELECT 1 FROM fulltext_passes WHERE id = %s FOR UPDATE", (pass_id,))
-    row = await (
-        await unit.execute(
-            f"SELECT {_eligible(deep)} AND f.state = ANY(%(claimable)s) AS open, "
-            f"{_TAKEABLE} AS takeable, {_allowed(deep, owners, background)} AS allowed, "
-            "CASE WHEN f.state = 'running' THEN f.lease_until END AS held_until "
-            "FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id WHERE f.id = %(pass)s",
-            {"job": None, "claimable": _CLAIMABLE, "pass": pass_id},
+    # The claim is one statement; why it took nothing is read in another. What the two read
+    # beside the pass's row (its paper: a withdrawal, say) may change between them: a pass
+    # the second finds runnable is claimed again.
+    while True:
+        claimed = await claim(
+            unit, lease, 1, deep=deep, owners=owners, background=background, pass_id=pass_id
         )
-    ).fetchone()
-    if row is None or not row["open"]:
-        return Decision()
-    if not row["takeable"]:
-        return Decision(held_until=row["held_until"])
-    if not row["allowed"]:
-        return Decision(held_back=True)
-    claimed = await claim(
-        unit, lease, 1, deep=deep, owners=owners, background=background, pass_id=pass_id
-    )
-    assert claimed, f"pass {pass_id} was found runnable under its lock"
-    return Decision(claimed=claimed[0])
+        if claimed:
+            return Decision(claimed=claimed[0])
+        row = await (
+            await unit.execute(
+                f"SELECT {_eligible(deep)} AND f.state = ANY(%(claimable)s) AS open, "
+                f"{_TAKEABLE} AS takeable, {_allowed(deep, owners, background)} AS allowed, "
+                "CASE WHEN f.state = 'running' THEN f.lease_until END AS held_until "
+                "FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id WHERE f.id = %(pass)s",
+                {"job": None, "claimable": _CLAIMABLE, "pass": pass_id},
+            )
+        ).fetchone()
+        if row is None or not row["open"]:
+            return Decision()
+        if not row["takeable"]:
+            return Decision(held_until=row["held_until"])
+        if not row["allowed"]:
+            return Decision(held_back=True)
 
 
 async def job_open(unit: ReadUnit, job_id: int) -> int:
@@ -579,9 +615,9 @@ async def release_job(unit: WriteUnit, job_id: int) -> None:
             (job_id,),
         )
     ).fetchall()
-    for r in rows:
+    for r in sorted(rows, key=_by_id):  # items locked in pass order
         if r["state"] in _CLAIMABLE:
-            await _submit(unit, r["id"])
+            await submit(unit, r["id"])
 
 
 async def take_back(unit: WriteUnit, lease: timedelta) -> int:
@@ -597,9 +633,9 @@ async def take_back(unit: WriteUnit, lease: timedelta) -> int:
             (lease,),
         )
     ).fetchall()
-    for r in rows:
+    for r in sorted(rows, key=_by_id):  # items locked in pass order
         if r["job_id"] is None:
-            await _submit(unit, r["id"])
+            await submit(unit, r["id"])
     return len(rows)
 
 
@@ -639,7 +675,7 @@ async def release(unit: WriteUnit, c: Claimed) -> None:
         )
     ).fetchone()
     if row is not None and not row["dropped"] and row["job_id"] is None:
-        await _submit(unit, c.id)
+        await submit(unit, c.id)
 
 
 async def let_go(unit: WriteUnit, c: Claimed, error: str, again: datetime) -> None:
@@ -649,11 +685,11 @@ async def let_go(unit: WriteUnit, c: Claimed, error: str, again: datetime) -> No
         await unit.execute(
             "UPDATE fulltext_passes SET lease_until = now(), last_error = %s "
             "WHERE id = %s AND state = 'running' AND lease_until = %s RETURNING job_id",
-            (error[:2000], c.id, c.lease_until),
+            (stored(error), c.id, c.lease_until),
         )
     ).fetchone()
     if row is not None and row["job_id"] is None:
-        await _submit(unit, c.id, again)
+        await submit(unit, c.id, again)
 
 
 async def wait_again(
@@ -667,11 +703,11 @@ async def wait_again(
         await unit.execute(
             "UPDATE fulltext_passes SET state = 'ready', lease_until = NULL, last_error = %s "
             "WHERE id = %s RETURNING job_id",
-            (error[:2000], c.id),
+            (stored(error), c.id),
         )
     ).fetchone()
     if row is not None and row["job_id"] is None:
-        await _submit(unit, c.id, again)
+        await submit(unit, c.id, again)
 
 
 async def retry_asked(unit: WriteUnit, c: Claimed) -> None:
@@ -687,11 +723,11 @@ async def awaiting(unit: WriteUnit, c: Claimed, error: str | None = None) -> Non
             "UPDATE fulltext_passes SET state = 'awaiting_text', lease_until = NULL, "
             "last_error = %s WHERE id = %s AND state = 'running' AND lease_until = %s "
             "RETURNING job_id",
-            (error, c.id, c.lease_until),
+            (error and stored(error), c.id, c.lease_until),
         )
     ).fetchone()
     if row is not None and row["job_id"] is None:
-        await _submit(unit, c.id, datetime.now(UTC) + TEXT_WAIT)
+        await submit(unit, c.id, datetime.now(UTC) + TEXT_WAIT)
 
 
 def _read(text: TextRead | None) -> dict[str, Any]:
@@ -738,7 +774,7 @@ async def failed(
         """,
         {
             "id": c.id,
-            "error": error[:2000],
+            "error": stored(error),
             "counts": int(counts),
             "unusable": int(unusable),
             "refused": refused,
@@ -979,9 +1015,9 @@ async def retry_failed(unit: WriteUnit, runs: int) -> int:
             (runs,),
         )
     ).fetchall()
-    for r in rows:
+    for r in sorted(rows, key=_by_id):  # items locked in pass order
         if r["job_id"] is None:
-            await _submit(unit, r["id"])
+            await submit(unit, r["id"])
     return len(rows)
 
 
@@ -1102,7 +1138,7 @@ async def run_now(unit: WriteUnit, pass_id: int, runs: int, *, pdf: bool = False
     )
     if not cur.rowcount:
         return False
-    await _submit(unit, pass_id)
+    await submit(unit, pass_id)
     return True
 
 

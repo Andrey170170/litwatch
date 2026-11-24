@@ -27,6 +27,7 @@ from litwatch.core import (
     Verdict,
 )
 from litwatch.core.fulltext import (
+    AUTOMATIC_PRIORITY,
     BACKGROUND_PRIORITY,
     FOCUS,
     PICK,
@@ -1682,10 +1683,7 @@ async def test_a_deep_pass_waits_out_the_services_pause_as_the_same_item(
     assert (fake.started, await attempts(db)) == (0, [])  # the pass never claimed
 
 
-@pytest.mark.parametrize("paused", [False, True])
-async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns(
-    db: Session, gate, paused
-):
+async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns(db: Session, gate):
     rerun = paper("2610.00003", title="Re-run", abstract="Graded again.", version=1)
     await in_write(db, papers_store.upsert, [rerun])
     async with Bridge(db).write("queue in reverse") as unit:  # each submitted before the next
@@ -1693,8 +1691,6 @@ async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns
         automatic = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
         mine = await fulltext_store.queue_deep(unit, P.id, 1, FOCUS)
     assert await ask(db, P.id) == mine  # takes over its automatic pass, queued last
-    if paused:  # each waited out the service's pause, and is due at its end, all at once
-        await db.execute("UPDATE work_items SET not_before = now() - interval '1 second'")
     taken: list[str] = []
 
     async def worker(item) -> None:
@@ -1706,6 +1702,60 @@ async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns
     async with serving(WorkGate(gate), {"deep": worker}):
         await until(all_ran, "the three items run")
     assert taken == [str(mine), str(automatic), str(background)]
+
+
+async def test_after_the_services_pause_the_owners_pass_runs_before_an_automatic_one(
+    db: Session, gate, monkeypatch
+):
+    monkeypatch.setattr(deep_passes, "PAUSE", timedelta(seconds=3))
+    service_failed = cards.service_failed
+
+    async def slowly(unit, attempt_id, error):  # the clock moves on before the pass is let go
+        await service_failed(unit, attempt_id, error)
+        await asyncio.sleep(1.5)
+
+    monkeypatch.setattr(cards, "service_failed", slowly)
+    fake = FakeDeep(DONE)
+    fake.fail_submits = 1  # the owner's, tried first, finds the service down
+    async with Bridge(db).write("queue") as unit:
+        automatic = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
+    mine = await ask(db, P.id)
+    workers = {"deep": DeepPassWorker(gate, Config(), archive(with_text(P, Q)), make(fake))}
+
+    async def both_ran_again() -> bool:  # each tried after the pause, and ended
+        found = [i for k in (mine, automatic) for i in await items_of(db, "deep", str(k))]
+        return len(found) == 2 and all(i["state"] == "ended" for i in found)
+
+    async with serving(WorkGate(gate), workers):
+        await until(both_ran_again, "both are tried again once the pause ends")
+    (owners,) = await items_of(db, "deep", str(mine))
+    (others,) = await items_of(db, "deep", str(automatic))
+    # Both waited for the one deadline the failure stored, so the owner's went first again.
+    assert owners["not_before"] == others["not_before"]
+    assert owners["started_at"] < others["started_at"]
+    assert ((await in_read(db, cards.card, P.id)) or {}).get("card") == CARD
+
+
+async def test_a_deep_pass_tried_again_after_an_error_keeps_its_priority(
+    db: Session, gate, monkeypatch
+):
+    async def broken(*args):
+        raise RuntimeError("the deep service answered without the job's id")
+
+    monkeypatch.setattr(deep_passes, "work_one", broken)
+    async with Bridge(db).write("queue") as unit:
+        automatic = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
+    workers = {"deep": DeepPassWorker(gate, Config(), archive(with_text(Q)), make(FakeDeep(DONE)))}
+
+    async def failed_and_next() -> bool:
+        found = await items_of(db, "deep", str(automatic))
+        return [i["state"] for i in found] == ["ended", "pending"]
+
+    async with serving(WorkGate(gate), workers):
+        await until(failed_and_next, "the try fails, and the next waits for its claim to lapse")
+    tried, following = await items_of(db, "deep", str(automatic))
+    assert tried["outcome"] == "failed"
+    assert following["priority"] == tried["priority"] == AUTOMATIC_PRIORITY
 
 
 async def _waits_until(conn: Session, pass_id: int | None, at: datetime) -> bool:

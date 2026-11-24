@@ -18,9 +18,11 @@ whatever the Worker returns after that is ignored. An item whose lease expires (
 died, or lost the database) is taken back and run again, by this process or another.
 
 A Worker returns how the item ended: `Done` (or None), or `Later` to have it wait and run again.
-One that raises fails the item, unless the database was lost under it: then the item is given
-back to be tried again. Settling needs the lease still live. A failed settling (the database
-lost) is logged, and the item is left to its lease, so it is taken back once that lapses.
+One that raises fails the item, unless the database was lost under it, or a statement lost a
+deadlock or a serialization conflict to another transaction (`conflicted`): then the item is
+given back to be tried again, so a turn or a pass is never left with no item to run it.
+Settling needs the lease still live. A failed settling (the database lost) is logged, and the
+item is left to its lease, so it is taken back once that lapses.
 
 Stopping (`run` cancelled) has one path: each supervisor cancels its Worker, waits for it to
 stop, and gives back the claim it still owns, and a claim whose commit the run loop was waiting
@@ -112,6 +114,17 @@ def database_lost(exc: BaseException) -> bool:
     if not isinstance(exc, psycopg.OperationalError):
         return False
     return exc.sqlstate is None or exc.sqlstate.startswith(("08", "57P"))
+
+
+# The errors of a statement another transaction made fail, which succeeds when tried again: a
+# deadlock it lost, a serialization conflict.
+_CONFLICTS = ("40P01", "40001")
+
+
+def conflicted(exc: BaseException) -> bool:
+    """Whether `exc` says a statement lost a deadlock or a serialization conflict to another
+    transaction: such an item is tried again, not failed."""
+    return isinstance(exc, psycopg.Error) and exc.sqlstate in _CONFLICTS
 
 
 async def _finished[T](task: asyncio.Task[T]) -> None:
@@ -306,8 +319,8 @@ class WorkGate:
         error = handler.exception()
         if isinstance(error, LeaseLostError):
             log.warning("work: %s %s (item %s) lost its lease", *_name(item))
-        elif error is not None and database_lost(error):
-            log.warning("work: %s %s (item %s) lost the database: %s", *_name(item), error)
+        elif error is not None and (database_lost(error) or conflicted(error)):
+            log.warning("work: %s %s (item %s) is tried again: %s", *_name(item), error)
             await self._change("try again", lambda unit: queue.again(unit, item))
         elif error is not None:
             log.error("work: %s %s (item %s) failed", *_name(item), exc_info=error)

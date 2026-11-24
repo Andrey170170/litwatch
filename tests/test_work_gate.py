@@ -791,10 +791,22 @@ def _session_ended(code: str) -> Exception:
             Outcome.FAILED,
         ),
         (lambda: psycopg.errors.QueryCanceled("statement timeout"), Outcome.FAILED),
+        (lambda: psycopg.errors.DeadlockDetected("deadlock detected"), None),
+        (lambda: psycopg.errors.SerializationFailure("could not serialize"), None),
     ],
-    ids=["idle-timeout", "transaction-timeout", "all-lost", "mixed", "statement-timeout"],
+    ids=[
+        "idle-timeout",
+        "transaction-timeout",
+        "all-lost",
+        "mixed",
+        "statement-timeout",
+        "deadlock",
+        "serialization",
+    ],
 )
-async def test_only_a_lost_database_tries_an_item_again(conn: Session, db, raised, outcome):
+async def test_only_a_lost_database_or_a_lost_conflict_tries_an_item_again(
+    conn: Session, db, raised, outcome
+):
     async def worker(item: WorkItem) -> None:
         if item.attempts == 1:
             raise raised()

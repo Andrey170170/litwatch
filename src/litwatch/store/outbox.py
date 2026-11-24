@@ -26,6 +26,7 @@ from psycopg.types.json import Jsonb
 from litwatch.core import Event
 from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import work
+from litwatch.store.text import stored
 
 # The kind of the deliveries' work items.
 DELIVERY = "deliver"
@@ -266,7 +267,7 @@ async def failed(
         "UPDATE integration_cursors SET failing = %s, failures = %s, last_error = %s, "
         "failed_at = %s, retry_at = %s, updated_at = now() "
         "WHERE name = %s AND (position_xid, position) < (%s::text::xid8, %s)",
-        (event.id, failures, error, failed_at, retry_at, name, str(at.xid), at.id),
+        (event.id, failures, stored(error), failed_at, retry_at, name, str(at.xid), at.id),
     )
     return cur.rowcount > 0
 
@@ -283,7 +284,7 @@ async def setup_failed(
     await unit.execute(
         "UPDATE integration_cursors SET setup_failures = %s, setup_error = %s, "
         "setup_failed_at = %s, setup_retry_at = %s, updated_at = now() WHERE name = %s",
-        (failures, error, failed_at, retry_at, name),
+        (failures, stored(error), failed_at, retry_at, name),
     )
 
 

@@ -11,6 +11,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core.deepread import Figure
 from litwatch.gates.database import ReadUnit, WriteUnit
+from litwatch.store.text import stored
 
 # -- zotero ----------------------------------------------------------------------------------------
 
@@ -152,7 +153,7 @@ async def card_failed(
         {
             "p": paper_id,
             "stats": Jsonb(stats) if stats is not None else None,
-            "error": error[:2000],
+            "error": stored(error),
         },
     )
 
@@ -209,7 +210,7 @@ async def attempt_ended(
         "WHERE id = %(id)s AND ended_at IS NULL",
         {
             "usage": Jsonb(usage) if usage is not None else None,
-            "error": error and error[:2000],
+            "error": error and stored(error),
             "failure": failure,
             "trace": Jsonb(trace) if trace is not None else None,
             "reviews": Jsonb(reviews) if reviews is not None else None,
@@ -224,7 +225,7 @@ async def service_failed(unit: WriteUnit, attempt_id: int, error: str) -> None:
     await unit.execute(
         "UPDATE deep_attempts SET error = %s, service_failed_at = now() "
         "WHERE id = %s AND ended_at IS NULL",
-        (error[:2000], attempt_id),
+        (stored(error), attempt_id),
     )
 
 

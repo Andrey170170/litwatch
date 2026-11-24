@@ -303,7 +303,7 @@ async def _ended(
             return "lost"
         await cards.card_failed(unit, c.paper.id, error, usage if ran else None)
         if failure == "service":
-            await store_.wait_again(unit, c, error, datetime.now(UTC) + PAUSE)
+            await store_.wait_again(unit, c, error, await _pause_end(unit))
             return "card_service_failed"
         revision, text = await store_.read_of(unit, c.id)
         await store_.failed(unit, c, error, counts=True, text=text)
@@ -316,5 +316,12 @@ async def _service_failed(db: DatabaseGate, c: Claimed, attempt_id: int, error: 
     log.warning("%s: the deep service failed: %s; the queue waits %s", c.paper.id, error, PAUSE)
     async with db.write("deep service failed") as unit:
         await cards.service_failed(unit, attempt_id, error)
-        await store_.let_go(unit, c, error, datetime.now(UTC) + PAUSE)
+        await store_.let_go(unit, c, error, await _pause_end(unit))
     return "card_service_failed"
+
+
+async def _pause_end(unit: WriteUnit) -> datetime:
+    """When the pause a service failure just recorded in `unit` ends, as every Deep pass
+    reads it (`paused`): the one deadline the pass that failed and the others wait for (now,
+    when there is no pause to wait out)."""
+    return await cards.paused_until(unit, PAUSE) or datetime.now(UTC)

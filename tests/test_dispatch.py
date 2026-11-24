@@ -8,10 +8,12 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import psycopg
+import pytest
 
 from litwatch import events
 from litwatch.api import create_app
 from litwatch.events import dispatch
+from litwatch.events import worker as delivery_worker
 from litwatch.events.worker import DeliveryWorker
 from litwatch.gates.database import outside_unit
 from litwatch.gates.work import WorkGate
@@ -675,3 +677,125 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
     assert list(served[outbox.DELIVERY].loaded.values()) == [recorder]
     assert given == {outbox.DELIVERY: [recorder.name]}  # its own integrations' turns alone
     assert deep.client.http.is_closed and closed == ["recorder"]
+
+
+class Garbled(Recorder):
+    """Fails with what a remote end answered, a NUL in it, on every event or in its setup."""
+
+    def __init__(self, where: str):
+        super().__init__("garbled")
+        if where == "setup":
+            self.setup = self._fail
+
+    async def _fail(self, db, *args):
+        raise RuntimeError("the remote end said \x00 nothing")
+
+    async def handle(self, db, event):
+        await self._fail(db)
+
+
+@pytest.mark.parametrize("where", ["handle", "setup"])
+async def test_a_failure_whose_text_the_database_refuses_is_still_recorded_and_retried(
+    conn: Session, db, where
+):
+    rec = Garbled(where)
+    gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()
+
+    async def recorded() -> bool:  # the failure is recorded, and a turn waits out its backoff
+        cursor = (await in_read(conn, outbox.cursors, [rec.name])).get(rec.name)
+        error = cursor and (cursor.last_error if where == "handle" else cursor.setup_error)
+        return bool(error) and await _waits(conn, rec.name)
+
+    async with served(gate, workers):
+        if where == "handle":
+            await emit(conn, events.PAPER_SAVED)
+        await until(recorded, "the failure is recorded, and its retry waits")
+    cursor = (await in_read(conn, outbox.cursors, [rec.name]))[rec.name]
+    error = cursor.last_error if where == "handle" else cursor.setup_error
+    assert error is not None and "\ufffd" in error
+
+
+async def test_a_replacement_with_no_setup_does_not_wait_out_its_predecessors_setup_backoff(
+    conn: Session, db
+):
+    rec = Recorder()  # the name's new implementation, with no setup
+    await start(db, rec)
+    # The name's last implementation failed its setup, and waits an hour; an event waits too.
+    await conn.execute(
+        "UPDATE integration_cursors SET setup_failures = 3, setup_error = 'old', "
+        "setup_failed_at = now(), setup_retry_at = now() + interval '1 hour' WHERE name = %s",
+        (rec.name,),
+    )
+    ids = await emit(conn, events.PAPER_SAVED)
+    await conn.execute("DELETE FROM work_items")  # the event's wake waits out that backoff too
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    app = create_app(dsn, "t", integrations=[rec])
+    async with app.router.lifespan_context(app):
+        await until(lambda: _seen(rec, ids), "the event is delivered at once")
+    assert (await in_read(conn, outbox.cursors, [rec.name]))[rec.name].setup_failures == 0
+
+
+async def test_an_event_behind_an_older_open_transaction_is_delivered_once_it_ends(
+    conn: Session, db, monkeypatch
+):
+    monkeypatch.setattr(delivery_worker, "RETRY", timedelta(seconds=0.2))
+    rec = Recorder()
+    await start(db, rec)
+    gate, workers = delivering(db, rec)
+    older = await sessions.sibling(conn)
+
+    async def looked() -> bool:  # a turn ran, and found the event held back
+        return any(t["state"] == "ended" for t in await turns(conn, rec.name))
+
+    try:
+        async with served(gate, workers):
+            async with contextlib.AsyncExitStack() as held:
+                await held.enter_async_context(older.transaction())
+                await older.execute("SELECT pg_current_xact_id()")  # older, with its id
+                ids = await emit(conn, events.PAPER_SAVED)  # an ordinary write's event
+                await until(looked, "a turn finds the event behind the older transaction")
+                assert rec.seen == []
+            # The older one ends; no other event comes: the turns the gate arranged find it.
+            await until(lambda: _seen(rec, ids), "the event is delivered")
+    finally:
+        await older.close()
+
+
+class SetupOnce(Recorder):
+    """Fails its first setup; records when each ran, on the loop's clock."""
+
+    def __init__(self):
+        super().__init__("setup-once")
+        self.set_up_at: list[float] = []
+
+    async def setup(self, db):
+        self.set_up_at.append(asyncio.get_running_loop().time())
+        if len(self.set_up_at) == 1:
+            raise RuntimeError("the remote end is down")
+
+
+async def test_the_owners_retry_during_a_failing_setup_runs_it_again_at_once(
+    conn: Session, db, monkeypatch
+):
+    rec = SetupOnce()
+    start_ = dispatch.start
+
+    async def retried_meanwhile(db_, integration, now=None):
+        # The setup failed and was recorded; the owner's Retry commits before the turn ends.
+        done = await start_(db_, integration, now)
+        if not done:
+            assert await in_write(conn, outbox.retry, integration.name)
+        return done
+
+    monkeypatch.setattr(dispatch, "start", retried_meanwhile)
+    gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()
+
+    async def twice() -> bool:
+        return len(rec.set_up_at) == 2
+
+    async with served(gate, workers):
+        await until(twice, "the setup runs again")
+    first, second = rec.set_up_at
+    assert second - first < 2  # at once, not after `RETRY`

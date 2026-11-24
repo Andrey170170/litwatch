@@ -23,6 +23,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core.work import ItemState, Outcome, WorkItem
 from litwatch.gates.database import ReadUnit, WriteUnit
+from litwatch.store.text import stored
 
 # The channel a submission, and an item's settling, notify the Work gates on; the payload is the
 # item's kind.
@@ -368,7 +369,7 @@ async def end(
 
 def _stored(error: str | None) -> str | None:
     """An error as stored: at most 2000 characters, without NULs, which text columns refuse."""
-    return None if error is None else error.replace("\x00", "\ufffd")[:2000]
+    return None if error is None else stored(error)
 
 
 async def again(

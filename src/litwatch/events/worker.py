@@ -46,9 +46,14 @@ class DeliveryWorker:
         return sorted(self.loaded)
 
     async def sweep(self) -> None:
-        """Submit a turn for each integration loaded: its setup, and what waits for it."""
+        """Submit a turn for each integration loaded: its setup, and what waits for it. One
+        with no setup first clears a setup failure the name's last implementation recorded
+        (`store.outbox.setup_done`, which locks the cursor), so its turn is not scheduled by
+        that backoff; an event's backoff stays."""
         async with self.db.write("deliveries: sweep") as unit:
             for name in self.keys:
+                if getattr(self.loaded[name], "setup", None) is None:
+                    await outbox.setup_done(unit, name)
                 await outbox.wake(unit, name)
 
     async def __call__(self, item: WorkItem) -> None:
@@ -65,8 +70,8 @@ class DeliveryWorker:
             await work.forget_resubmission(unit, item)
             settled, waiting = await outbox.waiting(unit, item.key)
             now = datetime.now(UTC)
-            if item.key not in self.set_up:
-                times = [cursor.setup_retry_at or now + RETRY]
+            if item.key not in self.set_up:  # after its backoff, or at once on the owner's Retry
+                times = [cursor.setup_retry_at or now]
             else:
                 times = [self._idle_at(item.key, now)] if idles else []
                 if cursor.failing is not None and cursor.retry_at:

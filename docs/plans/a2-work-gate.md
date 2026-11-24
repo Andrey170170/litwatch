@@ -61,8 +61,12 @@ Found in a survey of the code at 548857e3:
   by a heartbeat every third of the lease. A write unit opened under a work context takes the item's row
   `FOR KEY SHARE`, then checks that the token matches and has not expired, or it fails. A lease change locks that
   row `FOR UPDATE`, so it waits for the unit to end; a submission's plain update does not, so a submitter holding a
-  paper lock the unit waits for cannot deadlock with it. Lease changes (take, renew, take back, end) run in the Work gate's own units, which are not fenced. A path that
-  touches both an item's row and a pass's row takes the item's row first.
+  paper lock the unit waits for cannot deadlock with it. Lease changes (take, renew, take back, end) run in the Work
+  gate's own units, which are not fenced. Two lock modes on an item's row keep the order: a Worker's unit takes the
+  fence (`FOR KEY SHARE`) first, which no submission waits for, then its business locks (the pass's row, a paper,
+  a cursor); a write that schedules an item (a submission, `FOR NO KEY UPDATE`) takes the business row it decides
+  by first (the pass's or the cursor's) and the item's row last, as inline writers (the nightly, a settle) do. A unit
+  that schedules several items takes them in pass id order (or cursor name order).
 - **The pass claim stays, with its lease.** A pass item claims its named pass through the shared claim (today's SQL,
   narrowed to one id). The nightly's inline passes and a re-run's passes claim the same way. An item that finds its
   pass done or no longer wanted ends with nothing to do; one that finds it claimed by another owner sets its
@@ -278,7 +282,8 @@ Found while building, owned by the stage named.
 - **P3 (from P2): a turn decides its next run alone.** A delivery turn calls `store.work.forget_resubmission` in its
   last unit, then reads the cursor and the outbox and submits its own key for when it wants to run again; what was
   submitted while it ran is forgotten, since that read sees it. A P3 Worker that arranges its own next run (the
-  scheduler's fires, job chunks) can do the same.
+  scheduler's fires, job chunks) can do the same only when that last locked read accounts for every reason to run
+  again: a reason its read does not see (a request kept nowhere but in the resubmission) would be lost.
 - **P3, P7 (from P2): deliveries are served by name.** `WorkGate.run(workers, keys=)` serves a kind for some keys alone;
   `serve` gives it the integrations it loads, so a process takes, takes back and waits on only its own deliveries.
   An integration no process loads keeps one pending item, never taken; one dropped from the configuration leaves it
@@ -296,12 +301,25 @@ Found while building, owned by the stage named.
 - **P3 (from P2): a pass item decides under the pass's lock.** Both pass Workers decide with
   `store.fulltext.decide`: it locks the pass's row (waiting for a settle that holds it), reads it in a statement of
   its own, and claims it under that lock when a claim may take it, so a runnable pass never ends untried; else the
-  item waits for another owner's claim (`held_until`), looks again later (`held_back`), or ends. The sweeps share
-  the claim's static predicates (`_eligible`). A pass worked inline (the nightly, the CLI) retires its item as it
+  item waits for another owner's claim (`held_until`), looks again later (`held_back`), or ends; the claim and the
+  look are two statements, so one that finds the pass runnable after a claim that took nothing (its paper changed
+  between them) claims again. The startup sweep lists the open passes, then takes one unit per pass, which locks it,
+  looks again under the lock (`submit_open`, the claim's static predicates, `_eligible`) and submits its item, so it
+  never locks two items at once nor gives a pass worked inline meanwhile a new one. Every submission of a pass's item
+  goes through `store.fulltext.submit` (a Worker's retry after an error included), so its admission and priority come
+  from the pass. A Deep service failure stores the pause's start, and the pass that failed and every other wait for
+  the one deadline read from it (`paused_until`), so they resume in priority order. A pass worked inline (the nightly, the CLI) retires its item as it
   ends (`done`, `failed` call `store.work.done_elsewhere`): a pending one ends, and a running one other than the
   caller's is wanted again at once, so one that was about to wait looks again first, and finds the pass done; in
   that race the look again is one more short item. A pass's writes submit its item by the pass's job as it stands
   (`RETURNING job_id`), not the claim's, as the owner's Process may take a pass from a re-run meanwhile.
+- **P3 (from P2): a conflict is tried again, and a failure is always recorded.** The gate gives an item back to
+  be tried again when its Worker raises a lost deadlock or serialization conflict (`gates.work.conflicted`), as for
+  a lost database, so no pass or delivery is left with no item after one. Failure text from outside (a remote
+  answer in an error) is stored through `store.text.stored`, which replaces what PostgreSQL refuses (a NUL, a lone
+  surrogate), so the write that records a failure, and its backoff and Retry, cannot fail on it. P2 uses it for the
+  outbox's and the passes' errors; `runs`, `jobs`, `inference_calls`, `digests` and `failures` errors still cut
+  text alone, for the stages that move them.
 - **P3 (from P2): `fulltext.worker` imports `jobs.worker.nightly_waits`.** That is on the `(fulltext, jobs)` pair
   of `CYCLES_BEFORE_THE_RULE`; when P3 moves the nightly gating into items, the import can go with it.
 - **P3 (from P2): re-run passes stay off the gate.** A pass with a `job_id` is the re-run's, worked inline by its

@@ -801,6 +801,8 @@ async def test_a_pass_the_nightly_worked_inline_leaves_its_item_nothing_to_do(db
         await until(lambda: item_ended(db, row["id"]), "the item ends")
     assert len(writer.asked) == 1 and len(fake.jobs) == 1  # nothing worked twice
     assert (await passes(db))[0]["state"] == "done"
+    (item,) = await items_of(db, "fulltext", str(row["id"]))
+    assert item["attempts"] == 0  # retired by the nightly's write, never taken
 
 
 async def test_a_claim_a_process_abandoned_is_taken_by_the_passs_item_once_it_lapses(
@@ -1011,14 +1013,25 @@ async def test_the_sweep_submits_only_the_passes_a_claim_may_take(db: Session):
         (dropped.id, deep),
     )
     await db.execute("DELETE FROM work_items")  # as a process starting finds them
-    await in_write(db, fulltext_store.submit_open)
-    await in_write(db, functools.partial(fulltext_store.submit_open, deep=True))
+    await swept(db)
+    await swept(db, deep=True)
     keys = await (await db.execute("SELECT key FROM work_items ORDER BY id")).fetchall()
     assert sorted(int(k["key"]) for k in keys) == sorted([current, deep, unstarted])
     del older, gone  # an older revision's, and a dismissed paper's: no claim takes them
 
 
-async def test_a_pass_gone_while_the_sweep_runs_is_left_out(db: Session, monkeypatch):
+async def swept(db: Session, *, deep: bool = False) -> list[int]:
+    """The startup sweep as a Worker makes it: the open passes, then each in a unit of its own.
+    Returns those submitted."""
+    found = await in_read(db, functools.partial(fulltext_store.open_ids, deep=deep))
+    return [
+        i
+        for i in found
+        if await in_write(db, lambda unit, i=i: fulltext_store.submit_open(unit, i, deep=deep))
+    ]
+
+
+async def test_a_pass_gone_or_worked_inline_while_the_sweep_runs_gets_no_item(db: Session):
     other = paper("2610.00002", title="Another", abstract="Another.", version=1)
     await in_write(db, papers_store.upsert, [other])
     async with Bridge(db).write("queue two") as unit:
@@ -1027,22 +1040,77 @@ async def test_a_pass_gone_while_the_sweep_runs_is_left_out(db: Session, monkeyp
             for pid in (P.id, other.id)
         ]
     await db.execute("DELETE FROM work_items")  # as a process starting finds them
-    deleting = await sessions.sibling(db)
-    submit = fulltext_store.work.submit
+    found = await in_read(db, fulltext_store.open_ids)
+    assert found == [first, second]
+    # Meanwhile the nightly works the first inline (retiring an item it had none of), and the
+    # second is deleted (a taxonomy edit, say).
+    await db.execute("UPDATE fulltext_passes SET state = 'done' WHERE id = %s", (first,))
+    await db.execute("DELETE FROM fulltext_passes WHERE id = %s", (second,))
+    for pass_id in found:
+        assert not await in_write(db, fulltext_store.submit_open, pass_id)
+    assert await (await db.execute("SELECT key FROM work_items")).fetchall() == []
 
-    async def submitting(unit, kind, key, **kwargs):
-        if key == str(first):  # the second pass is deleted meanwhile (a taxonomy edit, say)
-            await deleting.execute("DELETE FROM fulltext_passes WHERE id = %s", (second,))
-        return await submit(unit, kind, key, **kwargs)
 
-    monkeypatch.setattr(fulltext_store.work, "submit", submitting)
+async def test_the_sweep_locks_one_item_at_a_time_beside_a_bulk_writer(db: Session, gate):
+    other = paper("2610.00002", title="Another", abstract="Another.", version=1)
+    await in_write(db, papers_store.upsert, [other])
+    async with Bridge(db).write("queue two") as unit:
+        first, second = [
+            await fulltext_store.queue(unit, pid, 1, PassKind.BRIEF, "focus", TEXT_PRIORITY)
+            for pid in (P.id, other.id)
+        ]
+    bulk = await sessions.sibling(db)  # a nightly's take-back, whose order is not the sweep's
+
+    async def blocked() -> bool:
+        found = await db.execute(
+            "SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+            "AND query LIKE 'SELECT%FROM work_items%FOR NO KEY UPDATE'"
+        )
+        return (await found.fetchone())["n"] == 1
+
     try:
-        await in_write(db, fulltext_store.submit_open)
+        async with contextlib.AsyncExitStack() as held:
+            await held.enter_async_context(bulk.transaction())
+            await bulk.execute(
+                "SELECT 1 FROM work_items WHERE key = %s FOR NO KEY UPDATE", (str(second),)
+            )
+            sweeping = asyncio.create_task(
+                workers(gate, FakeArchive(), Writer())["fulltext"].sweep()
+            )
+            await until(blocked, "the sweep waits for the second item")
+            # The bulk writer goes on to the first: free, as the sweep's unit for it ended.
+            async with asyncio.timeout(WAIT):
+                await bulk.execute(
+                    "SELECT 1 FROM work_items WHERE key = %s FOR NO KEY UPDATE", (str(first),)
+                )
+            await held.aclose()
+            await sweeping  # no deadlock aborted it
     finally:
-        await deleting.close()
-    assert [
-        i["key"] for i in await (await db.execute("SELECT key FROM work_items")).fetchall()
-    ] == [str(first)]
+        await bulk.close()
+    keys = await (await db.execute("SELECT key FROM work_items ORDER BY key")).fetchall()
+    assert sorted(int(k["key"]) for k in keys) == sorted([first, second])
+
+
+async def test_a_paper_withdrawn_between_the_decisions_statements_leaves_nothing_to_do(
+    db: Session, monkeypatch
+):
+    await graded(db, "central")
+    (row,) = await passes(db)
+    withdrawing = await sessions.sibling(db)
+    claim = fulltext_store.claim
+
+    async def withdrawn_first(*args, **kwargs):
+        # A version withdrawing the paper commits: it settles the paper, not this pass's row.
+        await withdrawing.execute("UPDATE papers SET withdrawn_at = now() WHERE id = %s", (P.id,))
+        return await claim(*args, **kwargs)
+
+    monkeypatch.setattr(fulltext_store, "claim", withdrawn_first)
+    try:
+        async with Bridge(db).write("decide") as unit:
+            decision = await fulltext_store.decide(unit, row["id"], LEASE)
+    finally:
+        await withdrawing.close()
+    assert decision == fulltext_store.Decision()  # nothing to do, not a failure
 
 
 async def test_serve_runs_text_and_deep_passes_as_its_work_items(db: Session, monkeypatch):
@@ -1075,6 +1143,10 @@ async def test_a_nightly_beside_the_gate_takes_over_an_abandoned_pass_and_works_
         (item,) = await items_of(db, "fulltext", str(row["id"]))
         return item["attempts"] >= 1 and item["state"] == "pending"
 
+    async def looked_again() -> bool:
+        (item,) = await items_of(db, "fulltext", str(row["id"]))
+        return item["attempts"] >= 2 and item["state"] == "pending"
+
     async def lapsed() -> bool:
         found = await db.execute(
             "SELECT lease_until < now() AS lapsed FROM fulltext_passes WHERE id = %s",
@@ -1086,6 +1158,9 @@ async def test_a_nightly_beside_the_gate_takes_over_an_abandoned_pass_and_works_
         async with gate.held("run"):  # a nightly runs, as the scheduler starts it in `serve`
             await until(tried, "the item finds its pass held")
             await until(lapsed, "the abandoned claim lapses")
+            # Due again, the item looks once more, and leaves it to the nightly that runs: its
+            # look holds the pass's row a moment, which the nightly's claim would skip.
+            await until(looked_again, "the item looks again, and waits")
             async with model_run(gate, CONFIG, "nightly", gateway=writer.gateway) as run:
                 done = await nightly.text_passes(gate, CONFIG, run, None)
         assert done == {"briefs_written": 1}  # taken over by the nightly

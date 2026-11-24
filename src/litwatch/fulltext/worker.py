@@ -39,7 +39,6 @@ from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.jobs.worker import nightly_waits
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
-from litwatch.store import work
 from litwatch.store.fulltext import Claimed, Decision
 
 
@@ -54,16 +53,28 @@ def _unclaimed(decision: Decision) -> Later | None:
     return None
 
 
+async def _sweep(db: DatabaseGate, *, deep: bool) -> None:
+    """Submit the item of each pass a claim can take, of Deep ones with `deep`: each in a unit
+    of its own, which locks the pass and looks at it again (`store.fulltext.submit_open`)."""
+    kind = "deep" if deep else "text"
+    async with db.read(f"{kind} passes: open") as unit:
+        found = await store_.open_ids(unit, deep=deep)
+    for pass_id in found:
+        async with db.write(f"{kind} passes: sweep") as unit:
+            await store_.submit_open(unit, pass_id, deep=deep)
+
+
 @asynccontextmanager
 async def _tried_again(db: DatabaseGate, item: WorkItem, c: Claimed) -> AsyncGenerator[None]:
-    """Submit the pass's next try for when its claim lapses if the block raises, but for a lost
-    database, with which the gate tries the item again itself."""
+    """Submit the pass's next try for when its claim lapses if the block raises, as every
+    submission of a pass's item is made (`store.fulltext.submit`), but for a lost database,
+    with which the gate tries the item again itself."""
     try:
         yield
     except Exception as exc:
         if not database_lost(exc):
             async with db.write(f"{item.kind} pass: tried again") as unit:
-                await work.submit(unit, item.kind, item.key, not_before=c.lease_until)
+                await store_.submit(unit, c.id, c.lease_until)
         raise
 
 
@@ -81,8 +92,7 @@ class TextPassWorker:
 
     async def sweep(self) -> None:
         """Submit the item of each text pass a claim can take."""
-        async with self.db.write("text passes: sweep") as unit:
-            await store_.submit_open(unit)
+        await _sweep(self.db, deep=False)
 
     async def __call__(self, item: WorkItem) -> Later | None:
         # While another job holds the run lock (a nightly batching the others), the owner's
@@ -115,8 +125,7 @@ class DeepPassWorker:
 
     async def sweep(self) -> None:
         """Submit the item of each Deep pass a claim can take."""
-        async with self.db.write("deep passes: sweep") as unit:
-            await store_.submit_open(unit, deep=True)
+        await _sweep(self.db, deep=True)
 
     async def __call__(self, item: WorkItem) -> Later | None:
         if until := await deep_passes.paused(self.db):
@@ -137,8 +146,8 @@ class DeepPassWorker:
             why = await deep_passes.work_one(
                 self.db, self.archive, self.deep, c, attempt, word.rules(self.config)
             )
-        if why == "card_service_failed":
-            return Later(datetime.now(UTC) + deep_passes.PAUSE)
+        if why == "card_service_failed":  # the pass waits out the pause the others wait out
+            return Later(await deep_passes.paused(self.db) or datetime.now(UTC))
         return _awaiting(why == "awaiting_text")
 
 
