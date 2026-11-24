@@ -15,7 +15,7 @@ import { PaperNumbers } from "./numbers.ts";
 import { headings, isLatex, splitPaper, type Text } from "./paper.ts";
 
 /** LaTeX without its comments: an unescaped % to the end of its line. */
-export const uncommented = (tex: string): string => tex.replace(/((?:^|[^\\])(?:\\\\)*)%.*$/gm, "$1");
+const uncommented = (tex: string): string => tex.replace(/((?:^|[^\\])(?:\\\\)*)%.*$/gm, "$1");
 
 /** What numbers a paper's floats some other way than an article's defaults: chapters, a class that has them, the
  * package that ties one counter to another, or a float that takes the number of the one before it. */
@@ -25,7 +25,7 @@ const RENUMBERING = /\\chapter\*?\s*[[{]|\\documentclass\s*(?:\[[^\]]*\])?\s*\{(
  * defaults this code models: counted from 1 through the paper. It does where it sets or steps the counter, ties it
  * to another, redefines or prints its form (\thefigure), or loads a class or package that numbers its own way. No
  * number of that kind is then inferred from the source. (litwatch numbers the sections, `core/outline.py`.) */
-export function ownFloatNumbering(tex: string, kind: string): boolean {
+function ownFloatNumbering(tex: string, kind: string): boolean {
   const set = new RegExp(`\\\\(?:setcounter|addtocounter|stepcounter|refstepcounter|numberwithin|counterwithin\\*?|counterwithout\\*?)\\s*\\{${kind}\\}|\\\\the${kind}(?![a-zA-Z])`);
   return set.test(tex) || RENUMBERING.test(tex);
 }

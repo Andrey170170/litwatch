@@ -29,7 +29,7 @@ export const SectionSchema = Type.Object(
   { additionalProperties: false, description: "One heading of a LaTeX source: a sectioning command, the abstract or the bibliography." },
 );
 
-export const OutlineSchema = Type.Object(
+const OutlineSchema = Type.Object(
   {
     sections: Type.Array(SectionSchema, { description: "The headings in the order of the text." }),
     references: Type.Optional(
@@ -46,7 +46,7 @@ export const OutlineSchema = Type.Object(
   },
 );
 
-export const PaperSchema = Type.Object(
+const PaperSchema = Type.Object(
   {
     id: Type.String({ minLength: 1 }),
     title: Type.String({ minLength: 1 }),
@@ -62,7 +62,7 @@ export const PaperSchema = Type.Object(
   { additionalProperties: false, description: "The paper. A LaTeX source comes with its outline, and nothing else does." },
 );
 
-export const SelectionSchema = Type.Object(
+const SelectionSchema = Type.Object(
   {
     name: Type.String({ minLength: 1 }),
     slug: nullable(Type.String()),
@@ -84,7 +84,7 @@ export const JobInputSchema = Type.Object(
 
 // ── what a job reports ──────────────────────────────────────────────────────────────────────────────
 
-export const JOB_STATUSES = ["queued", "running", "done", "error"] as const;
+const JOB_STATUSES = ["queued", "running", "done", "error"] as const;
 const JobStatus = enumOf(JOB_STATUSES, "Where the job is.");
 
 export const JobRefSchema = Type.Object(
@@ -93,12 +93,12 @@ export const JobRefSchema = Type.Object(
 );
 
 const count = Type.Integer({ minimum: 0 });
-export const StatsSchema = Type.Object(
+const StatsSchema = Type.Object(
   { cells: count, turns: count, input: count, output: count, reasoning: count, cache_read: count, list_cost: Type.Number({ minimum: 0 }), seconds: count },
   { description: "A job's usage: REPL cells, model turns, tokens, the cost at list prices in dollars, and its seconds." },
 );
 
-export const FigureSchema = Type.Object(
+const FigureSchema = Type.Object(
   {
     name: Type.String({ pattern: FIGURE_NAME, description: "The name the read's fig blocks cite it by." }),
     mime: Type.Literal("image/webp"),
@@ -107,9 +107,9 @@ export const FigureSchema = Type.Object(
   { description: "One of the read's figures." },
 );
 
-export const FAILURES = ["service", "paper"] as const;
+const FAILURES = ["service", "paper"] as const;
 
-export const ResultSchema = Type.Object(
+const ResultSchema = Type.Object(
   { format: Type.Literal("read") },
   { additionalProperties: true, description: "The Deep read (read.ts; its JSON Schema is web/src/deepread/read.schema.json), told by its format tag." },
 );
@@ -172,4 +172,3 @@ export type SelectionContext = Static<typeof SelectionSchema>;
 export type Stats = Static<typeof StatsSchema>;
 export type ReturnedFigure = Static<typeof FigureSchema>;
 export type Failure = (typeof FAILURES)[number];
-export type JobStatus = (typeof JOB_STATUSES)[number];

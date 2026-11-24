@@ -84,7 +84,7 @@ def ended(job: contract.Job) -> Outcome:
     the service's failure, an error with the job's usage and trace kept, never a card with
     something missing."""
     outcome = Outcome(
-        job.result.model_dump() if job.result else None,
+        job.result.model_dump() if job.result is not None else None,
         job.trace,
         job.stats.model_dump(),
         job.model or "",
@@ -101,7 +101,7 @@ def ended(job: contract.Job) -> Outcome:
     return replace(outcome, figures=tuple(figures))
 
 
-def unreadable(job: Any, exc: ValidationError) -> Outcome:
+def _unreadable(job: Any, exc: ValidationError) -> Outcome:
     """A job that is not the contract's: the service's failure, ending it whatever its status,
     with the usage and trace it reported kept when they are the contract's."""
     job = job if isinstance(job, dict) else {}
@@ -225,7 +225,7 @@ class DeepClient:
             try:
                 job = contract.Job.model_validate(raw)
             except ValidationError as exc:
-                return unreadable(raw, exc)
+                return _unreadable(raw, exc)
             stats = job.stats
             mark = f"{job.status} {job.last_event or ''} cells={stats.cells}"
             if mark != seen:
