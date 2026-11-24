@@ -154,3 +154,10 @@ def test_depths_follow_the_top_level_found_and_spans_hold_what_is_below():
     assert (
         found[0].title == "Before the first heading" and found[0].end == by_title["Abstract"].start
     )
+
+
+def test_a_heading_whose_title_runs_past_the_scan_is_kept_and_counted():
+    long = "\\section[Short]{" + "a long title " * 170 + "}\nText.\n\\section{Next}\n"
+    parts = latex(long).parts
+    assert [(p.number, p.title[:10]) for p in parts] == [("1", "a long tit"), ("2", "Next")]
+    assert len(parts[0].title) <= 200

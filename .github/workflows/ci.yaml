@@ -141,7 +141,7 @@ jobs:
       - run: scripts/contracts.sh
       - name: Nothing changed or new (else run scripts/contracts.sh and commit what it wrote)
         run: |
-          generated="contracts src/litwatch/core/contracts web/src/deepread"
+          generated="contracts src/litwatch/core/contracts web/src/deepread web/openapi.json web/src/api"
           git status --porcelain -- $generated
           git diff --exit-code -- $generated
           test -z "$(git status --porcelain -- $generated)"

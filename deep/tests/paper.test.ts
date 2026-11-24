@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { headings, outline, splitPaper } from "../src/paper.ts";
-import { BODY, latex } from "./support.ts";
+import type { PaperInput } from "../src/contracts.ts";
+import { BODY, latex, sentJob } from "./support.ts";
 
 /** A PDF's text, as litwatch sends one: with no outline. */
 const pdf = (body: string) => ({ body, body_source: "pdf" as const });
@@ -167,4 +168,24 @@ test("the outline gives each heading's number and says which were left out of th
     outline(headings(latex(BODY)).slice(3), cuts).replace(/\d+ characters/g, "n characters"),
     "- 3 Results (n characters)\n- References (n characters, bibliography: in the session only)\n- A Probe training details (n characters, appendix: in the session only)",
   );
+});
+
+test("litwatch's offsets into a text with characters past the BMP are JavaScript's: deep cuts it where litwatch parsed it", () => {
+  const { paper } = sentJob("job-latex.json") as { paper: PaperInput };
+  assert.ok(/[\u{10000}-\u{10FFFF}]/u.test(paper.body), "the fixture has characters that take two code units");
+  const found = headings(paper);
+  assert.deepEqual(
+    found.map((h) => paper.body.slice(h.start, h.end).split("\n")[0]),
+    ["\\begin{abstract}", "\\section{Introduction}", "\\section{Method}", "\\begin{thebibliography}{9}", "\\section{Details 🧪}"],
+  );
+  const { main, cuts } = splitPaper(paper);
+  assert.deepEqual(
+    cuts.map((c) => [c.part, paper.body.slice(c.start, c.end).split("\n")[0], paper.body.slice(c.start, c.end).split("\n").at(-1)]),
+    [
+      ["references", "\\begin{thebibliography}{9}", "\\end{thebibliography}"],
+      ["appendix", "\\appendix", ""],
+    ],
+  );
+  assert.ok(main.endsWith("𝔼-labelled traces.\n\n"), "the main text ends where the bibliography begins");
+  assert.ok(!main.includes("bibitem") && !main.includes("Details"));
 });

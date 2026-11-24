@@ -44,23 +44,11 @@ export type TraceEvent =
   | { t: number; type: "review"; round: number; passed?: boolean; error?: string; usage: TurnUsage }
   | { t: number; type: "system"; text: string };
 
-/** A job's usage (`contracts.ts`, which litwatch reads it by). */
-export type { Stats };
 /** One model turn's usage. */
 export type TurnUsage = Omit<Stats, "cells" | "turns" | "seconds">;
 
-/**
- * Whose failure a job's was: the service's when the model call failed (the sign-in, a usage limit, the provider), the
- * paper's when no valid read was submitted within the budget or the provider's content filter stopped the model.
- * litwatch counts only the paper's against it.
- */
-export type { Failure };
-
 /** A process note on the read: the model's, validated with it, or the service's, added after. */
 export type ProcessNote = NonNullable<Read["process_notes"]>[number];
-
-/** One of the read's figures as the job returns it (docs/integrations.md). */
-export type { ReturnedFigure };
 
 export interface Outcome {
   result: Read | null;
@@ -72,7 +60,10 @@ export interface Outcome {
   stats: Stats;
   model: string;
   error?: string;
-  failure?: Failure; // set with `error`
+  /** Set with `error`: the service's failure when the model call failed (the sign-in, a usage limit, the provider),
+   * the paper's when no valid read was submitted within the budget or the provider's content filter stopped the
+   * model. litwatch counts only the paper's against it. */
+  failure?: Failure;
 }
 
 export type Progress = (event: TraceEvent, stats: Stats) => void;
@@ -298,6 +289,7 @@ export async function processPaper(
       paper: paper.body,
       __meta: JSON.stringify({ id: paper.id, title: paper.title, authors: paper.authors, published: paper.published ?? null, url: paper.url ?? null }),
       __headings: JSON.stringify(heads),
+      __references: JSON.stringify((paper.body_source === "latex" && paper.outline.references) || null),
     },
     hosts,
     { cellTimeoutMs: opts.cellTimeoutMs, maxOutputChars: opts.maxOutputChars },

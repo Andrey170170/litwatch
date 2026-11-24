@@ -22,8 +22,9 @@ the session (`paper`), wherever they sit in the text, to be read where the read 
 once per run (`src/paper.ts`): the session's `sections()` gives them, the first message's outline lists them, and
 the checks look sections up in them. A LaTeX source's come from litwatch, which parses the source
 (`src/litwatch/core/outline.py`) and sends its outline with it (`paper.outline`: the headings with their depths,
-spans and numbers, `3.2`, `A.1` from `\appendix` on, the bibliography's span and where the appendix starts); a
-PDF's text is read in the two forms litwatch's archive writes, Markdown with bold headings (`## **References**`)
+spans and numbers, `3.2`, `A.1` from `\appendix` on, the bibliography's span and where the appendix starts, each
+offset in UTF-16 code units, as JavaScript indexes the text; `refs()` reads the bibliography's entries from that
+span); a PDF's text is read in the two forms litwatch's archive writes, Markdown with bold headings (`## **References**`)
 and plain text, where only two lines are told as headings: the References line, and the appendix's first, which
 is a line that names it (`Appendix`, `Appendix A: Proofs`) anywhere past the Introduction, or a lettered line
 (`A Additional samples`) after the references.
@@ -178,6 +179,24 @@ npm test && npm run typecheck
 node src/main.ts login    # sign in once; the auth file keeps the session
 node src/main.ts serve
 ```
+
+A LaTeX source in the tests is read by the outline litwatch's own parser gives it: `latex(body)` in
+`tests/support.ts` reads it from `tests/fixtures/outlines/`, which litwatch's code writes
+(`tests/deep_fixtures.py` at the repository's root; `tests/test_deep_fixtures.py` fails when one is stale). A body
+with no fixture yet gets one written by running that module, so a new LaTeX test needs `uv` and the dev extra
+(`uv sync --extra dev`) the first time it runs, and its fixture committed: CI's deep job has no Python.
+`tests/fixtures/job-*.json` are whole submissions litwatch's code wrote, which the service must take.
+
+`node src/main.ts run FILE.json` reads one paper from a file and writes its outcome next to it, for trying a
+change on a paper without litwatch. The file is what `POST /process` is sent, checked the same way before the
+model is called. litwatch writes one for a paper's text, with a LaTeX source's outline, from the repository's root:
+
+```sh
+uv run litwatch deep input paper.tex --id 2610.00001 --title "The paper's title" > deep/paper.json
+cd deep && node src/main.ts run paper.json
+```
+
+`--pdf` says the text is a PDF's; `--abstract` gives the abstract.
 
 ## Environment
 

@@ -7,14 +7,18 @@
  * root regenerates everything). A new contract is one schema here, added to `CONTRACTS`, and one regenerate.
  *
  * The read itself is `read.ts`'s: litwatch keeps it as JSON and checks only its format tag, so a job's `result` is
- * declared here by that tag alone.
+ * declared here by that tag alone, and a read's section kinds are taken from its schema.
+ *
+ * Offsets into the paper's text are UTF-16 code units, as JavaScript indexes a string; litwatch converts its own.
  */
 
 import { Type, type Static, type TSchema } from "typebox";
-import { FIGURE_NAME, LIMITATION_BY, READ_NOTE_KINDS, SECTION_KINDS } from "./read.ts";
+import { FIGURE_NAME, LIMITATION_BY, READ_NOTE_KINDS, ReadSchema, SectionSchema as ReadSectionSchema } from "./read.ts";
 import { enumOf, RELATIONS } from "./schema.ts";
 
 const nullable = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()]));
+/** An offset into the paper's text. */
+const offset = (description: string) => Type.Integer({ minimum: 0, description: `${description}, in UTF-16 code units.` });
 
 // ── what a job is sent ──────────────────────────────────────────────────────────────────────────────
 
@@ -23,8 +27,8 @@ export const SectionSchema = Type.Object(
     title: Type.String({ description: "The heading's title as the source writes it, comments dropped and spaces collapsed." }),
     depth: Type.Integer({ minimum: 0, description: "Its depth below the source's top level of headings, from 0." }),
     number: Type.Optional(Type.String({ description: 'Its number where LaTeX\'s defaults give it ("3.2", "A.1"); left out where the source numbers its sections itself.' })),
-    start: Type.Integer({ minimum: 0, description: "Where the heading starts in the paper's text." }),
-    end: Type.Integer({ minimum: 0, description: "Where its section ends: at the next heading of its depth or above." }),
+    start: offset("Where the heading starts in the paper's text"),
+    end: offset("Where its section ends: at the next heading of its depth or above"),
   },
   { additionalProperties: false, description: "One heading of a LaTeX source: a sectioning command, the abstract or the bibliography." },
 );
@@ -34,11 +38,11 @@ const OutlineSchema = Type.Object(
     sections: Type.Array(SectionSchema, { description: "The headings in the order of the text." }),
     references: Type.Optional(
       Type.Object(
-        { start: Type.Integer({ minimum: 0 }), end: Type.Integer({ minimum: 0 }) },
+        { start: offset("Where it starts"), end: offset("Where it ends") },
         { additionalProperties: false, description: "The bibliography's environment, from its \\begin to its \\end." },
       ),
     ),
-    appendix: Type.Optional(Type.Integer({ minimum: 0, description: "Where the appendix starts: \\appendix, or a section named for it. It runs to the end." })),
+    appendix: Type.Optional(offset("Where the appendix starts (\\appendix, or a section named for it), which runs to the end")),
   },
   {
     additionalProperties: false,
@@ -46,21 +50,25 @@ const OutlineSchema = Type.Object(
   },
 );
 
-const PaperSchema = Type.Object(
-  {
-    id: Type.String({ minLength: 1 }),
-    title: Type.String({ minLength: 1 }),
-    abstract: Type.String(),
-    authors: Type.Array(Type.String()),
-    published: nullable(Type.String()),
-    url: nullable(Type.String()),
-    body: Type.String({ description: "The paper's full text, as the archive gives it." }),
-    body_source: nullable(enumOf(["latex", "pdf"] as const, "Where the text comes from: the paper's LaTeX source, or its PDF.")),
-    body_version: nullable(Type.Integer({ minimum: 1, description: "The arXiv version the text is of, which the figures are taken at; null when litwatch cannot say." })),
-    outline: Type.Optional(OutlineSchema),
-  },
-  { additionalProperties: false, description: "The paper. A LaTeX source comes with its outline, and nothing else does." },
+const PAPER = {
+  id: Type.String({ minLength: 1 }),
+  title: Type.String({ minLength: 1 }),
+  abstract: Type.String(),
+  authors: Type.Array(Type.String()),
+  published: nullable(Type.String()),
+  url: nullable(Type.String()),
+  body: Type.String({ description: "The paper's full text, as the archive gives it." }),
+  body_version: nullable(Type.Integer({ minimum: 1, description: "The arXiv version the text is of, which the figures are taken at; null when litwatch cannot say." })),
+};
+const LatexPaperSchema = Type.Object(
+  { ...PAPER, body_source: Type.Literal("latex"), outline: OutlineSchema },
+  { additionalProperties: false, description: "A paper read from its LaTeX source, which comes with its outline." },
 );
+const PdfPaperSchema = Type.Object(
+  { ...PAPER, body_source: Type.Literal("pdf") },
+  { additionalProperties: false, description: "A paper read from its PDF's text, which has no outline." },
+);
+const PaperSchema = Type.Union([LatexPaperSchema, PdfPaperSchema], { description: "The paper, by where its text comes from." });
 
 const SelectionSchema = Type.Object(
   {
@@ -110,7 +118,7 @@ const FigureSchema = Type.Object(
 const FAILURES = ["service", "paper"] as const;
 
 const ResultSchema = Type.Object(
-  { format: Type.Literal("read") },
+  { format: ReadSchema.properties.format },
   { additionalProperties: true, description: "The Deep read (read.ts; its JSON Schema is web/src/deepread/read.schema.json), told by its format tag." },
 );
 
@@ -128,7 +136,7 @@ export const JobSchema = Type.Object(
     stats: StatsSchema,
     last_event: Type.Optional(Type.String()),
     last_activity: Type.String(),
-    result: Type.Optional(ResultSchema),
+    result: nullable(ResultSchema),
     figures: Type.Optional(Type.Array(FigureSchema, { description: "The figures the read shows; absent when it shows none." })),
     reviews: nullable(Type.Array(Type.Unknown(), { description: "The review rounds in order (review.ts); null when no review gave a verdict." })),
     trace: Type.Optional(Type.Array(Type.Unknown(), { description: "What the job did, event by event (agent.ts, TraceEvent)." })),
@@ -141,7 +149,13 @@ export const JobSchema = Type.Object(
 
 // ── a read's names ──────────────────────────────────────────────────────────────────────────────────
 
-const SectionKind = enumOf(SECTION_KINDS, "A read section's kind.");
+/** The strings a schema of string literals allows: a literal's, or each of a union's. */
+const literals = (schema: TSchema): string[] =>
+  "const" in schema ? [String(schema.const)] : "anyOf" in schema ? (schema.anyOf as TSchema[]).flatMap(literals) : [];
+const SectionKind = enumOf(
+  ReadSectionSchema.anyOf.flatMap((section) => literals(section.properties.kind)),
+  "A read section's kind.",
+);
 const NoteKind = enumOf(READ_NOTE_KINDS, "A read's process note's kind.");
 const Relation = enumOf(RELATIONS, "How a paper stands to one of the collection's.");
 const LimitationBy = enumOf(LIMITATION_BY, "Whose a limitation is: the paper's own, or the read's.");
@@ -151,6 +165,8 @@ const LimitationBy = enumOf(LIMITATION_BY, "Whose a limitation is: the paper's o
 export const CONTRACTS: Record<string, TSchema> = {
   JobInput: JobInputSchema,
   Paper: PaperSchema,
+  LatexPaper: LatexPaperSchema,
+  PdfPaper: PdfPaperSchema,
   Outline: OutlineSchema,
   Section: SectionSchema,
   Selection: SelectionSchema,

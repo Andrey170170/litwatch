@@ -19,7 +19,12 @@ We probe things.
 `;
 
 /** A session's globals as the service sets them for a paper's text, a PDF's unless it is given as sent. */
-const globals = (paper: string, text: Text = { body: paper, body_source: "pdf" }) => ({ paper, __meta: JSON.stringify({ id: "2601.00001" }), __headings: JSON.stringify(headings(text)) });
+const globals = (paper: string, text: Text = { body: paper, body_source: "pdf" }) => ({
+  paper,
+  __meta: JSON.stringify({ id: "2601.00001" }),
+  __headings: JSON.stringify(headings(text)),
+  __references: JSON.stringify((text.body_source === "latex" && text.outline.references) || null),
+});
 
 async function repl(hosts = {}, opts = {}) {
   return Repl.create(globals(PAPER), hosts, opts);
@@ -121,6 +126,19 @@ test("paper helpers read LaTeX source: sections, nesting, comments and the bibli
     assert.equal(refs.length, 2, "a commented-out entry is not a reference");
     assert.match(refs[1], /100\\% of it\.$/, "an escaped percent sign is text");
     assert.match(refs[0], /^M.~Turpin. Language models don't always say what they think. arXiv:2305.04388.$/);
+  } finally {
+    r.dispose();
+  }
+});
+
+test("refs() reads the bibliography where litwatch's outline found it, inside the appendix too", async () => {
+  const bibliography = LATEX.slice(LATEX.indexOf("\\begin{thebibliography}"), LATEX.indexOf("\\appendix"));
+  const inside = LATEX.replace(bibliography, "") + bibliography;
+  const r = await Repl.create(globals(inside, latex(inside)), {}, {});
+  try {
+    const refs = JSON.parse((await r.run("JSON.stringify(refs())")).output) as string[];
+    assert.equal(refs.length, 2);
+    assert.match(refs[1]!, /100\\% of it\.$/, "the environment's closing command is no part of the last entry");
   } finally {
     r.dispose();
   }

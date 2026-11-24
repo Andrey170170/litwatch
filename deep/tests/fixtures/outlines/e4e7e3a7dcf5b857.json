@@ -1,0 +1,58 @@
+{
+ "body": "\\begin{abstract}\nWe read hidden steps.\n\\end{abstract}\n\\section{Introduction}\\label{sec:intro}\nIntro with a needle.\n% \\section{Old draft}\n\\section{Method \\& \\texttt{probes}}\n\\subsection*{Setup}\nWe probe things.\n\\section{Results}\nNumbers.\n\\appendix\n\\section{Extra}\nMore.\n\\begin{thebibliography}{9}\n\\bibitem[Turpin et al.(2023)]{turpin} M.~Turpin.\n\\newblock Language models don't always say what they think.\n\\newblock arXiv:2305.04388.\n\\bibitem{lanham} T.~Lanham. Measuring faithfulness, 100\\% of it.\n% \\bibitem{draft} D.~Draft. Left out.\n\\end{thebibliography}\n",
+ "outline": {
+  "sections": [
+   {
+    "title": "Abstract",
+    "depth": 0,
+    "start": 0,
+    "end": 54
+   },
+   {
+    "title": "Introduction",
+    "depth": 0,
+    "number": "1",
+    "start": 54,
+    "end": 137
+   },
+   {
+    "title": "Method \\& \\texttt{probes}",
+    "depth": 0,
+    "number": "2",
+    "start": 137,
+    "end": 210
+   },
+   {
+    "title": "Setup",
+    "depth": 1,
+    "start": 173,
+    "end": 210
+   },
+   {
+    "title": "Results",
+    "depth": 0,
+    "number": "3",
+    "start": 210,
+    "end": 247
+   },
+   {
+    "title": "Extra",
+    "depth": 0,
+    "number": "A",
+    "start": 247,
+    "end": 269
+   },
+   {
+    "title": "References",
+    "depth": 0,
+    "start": 269,
+    "end": 558
+   }
+  ],
+  "references": {
+   "start": 269,
+   "end": 557
+  },
+  "appendix": 237
+ }
+}

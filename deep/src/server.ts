@@ -58,18 +58,23 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
     const key = req.headers["idempotency-key"];
     const known = typeof key === "string" ? deps.jobs.byKey(key) : undefined;
     if (known) return json(res, 200, { id: known.id, status: known.status });
-    const wrong = schemaErrors(JobInputSchema, body);
-    if (wrong.length) throw new HttpError(422, `not a job's input: ${wrong.slice(0, 20).join("; ")}`);
+    const wrong = refusal(body);
+    if (wrong) throw new HttpError(wrong.status, wrong.error);
     const { paper, extensions = [], selections = [] } = body as JobInput;
-    // the outline is how a LaTeX source is read, and a PDF's text is read without one
-    if ((paper.body_source === "latex") !== (paper.outline !== undefined))
-      throw new HttpError(422, "a LaTeX source comes with its outline (paper.outline), and no other text does");
-    for (const name of extensions)
-      if (!Object.hasOwn(LENS_QUESTIONS, name)) throw new HttpError(400, `unknown extension "${name}"; known: ${Object.keys(LENS_QUESTIONS).join(", ")}`);
     const job = deps.jobs.submit(paper, extensions, selections, typeof key === "string" ? key : undefined);
     return json(res, 202, { id: job.id, status: job.status });
   }
   throw new HttpError(404, "not found");
+}
+
+/** Why a job's input is turned down, as `POST /process` answers it: not the contract's (422), or asking for an
+ * extension the service has not (400). None when it is a job's input. `run FILE.json` checks its file by it too. */
+export function refusal(body: unknown): { status: 400 | 422; error: string } | undefined {
+  const wrong = schemaErrors(JobInputSchema, body);
+  if (wrong.length) return { status: 422, error: `not a job's input: ${wrong.slice(0, 20).join("; ")}` };
+  for (const name of (body as JobInput).extensions ?? [])
+    if (!Object.hasOwn(LENS_QUESTIONS, name)) return { status: 400, error: `unknown extension "${name}"; known: ${Object.keys(LENS_QUESTIONS).join(", ")}` };
+  return undefined;
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {

@@ -13,6 +13,28 @@ The arXiv version the text is of, which the figures are taken at; null when litw
 """
 
 
+class PdfPaper(BaseModel):
+    """
+    A paper read from its PDF's text, which has no outline.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    id: Annotated[str, Field(min_length=1)]
+    title: Annotated[str, Field(min_length=1)]
+    abstract: str
+    authors: list[str]
+    published: str | None = None
+    url: str | None = None
+    body: str
+    """
+    The paper's full text, as the archive gives it.
+    """
+    body_version: BodyVersion | None = None
+    body_source: Literal["pdf"]
+
+
 class References(BaseModel):
     """
     The bibliography's environment, from its \\begin to its \\end.
@@ -22,7 +44,13 @@ class References(BaseModel):
         extra="forbid",
     )
     start: Annotated[int, Field(ge=0)]
+    """
+    Where it starts, in UTF-16 code units.
+    """
     end: Annotated[int, Field(ge=0)]
+    """
+    Where it ends, in UTF-16 code units.
+    """
 
 
 class Section(BaseModel):
@@ -47,11 +75,11 @@ class Section(BaseModel):
     """
     start: Annotated[int, Field(ge=0)]
     """
-    Where the heading starts in the paper's text.
+    Where the heading starts in the paper's text, in UTF-16 code units.
     """
     end: Annotated[int, Field(ge=0)]
     """
-    Where its section ends: at the next heading of its depth or above.
+    Where its section ends: at the next heading of its depth or above, in UTF-16 code units.
     """
 
 
@@ -122,6 +150,9 @@ class Result(BaseModel):
         extra="allow",
     )
     format: Literal["read"]
+    """
+    Marks a Deep read; a Deep card from before has no format.
+    """
 
 
 type SectionKind = Literal[
@@ -168,7 +199,7 @@ class Outline(BaseModel):
     """
     appendix: Annotated[int | None, Field(ge=0)] = None
     """
-    Where the appendix starts: \\appendix, or a section named for it. It runs to the end.
+    Where the appendix starts (\\appendix, or a section named for it), which runs to the end, in UTF-16 code units.
     """
 
 
@@ -210,9 +241,9 @@ class Job(BaseModel):
     key: str | None = None
 
 
-class Paper(BaseModel):
+class LatexPaper(BaseModel):
     """
-    The paper. A LaTeX source comes with its outline, and nothing else does.
+    A paper read from its LaTeX source, which comes with its outline.
     """
 
     model_config = ConfigDict(
@@ -228,9 +259,15 @@ class Paper(BaseModel):
     """
     The paper's full text, as the archive gives it.
     """
-    body_source: Literal["latex", "pdf"] | None = None
     body_version: BodyVersion | None = None
-    outline: Outline | None = None
+    body_source: Literal["latex"]
+    outline: Outline
+
+
+type Paper = LatexPaper | PdfPaper
+"""
+The paper, by where its text comes from.
+"""
 
 
 class JobInput(BaseModel):

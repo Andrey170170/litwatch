@@ -117,13 +117,11 @@ def _group(text: str, at: int) -> int | None:
     return at if text.startswith("{", at) else None
 
 
-def _title(text: str, start: int) -> str | None:
-    """The braced group opening at `start`, comments dropped and spaces collapsed; None when it
-    does not close within `_TITLE_SCAN` characters."""
+def _title(text: str, start: int) -> str:
+    """The braced group opening at `start`, comments dropped and spaces collapsed; what it holds
+    within `_TITLE_SCAN` characters when it does not close by then, which is still a heading."""
     end = _close(text, start, "}")
-    if end is None:
-        return None
-    inner = _COMMENT.sub("", text[start + 1 : end])
+    inner = _COMMENT.sub("", text[start + 1 : start + _TITLE_SCAN if end is None else end])
     return " ".join(inner.split())[:TITLE_CHARS] or "(untitled)"
 
 
@@ -175,8 +173,7 @@ def latex(body: str) -> Outline:
     for m in _HEADING.finditer(body):
         if masked_at(m.start()) or (opens := _group(body, m.end())) is None:
             continue
-        if (title := _title(body, opens)) is not None:
-            found.append(_Heading(m.start(), LEVELS[m[1]], title, starred=m[2] == "*"))
+        found.append(_Heading(m.start(), LEVELS[m[1]], _title(body, opens), starred=m[2] == "*"))
     top = min((h.level for h in found), default=LEVELS["section"])
     for pattern, title in ((_ABSTRACT, "Abstract"), (_BIBLIOGRAPHY, "References")):
         for m in pattern.finditer(body):

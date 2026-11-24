@@ -7,8 +7,8 @@
 
 import { randomUUID } from "node:crypto";
 import type { Static } from "typebox";
-import type { Outcome, Progress, Stats, TraceEvent } from "./agent.ts";
-import type { JobSchema, PaperInput, SelectionContext } from "./contracts.ts";
+import type { Outcome, Progress, TraceEvent } from "./agent.ts";
+import type { JobSchema, PaperInput, SelectionContext, Stats } from "./contracts.ts";
 import type { Read } from "./read.ts";
 import type { Review } from "./review.ts";
 

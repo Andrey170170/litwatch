@@ -1142,6 +1142,41 @@ async def test_a_failed_poll_lets_the_pass_go_and_its_next_claim_follows_the_job
     assert len(fake.requests) == 1
 
 
+@pytest.mark.parametrize(
+    "odd", [{"id": "job-1", "status": "paused"}, {"status": "running"}, ["not", "a", "job"]]
+)
+async def test_a_progress_reply_that_is_not_the_contracts_is_a_failed_poll(db: Session, odd):
+    """An unknown status, or a running job missing what the contract says it reports: the
+    job may well be running, so it is followed again, never ended or sent again."""
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.odd_polls = [odd]
+    d = make(fake)
+    assert await work(db, with_text(P), d) == {"card_service_failed": 1}
+    (attempt,) = await attempts(db)
+    assert (
+        attempt["ended_at"] is None
+        and "the deep job is not" in (await deep_rows(db))[0]["last_error"]
+    )
+    await unpause(db)
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    assert len(fake.requests) == 1 and len(await attempts(db)) == 1
+
+
+async def test_a_failed_job_from_before_with_a_null_result_is_the_papers_failure(db: Session):
+    """The service once reported a failed job's result as null; the contract still takes it."""
+    failed = {"error": "no valid card", "failure": "paper", "stats": USAGE, "result": None}
+    fake = FakeDeep(failed | {"trace": []})
+    await grade(db, Fit.CENTRAL)
+    assert await work(db, with_text(P), make(fake)) == {"card_failed": 1}
+    (attempt,) = await attempts(db)
+    assert (attempt["failure"], attempt["error"], attempt["usage"]) == (
+        "paper",
+        "no valid card",
+        USAGE,
+    )
+
+
 async def test_a_submitted_job_is_followed_past_a_dismissal(db: Session):
     await ask(db, Q.id)
     fake = FakeDeep(DONE)

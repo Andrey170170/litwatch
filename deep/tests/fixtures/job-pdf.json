@@ -1,0 +1,21 @@
+{
+ "paper": {
+  "id": "2610.00001",
+  "title": "Probes read the trace",
+  "abstract": "A.",
+  "authors": [
+   "A. Author"
+  ],
+  "body": "# Probes\n\nWe read 𝔼[𝑥].\n",
+  "body_source": "pdf"
+ },
+ "extensions": [],
+ "selections": [
+  {
+   "name": "Faithfulness",
+   "slug": "cot",
+   "subject": "CoT.",
+   "grade": "relevant"
+  }
+ ]
+}

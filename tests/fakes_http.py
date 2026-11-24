@@ -255,9 +255,10 @@ class FakeDeep:
     (`started` counts those started), and found by `GET /keys/<key>`. It can fail the next
     submissions (`fail_submits`) or polls and lookups (`fail_polls`), answer every submission
     with a status and its error (`answer_submits`, as it turns one down), keep a job running
-    (`hold`) since `started_at`, or queued (`queued`), forget its jobs (`vanish`, as a restart
-    does), or accept a submission and then lose the answer (`lose_answers`), as a dropped
-    connection would. Its health check reports the sign-in `auth`. Its jobs are the contract's
+    (`hold`) since `started_at`, or queued (`queued`), answer the next polls with what is not a
+    job (`odd_polls`, popped in turn), forget its jobs (`vanish`, as a restart does), or accept a
+    submission and then lose the answer (`lose_answers`), as a dropped connection would. Its
+    health check reports the sign-in `auth`. Its jobs are the contract's
     (`core.contracts.deep.Job`), `outcome` over a job of no usage yet."""
 
     def __init__(self, outcome: dict[str, Any]) -> None:
@@ -273,6 +274,7 @@ class FakeDeep:
         self.hold = False
         self.started_at: str | None = None
         self.queued = False
+        self.odd_polls: list[Any] = []
         self.vanish = False
         self.lose_answers = 0
         self.auth: dict[str, Any] = {"state": "ok"}
@@ -310,6 +312,8 @@ class FakeDeep:
             if self.fail_polls:
                 self.fail_polls -= 1
                 return httpx.Response(503)
+            if self.odd_polls:
+                return httpx.Response(200, json=self.odd_polls.pop(0))
             self.polls += 1
             if self.queued:
                 return httpx.Response(200, json=self._job("queued"))

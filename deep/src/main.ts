@@ -2,8 +2,8 @@
  * litwatch-deep entry point.
  *   serve          run the HTTP service (default)
  *   login          Sign in with ChatGPT (paste the final redirect URL back)
- *   run FILE.json  process one paper from a JSON file and print the outcome (development);
- *                  the file is a PaperInput, optionally with `extensions` and `selections` as in POST /process
+ *   run FILE.json  process one paper from a JSON file and print the outcome (development); the file is what
+ *                  POST /process is sent, checked as it is (`litwatch deep input` writes one for a paper's text)
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -12,8 +12,8 @@ import { authState, buildModels, login } from "./auth.ts";
 import type { HostConfig } from "./hosts.ts";
 import { Studio } from "./imaging.ts";
 import { JobQueue } from "./jobs.ts";
-import type { PaperInput, SelectionContext } from "./contracts.ts";
-import { buildServer } from "./server.ts";
+import type { JobInput } from "./contracts.ts";
+import { buildServer, refusal } from "./server.ts";
 
 const env = (name: string, fallback: string) => process.env[name] ?? fallback;
 /** A numeric setting as a whole number from 1 to `max` in its consumer's unit, refused at start otherwise: a limit
@@ -79,10 +79,10 @@ async function main(): Promise<void> {
 
   if (command === "run") {
     if (!arg) throw new Error("usage: run FILE.json");
-    const { extensions = [], selections = [], ...paper } = JSON.parse(readFileSync(arg, "utf8")) as PaperInput & {
-      extensions?: string[];
-      selections?: SelectionContext[];
-    };
+    const input: unknown = JSON.parse(readFileSync(arg, "utf8"));
+    const wrong = refusal(input);
+    if (wrong) throw new Error(`${arg}: ${wrong.error}`);
+    const { paper, extensions = [], selections = [] } = input as JobInput;
     const outcome = await processPaper(paper, { extensions, selections }, models, config.hosts, config.run, studio, (event, stats) =>
       log(`${event.type} cells=${stats.cells} turns=${stats.turns} tokens=${stats.input}/${stats.output} $${stats.list_cost.toFixed(2)}`),
     ).finally(() => studio.close());

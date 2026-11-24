@@ -1,0 +1,14 @@
+{
+ "body": "\\documentclass{article}\\begin{document}\\section{Method}We probe.\\end{document}",
+ "outline": {
+  "sections": [
+   {
+    "title": "Method",
+    "depth": 0,
+    "number": "1",
+    "start": 39,
+    "end": 78
+   }
+  ]
+ }
+}

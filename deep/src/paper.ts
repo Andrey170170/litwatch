@@ -7,7 +7,7 @@
  * text is read here.
  */
 
-import type { Outline, PaperInput } from "./contracts.ts";
+import type { Outline } from "./contracts.ts";
 
 export const MAX_BODY_CHARS_IN_CONTEXT = 200_000;
 
@@ -41,7 +41,7 @@ export interface Heading {
 }
 
 /** The text as the run reads it: the paper's body, where it comes from, and a LaTeX source's outline. */
-export type Text = Pick<PaperInput, "body" | "body_source" | "outline">;
+export type Text = { body: string } & ({ body_source: "latex"; outline: Outline } | { body_source: "pdf"; outline?: undefined });
 
 /** Whether the text is a LaTeX source: litwatch sends one with its outline (`contracts.ts`), and nothing else. */
 export const isLatex = (text: Text): boolean => text.outline !== undefined;

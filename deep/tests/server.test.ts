@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
 import { JobQueue } from "../src/jobs.ts";
-import { buildServer } from "../src/server.ts";
+import { buildServer, refusal } from "../src/server.ts";
 import type { Outcome } from "../src/agent.ts";
-import { JobRefSchema, JobSchema } from "../src/contracts.ts";
-import { BODY, latex } from "./support.ts";
+import { JobInputSchema, JobRefSchema, JobSchema } from "../src/contracts.ts";
+import { BODY, latex, sentJob } from "./support.ts";
 
 /** A paper as litwatch sends one, a PDF's text unless `over` says otherwise. */
 const paper = (over: Record<string, unknown> = {}) => ({ id: "a", title: "T", abstract: "", authors: [], body: "# T", body_source: "pdf", ...over });
@@ -43,12 +43,14 @@ test("jobs run one at a time and expose progress, outcome, and health", async ()
     const post = (body: unknown) => fetch(`${base}/process`, { method: "POST", body: JSON.stringify(body) });
     const bad = await post({ paper: { id: "x" } });
     assert.equal(bad.status, 422);
-    assert.match(((await bad.json()) as { error: string }).error, /not a job's input: \/paper\/title: is required/);
+    assert.match(((await bad.json()) as { error: string }).error, /not a job's input: \/paper: must have required properties title/);
     // the contract is exact: a field it does not name is a submission gone wrong
     assert.equal((await post({ paper: paper({ id: "x", pages: 3 }) })).status, 422);
     // a LaTeX source comes with its outline, and a PDF's text without one
     assert.equal((await post({ paper: paper({ id: "x", body: BODY, body_source: "latex" }) })).status, 422);
     assert.equal((await post({ paper: paper({ id: "x", outline: { sections: [] } }) })).status, 422);
+    // and every text says where it comes from: a file from before the outline names none, or null
+    for (const body_source of [undefined, null]) assert.equal((await post({ paper: paper({ id: "x", body: BODY, body_source }) })).status, 422);
     const unknown = await post({ paper: paper({ id: "x" }), extensions: ["nope"] });
     assert.equal(unknown.status, 400);
     assert.match(((await unknown.json()) as { error: string }).error, /unknown extension "nope"/);
@@ -131,7 +133,7 @@ test("a submission's key answers with the job it started, and a runner that thro
 
 test("a key is forgotten with its job", async () => {
   const jobs = new JobQueue(async () => outcome("x"), 1);
-  const paper = { id: "a", title: "T", abstract: "", authors: [], body: "# T" };
+  const paper = { id: "a", title: "T", abstract: "", authors: [], body: "# T", body_source: "pdf" as const };
   const first = jobs.submit(paper, [], [], "1:a");
   for (let i = 0; i < 50 && first.status !== "error"; i++) await new Promise((r) => setTimeout(r, 5));
   const second = jobs.submit(paper, [], [], "2:a");
@@ -179,5 +181,13 @@ test("a finished job carries the read, its figures and its reviews, and the text
     assert.ok(list.every((j) => !("figures" in j) && !("reviews" in j) && !("result" in j)), "the list stays light");
   } finally {
     server.close();
+  }
+});
+
+test("what litwatch's code sends of a LaTeX source and of a PDF's text is a job's input", () => {
+  for (const name of ["job-latex.json", "job-pdf.json"] as const) {
+    const sent = sentJob(name);
+    assert.equal(refusal(sent), undefined, name);
+    assert.ok(Value.Check(JobInputSchema, sent), name);
   }
 });

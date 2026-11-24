@@ -249,13 +249,15 @@ part of it litwatch stores. The submission and the job are contracts the service
 are generated from it (`core.contracts.deep`, by `scripts/contracts.sh`), so the two sides read
 one definition.
 
-**The submission's `paper`** carries the paper's `body`, `body_source` (`latex` or `pdf`) and
-`body_version`: the arXiv version the text is of, left out when the archive cannot say (a text
-read from its historical LaTeX). The service takes the paper's figures from that version. A
-LaTeX source goes with its `outline`, as litwatch parses it (`core.outline`, which the MCP
-server's outline lists too): its headings with their depths, spans and numbers, the
-bibliography's span and where the appendix starts. The service reads a LaTeX source by it, and
-turns down a LaTeX source without one, or a PDF's text with one, with a 422.
+**The submission's `paper`** carries the paper's `body`, `body_source` (`latex` or `pdf`, always
+given) and `body_version`: the arXiv version the text is of, left out when the archive cannot say
+(a text read from its historical LaTeX). The service takes the paper's figures from that
+version. A LaTeX source goes with its `outline`, as litwatch parses it (`core.outline`, which
+the MCP server's outline lists too): its headings with their depths, spans and numbers, the
+bibliography's span and where the appendix starts. Its offsets are UTF-16 code units, as
+JavaScript indexes the text (the MCP server's are Python's code points). The contract has the
+two kinds of paper as two variants, so the service turns down a LaTeX source without an outline,
+a PDF's text with one, or a text that does not say where it comes from, with a 422.
 
 **A finished job** (`status: "done"`) carries, beside its `stats` and `trace`:
 
@@ -275,7 +277,10 @@ outside the pattern, `reviews` that are not a list), or figures given twice, not
 WebP image or more than 32 MiB together, end the job as the service's failure: nothing of the
 result is stored, the card and figures before it stay, the attempt keeps its usage and trace
 (and its reviews, but for a job that is not the contract's), and the Deep queue pauses and tries
-the pass again, as for any failure of the service.
+the pass again, as for any failure of the service. A failed job's `result` is left out, or null
+from a service from before. A reply to a poll for a job still queued or running that is not the
+contract's, or that gives a status the contract does not name, is a failed poll: the job is
+followed again, never ended or sent again.
 
 **A read that still failed its review** when the rounds ran out is stored and shown: the service
 adds a process note `{"kind": "review", "source": "service", "note": ...}` to it. Needs you lists

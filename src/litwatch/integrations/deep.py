@@ -6,10 +6,12 @@ a submission carries (the paper's text from the archive and its arXiv version, a
 source's outline as `core.outline` parses it, the topics the card is for and the card
 extensions they ask for), and the service's job protocol, followed to the job's end with its
 usage. Both are contracts the service declares (`core.contracts.deep`, generated from
-`deep/src/contracts.ts`): a submission is built as one, and every answer is read as one. A
-job that is not the contract's, a result of an unknown format among them, or figures that are
-not WebP images (`core.deepread.received`), ends as the service's failure, with the usage and
-trace it reported kept where they are readable; nothing of it is stored.
+`deep/src/contracts.ts`): a submission is built as one, its offsets into the text in UTF-16
+code units as JavaScript counts them, and every answer is read as one. A finished job that is
+not the contract's, a result of an unknown format among them, or figures that are not WebP
+images (`core.deepread.received`), ends as the service's failure, with the usage and trace it
+reported kept where they are readable; nothing of it is stored. A progress reply that is not
+the contract's is a failed poll.
 
 The queue records each submission as an attempt before it is sent and the job once accepted,
 and sends the attempt as the submission's key, by which the service finds the job it
@@ -29,7 +31,9 @@ the service's to end its own run and for litwatch's next poll to see it.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -101,10 +105,9 @@ def ended(job: contract.Job) -> Outcome:
     return replace(outcome, figures=tuple(figures))
 
 
-def _unreadable(job: Any, exc: ValidationError) -> Outcome:
-    """A job that is not the contract's: the service's failure, ending it whatever its status,
-    with the usage and trace it reported kept when they are the contract's."""
-    job = job if isinstance(job, dict) else {}
+def _unreadable(job: dict[str, Any], exc: ValidationError) -> Outcome:
+    """A finished job that is not the contract's: the service's failure, with the usage and
+    trace it reported kept when they are the contract's."""
     try:
         usage = contract.Stats.model_validate(job.get("stats")).model_dump()
     except ValidationError:
@@ -142,6 +145,23 @@ def _said(resp: httpx.Response) -> str:
     except ValueError:
         return resp.text[:500]
     return str(body.get("error", body)) if isinstance(body, dict) else str(body)
+
+
+def _job(resp: httpx.Response) -> contract.Job | Outcome:
+    """The job a poll answers with. A finished one (done, error) that is not the contract's is
+    the service's failure, as its Outcome; any other answer that is not, an unknown status
+    among them, raises as a failed poll does, and the job is followed again."""
+    try:
+        raw = resp.json()
+    except ValueError as exc:
+        raise httpx.DecodingError(f"the deep job is not JSON: {exc}", request=resp.request) from exc
+    try:
+        return contract.Job.model_validate(raw)
+    except ValidationError as exc:
+        if isinstance(raw, dict) and raw.get("status") in ("done", "error"):
+            return _unreadable(raw, exc)
+        error = f"the deep job is not one: {_errors(exc)}"
+        raise httpx.DecodingError(error, request=resp.request) from exc
 
 
 def _job_ref(resp: httpx.Response) -> contract.JobRef:
@@ -217,15 +237,13 @@ class DeepClient:
                     error = "deep job vanished (service restarted?)"
                     return Outcome(None, None, None, "", error, "service")
                 resp.raise_for_status()
+                job = _job(resp)
             except httpx.HTTPError:
                 if datetime.now(UTC) > deadline:
                     return kept
                 raise
-            raw = resp.json()
-            try:
-                job = contract.Job.model_validate(raw)
-            except ValidationError as exc:
-                return _unreadable(raw, exc)
+            if isinstance(job, Outcome):
+                return job
             stats = job.stats
             mark = f"{job.status} {job.last_event or ''} cells={stats.cells}"
             if mark != seen:
@@ -283,38 +301,23 @@ class Deep:
         await self.client.http.aclose()
 
     async def submission(self, conn: ReadUnit, paper: Paper, text: PaperText) -> contract.JobInput:
-        """What the service is sent for the paper: its text, the arXiv version it is of (none
-        when the archive cannot say), which the service fetches the paper's figures at, and a
-        LaTeX source's outline; the topics the card is for with the grade each gave it, and the
-        extensions they ask for."""
+        """What the service is sent for the paper (`job_input`): for the topics the card is for,
+        with the grade each gave it, and the extensions they ask for."""
         topics = await self._topics(conn, paper.id)
-        return contract.JobInput(
-            paper=contract.Paper(
-                id=paper.id,
-                title=paper.title,
-                abstract=paper.abstract,
-                authors=paper.authors,
-                published=paper.published,
-                url=paper.url,
-                body=text.body,
-                body_source=text.source,
-                body_version=text.version,
-                outline=_outline(text.body) if text.source == "latex" else None,
-            ),
-            extensions=sorted(
-                {self.extensions[t.slug] for _, t, _ in topics if t.slug in self.extensions}
-            ),
-            selections=[
-                contract.Selection(
-                    slug=t.slug,
-                    name=name,
-                    subject=t.subject,
-                    rubric=t.rubric,
-                    grade=None if g == Grade.NONE else g.value,  # never none: see _topics
-                )
-                for name, t, g in topics
-            ],
+        selections = [
+            contract.Selection(
+                slug=t.slug,
+                name=name,
+                subject=t.subject,
+                rubric=t.rubric,
+                grade=None if g == Grade.NONE else g.value,  # never none: see _topics
+            )
+            for name, t, g in topics
+        ]
+        extensions = sorted(
+            {self.extensions[t.slug] for _, t, _ in topics if t.slug in self.extensions}
         )
+        return job_input(paper, text, selections, extensions)
 
     async def _topics(self, conn: ReadUnit, paper_id: str) -> list[tuple[str, Topic, Grade]]:
         """The topics the card is for: the active topics, at any depth, that grade the paper
@@ -349,20 +352,56 @@ def load(name: str, options: dict[str, Any], config: Config) -> Deep:
     return Deep(client, name=name, extensions=options.get("extensions"))
 
 
-def _outline(body: str) -> contract.Outline:
-    """A LaTeX source's outline as the service reads it: its headings, without what comes
-    before the first, its bibliography's span and where its appendix starts."""
+def job_input(
+    paper: Paper,
+    text: PaperText,
+    selections: list[contract.Selection] | None = None,
+    extensions: list[str] | None = None,
+) -> contract.JobInput:
+    """What the service is sent to read a paper: its text, the arXiv version it is of (none when
+    the archive cannot say), which the service fetches the paper's figures at, and a LaTeX
+    source's outline; the topics the read is for, and the extensions they ask for."""
+    fields = {
+        "id": paper.id,
+        "title": paper.title,
+        "abstract": paper.abstract,
+        "authors": paper.authors,
+        "published": paper.published,
+        "url": paper.url,
+        "body": text.body,
+        "body_version": text.version,
+    }
+    sent: contract.Paper = (
+        contract.LatexPaper(**fields, body_source="latex", outline=outline(text.body))
+        if text.source == "latex"
+        else contract.PdfPaper(**fields, body_source="pdf")
+    )
+    return contract.JobInput(paper=sent, extensions=extensions, selections=selections)
+
+
+def outline(body: str) -> contract.Outline:
+    """A LaTeX source's outline as the service reads it (`core.outline`): its headings, without
+    what comes before the first, its bibliography's span and where its appendix starts, each
+    offset in UTF-16 code units."""
     parsed = latex(body)
+    at = _utf16(body)
     return contract.Outline(
         sections=[
             contract.Section(
-                title=p.title, depth=p.depth, number=p.number, start=p.start, end=p.end
+                title=p.title, depth=p.depth, number=p.number, start=at(p.start), end=at(p.end)
             )
             for p in parsed.parts
             if p.index > 0
         ],
-        references=contract.References(start=parsed.references[0], end=parsed.references[1])
+        references=contract.References(start=at(parsed.references[0]), end=at(parsed.references[1]))
         if parsed.references
         else None,
-        appendix=parsed.appendix,
+        appendix=None if parsed.appendix is None else at(parsed.appendix),
     )
+
+
+def _utf16(text: str) -> Callable[[int], int]:
+    """An offset into `text`, a code point's, as the UTF-16 code unit's it is in JavaScript: one
+    more for each character past the Basic Multilingual Plane before it, which takes two."""
+    astral = [i for i, ch in enumerate(text) if ord(ch) > 0xFFFF]
+    return lambda at: at + bisect.bisect_left(astral, at)

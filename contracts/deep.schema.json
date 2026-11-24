@@ -30,13 +30,26 @@
       "description": "What POST /process is sent: one paper to read."
     },
     "Paper": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LatexPaper"
+        },
+        {
+          "$ref": "#/$defs/PdfPaper"
+        }
+      ],
+      "description": "The paper, by where its text comes from."
+    },
+    "LatexPaper": {
       "type": "object",
       "required": [
         "id",
         "title",
         "abstract",
         "authors",
-        "body"
+        "body",
+        "body_source",
+        "outline"
       ],
       "properties": {
         "id": {
@@ -80,25 +93,80 @@
           "type": "string",
           "description": "The paper's full text, as the archive gives it."
         },
-        "body_source": {
+        "body_version": {
           "anyOf": [
             {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "const": "latex"
-                },
-                {
-                  "type": "string",
-                  "const": "pdf"
-                }
-              ],
-              "description": "Where the text comes from: the paper's LaTeX source, or its PDF."
+              "type": "integer",
+              "minimum": 1,
+              "description": "The arXiv version the text is of, which the figures are taken at; null when litwatch cannot say."
             },
             {
               "type": "null"
             }
           ]
+        },
+        "body_source": {
+          "type": "string",
+          "const": "latex"
+        },
+        "outline": {
+          "$ref": "#/$defs/Outline"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A paper read from its LaTeX source, which comes with its outline."
+    },
+    "PdfPaper": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "abstract",
+        "authors",
+        "body",
+        "body_source"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "abstract": {
+          "type": "string"
+        },
+        "authors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "published": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body": {
+          "type": "string",
+          "description": "The paper's full text, as the archive gives it."
         },
         "body_version": {
           "anyOf": [
@@ -112,12 +180,13 @@
             }
           ]
         },
-        "outline": {
-          "$ref": "#/$defs/Outline"
+        "body_source": {
+          "type": "string",
+          "const": "pdf"
         }
       },
       "additionalProperties": false,
-      "description": "The paper. A LaTeX source comes with its outline, and nothing else does."
+      "description": "A paper read from its PDF's text, which has no outline."
     },
     "Outline": {
       "type": "object",
@@ -141,11 +210,13 @@
           "properties": {
             "start": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "description": "Where it starts, in UTF-16 code units."
             },
             "end": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "description": "Where it ends, in UTF-16 code units."
             }
           },
           "additionalProperties": false,
@@ -154,7 +225,7 @@
         "appendix": {
           "type": "integer",
           "minimum": 0,
-          "description": "Where the appendix starts: \\appendix, or a section named for it. It runs to the end."
+          "description": "Where the appendix starts (\\appendix, or a section named for it), which runs to the end, in UTF-16 code units."
         }
       },
       "additionalProperties": false,
@@ -185,12 +256,12 @@
         "start": {
           "type": "integer",
           "minimum": 0,
-          "description": "Where the heading starts in the paper's text."
+          "description": "Where the heading starts in the paper's text, in UTF-16 code units."
         },
         "end": {
           "type": "integer",
           "minimum": 0,
-          "description": "Where its section ends: at the next heading of its depth or above."
+          "description": "Where its section ends: at the next heading of its depth or above, in UTF-16 code units."
         }
       },
       "additionalProperties": false,
@@ -363,7 +434,14 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/Result"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Result"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "figures": {
           "type": "array",
@@ -491,7 +569,8 @@
       "properties": {
         "format": {
           "type": "string",
-          "const": "read"
+          "const": "read",
+          "description": "Marks a Deep read; a Deep card from before has no format."
         }
       },
       "additionalProperties": true,
