@@ -34,23 +34,43 @@ A2 changes almost nothing the owner sees. It is groundwork for A3 and A4, plus o
 - a CLI command's work (below).
 
 **Work records are a table of their own,** beside `runs` and `jobs` (Q1). A record is written before anything runs,
-with its kind, scope, timings, outcome, cost and lease. `runs` and `jobs` keep their meaning and their API: a run is
-what one work item records (a run links to its item), and a job is what the owner asked for, made of the items that
-work it. The owner-facing job states (offered, stopped, tonight) stay product states on `jobs`. Neither table tracks
-liveness any more: a run or job is alive while its item's lease is. Whether `runs` folds into work records is A4's
-call, when the Jobs page becomes the log of all work.
+with its kind, scope, timings, outcome, cost and lease. `runs` and `jobs` keep their meaning and their API:
+
+- a run still spans what it spans today. A standalone run (the nightly, a pass wave, an evaluation) links to its
+  item. A job's run links to every chunk item that works it, and a re-run's or replay's ceiling covers the whole job:
+  each chunk reserves against what the job has left;
+- a job is what the owner asked for. Its owner-facing states (offered, stopped, tonight, waiting for text between
+  chunks) stay product states on `jobs`;
+- neither table tracks liveness any more. A lease says what is executing now, and the job row says where a job stands
+  between chunks.
+
+Whether `runs` folds into work records is A4's call, when the Jobs page becomes the log of all work.
 
 **What a paper wants stays where it is.** The pass tables still say which passes are due, and a work item is one
-attempt at one of them. The code that queues a pass submits its work item in the same write unit, so the data and the
-work it calls for commit together, as an event does with its data. The wake events and the 30-second ticks go.
+attempt at one of them. The pass claim stays the single claim on a pass: the nightly and a re-run's chunk keep
+working their text passes inline, a standalone item takes the same claim, and an item whose pass was done or claimed
+meanwhile ends with nothing to do.
 
-**Duplicates are dropped by a key.** A submission carries a key, such as the paper and pass, or the nightly and the
-fire time it serves (`nightly@2026-11-24T02:00`). A second submission with a key that is still open is the same item.
-The scheduler stops being a loop that runs work: at each fire time it submits, and the key replaces the schedule-kind
-lock.
+**Submitting is a write, like an event.** The code that queues a pass writes its submission through the work
+Repository in the same write unit, so the data and the work it calls for commit together, as an event does with its
+data. That is a Repository call, not a gate call. The Work gate itself admits, leases and takes back items in short
+units of its own, and never inside a caller's unit.
 
-**Admission is one at a time per kind** (Q3), the concurrency of today's loops. The run lock still decides between
-the nightly and job chunks, and no chunk starts while a nightly is due or running. A3 replaces all of this with lanes.
+**Items wait on time, not on loops.** An item may carry the earliest time it may run: a retry's backoff, an
+integration's delivery backoff, a pass still waiting for the archive's text, which is looked at again later as
+today. The Work gate wakes when such a time comes or a submission commits. The feature-local loops, their ticks and
+their wake events go.
+
+**Duplicates are dropped by a key.** A submission carries a key, such as the paper and pass. A second submission
+with a key that is still open is the same item. A scheduled occurrence's key (`nightly@2026-11-24T02:00`) holds for
+good, so a fire is submitted once even after it finished, by however many processes or restarts. The scheduler stops
+being a loop that runs work: it submits each fire, a missed one too within today's catch-up window, and its key
+replaces the schedule-kind lock.
+
+**Admission keeps today's concurrency** (Q3): one item at a time per kind, and per integration for deliveries, so a
+slow integration does not hold up the others. The run lock still decides between the nightly and job chunks: a
+nightly that finds the lock taken stays pending rather than failing, no job chunk starts while a nightly is due or
+running, and a lease never stands in for the run lock. A3 replaces all of this with lanes.
 
 ## Leases
 
@@ -59,12 +79,13 @@ the database) is taken back and tried again by any worker, the same process afte
 the presence session, which goes, with the Deep worker's, dispatch's and the schedule-kind session locks. The
 held-across-calls list keeps only the run lock, which A3 removes.
 
-**Work whose lease is lost is fenced** (Q7). Every write unit opened for a work item confirms, inside its own
-transaction, that the item's current lease is still the one the worker holds, and fails if not, so no write from a
-lost owner commits after a peer takes the item. A failed heartbeat also cancels the item's task, so the work stops
-rather than running on to the end of its block. A pooled connection lost in the middle of an item leaves the item to
-be tried again rather than ending it failed. This closes the backlog's cases except the run lock's, which stays open
-through A3.
+**Work whose lease is lost is fenced** (Q7). The Work gate alone moves a lease: taking an item, renewing, taking it
+back, ending it. Every write unit opened for an item checks, in its own transaction, that the worker's lease is the
+item's current, unexpired one, and holds the item's row so that a takeover waits for the unit to end; so no write
+under a lost lease commits after a peer takes the item. A failed heartbeat also cancels the item's task, so the work
+stops rather than running on to the end of its block. A pooled connection lost in the middle of an item leaves the
+item to be tried again rather than ending it failed. This closes the backlog's cases except the run lock's, which
+stays open through A3.
 
 ## The Model gate
 
@@ -74,7 +95,7 @@ per run any more. What differed between runs comes from the work context the Wor
 - the item's attribution, which the call log records with each call;
 - its ceiling (a re-run's, a replay's), which every attempt reserves against as today;
 - its batch deadline (the nightly's). Batchers are kept per provider and deadline, so calls of several items with the
-  same deadline go in one provider batch, which A3 needs.
+  same deadline can share batches, which A3 needs.
 
 Pipeline code keeps calling `ask(role, request)` and `decide(role, request)`.
 
@@ -85,25 +106,34 @@ A2. Flex processing waits until an evaluation asks for it.
 
 ## Attribution
 
-Every Database-gate unit, reads included, and every Model-gate call knows what it serves (Q9): a work item, set by
-the Worker; an API request, set by the API, MCP and the monitor for everything they do; or a named system attribution
-for startup work (migrations) and the gates' own bookkeeping. A gate call with none raises in tests and development
-and is logged as an error in production, as the nesting check does. Fetch, Compute and Files join the check when they
-arrive in A5.
+Every Database-gate unit, reads included, and every Model-gate call knows what it serves (Q9):
+
+- a work item, set by the Worker;
+- a request, set for everything it does by the API, MCP and the monitor, and by each CLI command for its own units,
+  its submission and its follow-up reads;
+- a named system attribution for startup work (migrations) and the gates' own bookkeeping. A batch read after the
+  item that sent it ended is accounted under the gate's system attribution, and each call it answers keeps its own
+  item's attribution.
+
+Attribution says whom a unit serves, not what it may do: an item's progress and its end take its lease (above). A gate
+call with no attribution raises in tests and development and is logged as an error in production, as the nesting
+check does. Fetch, Compute and Files join the check when they arrive in A5.
 
 ## The CLI
 
-**Commands that run pipeline work submit it and wait** (Q4): those that call models or fetch for the pipeline (the
-nightly, intake, digests, full-text passes, publications, the evaluations, replays). So only `serve` calls models for
-litwatch, and its Model gate's limits are the global ones. An evaluation stays a dry run: its item writes the
-evaluation tables only.
+**Commands that call models or run pipeline work submit it and wait** (Q4): the nightly, intake, digests, full-text
+passes, publications, the evaluations, replays and `ping`. So only `serve` calls models for litwatch, and its Model
+gate's limits are the global ones.
 
-- With no worker running, the command refuses and says to start `serve`. It never runs the work itself. Tests and
-  development run a worker in process.
+- With no worker that runs the command's kind (no `serve`, or one with its pipeline workers off), the command refuses
+  and says so. It never runs the work itself. Tests and development run a worker in process.
 - Ctrl-C asks whether to cancel the item. Otherwise the command stops waiting, prints the item's id, and a command
   can follow it later.
-- Commands that only read or edit (taxonomy import and export, migrations, `openapi`, `ping`) stay Entries that open
-  their own units.
+- **An evaluation's submission carries its inputs and candidate settings,** and its results come back to the command,
+  which writes the output files and keeps their resume contract as today. Its item writes nothing production reads:
+  no verdicts, no outbox events, no provider observations.
+- Commands that only read or edit (taxonomy import and export, migrations, `openapi`) stay Entries that open their
+  own units.
 
 ## Release links
 
@@ -111,24 +141,27 @@ evaluation tables only.
 off, litwatch has no way to find them; the analysis only says whether a paper releases code or weights. A2 builds
 the finder on the Work gate, its first kind of work built for the gate rather than ported to it.
 
-- **Trigger** (Q11): every analysed paper whose analysis says it releases code or weights, about 70 a night, and a
-  "find links" action on the paper's page.
+- **Trigger** (Q11): a paper whose analysis says it releases code or weights, about 70 a night, when it is analysed
+  and again when a new arXiv version arrives; and a "find links" action on the paper's page, which always runs a
+  fresh find and shows its result whatever the analysis says.
 - **The find** runs on the deep service, as an agent with a narrow task and a small structured answer: start from the
   abstract, the arXiv comments and the paper's text, go to the open web only when those say nothing, and confirm each
-  link. Per link: its kind (code or weights), its access state (public, gated, placeholder: a repository with nothing
-  but a README, or missing), its license when it is cheap to see, and when it was checked. The answer is the
-  contract the shared contracts (below) cover.
+  link. Per link: its kind (code or weights), its access state (public; gated, behind a request form; placeholder, a
+  repository with nothing but a README; missing, a link the paper gives that leads nowhere), its license when it is
+  cheap to see, and when it was checked. A paper may also have no link found. The answer is one of the shared
+  contracts (below).
 - **Its model is a setting of its own** (Q14), by default `gpt-6.2-sol` at medium effort: it is a lookup, not
   writing.
-- **Re-checks stay bounded** (Q12). The agent runs once per paper version. A placeholder link is checked again weekly
-  for four weeks by a plain request to GitHub's or Hugging Face's API, not by the agent, then left. A paper where
-  nothing was found gets the agent again only when a new arXiv version arrives, which is when links usually appear.
-  Public links are not re-checked.
+- **Re-checks stay bounded** (Q12). The agent runs once per paper version, besides the owner's action. A placeholder
+  link is checked again weekly for four weeks by a plain request to GitHub's or Hugging Face's API, not by the agent,
+  then left. A paper with no link found gets the agent again only with a new arXiv version, which is when links
+  usually appear. Public links are not re-checked.
 - **Where it shows** (Q13): the paper's page and the API, so the MCP server's `get_paper` carries the links. Not the
   digests or the Notion export, whose contract stays as it is.
-- **The deep service runs with Deep reads off.** Today one switch enables the deep integration and with it automatic
-  Deep reads. A2 separates them: the finder runs while automatic reads stay off.
-- **Judged by eye** (Q15). No labelled set first: the owner fixes a wrong link when one shows up.
+- **Deep's switches are separated.** Today the deep integration, once configured, both serves the owner's Deep reads
+  and queues automatic ones. A2 gives automatic queueing a switch of its own: the finder and the owner's reads use the
+  configured deep service, automatic reads stay off here, and an install that has them on keeps them.
+- **Judged by eye** (Q15). No labelled set first: the owner reviews the links as they appear and flags wrong ones.
 
 ## Folded in
 
@@ -146,16 +179,16 @@ These are under A2 in [`backlog.md`](../../backlog.md), and A2 is done when they
 
 ## Done when
 
-- every loop is a Worker taking items from the Work gate, and the scheduler only submits; no wake events or ticks
-  remain;
+- every loop is a Worker taking items from the Work gate, and the scheduler only submits; no feature-local loop,
+  tick or wake event remains;
 - every item has one work record, written before it runs; runs and jobs read liveness from their items' leases, and
   the presence session and the Deep, dispatch and schedule-kind session locks are gone;
-- a write from an item whose lease was lost does not commit, and a worker that exits while its last bookkeeping write
-  fails leaves its item to be taken back and tried again;
+- a write under a lost lease does not commit, and a worker that exits while its last bookkeeping write fails leaves
+  its item to be taken back and tried again;
 - one Model gate per process, with the OpenAI adapter's normal and batched calls; ceilings and batch deadlines come
   from the work context;
 - every unit and model call is attributed, with the check raising in tests and development;
-- the CLI's pipeline commands submit and wait, and refuse without a worker;
+- the CLI's model and pipeline commands submit and wait, and refuse without a worker for them;
 - release links are found and shown on the paper's page and in the API, with automatic Deep reads still off;
 - the folded items are merged.
 
