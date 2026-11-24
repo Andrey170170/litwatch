@@ -56,7 +56,17 @@ Carried from the first v1: `Gateway.ask(role, request, *, paper_id)` resolves th
 each a provider, model and effort; for each it applies retries and the timeout, journals the call with its cost, and
 reuses an identical earlier call (identical includes the resolved provider, model, effort and routing, so `judge` and
 `check` never share a reply).
-Providers: `anthropic` (prompt caching, cost from a price table) and `openrouter`.
+Providers: `anthropic` (prompt caching, cost from a price table), `openrouter`, and `openai` (OpenAI's own API on the
+owner's credit: the Responses API with a strict schema, the system prompt cached, cost from a price table; no role is
+on it by default). Its explicit cache controls need GPT-5.6 or later, and the price table lists the GPT-6 and GPT-6.x
+models only; a normal call asks for the default service tier, and a reply served at any other tier, or by a model
+without a listed price, is journalled with its charge unknown; a reply is priced as the model the response names,
+and journalled as the model configured. Each send has a journal row of its own, opened once the ceiling admits it and
+before it goes, with the model and effort configured: an attempt tried again is settled with its charge (an OpenAI
+response that failed carries one; a request the provider rejected, a 4xx, is charged nothing), or none when unknown
+(a timeout, a lost connection, a 5xx, which keeps its reservation under a ceiling), and the retry, or the normal call
+after a batch that did not answer, gets a new row. A call that sends nothing has none, nor does one given a reply
+shared with an identical call. A failure is accounted for, never counted as the provider's reply.
 
 A provider's 401, 402 or 403 is an **`account` error** (a key revoked, credits used up, access withdrawn), in normal
 and batched calls alike: never retried, never counted against a paper, and shown on the provider's component of the
@@ -64,7 +74,9 @@ status document until its next answered call ([data.md](data.md), configuration)
 the request's content: a moderation flag, a guardrail's block, a filter's `content_policy_violation`, a model's
 `refusal` sent as an error. Told by the error's type and metadata, such a 403 is **a refusal** (above), with that
 category; a budget used up or a permission denied is the account's, and so is a 403 that can't be told apart, which
-shows on the status document rather than passing quietly down the list.
+shows on the status document rather than passing quietly down the list. OpenAI's 429 for a credit, spend or usage
+limit used up is an `account` error too, and a request it declines for its content (an error coded `invalid_prompt`,
+`bio_policy` or `misalignment_policy_violation`) a refusal with that category.
 
 An invalid reply's error names where the validator failed it and what it said there, never the reply's text.
 Debug mode (`debug = true` in `litwatch.toml`, or `LITWATCH_DEBUG=1`; off by default) is for catching problems over a
@@ -82,8 +94,8 @@ Decisions and Jev bill input tokens only).
 
 ## Batches
 
-The nightly run's Anthropic calls go through Message Batches, at half the price of normal calls; the run starts at
-02:00 and its results are needed by morning, so latency costs nothing. Batching is inside the gateway: a pipeline step
+The nightly run's Anthropic and OpenAI calls go through their batches, at half the price of normal calls; the run
+starts at 02:00 and its results are needed by morning, so latency costs nothing. Batching is inside the gateway: a pipeline step
 asks for one answer and awaits it as before, and neither requests nor passes say whether they may be batched. **The
 job decides**: a nightly run started between the schedule's nightly time and its deadline batches; the app, the
 service's workers, the CLI's other commands and a nightly started outside that window use a gateway without batching.
@@ -104,8 +116,8 @@ service's workers, the CLI's other commands and a nightly started outside that w
 - **Nothing is paid twice once a batch is recorded.** A batched call's journal row is written before the batch is
   sent and given the batch id once the provider accepts it; its request key is its id in the batch. A run that asks a
   key already in an open batch waits on that batch, so a run started again after a crash attaches to its batches
-  instead of resubmitting. A call whose batch was sent but whose id was not recorded (the process died in between) is
-  sent again: that one batch may be paid twice.
+  instead of resubmitting. A call whose batch was sent with neither its id nor a reference to find it by recorded (the
+  process died in between) is sent again: that one batch may be paid twice.
 - **The deadline.** `[schedule] deadline` (07:30 in the schedule's zone) is the nightly's: the first after the
   schedule's nightly time that the run belongs to, kept by a run started again the same night. At the deadline the
   run sends no more batches (calls held but not yet sent go as normal calls), cancels its open batches and waits for them to end (cancelling takes minutes; requests in flight may still be
@@ -124,8 +136,19 @@ service's workers, the CLI's other commands and a nightly started outside that w
   without batching; the nightly does not claim those. A pass the owner's word queues meanwhile (a label that makes a
   paper central) is automatic: the nightly takes it, batched.
 - **Providers.** Batching is a provider capability (submit, poll, cancel, results with usage per call). `anthropic`
-  has it; a role on a provider without it is sent as normal calls in any job. OpenRouter's calls are not batched: its
-  batch API has no Decisions endpoint and reports cost per batch, not per call.
+  and `openai` (the Batch API, also at half price) have it; a role on a provider without it is sent as normal calls in
+  any job. An OpenAI batch holds one model's requests, so a step whose calls go to two models is two batches. Its
+  input file is uploaded first; past the deadline then, no batch is made and its calls go as normal calls, else its
+  calls' rows are given the file's reference (`staged:<file id>`) just before the batch is created. A creation whose
+  outcome is unknown (it timed out, lost its connection or failed with a 5xx), and a dead run's rows still on a
+  reference, are looked for, a few times within two minutes: found, the batch's id goes on the rows before it is
+  polled; not found by then, the rows are settled and the calls go as normal calls, with a warning naming the batch,
+  at the risk of paying for both; refused for the account, the calls fail on it and the rows wait for a later run. A
+  creation the provider rejected (a 4xx, or a connection that never opened) made no batch: its calls go as normal
+  calls at once. An OpenAI batch is found by its input file; a Message Batch carries nothing of ours to find it by,
+  so Anthropic's is not looked for: its calls go as normal calls at once, with the warning. A batch that ends without answering some of a dead run's calls (one that
+  failed has no answers at all) settles them as unanswered. OpenRouter's calls are not batched: its batch API has no
+  Decisions endpoint and reports cost per batch, not per call.
 
 ## Lab diversity
 
@@ -133,7 +156,8 @@ Unchanged where one model's error would be final:
 
 - **Focus grading.** `judge` and `check` must come from different labs, fallbacks included: start-up refuses a
   configuration where `judge`'s model and fallbacks share a lab with `check`'s model and fallbacks. The lab is the
-  organisation that trained the model, read from the OpenRouter prefix, and `anthropic` for the direct API. When
+  organisation that trained the model, read from the OpenRouter prefix, and `anthropic` or `openai` for their direct
+  APIs. When
   every model on one side refuses and the other side answers, the grade stands from one lab, marked `one_lab`
   ([pipeline.md](pipeline.md), section 4).
 - **Classification** drops a paper silently if it is wrong, so three things stand behind it for Focus topics: the

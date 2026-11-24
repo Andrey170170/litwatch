@@ -26,7 +26,7 @@ from litwatch.core.grading import GRADERS
 from litwatch.feedback import word
 from litwatch.gates.database import DatabaseGate, Identity, ReadUnit
 from litwatch.jobs.context import ModelRun
-from litwatch.llm.ceiling import Bound, Ceiling, anthropic_bound, route
+from litwatch.llm.ceiling import Bound, Ceiling, listed_bound, route
 from litwatch.llm.types import DEFAULT_MAX_TOKENS
 from litwatch.store import calls, quality
 from litwatch.store import fulltext as fulltext_store
@@ -142,10 +142,10 @@ async def unpriced(conn: ReadUnit, config: Config, names: Iterable[str]) -> list
     out = []
     for name in names:
         for model in config.models.role(name).models:
-            if model.provider == "anthropic":
-                missing = anthropic_bound(model, 0) is None
-            else:
+            if model.provider == "openrouter":
                 missing = found.get(route(model)) is None
+            else:
+                missing = listed_bound(model, 0) is None
             if missing:
                 out.append(f"{name}: {model.model}")
     return out

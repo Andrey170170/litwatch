@@ -280,7 +280,9 @@ async def test_a_job_answers_a_call_a_dead_nightly_left_in_an_ended_batch_from_i
         await nightly.analyse(db, CONFIG, night, ids=[A.id])
     assert anthropic.batched and not anthropic.calls
     await conn.execute("DELETE FROM analyses")  # as if it died before reading the batch
-    await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")
+    await conn.execute(
+        "UPDATE inference_calls SET output = NULL, usage = usage - 'cost', responded_at = NULL"
+    )
 
     job = await queued(conn, A.id)
     await work_out(worker.Worker(db, CONFIG, plain))

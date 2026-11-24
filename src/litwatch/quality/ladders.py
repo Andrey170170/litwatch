@@ -85,8 +85,8 @@ class Candidate(BaseModel):
     """One model asked as a role, with its prices in USD per million input and output tokens:
     `price` what a call is expected to cost (the estimate), `price_max` its dearest endpoint
     among those its routing allows (the reservation). `max_output` is the most output tokens
-    those endpoints can return, for an OpenRouter call, which goes out uncapped as the
-    pipeline's does."""
+    those endpoints can return, for an OpenRouter call, or an OpenAI one whose role sets no cap,
+    which goes out uncapped as the pipeline's does."""
 
     name: str
     role: RoleConfig
@@ -103,8 +103,11 @@ class Candidate(BaseModel):
             raise ValueError(f"{self.name}: prices are finite and not negative")
         if any(m < p for p, m in zip(self.price, self.price_max, strict=True)):
             raise ValueError(f"{self.name}: price_max is below price")
-        if self.role.provider == "openrouter" and self.max_output is None:
-            raise ValueError(f"{self.name}: an OpenRouter candidate needs its max_output")
+        uncapped = self.role.provider == "openrouter" or (
+            self.role.provider == "openai" and self.role.max_output_tokens is None
+        )
+        if uncapped and self.max_output is None:
+            raise ValueError(f"{self.name}: a candidate sent uncapped needs its max_output")
         return self
 
 
@@ -132,7 +135,7 @@ class Ladder(BaseModel):
 def ladders(path: Path) -> dict[str, Ladder]:
     """The ladders of a TOML file: a table per role, holding its `output_tokens` and an array
     `candidates` of tables, each a role's configuration with a `name`, a `price`, a `price_max`
-    and, for OpenRouter, a `max_output`."""
+    and, for one sent uncapped (`Candidate`), a `max_output`."""
     own = ("name", "price", "price_max", "max_output")
     found = {}
     for role, table in tomllib.loads(path.read_text()).items():
@@ -361,13 +364,13 @@ def estimate(ladder: Ladder, candidate: Candidate, request: Request) -> float:
 
 def output_bound(candidate: Candidate, request: Request) -> int:
     """The most output tokens a call can return: the cap it is sent with (the request's or the
-    role's, else Anthropic's default), else, for an OpenRouter call sent uncapped as the pipeline
-    sends it, the candidate's `max_output`."""
+    role's, else Anthropic's default), else, for an OpenRouter or OpenAI call sent uncapped as the
+    pipeline sends it, the candidate's `max_output`."""
     if limit := request.max_output_tokens or candidate.role.max_output_tokens:
         return limit
     if candidate.role.provider == "anthropic":
         return DEFAULT_MAX_TOKENS
-    assert candidate.max_output is not None  # Candidate requires it of OpenRouter
+    assert candidate.max_output is not None  # Candidate requires it but of Anthropic
     return candidate.max_output
 
 

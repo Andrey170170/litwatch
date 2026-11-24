@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from typing import Any
 
 import anthropic
@@ -11,6 +11,7 @@ import httpx2  # the HTTP client this SDK is built on
 from anthropic import AsyncAnthropic, transform_schema
 
 from litwatch.config import RoleConfig
+from litwatch.llm.batches import Staged
 from litwatch.llm.prices import anthropic_cost
 from litwatch.llm.types import (
     ACCOUNT_STATUSES,
@@ -91,8 +92,40 @@ def _account_errors() -> Iterator[None]:
         raise
 
 
+@contextlib.contextmanager
+def _errors() -> Generator[None]:
+    """The SDK's failures as provider errors, for a call or a batch's creation. One that timed
+    out, lost its connection once sent, or failed on the server (any 5xx) may have run, billed
+    or not (`timeout`, `unanswered`); one whose connection never opened sent nothing."""
+    try:
+        yield
+    except anthropic.APITimeoutError as exc:
+        if isinstance(exc.__cause__, httpx2.ConnectTimeout):
+            # The connection never opened, so nothing was sent: worth another attempt.
+            raise ProviderError("APITimeoutError while connecting", transient=True) from exc
+        raise ProviderError(type(exc).__name__, timeout=True) from exc
+    except anthropic.APIConnectionError as exc:
+        if isinstance(exc.__cause__, httpx2.ConnectError):
+            raise ProviderError("APIConnectionError while connecting", transient=True) from exc
+        raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
+    except anthropic.RateLimitError as exc:
+        raise ProviderError(type(exc).__name__, transient=True) from exc
+    except anthropic.APIStatusError as exc:
+        if exc.status_code >= 500:
+            raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
+        account = exc.status_code in ACCOUNT_STATUSES
+        raise ProviderError(f"{type(exc).__name__}: {exc}", account=account) from exc
+    except anthropic.APIError as exc:
+        raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
+
+
 class AnthropicProvider:
     name = "anthropic"
+    one_model = False  # a Message Batch may mix models
+    # A Message Batch carries nothing of ours to find it by (no metadata, no idempotency key,
+    # its requests readable only once it ends): a creation whose outcome is unknown is not
+    # looked for, its calls sent again as normal calls at once.
+    find = None
 
     def __init__(self, api_key: str | None = None, client: Any = None) -> None:
         # The gateway owns retries; the SDK's own would multiply them.
@@ -102,26 +135,17 @@ class AnthropicProvider:
         return ()
 
     async def complete(self, role: RoleConfig, request: Request) -> Reply:
-        try:
+        with _errors():
             message = await self.client.messages.create(**messages_request(role, request))
-        except anthropic.APITimeoutError as exc:
-            if isinstance(exc.__cause__, httpx2.ConnectTimeout):
-                # The connection never opened, so nothing was sent: worth another attempt.
-                raise ProviderError("APITimeoutError while connecting", transient=True) from exc
-            raise ProviderError(type(exc).__name__, timeout=True) from exc
-        except anthropic.APIConnectionError as exc:  # it may have been sent: billed or not
-            raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
-        except (anthropic.InternalServerError, anthropic.RateLimitError) as exc:
-            raise ProviderError(type(exc).__name__, transient=True) from exc
-        except anthropic.APIError as exc:
-            account = getattr(exc, "status_code", None) in ACCOUNT_STATUSES
-            raise ProviderError(f"{type(exc).__name__}: {exc}", account=account) from exc
         return reply_of(message, role)
 
     # Message Batches (models.md, batches): `custom_id` is the gateway's request key.
 
-    async def submit(self, requests: list[tuple[str, RoleConfig, Request]]) -> str:
-        with _account_errors():
+    async def submit(self, requests: list[tuple[str, RoleConfig, Request]], staged: Staged) -> str:
+        """The batch's id. Created in one step, it has no reference before its id: `staged` is
+        told none. A creation may have made the batch as a call may have run (`_errors`)."""
+        await staged(None)
+        with _errors():
             batch = await self.client.messages.batches.create(
                 requests=[
                     {"custom_id": key, "params": messages_request(role, request)}

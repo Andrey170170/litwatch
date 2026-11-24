@@ -41,6 +41,7 @@ provider = "openrouter"
 model = "lab-b/other"
 effort = "high"
 """
+OPENAI_OTHER = 'provider = "openai"\nmodel = "gpt-6.2-sol"'
 P = paper("2610.00001", title="Probes for hidden steps", abstract="Probes find hidden steps.")
 Q = paper("2610.00002", title="Monitors under pressure", abstract="Monitors fail under pressure.")
 FIT = grading.Output(reason="It is about the topic.", fit="central")
@@ -76,6 +77,14 @@ def test_ladders_and_cases_load_from_their_files(tmp_path):
         ladder(tmp_path, LADDERS.replace("price_max = [2.0, 2.0]", "price_max = [0.5, 2.0]"))
     with pytest.raises(ValueError, match="not negative"):
         ladder(tmp_path, LADDERS.replace("price = [1.0, 1.0]", "price = [-1.0, 1.0]"))
+    # An OpenRouter candidate says how much it can return; an OpenAI one only when uncapped.
+    with pytest.raises(ValueError, match="needs its max_output"):
+        ladder(tmp_path, LADDERS.replace("max_output = 1000\n", "max_output_tokens = 500\n"))
+    on_openai = LADDERS.replace('provider = "openrouter"\nmodel = "lab-b/other"', OPENAI_OTHER)
+    with pytest.raises(ValueError, match="needs its max_output"):
+        ladder(tmp_path, on_openai.replace("max_output = 1000\n", ""))
+    capped = ladder(tmp_path, on_openai.replace("max_output = 1000\n", "max_output_tokens = 500\n"))
+    assert capped["judge"].candidates[1].max_output is None
     cases = tmp_path / "cases.csv"
     cases.write_text(
         "set,role,paper,subject,label,note\n"
@@ -261,7 +270,7 @@ async def test_a_directory_with_a_call_of_unknown_cost_and_no_reservation_is_not
     work = [t for t in todo(found, judged(P, Q), []) if t.candidate.name == "other"]
 
     def down(role, request):
-        raise ProviderError("the completion has no choices", transient=True)
+        raise ProviderError("APIConnectionError", transient=True, unanswered=True)  # charge unknown
 
     providers = {"openrouter": ScriptedProvider("openrouter", down)}
     await ladders.run(work[:1], providers, out, ceiling=5.0)

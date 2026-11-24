@@ -9,6 +9,9 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import anthropic
+import httpx2
+import openai
 import pytest
 from pydantic import BaseModel
 
@@ -20,9 +23,10 @@ from litwatch.core.fulltext import LEASE
 from litwatch.gates.database import LOCKS, DatabaseGate
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
-from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm import CallError, Gateway, Provider, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.batches import DRAIN, MAX_REQUESTS, Batcher
+from litwatch.llm.openai import OpenAIProvider, responses_request
 from litwatch.llm.prices import anthropic_cost
 from litwatch.store import calls as calls_store
 from litwatch.store import fulltext as fulltext_store
@@ -35,7 +39,17 @@ from tests import digesting as dg
 from tests import scripted as steps
 from tests import sessions, settling
 from tests.conftest import TREE, gate_on, started
-from tests.fakes import FAST, BatchingProvider, ScriptedProvider, anthropic_message
+from tests.fakes import (
+    FAST,
+    BatchingProvider,
+    OpenAIBatches,
+    ScriptedProvider,
+    SdkClient,
+    anthropic_message,
+    openai_body,
+    openai_response,
+    status_error,
+)
 from tests.fakes_http import FakeArchive
 from tests.sessions import Session, in_read, in_write
 
@@ -51,6 +65,13 @@ BRIEF = RoleConfig(provider="anthropic", model="test-brief", effort="high", fall
 MODELS = Models(brief=BRIEF)
 START = datetime(2026, 10, 16, 9, tzinfo=UTC)  # 03:00 in Denver
 DEADLINE = START + timedelta(hours=4, minutes=30)
+
+
+class Staged(list):
+    """A `staged` that records the references it was told."""
+
+    async def __call__(self, reference: str | None) -> None:
+        self.append(reference)
 
 
 def ask(n: int | str) -> Request:
@@ -147,15 +168,17 @@ async def test_a_batch_answer_is_handled_as_a_normal_one_the_fallback_included()
     await gw.close()
 
 
-async def test_a_batch_that_cannot_be_sent_goes_as_normal_calls(monkeypatch):
+async def test_a_batch_refused_before_it_is_staged_goes_as_normal_calls(monkeypatch, caplog):
     gw, anthropic, _, _ = batching()
 
-    async def refused(requests):
-        raise ProviderError("InternalServerError")
+    async def refused(requests, staged):
+        raise ProviderError("BadRequestError: too large")
 
     monkeypatch.setattr(anthropic, "submit", refused)
     await asyncio.gather(gw.ask("brief", ask(0)), gw.ask("brief", ask(1)))
     assert len(anthropic.calls) == 2
+    assert "was not made; its calls go as normal calls" in caplog.text
+    assert "BadRequestError: too large" in caplog.text  # the refusal, not a mismatched fake
     await gw.close()
 
 
@@ -189,7 +212,7 @@ async def test_a_batch_the_account_kept_from_being_sent_fails_its_calls_on_the_a
 ):
     gw, anthropic, openrouter, _ = batching()
 
-    async def unauthorized(requests):
+    async def unauthorized(requests, staged):
         raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
 
     monkeypatch.setattr(anthropic, "submit", unauthorized)
@@ -217,19 +240,15 @@ async def test_a_batch_the_account_can_no_longer_read_fails_its_calls_and_stays_
     with pytest.raises(CallError) as found:
         await asked
     assert found.value.kind == "account" and reads == ["msgbatch_1"] and anthropic.calls == []
-    # The batch stays open on its row, for a later run to account for; the call has its own.
-    assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [
-        ("msgbatch_1", None),
-        (None, "account: AuthenticationError: invalid x-api-key"),
-    ]
+    # The batch stays open on its row, for a later run to account for; nothing else was sent.
+    assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [("msgbatch_1", None)]
     # The account works again and the call is asked again: the batch's answer settles its own
     # row, charged once there, and nothing is left open for a later run to charge again.
     monkeypatch.undo()
     anthropic.end("msgbatch_1")
     await gw.ask("brief", ask(0))
     assert [(c["batch_id"], c["answered"], c["error"]) for c in await calls(conn)] == [
-        ("msgbatch_1", True, None),
-        (None, False, "account: AuthenticationError: invalid x-api-key"),
+        ("msgbatch_1", True, None)
     ]
     assert await CallJournal(db, await started(conn, "nightly")).open_batches() == []
     await gw.close()
@@ -249,16 +268,14 @@ async def test_a_batch_given_up_on_for_the_account_settles_its_row_with_the_answ
     with pytest.raises(CallError):
         await asked
     # Readable again, the batch answered the request with an account error: on the batch's row,
-    # settled for good, and on the call's own, as the row was given up on.
+    # settled for good; the calls sent nothing else.
     monkeypatch.undo()
     anthropic.end("msgbatch_1")
     with pytest.raises(CallError) as found:
         await gw.ask("brief", ask("account"))
     assert found.value.kind == "account"
     assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [
-        ("msgbatch_1", "account: authentication_error in batch"),
-        (None, "account: AuthenticationError: invalid x-api-key"),
-        (None, "account: authentication_error in batch"),
+        ("msgbatch_1", "account: authentication_error in batch")
     ]
     assert await CallJournal(db, await started(conn, "nightly")).open_batches() == []
     await gw.close()
@@ -290,7 +307,6 @@ async def test_a_call_attached_to_a_batch_read_meanwhile_is_answered_past_the_dr
     other_read.set()
     reply = await asyncio.wait_for(attached, 1)
     assert isinstance(reply, ProviderError) and reply.account
-    assert batcher.unsettled == {1}
     await batcher.close()
 
 
@@ -425,10 +441,10 @@ async def test_a_journal_that_fails_on_one_batch_lets_the_others_checks_end_firs
     gw, _, _, _ = batching(journal, provider=anthropic)
     answered, results, ended = journal.answered, anthropic.results, []
 
-    async def fails_on_the_first(batch_id, key, usage):
+    async def fails_on_the_first(batch_id, key, usage, error=None):
         if batch_id == "msgbatch_1":
             raise OSError("the database went away")
-        await answered(batch_id, key, usage)
+        await answered(batch_id, key, usage, error)
 
     async def slow_second(batch_id):
         if batch_id == "msgbatch_2":
@@ -552,12 +568,16 @@ async def test_anthropic_batches_carry_the_request_key_and_are_priced_at_half():
     batches = Batches(message)
     provider = AnthropicProvider(client=SimpleNamespace(messages=SimpleNamespace(batches=batches)))
     request = ask(1)
-    batch_id = await provider.submit([("k1", haiku, request)])
+    staged = Staged()
+    batch_id = await provider.submit([("k1", haiku, request)], staged)
+    assert staged == [None]  # just before it was created, with no reference
     assert batches.created == [[{"custom_id": "k1", "params": messages_request(haiku, request)}]]
     assert await provider.status(batch_id) == "ended"
     found = await provider.results(batch_id)
     assert found["expired"] is None
-    usage = found["k1"].usage
+    reply = found["k1"]
+    assert isinstance(reply, Reply)
+    usage = reply.usage
     full = anthropic_cost("claude-haiku-5-5", 400, 3000, 0, 200)
     assert (usage.cost, usage.service_tier) == (pytest.approx(full / 2), "batch")
 
@@ -581,22 +601,20 @@ def unordered(rows) -> list:
 
 
 class Together(CallJournal):
-    """A journal whose first `n` calls wait for each other once their rows are in, so they join
-    one batch however slow the database: on a slow runner the inserts alone can outlast the
-    batcher's quiet, and the calls go in batches of their own."""
+    """A journal whose first `n` calls wait for each other once they have looked for a batch to
+    attach to, so they join one batch however slow the database: on a slow runner the reads
+    alone can outlast the batcher's quiet, and the calls go in batches of their own."""
 
     def __init__(self, db, run_id: int, n: int) -> None:
         super().__init__(db, run_id)
         self._together, self._left = asyncio.Barrier(n), n
 
-    async def start(
-        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
-    ) -> int:
-        call_id = await super().start(role, model, key, paper_id, via)
+    async def in_batch(self, key: str):
+        row = await super().in_batch(key)
         if self._left > 0:
             self._left -= 1
             await self._together.wait()
-        return call_id
+        return row
 
 
 async def test_a_run_started_again_waits_on_the_batch_a_dead_run_sent(conn: Session, db):
@@ -744,7 +762,9 @@ async def test_a_run_past_the_drain_reads_a_dead_runs_ended_batch_before_giving_
     dead = await started(conn, "nightly")
     gw, anthropic, _, clock = batching(CallJournal(db, dead))
     await asyncio.gather(*(gw.ask("brief", ask(n)) for n in range(2)))
-    await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")  # unread
+    await conn.execute(
+        "UPDATE inference_calls SET output = NULL, usage = usage - 'cost', responded_at = NULL"
+    )  # unread
     await gw.close()
 
     clock.now = DEADLINE + DRAIN + timedelta(hours=1)
@@ -764,7 +784,9 @@ async def dead_batches(conn: Session, db, n: int) -> tuple[BatchingProvider, Clo
     gw, anthropic, _, clock = batching(CallJournal(db, await started(conn, "nightly")))
     for i in range(n):
         await gw.ask("brief", ask(i))
-    await conn.execute("UPDATE inference_calls SET output = NULL, usage = usage - 'cost'")
+    await conn.execute(
+        "UPDATE inference_calls SET output = NULL, usage = usage - 'cost', responded_at = NULL"
+    )
     await gw.close()
     return anthropic, clock
 
@@ -1208,3 +1230,476 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
     assert found == expected
     assert sum(r[3] == "written" for r in found) >= 3
     assert anthropic.calls == [] and len(anthropic.batches) <= 3  # rounds, not one per digest
+
+
+# -- OpenAI's Batch API ----------------------------------------------------------------------------
+
+SOL = RoleConfig(provider="openai", model="gpt-6.2-sol", effort="high")
+# What the fake's answer to a batched request is charged: half of a normal call's 1000 fresh
+# input tokens at $2, 3000 cached at $0.10 and 200 output at $10.
+SOL_BATCHED = 0.00215
+FAILED = {"code": "server_error", "message": "x"}
+
+
+def openai_batching(journal=None, client=None, clock=None, models=None):
+    """A gateway batching on `openai` until DEADLINE, over a faked Batch API."""
+    clock, client = clock or Clock(), client or OpenAIBatches()
+    providers: dict[str, Provider] = {"openai": OpenAIProvider(client=client)}
+    options = FAST | {"now": clock}
+    gw = Gateway(
+        models or Models(brief=SOL), providers, journal, retry_delays=(0.0,), batch_options=options
+    )
+    gw.batch_until(DEADLINE)
+    return gw, client, clock
+
+
+async def test_openai_batches_carry_the_request_key_and_are_priced_at_half():
+    # A U+2028 inside an answer's string does not end its line.
+    answer = openai_body(json.dumps({"yes": True, "why": "a\u2028b"}, ensure_ascii=False))
+    client = OpenAIBatches(lambda body: answer)
+    provider, staged, request = OpenAIProvider(client=client), Staged(), ask(1)
+    batch_id = await provider.submit([("k1", SOL, request)], staged)
+    assert staged == ["file-1"]  # its input file, before the batch was made
+    body = responses_request(SOL, request)
+    assert client.uploaded["file-1"] == [
+        {"custom_id": "k1", "method": "POST", "url": "/v1/responses", "body": body}
+    ]
+    assert await provider.status(batch_id) == "in_progress"
+    client.end(batch_id)
+    assert await provider.status(batch_id) == "ended"
+    reply = (await provider.results(batch_id))["k1"]
+    assert isinstance(reply, Reply) and json.loads(reply.text)["why"] == "a\u2028b"
+    usage = reply.usage
+    # Priced by the alias its snapshot answered as.
+    assert (usage.model, usage.service_tier, usage.via) == ("gpt-6.2-sol", "batch", "openai")
+    assert usage.cost == pytest.approx(SOL_BATCHED)
+    assert await provider.status("batch_deleted") == "gone"
+
+
+async def test_openai_batch_lines_that_failed_are_asked_again_refused_or_fail_on_the_account():
+    answers = {
+        "paper ok": openai_body(GOOD),
+        "paper refused": openai_body("", refusal="I can't help with that."),
+        "paper declined": (400, {"code": "invalid_prompt", "message": "flagged"}),
+        "paper flagged": openai_body(status="failed", error={"code": "bio_policy"}),
+        "paper server": (500, FAILED),
+        "paper rate": (429, {"code": "rate_limit_exceeded"}),
+        "paper expired": (None, {"code": "batch_expired"}),
+        "paper failed": openai_body(status="failed", error=FAILED),
+        "paper key": (401, {"code": "invalid_api_key"}),
+        "paper credit": (429, {"code": "credit_balance_exhausted", "type": "insufficient_quota"}),
+    }
+    client = OpenAIBatches(lambda body: answers[body["input"][1]["content"]])
+    provider = OpenAIProvider(client=client)
+    requests = [(user, SOL, Request(system="rubric", user=user, output=Answer)) for user in answers]
+    batch_id = await provider.submit(requests, Staged())
+    client.end(batch_id)
+    found = await provider.results(batch_id)
+    replies = [found[f"paper {n}"] for n in ("ok", "refused", "declined", "flagged")]
+    assert [(r.stop, r.refusal) if isinstance(r, Reply) else r for r in replies] == [
+        (Stop.COMPLETE, None),
+        (Stop.REFUSED, "unspecified"),
+        (Stop.REFUSED, "invalid_prompt"),
+        (Stop.REFUSED, "bio_policy"),
+    ]
+    assert isinstance(replies[3], Reply) and replies[3].usage.cost == pytest.approx(SOL_BATCHED)
+    assert isinstance(replies[2], Reply)  # declined unbilled, at the batch's tier still
+    assert (replies[2].usage.cost, replies[2].usage.service_tier) == (0.0, "batch")
+    for user in ("paper server", "paper rate", "paper expired"):
+        assert found[user] is None  # asked again as a normal call
+    billed = found["paper failed"]  # billed and failed: asked again, its charge kept
+    assert isinstance(billed, ProviderError) and not billed.account and billed.usage is not None
+    assert billed.usage.cost == pytest.approx(SOL_BATCHED)
+    for user in ("paper key", "paper credit"):
+        error = found[user]
+        assert isinstance(error, ProviderError) and error.account
+
+
+def lost() -> Exception:
+    return openai.APIConnectionError(request=httpx2.Request("POST", "https://x.org"))
+
+
+async def configured(conn: Session) -> list[tuple]:
+    """Each call's model and effort, as its row keeps them."""
+    rows = await conn.execute(
+        "SELECT usage->>'model' AS model, usage->>'effort' AS effort FROM inference_calls"
+    )
+    return [(r["model"], r["effort"]) for r in await rows.fetchall()]
+
+
+async def test_an_openai_batch_is_found_by_its_file_through_every_page_of_the_sdks_list():
+    client = OpenAIBatches(page=1)
+    client.creating = [(True, lost())]  # created, and the reply lost on the way back
+    provider = OpenAIProvider(client=client)
+    with pytest.raises(ProviderError) as raised:
+        await provider.submit([("k1", SOL, ask(1)), ("k2", SOL, ask(2))], Staged())
+    assert raised.value.unanswered and list(client.made) == ["batch_1"]
+    for n in (3, 4):  # newer batches, listed before it
+        await provider.submit([(f"k{n}", SOL, ask(n))], Staged())
+    client.end("batch_1")
+    # Found by its file, ended, three pages down.
+    assert await provider.find("file-1") == "batch_1"
+    assert await provider.find("file-9") is None  # no batch was made of it
+    assert await provider.find(None) is None
+
+
+@pytest.mark.parametrize("failure", ["server", "lost", "hang"])
+async def test_an_openai_batch_whose_creation_may_have_failed_is_adopted_once_found(
+    conn: Session, db, failure
+):
+    client = OpenAIBatches()  # no normal call can be made (`responses`)
+    error = {"server": status_error(openai, 500), "lost": lost(), "hang": "hang"}[failure]
+    client.creating, client.misses = [(True, error)], 1  # and the first lookup misses it
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    gw.batchers["openai"].operation = 0.2  # our own bound, past which a hang is unknown too
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: client.listings == 2)
+    client.end("batch_1")
+    assert (await asked).usage.service_tier == "batch"
+    assert [(c["batch_id"], c["cost"]) for c in await calls(conn)] == [
+        ("batch_1", pytest.approx(SOL_BATCHED))
+    ]
+    await gw.close()
+
+
+async def test_an_openai_batch_never_found_sends_its_calls_normally_once_the_window_ends(
+    conn: Session, db, caplog
+):
+    client = OpenAIBatches()
+    client.creating, client.unlisted = [(True, lost())], True  # and every lookup fails
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    assert (await gw.ask("brief", ask(1))).usage.service_tier == "default"
+    batched, normal = await calls(conn)
+    assert batched["batch_id"] == "staged:file-1" and batched["cost"] is None
+    assert batched["error"].startswith("provider: the batch may have been made")
+    assert (normal["batch_id"], normal["answered"]) == (None, True)
+    assert "staged:file-1 may have been made and was not found" in caplog.text
+    await gw.close()
+
+
+def never_connected() -> Exception:
+    error = openai.APIConnectionError(request=httpx2.Request("POST", "https://x.org"))
+    error.__cause__ = httpx2.ConnectError("refused")  # as the SDK raises it, from the transport's
+    return error
+
+
+@pytest.mark.parametrize("failure", ["400", "429", "never connected"])
+async def test_an_openai_batch_the_api_refused_to_make_sends_its_calls_normally_at_once(
+    conn: Session, db, failure
+):
+    client = OpenAIBatches()
+    if failure == "never connected":
+        error = never_connected()
+    else:
+        error = status_error(openai, int(failure), {"code": "x", "message": "no"})
+    client.creating = [(False, error)]
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, _, _ = openai_batching(journal, client)
+    assert (await gw.ask("brief", ask(1))).value.yes
+    assert client.listings == 0  # not looked for
+    batched, normal = await calls(conn)
+    assert batched["batch_id"] == "staged:file-1"
+    assert batched["error"].startswith("provider: the batch was not made")
+    assert (normal["batch_id"], normal["answered"]) == (None, True)
+    # Its reference settled, no identical call attaches to it.
+    assert await journal.in_batch(gw.request_key(SOL, ask(1))) is None
+    await gw.close()
+
+
+async def test_an_identical_call_is_given_what_a_creation_still_looked_for_gives(conn: Session, db):
+    client = OpenAIBatches()  # no normal call can be made (`responses`)
+    client.creating, client.misses = [(True, lost())], 2
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    gw.batchers["openai"].find_delays = (0.05, 0.05, 0.05)
+    first = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: client.listings == 1)  # its batch looked for, on its staged row
+    second = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: client.listings == 3)
+    client.end("batch_1")
+    answers = await asyncio.gather(first, second)
+    assert [(a.usage.service_tier, a.usage.reused) for a in answers] == [
+        ("batch", False),
+        ("batch", True),
+    ]
+    # One row, the send's: the shared answer names it, as a reused one does.
+    (row,) = await (await conn.execute("SELECT id, batch_id FROM inference_calls")).fetchall()
+    assert row["batch_id"] == "batch_1"
+    assert [a.usage.source_call_id for a in answers] == [row["id"]] * 2
+    await gw.close()
+
+
+async def test_a_dead_runs_staged_batch_is_looked_for_its_id_kept_and_read(conn: Session, db):
+    client = OpenAIBatches()
+    client.creating = [(True, lost())]
+    gw, _, clock = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    gw.batchers["openai"].find_delays = (30.0,)  # the run dies while it looks
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+
+    async def staged():
+        return [c["batch_id"] for c in await calls(conn)] == ["staged:file-1"]
+
+    async def adopted():
+        return [c["batch_id"] for c in await calls(conn)] == ["batch_1"]
+
+    await until(staged)
+    asked.cancel()
+    await asyncio.gather(asked, return_exceptions=True)
+    await gw.close()
+
+    client.misses = 1  # the next run's first lookup misses it
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client, clock)
+    await gw.recover()
+    await until(adopted)  # kept before it is polled
+    client.end("batch_1")
+    await gw.settle()
+    assert [c["cost"] for c in await calls(conn)] == [pytest.approx(SOL_BATCHED)]
+    assert client.listings == 2
+    await gw.close()
+
+
+async def test_a_batch_whose_upload_outlasts_the_deadline_is_not_made(conn: Session, db):
+    client = OpenAIBatches()
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+    gw, _, clock = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    client.uploaded_then = lambda: setattr(clock, "now", DEADLINE)
+    answer = await asyncio.wait_for(gw.ask("brief", ask(1)), 5)
+    assert (answer.usage.service_tier, client.made) == ("default", {})
+    assert [(c["batch_id"], c["answered"]) for c in await calls(conn)] == [(None, True)]
+    await gw.close()
+
+
+async def test_an_openai_batch_timed_out_while_uploading_was_not_made(conn: Session, db, caplog):
+    client = OpenAIBatches()
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+
+    async def hanging(**_):
+        await asyncio.Event().wait()
+
+    client.files.create = hanging
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    gw.batchers["openai"].operation = 0.1
+    assert (await asyncio.wait_for(gw.ask("brief", ask(1)), 5)).value.yes
+    assert "was not made; its calls go as normal calls" in caplog.text
+    assert "may have been made" not in caplog.text and client.listings == 0
+    assert [(c["batch_id"], c["answered"]) for c in await calls(conn)] == [(None, True)]
+    await gw.close()
+
+
+async def test_looking_for_a_batch_ends_with_its_window_however_long_a_lookup_takes(
+    conn: Session, db
+):
+    client = OpenAIBatches()
+    client.creating, client.hanging = [(True, lost())], True
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    batcher = gw.batchers["openai"]
+    batcher.find_seconds, batcher.operation = 0.3, 30.0
+    answer = await asyncio.wait_for(gw.ask("brief", ask(1)), 3)
+    assert answer.usage.service_tier == "default"
+    await gw.close()
+
+
+async def test_an_account_error_looking_for_a_batch_fails_its_calls_and_leaves_it_to_recover(
+    conn: Session, db
+):
+    client = OpenAIBatches()
+    client.creating, client.listed = [(True, lost())], 401
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, _, _ = openai_batching(journal, client)
+    with pytest.raises(CallError) as raised:
+        await gw.ask("brief", ask(1))
+    assert raised.value.kind == "account"
+    assert [(c["batch_id"], c["error"]) for c in await calls(conn)] == [("staged:file-1", None)]
+    observed = await conn.execute(
+        "SELECT account_error FROM provider_observations WHERE provider = 'openai'"
+    )
+    assert "AuthenticationError" in (await observed.fetchone())["account_error"]
+    assert await journal.open_batches() == [{"batch_id": "staged:file-1", "provider": "openai"}]
+    await gw.close()
+
+
+async def test_a_call_given_up_on_while_its_batch_runs_has_its_row_charged(conn: Session, db):
+    gw, client, _ = openai_batching(CallJournal(db, await started(conn, "nightly")))
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+
+    async def sent():
+        return [c["batch_id"] for c in await calls(conn)] == ["batch_1"]
+
+    await until(sent)
+    asked.cancel()
+    await asyncio.gather(asked, return_exceptions=True)
+    client.end("batch_1")
+    await gw.settle()
+    assert [c["cost"] for c in await calls(conn)] == [pytest.approx(SOL_BATCHED)]
+    await gw.close()
+
+
+async def test_a_dated_snapshot_keeps_its_name_on_its_row_and_is_priced(conn: Session, db):
+    dated = RoleConfig(provider="openai", model="gpt-6.2-sol-2026-11-01", effort="high")
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, client, _ = openai_batching(journal, models=Models(brief=dated))
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: client.made)
+    client.end("batch_1")
+    usage = (await asked).usage
+    assert (usage.model, usage.cost) == (dated.model, pytest.approx(SOL_BATCHED))
+    assert await configured(conn) == [(dated.model, "high")]
+    await gw.close()
+
+
+class Unmade:
+    """Anthropic's `messages.batches`, failing to create a batch with `error`."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error, self.created = error, 0
+
+    async def create(self, requests):
+        self.created += 1
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("code", "made"),
+    [(500, "may have been made"), (529, "may have been made"), (400, "was not made")],
+)
+async def test_an_anthropic_batch_that_may_not_have_been_made_sends_its_calls_normally(
+    conn: Session, db, caplog, code, made
+):
+    haiku = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")
+    client = SdkClient(anthropic_message(GOOD))
+    client.messages.batches = Unmade(status_error(anthropic, code))
+    journal = CallJournal(db, await started(conn, "nightly"))
+    providers: dict[str, Provider] = {"anthropic": AnthropicProvider(client=client)}
+    # A window far longer than the test may take: Anthropic cannot find a batch, so never waits.
+    options = FAST | {"now": Clock(), "find_delays": (60.0,)}
+    gw = Gateway(Models(brief=haiku), providers, journal, batch_options=options)
+    gw.batch_until(DEADLINE)
+    assert (await asyncio.wait_for(gw.ask("brief", ask(1)), 5)).value.yes
+    assert (client.messages.batches.created, len(client.sent)) == (1, 1)
+    batched, normal = await calls(conn)
+    assert batched["error"].startswith(f"provider: the batch {made}")
+    assert (normal["batch_id"], normal["answered"]) == (None, True)
+    # Never looked for (a Message Batch has nothing of ours to know it by), and told so.
+    assert ("may have been made and cannot be found" in caplog.text) == (code != 400)
+    await gw.close()
+
+
+async def test_an_openai_batch_line_billed_and_failed_is_settled_on_its_row_and_asked_again(
+    conn: Session, db
+):
+    client = OpenAIBatches(lambda body: openai_body(status="failed", error=FAILED))
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: len(client.made) == 1)
+    client.end("batch_1")
+    assert (await asked).value.yes
+    batched, normal = await calls(conn)
+    assert (batched["batch_id"], batched["cost"]) == ("batch_1", pytest.approx(SOL_BATCHED))
+    assert batched["error"].startswith("provider: response failed")
+    assert (normal["batch_id"], normal["error"], normal["answered"]) == (None, None, True)
+    assert normal["cost"] == pytest.approx(2 * SOL_BATCHED)  # the normal call's full price
+    assert await configured(conn) == [("gpt-6.2-sol", "high")] * 2  # as configured, both
+    await gw.close()
+
+
+async def test_an_openai_batch_holds_one_model_so_a_step_of_two_models_goes_in_two():
+    luna = RoleConfig(provider="openai", model="gpt-6-luna")
+    gw, client, _ = openai_batching(models=Models(brief=SOL, writer=luna))
+    asked = [
+        asyncio.create_task(gw.ask(role, ask(n)))
+        for n, role in enumerate(("brief", "writer", "brief"))
+    ]
+    await until(lambda: len(client.made) == 2)
+    for batch_id in list(client.made):
+        client.end(batch_id)
+    answers = await asyncio.gather(*asked)
+    sent = sorted([line["body"]["model"] for line in lines] for lines in client.uploaded.values())
+    assert sent == [["gpt-6-luna"], ["gpt-6.2-sol", "gpt-6.2-sol"]]
+    # Each priced as its own model: Luna's 1000 fresh at $0.10, 3000 cached at $0.01, 200 out
+    # at $0.50, halved.
+    assert [(a.usage.model, a.usage.service_tier) for a in answers[:2]] == [
+        ("gpt-6.2-sol", "batch"),
+        ("gpt-6-luna", "batch"),
+    ]
+    assert [a.usage.cost for a in answers[:2]] == [
+        pytest.approx(SOL_BATCHED),
+        pytest.approx(0.000115),
+    ]
+    await gw.close()
+
+
+async def dead_batch(conn: Session, db, client: OpenAIBatches, models=None):
+    """Two calls a dead run left in an open batch; then a gateway of a later run, recovering
+    it. The gateway, its clock and the batch's id."""
+    dead = await started(conn, "nightly")
+    gw, _, clock = openai_batching(Together(db, dead, 2), client, models=models)
+    asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in range(2)]
+
+    async def recorded():
+        rows = await calls(conn)
+        return len(rows) == 2 and all(c["batch_id"] == "batch_1" for c in rows)
+
+    await until(recorded)
+    for t in asked:  # the run dies with its batch open
+        t.cancel()
+    await asyncio.gather(*asked, return_exceptions=True)
+    await gw.close()
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, _, _ = openai_batching(journal, client, clock, models=models)
+    await gw.recover()
+    return gw, journal, dead
+
+
+async def test_an_openai_batch_a_dead_run_left_is_read_once_and_credited_to_its_calls(
+    conn: Session, db
+):
+    client = OpenAIBatches()
+    gw, _, dead = await dead_batch(conn, db, client)
+    settling = asyncio.create_task(gw.settle())  # as a nightly does before it ends
+    await asyncio.sleep(0.05)
+    assert not settling.done()
+    client.end("batch_1")
+    await settling
+    assert [(c["run_id"], c["batch_id"], c["answered"]) for c in await calls(conn)] == [
+        (dead, "batch_1", False)
+    ] * 2
+    assert [c["cost"] for c in await calls(conn)] == [pytest.approx(SOL_BATCHED)] * 2
+    assert client.read == [client.made["batch_1"].output_file_id]  # read once, nothing paid again
+    assert await configured(conn) == [("gpt-6.2-sol", "high")] * 2  # as configured, not answered
+    await gw.close()
+
+
+async def test_an_openai_batch_that_failed_with_no_answers_settles_a_dead_runs_calls(
+    conn: Session, db
+):
+    client = OpenAIBatches()
+    gw, journal, _ = await dead_batch(conn, db, client)
+    client.end("batch_1", failed=True)  # its input refused: no files at all
+    await gw.settle()
+    errors = [c["error"] for c in await calls(conn)]
+    assert errors == ["provider: the batch did not answer it"] * 2
+    assert await journal.open_batches() == []
+    await gw.close()
+
+
+async def test_an_openai_answer_of_unknown_charge_is_read_once_and_still_given_to_its_call(
+    conn: Session, db
+):
+    unlisted = Models(brief=RoleConfig(provider="openai", model="gpt-9"))
+    client = OpenAIBatches()
+    gw, journal, _ = await dead_batch(conn, db, client, unlisted)
+    client.end("batch_1")
+    await gw.settle()
+    assert [c["cost"] for c in await calls(conn)] == [None, None]
+    assert await journal.open_batches() == []  # accounted for, though its charge is unknown
+    await gw.close()
+    # A run asking for one of them again is given its answer, not a new call.
+    gw, _, _ = openai_batching(
+        CallJournal(db, await started(conn, "nightly")), client, None, unlisted
+    )
+    assert (await gw.ask("brief", ask(0))).value.yes
+    assert (len(client.made), len(await calls(conn))) == (1, 2)
+    await gw.close()

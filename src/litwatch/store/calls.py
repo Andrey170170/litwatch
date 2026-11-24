@@ -66,9 +66,16 @@ class CallJournal:
         )
 
     async def start(
-        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
+        self,
+        role: str,
+        model: str,
+        key: str,
+        paper_id: str | None,
+        via: str | None = None,
+        effort: str | None = None,
     ) -> int:
-        """A call about to be sent, to `model` by provider `via`: its row, before any reply."""
+        """A call about to be sent, to `model` at `effort` by provider `via`: its row, before any
+        reply."""
         row = await self._write(
             "start",
             "INSERT INTO inference_calls (run_id, operation, request_key, usage, paper_id) "
@@ -77,7 +84,7 @@ class CallJournal:
                 self.run_id,
                 role,
                 key,
-                Jsonb(Usage(model=model, via=via).model_dump(mode="json")),
+                Jsonb(Usage(model=model, via=via, effort=effort).model_dump(mode="json")),
                 paper_id,
             ),
         )
@@ -106,71 +113,113 @@ class CallJournal:
         )
 
     async def open_batches(self) -> list[dict[str, Any]]:
-        """The batches with calls not yet answered or charged, with the provider each went to:
-        a dead run's, or one given up on after a deadline, whose charges are read when they
+        """The batches with calls not yet answered or accounted for (`responded_at`, set by the
+        reply's accounting even when its charge is unknown), with the provider each went to: a
+        dead run's, or one given up on after a deadline, whose charges are read when they
         end."""
         return await self._all(
             "open batches",
             "SELECT batch_id, min(usage->>'via') AS provider FROM inference_calls "
             "WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL "
-            "AND usage->>'cost' IS NULL AND started_at > now() - %s "
+            "AND responded_at IS NULL AND started_at > now() - %s "
             "GROUP BY batch_id ORDER BY batch_id",
             (RESULTS_KEPT,),
         )
 
-    async def gone(self, batch_id: str) -> None:
+    async def gone(self, batch_id: str, error: str = "provider: the batch is gone") -> None:
         """Batch `batch_id` is gone from its provider (deleted, or the key is another
-        workspace's): it never answers, so its calls not yet settled are settled with that."""
+        workspace's), or a staged reference's batch was not found: it never answers, so its
+        calls not yet settled are settled with `error`."""
         await self._write(
             "batch gone",
-            "UPDATE inference_calls SET error = 'provider: the batch is gone' "
-            "WHERE batch_id = %s AND output IS NULL AND error IS NULL "
-            "AND usage->>'cost' IS NULL",
-            (batch_id,),
+            "UPDATE inference_calls SET error = %s "
+            "WHERE batch_id = %s AND output IS NULL AND error IS NULL AND responded_at IS NULL",
+            (error, batch_id),
+        )
+
+    async def adopted(self, reference: str, batch_id: str) -> None:
+        """The batch staged as `reference` was found: its calls' rows name its id."""
+        await self._write(
+            "batch adopted",
+            "UPDATE inference_calls SET batch_id = %s WHERE batch_id = %s",
+            (batch_id, reference),
+        )
+
+    async def ended(self, batch_id: str, keys: list[str]) -> None:
+        """Batch `batch_id` ended without naming the calls of its not in `keys` (those it
+        answered, or whose calls settle them): it never answers them, so they are settled with
+        that, their charge unknown."""
+        await self._write(
+            "batch ended",
+            "UPDATE inference_calls SET error = 'provider: the batch did not answer it' "
+            "WHERE batch_id = %s AND output IS NULL AND error IS NULL AND responded_at IS NULL "
+            "AND request_key <> ALL(%s)",
+            (batch_id, keys),
+        )
+
+    async def unsent(self, call_ids: list[int], error: str) -> None:
+        """The calls' batch was not made, or may have been and was not found: settled with
+        `error`, their charge unknown; each is asked again on a row of its own."""
+        await self._write(
+            "unsent",
+            "UPDATE inference_calls SET error = %s "
+            "WHERE id = ANY(%s) AND output IS NULL AND error IS NULL",
+            (error, call_ids),
         )
 
     async def answered(
         self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
     ) -> None:
-        """An answer of batch `batch_id` that no call awaited: its charge, on the calls that
-        asked for it and have none yet, so the batch is accounted for in full. None: the batch
-        did not answer it, and its call is settled with that, or with `error` (an account
-        error)."""
+        """An answer of batch `batch_id` its call does not settle: its charge, on the first call
+        that asked for it and is not yet accounted for (`responded_at`), so the batch is
+        accounted for in full, keeping the call's configured model and effort (the answer knows
+        its provider's name for the model, and no effort); with `error`, a request it billed and
+        failed, which settles that call. None: the batch did not answer it, and its call is
+        settled with that, or with `error` (an account error)."""
         if usage is None:
             await self._write(
                 "batch answered nothing",
                 "UPDATE inference_calls SET error = %s "
                 "WHERE batch_id = %s AND request_key = %s AND output IS NULL AND error IS NULL "
-                "AND usage->>'cost' IS NULL",
+                "AND responded_at IS NULL",
                 (error or "provider: the batch did not answer it", batch_id, key),
             )
             return
         row = await self._write(
             "batch answered",
-            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
+            "WITH c AS (UPDATE inference_calls SET usage = %(usage)s || "
+            "jsonb_build_object('model', usage->'model', 'effort', usage->'effort'), "
+            "error = %(error)s, "
             "responded_at = clock_timestamp() WHERE id = (SELECT min(id) FROM inference_calls "
-            "WHERE batch_id = %(batch)s AND request_key = %(key)s AND usage->>'cost' IS NULL) "
+            "WHERE batch_id = %(batch)s AND request_key = %(key)s AND responded_at IS NULL) "
             f"RETURNING run_id, responded_at), {_REPLIED} SELECT run_id FROM c",
-            {"usage": Jsonb(usage.model_dump(mode="json")), "batch": batch_id, "key": key}
-            | self._reply(usage),
+            {
+                "usage": Jsonb(usage.model_dump(mode="json")),
+                "error": error,
+                "batch": batch_id,
+                "key": key,
+            }
+            | self._reply(usage, replied=error is None),
         )
         await self._retally(row)
 
     async def record(self, call_id: int, usage: Usage) -> None:
         """A reply came for the call: its accounting, whether or not the answer is usable, and
-        that the provider replied."""
+        that the provider replied. A failure's charge is its `reject`'s."""
         row = await self._write(
             "record",
             "WITH c AS (UPDATE inference_calls SET usage = %(usage)s, "
             "responded_at = clock_timestamp() WHERE id = %(id)s RETURNING run_id, responded_at), "
             f"{_REPLIED} SELECT run_id FROM c",
-            {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id} | self._reply(usage),
+            {"usage": Jsonb(usage.model_dump(mode="json")), "id": call_id}
+            | self._reply(usage, replied=True),
         )
         await self._retally(row)
 
-    def _reply(self, usage: Usage) -> dict[str, Any]:
-        """`_REPLIED`'s parameters: a reply shared from another call is not the provider's."""
-        own = self.observes and usage.via is not None and not usage.reused
+    def _reply(self, usage: Usage, *, replied: bool) -> dict[str, Any]:
+        """`_REPLIED`'s parameters: a reply shared from another call is not the provider's, nor
+        is an error."""
+        own = self.observes and replied and usage.via is not None and not usage.reused
         return {"via": usage.via, "own": own}
 
     async def account_error(self, provider: str, error: str) -> None:
@@ -212,17 +261,34 @@ class CallJournal:
         )
 
     async def reject(
-        self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
+        self,
+        call_id: int,
+        error: str,
+        reply: str | None = None,
+        *,
+        account: str | None = None,
+        usage: Usage | None = None,
     ) -> None:
-        """The call got no usable answer; with `account`, that provider refused it for the
-        account, which is observed with it (`observes`)."""
+        """The call, this run's, got no usable answer; with `usage`, what the failure was
+        charged, accounted for in the same write and not a reply (`record`); with `account`,
+        that provider refused it for the account, which is observed with it (`observes`)."""
         account = account if self.observes else None
-        update = "UPDATE inference_calls SET error = %(error)s, reply = %(reply)s WHERE id = %(id)s"
+        charged = ", usage = %(usage)s, responded_at = clock_timestamp()" if usage else ""
+        update = (
+            f"UPDATE inference_calls SET error = %(error)s, reply = %(reply)s{charged} "
+            "WHERE id = %(id)s"
+        )
         observed = _ACCOUNT_ERROR.format(source="FROM c")
         await self._write(
             "reject",
             f"WITH c AS ({update} RETURNING id), o AS ({observed}) SELECT 1" if account else update,
-            {"error": error, "reply": reply, "id": call_id, "provider": account},
+            {
+                "error": error,
+                "reply": reply,
+                "id": call_id,
+                "provider": account,
+                "usage": Jsonb(usage.model_dump(mode="json")) if usage else None,
+            },
         )
 
     async def refused(self, key: str, paper_id: str | None) -> bool:
@@ -280,16 +346,20 @@ async def mean_cost(
     last: int = 200,
 ) -> float | None:
     """What a call of `role` on `provider`, `model` and `effort` alike cost on average over
-    its latest `last` billed calls (reused replies left out), or None when it has none: what an
-    estimate goes by. Calls under another provider or effort, or answered in a batch, are left
-    out, as they cost differently (an estimate is of normal calls)."""
+    its latest `last` billed calls (reused replies and requests rejected unbilled, free and of no
+    tokens, left out), or None when it has none: what an estimate goes by. Calls under another
+    provider or effort, or answered in a batch, are left out, as they cost differently (an
+    estimate is of normal calls)."""
     row = await (
         await unit.execute(
             "SELECT avg(cost) AS cost FROM (SELECT (usage->>'cost')::float AS cost "
             "FROM inference_calls WHERE operation = %s AND usage->>'model' = %s "
             "AND usage->>'via' = %s AND usage->>'effort' IS NOT DISTINCT FROM %s "
             "AND usage->>'cost' IS NOT NULL AND NOT coalesce((usage->>'reused')::boolean, false) "
-            "AND usage->>'service_tier' IS DISTINCT FROM 'batch' ORDER BY id DESC LIMIT %s) recent",
+            "AND usage->>'service_tier' IS DISTINCT FROM 'batch' "
+            "AND NOT ((usage->>'cost')::float = 0 "
+            "AND coalesce((usage->>'prompt_tokens')::int, 0) = 0) "
+            "ORDER BY id DESC LIMIT %s) recent",
             (role, model, provider, effort, last),
         )
     ).fetchone()
@@ -342,8 +412,8 @@ async def observations(unit: ReadUnit) -> dict[str, dict[str, Any]]:
 async def outcomes(unit: ReadUnit, run: dict[str, Any]) -> dict[str, dict[str, int]]:
     """Per provider, the run's calls that failed without an answer (provider errors and
     timeouts), and the replies it sent while the run went on, whichever run's calls they
-    settled (a dead run's batch, read in this one; reused replies and evaluation runs' calls, a
-    replay job's included, left out)."""
+    settled (a dead run's batch, read in this one; reused replies, errors the provider billed or
+    rejected unbilled, and evaluation runs' calls, a replay job's included, left out)."""
     rows = await (
         await unit.execute(
             "SELECT provider, sum(failed)::int AS failed, sum(replied)::int AS replied FROM ("
@@ -352,6 +422,7 @@ async def outcomes(unit: ReadUnit, run: dict[str, Any]) -> dict[str, dict[str, i
             "UNION ALL SELECT usage->>'via', 0, 1 FROM inference_calls "
             "WHERE responded_at BETWEEN %(since)s AND %(until)s "
             "AND NOT coalesce((usage->>'reused')::boolean, false) "
+            "AND NOT coalesce(error LIKE 'provider%%' OR error LIKE 'account%%', false) "
             "AND run_id NOT IN (SELECT id FROM runs WHERE kind = %(eval)s)) seen "
             "WHERE provider IS NOT NULL GROUP BY provider",
             {

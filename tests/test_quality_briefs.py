@@ -117,7 +117,7 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
     # So does a fallback that timed out, after a refusal that was charged.
 
     def down(role, request):
-        raise ProviderError("APITimeoutError", transient=True)
+        raise ProviderError("APIConnectionError", transient=True, unanswered=True)  # charge unknown
 
     providers["openrouter"] = ScriptedProvider("openrouter", down)
     gw = Gateway(models, providers, retry_delays=())

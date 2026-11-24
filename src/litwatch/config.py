@@ -35,10 +35,13 @@ class _Section(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+type ProviderName = Literal["anthropic", "openrouter", "openai"]
+
+
 class RoleConfig(_Section):
     """Where one gateway role is served. Pipeline code names the role, never the model."""
 
-    provider: Literal["anthropic", "openrouter"]
+    provider: ProviderName
     model: str
     effort: str | None = None
     # OpenRouter only: the providers allowed to serve the model, tried in order. Empty uses
@@ -76,8 +79,8 @@ class RoleConfig(_Section):
     @property
     def lab(self) -> str:
         """The organisation that trained the model, not the account it is reached through."""
-        if self.provider == "anthropic":
-            return "anthropic"
+        if self.provider in ("anthropic", "openai"):
+            return self.provider
         return self.model.split("/", 1)[0]
 
     @property
@@ -85,9 +88,7 @@ class RoleConfig(_Section):
         return f"{self.provider}:{self.model}" + (f"@{self.effort}" if self.effort else "")
 
 
-def _model(
-    provider: Literal["anthropic", "openrouter"], model: str, effort: str | None = None
-) -> RoleConfig:
+def _model(provider: ProviderName, model: str, effort: str | None = None) -> RoleConfig:
     return RoleConfig(provider=provider, model=model, effort=effort)
 
 

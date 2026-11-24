@@ -177,7 +177,7 @@ def reply_of(completion: Any, role: RoleConfig) -> Reply:
     )
     choices = getattr(completion, "choices", None)
     if not choices:
-        raise ProviderError("the completion has no choices", transient=True, cost=usage.cost)
+        raise ProviderError("the completion has no choices", transient=True, usage=usage)
     choice = choices[0]
     text = choice.message.content or ""
     if said := getattr(choice.message, "refusal", None):
@@ -246,13 +246,14 @@ class OpenRouterProvider:
             raise ProviderError(type(exc).__name__, timeout=True) from exc
         # OpenRouter answers 404 when a model's only provider has no endpoint up, which the
         # SDK never retries.
-        except openai.APIConnectionError as exc:  # it may have been sent: billed or not
+        except openai.APIConnectionError as exc:
+            if isinstance(exc.__cause__, httpx2.ConnectError):  # never opened: nothing was sent
+                raise ProviderError("APIConnectionError while connecting", transient=True) from exc
+            # It may have been sent: billed or not.
             raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
-        except (
-            openai.NotFoundError,
-            openai.InternalServerError,
-            openai.RateLimitError,
-        ) as exc:
+        except openai.InternalServerError as exc:  # any 5xx: it may have run, billed or not
+            raise ProviderError(type(exc).__name__, transient=True, unanswered=True) from exc
+        except (openai.NotFoundError, openai.RateLimitError) as exc:
             raise ProviderError(type(exc).__name__, transient=True) from exc
         except openai.PermissionDeniedError as exc:
             if category := declined(exc.body):

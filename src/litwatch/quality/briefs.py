@@ -143,7 +143,13 @@ class _Spent:
         return None
 
     async def start(
-        self, role: str, model: str, key: str, paper_id: str | None, via: str | None = None
+        self,
+        role: str,
+        model: str,
+        key: str,
+        paper_id: str | None,
+        via: str | None = None,
+        effort: str | None = None,
     ) -> int:
         self.calls.append((paper_id, None))
         return len(self.calls) - 1
@@ -155,9 +161,16 @@ class _Spent:
         return None
 
     async def reject(
-        self, call_id: int, error: str, reply: str | None = None, *, account: str | None = None
+        self,
+        call_id: int,
+        error: str,
+        reply: str | None = None,
+        *,
+        account: str | None = None,
+        usage: Usage | None = None,
     ) -> None:
-        return None
+        if usage is not None:
+            self.calls[call_id] = (self.calls[call_id][0], usage.cost)
 
 
 def _usage(usage: Usage | None) -> dict:

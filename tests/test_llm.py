@@ -3,25 +3,32 @@
 import json
 import os
 import sys
+from datetime import UTC, datetime
 
 import anthropic
+import httpx2
 import openai
 import pytest
 from pydantic import BaseModel
 
 from litwatch.config import ROLES, Models, RoleConfig
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm import ceiling as ceilings
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
+from litwatch.llm.openai import BASE_URL, OpenAIProvider, responses_request
 from litwatch.llm.openrouter import OpenRouterProvider
+from litwatch.llm.types import DEFAULT_MAX_TOKENS
+from litwatch.store import calls as calls_store
 from tests.conftest import calls
 from tests.fakes import (
     ScriptedProvider,
     SdkClient,
     anthropic_message,
+    openai_response,
     openrouter_completion,
     status_error,
 )
-from tests.sessions import Session
+from tests.sessions import Session, in_read
 
 
 class Answer(BaseModel):
@@ -34,16 +41,21 @@ GOOD = json.dumps({"yes": True, "why": "it says so"})
 HAIKU = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")
 OPUS = RoleConfig(provider="anthropic", model="claude-opus-5-5", effort="medium")
 MUSE = RoleConfig(provider="openrouter", model="meta/muse-spark-1.3-contributor", effort="high")
-# Haiku in a chat role, for the cases that price it.
-MODELS = Models(writer=HAIKU)
+SOL = RoleConfig(provider="openai", model="gpt-6.2-sol", effort="medium")
+# Haiku in a chat role, for the cases that price it, and GPT-6.2 Sol on OpenAI in another.
+MODELS = Models(writer=HAIKU, brief=SOL)
 
 
-def gateway(models: Models, anthropic=None, openrouter=None, journal=None, debug=False) -> Gateway:
+def gateway(
+    models: Models, anthropic=None, openrouter=None, journal=None, debug=False, openai=None
+) -> Gateway:
     providers = {}
     if anthropic is not None:
         providers["anthropic"] = AnthropicProvider(client=anthropic)
     if openrouter is not None:
         providers["openrouter"] = OpenRouterProvider(client=openrouter)
+    if openai is not None:
+        providers["openai"] = OpenAIProvider(client=openai)
     return Gateway(models, providers, journal, retry_delays=(0.0, 0.0), debug=debug)
 
 
@@ -56,6 +68,23 @@ def test_anthropic_request_carries_the_schema_effort_and_a_cached_system_prompt(
     assert sent["output_config"]["effort"] == "medium"
     schema = sent["output_config"]["format"]["schema"]
     assert schema["additionalProperties"] is False and set(schema["properties"]) == {"yes", "why"}
+
+
+def test_openai_request_asks_for_strict_json_and_caches_only_the_system_prompt():
+    sent = responses_request(SOL, REQUEST)
+    developer, user = sent["input"]
+    assert developer["content"] == [
+        {"type": "input_text", "text": "rubric", "prompt_cache_breakpoint": {"mode": "explicit"}}
+    ]
+    assert user == {"role": "user", "content": "paper"}
+    # Explicit caching only: the paper after the breakpoint is never written to the cache.
+    assert sent["prompt_cache_options"] == {"mode": "explicit"}
+    assert (sent["reasoning"], sent["store"]) == ({"effort": "medium"}, False)
+    form = sent["text"]["format"]
+    assert (form["type"], form["strict"]) == ("json_schema", True)
+    assert form["schema"]["additionalProperties"] is False
+    assert set(form["schema"]["properties"]) == {"yes", "why"}
+    assert "max_output_tokens" not in sent  # uncapped unless the role or a ceiling caps it
 
 
 async def test_the_same_request_runs_through_either_provider_by_configuration_alone():
@@ -88,6 +117,37 @@ async def test_cost_is_computed_for_anthropic_and_taken_as_reported_from_openrou
     assert (muse.cost, muse.provider, muse.reasoning_tokens) == (0.0021, "Meta", 300)
 
 
+async def test_an_openai_reply_is_priced_from_its_usage_its_cache_and_a_long_prompt_included():
+    client = SdkClient(
+        openai_response(GOOD, read=3000, write=500),
+        openai_response(GOOD, tokens_in=300_000, read=0),
+    )
+    gw = gateway(MODELS, openai=client)
+    answer = await gw.ask("brief", REQUEST)
+    assert (answer.value, answer.model) == (Answer(yes=True, why="it says so"), SOL.label)
+    u = answer.usage
+    assert (u.via, u.model, u.prompt_tokens, u.completion_tokens) == (
+        "openai",
+        SOL.model,
+        4000,
+        200,
+    )
+    assert (u.cached_tokens, u.cache_write_tokens, u.reasoning_tokens) == (3000, 500, 150)
+    # 500 fresh at $2, 3000 cached at $0.10, 500 written at $2.50, 200 output at $10.
+    assert u.cost == pytest.approx((500 * 2 + 3000 * 0.1 + 500 * 2.5 + 200 * 10) / 1e6)
+    # Past 272K input tokens the whole request is dearer: input twice, output 1.5 times.
+    long = (await gw.ask("brief", REQUEST)).usage
+    assert long.cost == pytest.approx((300_000 * 4.0 + 200 * 15.0) / 1e6)
+
+
+async def test_an_openai_reply_is_priced_as_the_model_that_served_it_and_kept_as_configured():
+    astra = openai_response(GOOD, read=3000, model="gpt-6.2-astra-2026-11-01")
+    usage = (await gateway(MODELS, openai=SdkClient(astra)).ask("brief", REQUEST)).usage
+    assert usage.model == SOL.model
+    # Astra's prices: 1000 fresh at $8, 3000 cached at $0.40, 200 output at $40.
+    assert usage.cost == pytest.approx((1000 * 8 + 3000 * 0.4 + 200 * 40) / 1e6)
+
+
 async def test_haiku_charges_a_long_prompt_five_times_and_an_unlisted_model_has_no_cost():
     long = SdkClient(anthropic_message(GOOD, fresh=1000, read=100_000, write=2000, output=100))
     usage = (await gateway(MODELS, long).ask("writer", REQUEST)).usage
@@ -115,6 +175,179 @@ async def test_an_unusable_reply_is_an_error_that_says_which_kind(reply, kind, d
     with pytest.raises(CallError) as raised:
         await gateway(MODELS, SdkClient(reply)).ask("writer", REQUEST)
     assert (raised.value.kind, raised.value.detail) == (kind, detail)
+
+
+@pytest.mark.parametrize(
+    ("reply", "kind", "detail"),
+    [
+        (openai_response("", refusal="I can't help with that."), "refused", "unspecified"),
+        (
+            openai_response("", "incomplete", incomplete="content_filter"),
+            "refused",
+            "content_filter",
+        ),
+        (
+            openai_response('{"yes": tr', "incomplete", incomplete="max_output_tokens"),
+            "truncated",
+            None,
+        ),
+        (
+            openai_response(status="failed", error={"code": "bio_policy", "message": "no"}),
+            "refused",
+            "bio_policy",
+        ),
+    ],
+)
+async def test_an_openai_refusal_or_incomplete_reply_is_the_error_the_others_give(
+    reply, kind, detail
+):
+    with pytest.raises(CallError) as raised:
+        await gateway(MODELS, openai=SdkClient(reply)).ask("brief", REQUEST)
+    assert (raised.value.kind, raised.value.detail) == (kind, detail)
+    usage = raised.value.usage
+    assert usage is not None and usage.cost is not None and usage.cost > 0  # billed, and kept
+
+
+async def test_an_openai_request_declined_for_its_content_is_a_refusal_that_goes_down_the_list(
+    conn: Session, journal
+):
+    error = {"code": "invalid_prompt", "type": "invalid_request_error", "message": "flagged"}
+    declining = SdkClient(status_error(openai, 400, error))
+    anthropic = SdkClient(anthropic_message(GOOD))
+    models = Models(writer=SOL.model_copy(update={"fallbacks": (HAIKU,)}))
+    gw = gateway(models, anthropic, openai=declining, journal=journal)
+    assert (await gw.ask("writer", REQUEST)).value.yes and len(anthropic.sent) == 1
+    refused, answered = await calls(conn)
+    assert refused["error"] == "refused: invalid_prompt" and answered["error"] is None
+    assert refused["usage"]["via"] == "openai" and refused["usage"]["cost"] == 0.0
+
+
+async def test_an_openai_call_asks_for_the_default_tier_and_another_tiers_charge_is_unknown():
+    client = SdkClient(openai_response(GOOD, tier="flex"))
+    usage = (await gateway(MODELS, openai=client).ask("brief", REQUEST)).usage
+    assert client.sent[0]["service_tier"] == "default"
+    assert (usage.service_tier, usage.cost) == ("flex", None)
+
+
+async def test_an_openai_attempt_billed_and_failed_is_settled_on_a_row_of_its_own(
+    conn: Session, journal
+):
+    failed = openai_response(status="failed", error={"code": "server_error", "message": "x"})
+    client = SdkClient(failed, openai_response(GOOD))
+    assert (await gateway(MODELS, openai=client, journal=journal).ask("brief", REQUEST)).value.yes
+    first, second = await calls(conn)
+    # Each billed: 1000 fresh at $2, 3000 cached at $0.10, 200 output at $10.
+    assert first["error"].startswith("provider: response failed")
+    assert [first["usage"]["cost"], second["usage"]["cost"]] == [pytest.approx(0.0043)] * 2
+    assert (second["error"], second["output"] is not None) == (None, True)
+
+
+async def test_an_attempt_whose_reply_was_lost_keeps_a_row_with_its_charge_unknown(
+    conn: Session, journal
+):
+    lost = openai.APIConnectionError(request=httpx2.Request("POST", "https://x.org"))
+    client = SdkClient(lost, openai_response(GOOD))
+    assert (await gateway(MODELS, openai=client, journal=journal).ask("brief", REQUEST)).value.yes
+    first, second = await calls(conn)  # one row per send
+    assert (first["error"], first["usage"]["cost"]) == ("provider: APIConnectionError", None)
+    assert (first["usage"]["model"], first["usage"]["effort"]) == ("gpt-6.2-sol", "medium")
+    assert (second["error"], second["usage"]["cost"]) == (None, pytest.approx(0.0043))
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic"])
+async def test_a_5xx_may_have_been_billed_so_its_reservation_is_kept_and_its_row_stays_its_own(
+    conn: Session, journal, provider
+):
+    sdk, role = (openai, SOL) if provider == "openai" else (anthropic, HAIKU)
+    reply = openai_response(GOOD) if provider == "openai" else anthropic_message(GOOD)
+    client = SdkClient(status_error(sdk, 500), reply)
+    gw = Gateway(
+        Models(brief=role),
+        {"openai": OpenAIProvider(client=client), "anthropic": AnthropicProvider(client=client)},
+        journal,
+        retry_delays=(0.0,),
+    )
+    tokens_in = ceilings.input_tokens(REQUEST)
+    bound = ceilings.listed_bound(role, tokens_in)
+    assert bound is not None
+    most = ceilings.Ceiling.most(bound, tokens_in, DEFAULT_MAX_TOKENS)
+    gw.ceiling = ceilings.Ceiling(1.5 * most, {})  # room for one send whose charge is unknown
+    with pytest.raises(CallError) as raised:
+        await gw.ask("brief", REQUEST)
+    assert raised.value.kind == "ceiling"  # the retry did not fit beside the kept reservation
+    (row,) = await calls(conn)  # the retry, never admitted, has no row, nor overwrites this one
+    assert row["error"] == "provider: InternalServerError" and row["usage"]["cost"] is None
+
+
+async def test_an_openrouter_5xx_is_tried_again_and_its_charge_is_unknown(conn: Session, journal):
+    client = SdkClient(status_error(openai, 503), openrouter_completion(GOOD))
+    gw = gateway(Models(check=MUSE), openrouter=client, journal=journal)
+    assert (await gw.ask("check", REQUEST)).value.yes and len(client.sent) == 2
+    first, second = await calls(conn)  # it may have run, billed or not
+    assert (first["error"], first["usage"]["cost"]) == ("provider: InternalServerError", None)
+    assert (second["error"], second["usage"]["cost"]) == (None, 0.0021)
+
+
+async def test_failures_are_accounted_for_and_not_replies(conn: Session, journal):
+    failed = openai_response(status="failed", error={"code": "server_error", "message": "x"})
+    rate = status_error(openai, 429, {"code": "rate_limit_exceeded", "message": "slow"})
+    client = SdkClient(failed, rate, failed)
+    with pytest.raises(CallError):
+        await gateway(MODELS, openai=client, journal=journal).ask("brief", REQUEST)
+    rows = await calls(conn)
+    # Billed, billed nothing (a 429 is known to be free), billed: each accounted for.
+    assert [r["usage"]["cost"] for r in rows] == [pytest.approx(0.0043), 0.0, pytest.approx(0.0043)]
+    assert all(r["responded_at"] is not None for r in rows)
+    observed = await conn.execute(
+        "SELECT replied_at FROM provider_observations WHERE provider = 'openai'"
+    )
+    assert (await observed.fetchone() or {}).get("replied_at") is None
+    run = {
+        "id": journal.run_id,
+        "started_at": datetime(2000, 1, 1, tzinfo=UTC),
+        "finished_at": datetime(2100, 1, 1, tzinfo=UTC),
+    }
+    outcomes = await in_read(conn, calls_store.outcomes, run)
+    assert outcomes["openai"] == {"failed": 3, "replied": 0}
+
+
+async def test_an_openai_403_for_the_content_is_a_refusal_not_the_accounts():
+    error = {
+        "code": "misalignment_policy_violation",
+        "type": "invalid_request_error",
+        "message": "flagged",
+    }
+    with pytest.raises(CallError) as raised:
+        await gateway(MODELS, openai=SdkClient(status_error(openai, 403, error))).ask(
+            "brief", REQUEST
+        )
+    assert (raised.value.kind, raised.value.detail) == ("refused", "misalignment_policy_violation")
+
+
+async def test_a_requests_estimate_leaves_out_the_requests_rejected_unbilled(
+    conn: Session, journal
+):
+    declined = status_error(openai, 400, {"code": "invalid_prompt", "message": "flagged"})
+    client = SdkClient(declined, openai_response(GOOD))
+    gw = gateway(MODELS, openai=client, journal=journal)
+    with pytest.raises(CallError, match="refused"):
+        await gw.ask("brief", REQUEST)
+    await gw.ask("brief", Request(system="rubric", user="another", output=Answer))
+    mean = await in_read(conn, calls_store.mean_cost, "brief", "openai", SOL.model, SOL.effort)
+    assert mean == pytest.approx(0.0043)  # the billed call's, not halved by the free refusal
+
+
+async def test_an_openai_429_for_the_rate_is_tried_again_and_for_the_accounts_limit_is_not():
+    rate = status_error(openai, 429, {"code": "rate_limit_exceeded", "type": "requests"})
+    client = SdkClient(rate, openai_response(GOOD))
+    assert (await gateway(MODELS, openai=client).ask("brief", REQUEST)).value.yes
+    assert len(client.sent) == 2
+    for code in ("credit_balance_exhausted", "project_spend_limit_exceeded"):
+        limit = status_error(openai, 429, {"code": code, "type": "insufficient_quota"})
+        client = SdkClient(limit, openai_response(GOOD))
+        with pytest.raises(CallError) as caught:
+            await gateway(MODELS, openai=client).ask("brief", REQUEST)
+        assert caught.value.kind == "account" and len(client.sent) == 1
 
 
 async def test_openrouter_refusals_and_filtered_replies_are_refusals():
@@ -172,6 +405,7 @@ def _timeout(sdk, phase: str) -> Exception:
     [
         (anthropic, "anthropic", anthropic_message(GOOD), "writer"),
         (openai, "openrouter", openrouter_completion(GOOD), "check"),
+        (openai, "openai", openai_response(GOOD), "brief"),
     ],
 )
 async def test_a_connection_that_never_opened_is_tried_again_and_a_read_timeout_is_not(
@@ -189,7 +423,11 @@ async def test_a_connection_that_never_opened_is_tried_again_and_a_read_timeout_
 @pytest.mark.parametrize("code", [401, 402, 403])
 @pytest.mark.parametrize(
     ("sdk", "provider", "role"),
-    [(anthropic, "anthropic", "writer"), (openai, "openrouter", "check")],
+    [
+        (anthropic, "anthropic", "writer"),
+        (openai, "openrouter", "check"),
+        (openai, "openai", "brief"),
+    ],
 )
 async def test_an_account_error_is_never_retried_and_journalled_as_its_kind(
     conn: Session, journal, sdk, provider, role, code
@@ -313,7 +551,7 @@ async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn: Session
     assert all(r["output"] is None and r["usage"]["cost"] > 0 for r in rows)
 
     def down(role, request):
-        raise ProviderError("APIConnectionError", transient=True)
+        raise ProviderError("APIConnectionError", transient=True, unanswered=True)
 
     offline = Gateway(MODELS, {"anthropic": ScriptedProvider("anthropic", down)}, journal)
     offline.retry_delays = ()
@@ -474,6 +712,11 @@ def test_fallbacks_may_share_their_roles_lab_but_judge_and_check_share_none():
             MUSE,
         ),
         (OPUS, MUSE.model_copy(update={"fallbacks": (SONNET,)})),
+        # OpenAI's model is OpenAI's lab whether reached directly or through OpenRouter.
+        (
+            SOL,
+            MUSE.model_copy(update={"fallbacks": (MUSE.model_copy(update={"model": "openai/x"}),)}),
+        ),
     ):
         with pytest.raises(ValueError, match="share no lab"):
             Models(judge=judge, check=check)
@@ -635,6 +878,9 @@ def test_every_command_sees_dotenv_on_entry(tmp_path, monkeypatch, args):
     assert (seen, len(loads)) == (["1"], 1)  # loaded by the root callback, before the command
 
 
-def test_the_sdk_clients_leave_retrying_to_the_gateway():
+def test_the_sdk_clients_leave_retrying_to_the_gateway(monkeypatch):
     assert AnthropicProvider(api_key="k").client.max_retries == 0
     assert OpenRouterProvider(api_key="k").client.max_retries == 0
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+    direct = OpenAIProvider(api_key="k").client
+    assert direct.max_retries == 0 and str(direct.base_url).rstrip("/") == BASE_URL
