@@ -30,7 +30,8 @@ the whole milestone (V9).
 Found in a survey of the code at 548857e3:
 
 - **Full-text and Deep passes already have a lease with a fence.** `fulltext_passes.lease_until` is set by
-  `store/fulltext.py`'s `claim`, and every write checks `held()`: the pass row `FOR UPDATE` where the lease matches.
+  `store/fulltext.py`'s `claim`, and the writes of a pass's result check `held()`: the pass row `FOR UPDATE` where
+  the lease matches. Deep's attempt bookkeeping writes without it.
   Nothing renews a lease; it lasts 30 minutes (`core/fulltext.py`, `LEASE`), a batching nightly stretches it to its
   deadline, and a Deep lease is the deep timeout plus 15 minutes.
 - **The background full-text worker opens a run and a gateway for each wave** of at most 4 passes with text.
@@ -59,52 +60,72 @@ Found in a survey of the code at 548857e3:
 - **The lease and fence copy the passes'.** The Work gate generalizes `held()`. Each item has a lease token, renewed
   by a heartbeat every third of the lease. A write unit opened under a work context takes the item's row `FOR SHARE`
   where the token matches and has not expired, or it fails. A takeover updates that row, so it waits for the unit to
-  end.
-- **The pass claim stays.** A pass item claims its pass with today's SQL. The nightly's inline passes and a re-run's
-  passes claim the same way, and an item that finds its pass done or already claimed ends with nothing to do. A
-  standalone pass's lease is its item's; the pass's own `lease_until` stays only for the nightly's inline passes,
-  until A3.
+  end. Lease changes (take, renew, take back, end) run in the Work gate's own units, which are not fenced. A path that
+  touches both an item's row and a pass's row takes the item's row first.
+- **The pass claim stays, with its lease.** A pass item claims its named pass through the shared claim (today's SQL,
+  narrowed to one id). The nightly's inline passes and a re-run's passes claim the same way, and an item that finds
+  its pass done or claimed ends with nothing to do. Every caller keeps the pass's own `lease_until`, so a pass whose
+  owner is gone, standalone or inline, is reclaimed when it lapses, as today.
+- **Submitting where work becomes eligible.** Whatever makes a pass runnable submits or reschedules its item in the
+  same unit: queueing it, the owner's "run it now", `retry_failed`, a re-run letting go of its passes. P3 does the same
+  for a job's creation and every return to runnable. A startup sweep submits what is already queued.
 - **Waking.** A submission sends `NOTIFY` in the submitter's unit, which Postgres delivers when that unit commits. The
   gate listens on one connection outside the pool, as the session locks do, and otherwise sleeps until the next
   `not_before`. A 30 s fallback poll covers a dropped listener: a drop delays work and loses none.
 - **Process liveness.** Each serving process has a `workers` row with a heartbeat and the kinds it runs. A CLI
   command reads it to decide whether a worker for its kind exists.
 - **Grain, as today's code has it:**
-  - a full-text pass item is one pass, so the wave of 4 per run goes; the item opens no run of its own and attributes
-    its calls to itself;
+  - a full-text pass item is one pass and opens its own `fulltext` run with the journal as today (the wave of 4
+    becomes a wave of one), so every call keeps a run; from P4 each call also records its item;
   - a job chunk is 50 papers, and its run is the job's, opened at its first chunk;
-  - a delivery is one `deliver` call for one integration, and dispatch's backoff (30 s doubling to 1 h) is the item's
-    `not_before`;
+  - a delivery is one `deliver` call for one integration. Setup, cursors and retries stay as they are, and dispatch's
+    backoff (30 s doubling to 1 h) is the item's `not_before`. A delivery that may have left a backlog, read nothing
+    behind the outbox's snapshot, or saw an event arrive while it ran submits the integration's next turn;
   - an awaiting-text pass sets `not_before` 30 s ahead, today's tick.
 - **The run lock is still taken inside the nightly item and each job chunk,** on its listed session connection. The
   scheduler no longer holds a lock across a night. A nightly item that finds the run lock taken gets a `not_before`
   and stays pending.
 - **The Deep pause stays global,** as a `not_before` on every Deep pass item.
-- **One Model gate per process,** built by its owner (`serve`, or a test). `recover` runs once at startup over every
-  open batch, and an answer it finds is credited to its original call's run and item. `eval ladders` goes through the
-  gate instead of calling providers directly.
+- **One Model gate per process,** built by its owner (`serve`, or a test). The batchers' flushing and polling tasks
+  are shared by many items, so they run under the gate's system attribution, unfenced, and journal by the original
+  call's id; a write that advances a live item stays fenced. `recover` at startup accounts for batches whose items
+  are gone and leaves a live item's batch to it. `eval ladders` goes through the gate instead of calling providers
+  directly.
 - **Attribution** is a second context variable beside A1's `_unit`: a work item, a request or system. The check sits
   where the nesting check does: the Database gate's `read`, `write` and `held`, and the Model gate's `complete`,
   `ask` and `refused_throughout`. It turns strict in P5, once every caller sets it.
-- **The CLI submits through the database, not HTTP.** It writes the item and waits on its row and on `NOTIFY`. An
-  evaluation's inputs go in the item's scope; each result is a row in `work_results`, which the command reads and
-  writes to its jsonl as it arrives. Resuming works as today: the command skips what its files hold and submits the
-  rest.
-- **Rollback stays possible until the end.** The old liveness columns (`backend_pid`, `backend_start`) and the
-  pass's own lease stay until P7, so the previous image can run on the new schema.
+- **The CLI submits through the database, not HTTP.** It writes the item to the database `serve` works from, with
+  write access (the evaluations open it read-only today), and waits on its row and on `NOTIFY`. An evaluation's
+  inputs and candidate settings go in the item's scope; each result is a row in `work_results`, which the command
+  reads and writes to its jsonl as it arrives. Resuming works as today: the command skips what its files hold and
+  submits the rest, and the replay keeps `--resume`. An evaluation's calls are journalled as evaluation calls, which
+  production's reuse and price estimates do not read. `docs/agents/dev-host.md` says how to run them.
+- **Until P5, the CLI's inline commands run as items in their own process.** P3 retires the presence session, so a
+  command that still runs work inline (`nightly`, `digests write`, `fulltext`, …) does it as a work item through an
+  in-process Worker, whose lease gives its run liveness. P5 sends the same items to `serve` instead.
+- **Rollback is a handoff of live work.** Until P7, P2 and P3 keep writing the claim state the previous image reads:
+  the passes' leases, job states, the old liveness columns (`backend_pid`, `backend_start`). A version switch stops
+  `serve` first; the receiving version resumes from the current pass, job, run and cursor records (the old image takes
+  back sessionless jobs and lapsed passes; the new one's startup sweep submits what is queued or runnable). P2 and P3
+  each rehearse upgrade, rollback and upgrade again with unfinished work on a migrated sandbox.
+- **The scheduler's handoff.** A fire the old scheduler already served (a run started after it) stays served when P3
+  starts inside the catch-up window: the submitter checks the runs as today before using the key.
 - **Release links:**
   - a `release_links` table holds paper, version, url, kind, state, license, `checked_at` and `found_by` (the
     finder, a re-check or the owner's action);
-  - on the paper's page they replace the Deep card's Code link (`web/src/components/paper/Actions.tsx`,
-    `linkCells`), as chips coloured by state;
-  - re-checks use GitHub's and Hugging Face's APIs without a token: about 20 a week fits the anonymous limits;
+  - on the paper's page they show as chips coloured by state (`web/src/components/paper/Actions.tsx`, `linkCells`),
+    and a Deep card's Code link stays where no release link exists;
+  - an automatic find is keyed for good by paper and version, a "none found" outcome included; the owner's action
+    always runs a fresh find;
+  - re-checks use GitHub's and Hugging Face's APIs;
   - the automatic Deep read switch is `[integrations.deep] automatic`, which sets `word.Rules.automatic_deep`;
     unset keeps today's behaviour, and production sets it `false`.
 - **Pi** goes to the newest release at build time that knows the GPT-6.2 models: 1.6.0 (2026-11-20) today.
 - **The folded re-trigger fix goes with the jobs worker in P3:** an owner's Deep request bumps a running Process job
   only when the job's steps are affected.
 - **Shipping.** Each stage is a hard-class PR with drive's review loop; Opus implements and Sol reviews. Stages merge
-  and deploy back to back. While the loops move (P2, P3), no other backend PR is open.
+  and deploy back to back. While P2 and P3 move the loops, unrelated backend PRs stay out of the rollout; T1 and T2
+  are part of it.
 
 ## Structure
 
@@ -140,8 +161,8 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
 ## Risks
 
 - **R1. Five loops replaced, and the nightly breaks.** Handled by a strict sandbox nightly on the same window before
-  and after (V3), each kind run end to end on the sandbox (V2), an additive schema so the previous image can be
-  redeployed until P7, and one checked weekday night after the last deploy (V9).
+  and after (V3), each kind run end to end on the sandbox (V2), rollback as a rehearsed handoff of live work until
+  P7, and one checked weekday night after the last deploy (V9).
 - **R2. The fence's row lock makes heartbeats or takeovers wait.** Every write unit of an item holds its row
   `FOR SHARE`, and a renewal updates it. Units are short since A1, the slow-unit warning surfaces a long one, and a
   heartbeat every third of the lease makes a wait of seconds harmless.
@@ -152,36 +173,36 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
   original run and item, and the bookkeeping runs under the system attribution. Tested with a batch left open by a
   killed worker (V4).
 - **R5. The deep update changes how Deep reads are written.** Pi 1.0 to 1.6 and the model 6.1 to 6.2. Deep reads are
-  off, and switching them back on needs its own shaping (backlog); the finder is the first user of the new versions,
-  covered by V7.
+  off, and switching them back on needs its own shaping (backlog). One real Deep read on the sandbox (V8) and the
+  finder (V7) exercise the new versions.
 
 ## Stages
 
 | | Stage | Shows before the next starts |
 |---|---|---|
 | **P1** | **The gate.** The migration; `WorkGate` with submit (a Repository call), keys (a scheduled one holds for good), `not_before`, admission per kind or per integration, leases and heartbeats, take-back, the fence in write units, LISTEN and the fallback poll; the `workers` rows; a Worker runner; the attribution context, not yet checked. Nothing uses it yet. | The gate's tests (V1); CI green. |
-| **P2** | **Passes and deliveries.** Full-text and Deep passes become items, submitted where settling queues them and by a startup sweep for those already queued. Dispatch becomes delivery items per integration. Their loops, wake events, ticks and the Deep and dispatch session locks go. | V2 for these kinds on the sandbox, deliveries to a test webhook included; then merge and deploy. |
-| **P3** | **Scheduler, nightly, jobs.** The scheduler submits fires within their catch-up window, and its lock goes. The nightly is one item under the run lock. Job chunks are items, the job's run spanning them and its ceiling covering the job. Liveness comes from leases, and the presence session goes. The re-trigger fix. | V2 and V3 on the sandbox; then merge and deploy. |
+| **P2** | **Passes and deliveries.** Full-text and Deep passes become items, submitted wherever a pass becomes eligible and by a startup sweep. Dispatch becomes delivery items per integration, each arranging its next turn. Their loops, wake events, ticks and the Deep and dispatch session locks go. | V2 for these kinds on the sandbox, deliveries to a test webhook included; the rollback rehearsal; then merge and deploy. |
+| **P3** | **Scheduler, nightly, jobs.** The scheduler submits fires within their catch-up window, served fires staying served, and its lock goes. The nightly is one item under the run lock. Job chunks are items, the job's run spanning them and its ceiling covering the job. Liveness comes from leases, and the presence session goes; the CLI's inline commands run as items in process. The re-trigger fix. | V2 and V3 on the sandbox; the rollback rehearsal; then merge and deploy. |
 | **P4** | **One Model gate.** Providers, limits and batchers per (provider, deadline) in one gate per process; ceiling, deadline and journal from the work context; recovery once at startup; `work_id` on calls; `eval ladders` through it. | V4; V3 again; then merge and deploy. |
 | **P5** | **CLI and attribution.** The model and pipeline commands submit and wait; evaluations carry their inputs and stream their results to their files; Ctrl-C asks whether to cancel or detach, and `litwatch work follow ID` picks an item back up. The API, MCP, monitor and CLI set request attribution, and the check turns strict. | V5, V6; then merge and deploy. |
 | **P6** | **Release links.** The finder's endpoint and prompt in deep; `release_links`; the triggers (an analysis, a new version, the owner's action); placeholder re-checks; the paper's page, the API and MCP; the automatic Deep read switch. | V7; then merge and deploy with deep's image. |
-| **P7** | **Cleanup.** The old liveness columns and the pass's own lease outside the nightly dropped; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
-| **T1** ∥ | **Deep track:** the shared contracts (D2), one LaTeX parser (D3), Pi to the newest release, `gpt-6.2-sol` for the Deep read (high effort), the finder's own model setting (`gpt-6.2-sol`, medium). Starts with P1; P6 needs it. | V8; merged and deployed with litwatch's image as it lands. |
-| **T2** ∥ | **OpenAI adapter:** the Responses API with structured output, the Batch API behind the batcher's interface, prices and bounds. Built against today's provider interface from P1 on; it moves into the gate in P4. | V4's adapter part; merged whenever ready. |
+| **P7** | **Cleanup.** The old liveness columns dropped, now that no image reads them; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
+| **T1** ∥ | **Deep track:** the shared contracts (D2), one LaTeX parser (D3), Pi to the newest release, `gpt-6.2-sol` for the Deep read (high effort), the finder's own model setting (`gpt-6.2-sol`, medium). Starts with P1; P6 needs it. | V8; deployed, and rolled back if need be, as a litwatch and deep image pair. |
+| **T2** ∥ | **OpenAI adapter:** the Responses API with structured output, the Batch API behind the batcher's interface, prices and bounds. Built against today's provider interface from P1 on; it moves into the gate in P4. | V4's adapter part; merged before P4 starts. |
 
 ## Verification
 
 | | Claim | Evidence |
 |---|---|---|
-| **V1** | A submission commits with its unit or not at all. A second submission with an open key is the same item, and a scheduled key holds after its item ends. Items wait for their `not_before`. Admission is one per kind or per integration. An expired lease is taken back and the item tried again. A write under a lost lease fails, and a takeover waits for an open unit. A worker that exits while its last bookkeeping write fails leaves its item to be tried again. | pytest on real Postgres (`tests/test_work_gate.py`), one test per sentence; the fence and the takeover with two connections under a timeout. |
-| **V2** | Each kind runs as a Worker as before: full-text passes, Deep passes, deliveries, the publications lookup, the nightly, Process, re-run, replay and Write again. A nightly blocked by the run lock stays pending, no chunk starts while a nightly is due or running, and a pass the nightly worked inline leaves no item to run. | pytest per kind. On the sandbox: a Process job, a re-run under a $0.50 ceiling, a replay, a Write again, a Deep request to a dev deep instance and deliveries to a test webhook, their run records and results read back. |
-| **V3** | The nightly runs as before. | On a sandbox built from the archive's papers, `litwatch nightly --no-fetch --limit 25` with `LITWATCH_STRICT_GATES=1`, at the base and after P3, P4 and P5: the run records' counts match, and no check raises. At most $5 a run. |
-| **V4** | One Model gate per process. A ceiling holds across a job's chunks. Calls with the same provider and deadline share batches. A batch left by a killed worker is recovered once and credited to its original call. The OpenAI adapter's normal and batched replies parse, and their cost lands in the journal. | pytest with fake providers (`tests/fakes.py`) and faked OpenAI SDK objects; one real `litwatch ping` through OpenAI and one real Batch of 2 requests. |
-| **V5** | Every unit and model call is attributed. | The suite in strict mode; V3's strict nightly logs no attribution error; the API tests and the stack smoke test pass. |
-| **V6** | The CLI submits and waits, refuses without a worker, survives a restart of `serve` while it waits, and an evaluation resumes from its files. | pytest with a worker in process. On the sandbox, with `serve` on its own port: `nightly --limit 5`; `eval classify` on 10 labels, stopped and resumed; `ping`; the same with `serve` stopped, which must refuse. |
-| **V7** | Release links are found with the right access states and shown; placeholders are re-checked; automatic Deep reads stay off. | `npm test` with a fake model. A real find on about 10 sandbox papers through a dev deep instance, covering public, gated, placeholder and none found, which the owner looks over. Re-checks against a real placeholder repository. The paper's page walked at 390 and 1440 px, dark and light. MCP `get_paper` shows the links. |
-| **V8** | Python and deep share generated contracts, one outline parser serves both, and deep runs on the newer Pi and model. | CI fails on a stale generated contract (shown once in the PR). Parser tests over the papers both parsers covered. `npm test`, `npm run typecheck`, the stack smoke test. |
-| **V9** | Production holds. | The first weekday night after the last deploy: its run record against the week's; the logs searched for attribution, nesting, fence, lease-lost, take-back and pool errors; no stuck items; integrations caught up; release links found for that night's papers. |
+| **V1** | A submission commits with its unit or not at all. A second submission with an open key is the same item, and a scheduled key holds after its item ends. Items wait for their `not_before`. Admission is one per kind or per integration. An expired lease is taken back and the item tried again. A write under a lost lease fails, and a takeover waits for an open unit; a heartbeat blocked by a unit goes through once it ends. A failed heartbeat cancels the item's task, and a lost pooled connection leaves the item to be tried again. A worker that exits while its last bookkeeping write fails leaves its item to be tried again. `NOTIFY` wakes the gate on commit, not on rollback, and the poll takes over after the listener drops. | pytest on real Postgres (`tests/test_work_gate.py`), one test per sentence; the fence, takeover and heartbeat with two connections under a timeout. |
+| **V2** | Each kind runs as a Worker as before: full-text passes, Deep passes, deliveries, the publications lookup, the nightly, Process, re-run, replay and Write again. A nightly blocked by the run lock stays pending, no chunk starts while a nightly is due or running, and a pass the nightly worked inline leaves no item to run. A failed pass retried by the owner runs without a restart. Runs and jobs read as alive or dead across a lease's expiry, the retired sessions, locks and loops are gone, and a first Deep request during a Process job no longer re-queues it. | pytest per kind. On the sandbox: a Process job, a re-run under a $0.50 ceiling, a replay, a Write again, a pass retried from Settings, a Deep request to a dev deep instance and deliveries to a test webhook, their run and work records read back; each change's spend counted. |
+| **V3** | The nightly runs as before, through the Worker. | On a sandbox built from the archive's papers, the same seeded nightly (`--no-fetch --limit 25`, `LITWATCH_STRICT_GATES=1`): at the base directly; after P3 and P4 as a scheduled item under a strict `serve`; after P5 submitted from the CLI to a strict `serve`. The run records' counts match, the work records are read back, and no check raises. At most $5 a run. |
+| **V4** | One Model gate per process. A ceiling holds across a job's chunks. Calls with the same provider and deadline share batches. A batch left by a killed worker is recovered once and credited to its original call, and a second item's call in a batch still settles after the first item's lease is lost. The OpenAI adapter's normal and batched replies parse and report their cost; through the gate, that cost is journalled on the original run and item. | pytest with fake providers (`tests/fakes.py`) and faked OpenAI SDK objects. At T2, one real normal call and one real Batch of 2 requests, parsed with their cost. At P4, the same calls' cost read back from the journal. |
+| **V5** | Every unit and model call is attributed, and a missing attribution is caught. | Tests that a Database or Model gate call with no attribution raises in strict mode and logs an error otherwise, and that startup and the gates' bookkeeping run under the system attribution. The suite in strict mode; V3's strict nightly logs no attribution error; the API tests and the stack smoke test pass. |
+| **V6** | The CLI submits and waits, refuses without a worker, survives a restart of `serve` while it waits, and an evaluation resumes from its files. | pytest with a worker in process. On the sandbox, with `serve` on its own port: `nightly --limit 5`, with `serve` restarted while the command waits, which follows the same item and writes nothing twice; `eval classify` on 10 labels, stopped and resumed; `ping`; the same with `serve` stopped, which must refuse. |
+| **V7** | Release links are found with the right access states and shown; triggers and re-checks follow their policy; automatic Deep reads stay off while the owner's Deep requests still work. | `npm test` with a fake model. pytest of the triggers (once per version, again on a new version, always on the owner's action) and of the re-check schedule, ending after four weeks. A real find on about 10 sandbox papers through a dev deep instance, covering public, gated, placeholder and none found, which the owner looks over. Re-checks against a real placeholder repository. On the sandbox with automatic reads off: an eligible paper queues no Deep read, and an owner's Deep request runs. The paper's page walked at 390 and 1440 px, dark and light. MCP `get_paper` shows the links. |
+| **V8** | Python and deep share generated contracts, one outline parser serves both, and deep runs on the newer Pi and model. | CI fails on a stale generated contract (shown once in the PR). Parser tests over the papers both parsers covered. `npm test`, `npm run typecheck`, the stack smoke test. One real Deep read on the sandbox with the new image pair, its resolved model and reviews recorded for the owner. |
+| **V9** | Production holds. | The first weekday night after the last deploy: its run record against the week's; the logs searched for attribution, nesting, fence, lease-lost, take-back and pool errors; no stuck items; integrations caught up; every eligible paper of the night has a find with an outcome, "none found" included. |
 
 ## Scope
 
