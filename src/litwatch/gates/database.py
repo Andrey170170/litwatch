@@ -16,7 +16,18 @@ without it.
 A write unit names its locks when it opens and the gate takes them in one order: the taxonomy,
 then papers by id, then the other locks as `REGISTRY` lists them. The session locks held across
 network calls (`HELD_ACROSS_CALLS`) are not units: `db.held` keeps each on a connection of its
-own, outside the pool; so does `db.startup` the migration lock.
+own, outside the pool; so does `db.startup` the migration lock, and `db.listen` the Work gate's
+LISTEN.
+
+A write unit opened under a work context (`gates.context.working`, set by the Work gate for a
+work item's task) is fenced: before its locks, it takes the item's row `FOR KEY SHARE`, then
+checks that the item's lease is the task's and unexpired by the clock, or fails with
+`LeaseLostError`. It holds that row to its end, so no lease change, which locks the row
+`FOR UPDATE` first, can happen while the unit is open: no write made under a lease commits
+after a peer took the item. A plain update of the row (a submission marking the item to run
+again) does not wait for it, so a submitter holding a paper lock the unit waits for cannot
+deadlock with it (docs/plans/a2-work-gate.md, "The lease and fence"). Read
+units are not fenced.
 
 Transitional, until A2's Work gate replaces it with leases and heartbeats (docs/backlog.md, A2,
 "Leases replace the presence session"): the gate holds a presence session, a connection of its
@@ -32,7 +43,7 @@ import contextlib
 import logging
 import os
 import time
-from collections.abc import AsyncIterator, Iterable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Iterable, Sequence
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -44,6 +55,8 @@ from psycopg import sql
 from psycopg.abc import Params
 from psycopg.rows import dict_row, tuple_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
+
+from litwatch.gates.context import Work, current_work
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +91,11 @@ class PoolTimeoutError(RuntimeError):
 
 class BusyError(RuntimeError):
     """Another session holds the session lock asked for."""
+
+
+class LeaseLostError(RuntimeError):
+    """A write unit was opened for a work item whose lease the task no longer holds: it
+    expired, or the item was taken back."""
 
 
 @dataclass(frozen=True)
@@ -339,6 +357,27 @@ class WriteUnit(ReadUnit):
         self.locks = tuple(lock.name if arg is None else (lock.name, arg) for lock, arg in locks)
 
 
+async def _fence(unit: WriteUnit, work: Work) -> None:
+    """Hold the work item's row for the unit, if the task's lease on it is the current one and
+    has not expired; otherwise `LeaseLostError`. The row comes first, before any lock the unit
+    takes, as on every path that touches an item's row and a pass's.
+
+    The row is locked first and the lease checked after, in a statement of its own against the
+    clock: a locking statement that waited judges by the time it started, so a lease that
+    lapsed while it waited would pass."""
+    item = work.item
+    await unit.execute("SELECT 1 FROM work_items WHERE id = %s FOR KEY SHARE", (item.id,))
+    held = await (
+        await unit.execute(
+            "SELECT 1 FROM work_items WHERE id = %s AND lease_token = %s "
+            "AND lease_until > clock_timestamp()",
+            (item.id, item.lease_token),
+        )
+    ).fetchone()
+    if held is None:
+        raise LeaseLostError(f"unit {unit.name!r}: the lease on work item {item.id} is lost")
+
+
 # -- the gate --------------------------------------------------------------------------------------
 
 
@@ -490,9 +529,12 @@ class DatabaseGate:
             raise ValueError(f"unit {name!r} names papers without the taxonomy lock")
         others = _named(locks)
         outside_unit(f"opening unit {name!r}")
+        work = current_work()
         async with self._connection(name) as conn:
             unit = WriteUnit(name, conn, taxonomy)
             async with _entered(unit), conn.transaction():
+                if work is not None:
+                    await _fence(unit, work)
                 await unit._take(paper_ids, others)
                 yield unit
 
@@ -520,6 +562,20 @@ class DatabaseGate:
             raise ValueError(f"{name!r} is not a startup lock")
         async with self._session_lock(lock, None, wait=True) as (_, conn):
             yield conn
+
+    @asynccontextmanager
+    async def listen(self, channel: str) -> AsyncGenerator[AsyncIterator[str]]:
+        """LISTEN on `channel` for the block, on a connection of its own outside the pool.
+        Yields the payloads of its notifications as they arrive: a notification is sent when
+        the transaction that sent it commits, never when it rolls back. When the connection
+        drops, iterating raises `psycopg.OperationalError`."""
+        outside_unit(f"listening on {channel!r}")
+        conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
+        try:
+            await conn.execute(sql.SQL("LISTEN {}").format(sql.Identifier(channel)))
+            yield (note.payload async for note in conn.notifies())
+        finally:
+            await conn.close()
 
     @asynccontextmanager
     async def _session_lock(

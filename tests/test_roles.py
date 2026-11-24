@@ -64,11 +64,16 @@ def _services() -> set[str]:
     return _packages() - set(NOT_SERVICES)
 
 
-def _forbidden(source: str) -> set[str]:
-    """What the forbidden contract on a module forbids it, by top-level module."""
+def _contract(source: str) -> dict:
+    """The forbidden contract on a module."""
     contracts = tomllib.loads(PYPROJECT.read_text())["tool"]["importlinter"]["contracts"]
     (contract,) = (c for c in contracts if f"litwatch.{source}" in c.get("source_modules", []))
-    return {_top(m) for m in contract["forbidden_modules"]}
+    return contract
+
+
+def _forbidden(source: str) -> set[str]:
+    """What the forbidden contract on a module forbids it, by top-level module."""
+    return {_top(m) for m in _contract(source)["forbidden_modules"]}
 
 
 def test_contracts_name_every_package():
@@ -77,6 +82,9 @@ def test_contracts_name_every_package():
     # itself, for the nesting check.
     assert _forbidden("store") == _packages() - {"store", "core", "gates"}
     assert _forbidden("gates") == _packages() - {"gates", "core"}
+    # The one exception: the Work gate's queue is a Repository it keeps its bookkeeping with.
+    exceptions = _contract("gates").get("ignore_imports")
+    assert exceptions == ["litwatch.gates.work -> litwatch.store.work"]
     assert _forbidden("llm") == _services() | ENTRIES
     for shared in SHARED:
         assert _forbidden(shared) == _packages() - {"core"}
