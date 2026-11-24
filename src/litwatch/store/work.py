@@ -80,8 +80,8 @@ async def submit(
     to `not_before` when that is sooner; a running one is marked as resubmitted, wanted again
     at `not_before` (the sooner of two such submissions), so work asked for while it ran is not
     lost: when that run ends, a fresh item takes the key (`end`). A `lasting` key, a scheduled
-    occurrence's (the fire time), holds for good: once submitted, it returns its item, running
-    or ended, unchanged, and never runs it again.
+    occurrence's (the fire time), holds for good: once submitted, it returns its item, pending,
+    running or ended, unchanged, and never runs it again.
 
     The open item's row is locked `FOR NO KEY UPDATE` before its state is read, so a claim or a
     settling of it in flight is waited for and the item returned is as it stands. That lock
@@ -96,8 +96,10 @@ async def submit(
         "admission": kind if admission is None else admission,
         "lasting": lasting,
     }
-    # A key found free may be taken by a concurrent insert before ours: then it is looked up again.
-    for _ in range(2):
+    # A key found free may be taken by a concurrent insert before ours, or the item found may end
+    # and hand its key to a successor while we wait for its row: either way it is looked up
+    # again, until a row is locked or ours is inserted. Each turn follows a commit elsewhere.
+    while True:
         row = await (
             await unit.execute(
                 f"SELECT {_COLUMNS}, lasting FROM work_items "
@@ -119,7 +121,7 @@ async def submit(
                 continue
             await _notify(unit, kind)
             return _item(inserted)
-        if row["state"] == "ended" or (row["state"] == "running" and row["lasting"]):
+        if row["state"] == "ended" or row["lasting"]:
             return _item(row)
         if row["state"] == "pending":
             sooner = await (
@@ -143,7 +145,6 @@ async def submit(
         ).fetchone()
         assert marked is not None  # locked above
         return _item(marked)
-    raise RuntimeError(f"work item {kind} {key!r} could be neither submitted nor found")
 
 
 async def take_back(unit: WriteUnit, kinds: list[str]) -> list[WorkItem]:
@@ -181,7 +182,7 @@ async def take(unit: WriteUnit, kinds: list[str], lease: timedelta) -> WorkItem 
                 ORDER BY not_before, id LIMIT 1 FOR UPDATE SKIP LOCKED
             )
             UPDATE work_items SET state = 'running', lease_token = gen_random_uuid(),
-                                  lease_until = now() + %(lease)s, started_at = now(),
+                                  lease_until = now() + %(lease)s,
                                   attempts = attempts + 1, resubmitted = false
             WHERE id = (SELECT id FROM next) RETURNING {_COLUMNS}
             """,
@@ -192,11 +193,12 @@ async def take(unit: WriteUnit, kinds: list[str], lease: timedelta) -> WorkItem 
 
 
 async def stamp(unit: WriteUnit, item: WorkItem, lease: timedelta) -> WorkItem:
-    """Start the lease of an item `take` claimed in this unit: `lease` from the clock now."""
+    """Start the lease of an item `take` claimed in this unit: `lease` from the clock now, which
+    is when it started."""
     row = await (
         await unit.execute(
-            f"UPDATE work_items SET lease_until = clock_timestamp() + %s WHERE id = %s "
-            f"RETURNING {_COLUMNS}",
+            f"UPDATE work_items SET started_at = c.at, lease_until = c.at + %s "
+            f"FROM (SELECT clock_timestamp() AS at) c WHERE id = %s RETURNING {_COLUMNS}",
             (lease, item.id),
         )
     ).fetchone()
@@ -251,9 +253,9 @@ async def end(
         return False
     await unit.execute(
         "UPDATE work_items SET state = 'ended', outcome = %s, error = %s, cost = %s, "
-        "ended_at = now(), lease_token = NULL, lease_until = NULL, resubmitted = false "
+        "ended_at = %s, lease_token = NULL, lease_until = NULL, resubmitted = false "
         "WHERE id = %s",
-        (outcome, error[:2000] if error is not None else None, cost, item.id),
+        (outcome, _stored(error), cost, held["at"], item.id),
     )
     if held["resubmitted"]:
         await unit.execute(
@@ -263,6 +265,11 @@ async def end(
         )
     await _notify(unit, item.kind)
     return True
+
+
+def _stored(error: str | None) -> str | None:
+    """An error as stored: at most 2000 characters, without NULs, which text columns refuse."""
+    return None if error is None else error.replace("\x00", "\ufffd")[:2000]
 
 
 async def again(

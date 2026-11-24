@@ -12,10 +12,11 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg.abc import Params
 
 from litwatch.core.work import ItemState, Outcome, WorkItem
 from litwatch.gates.context import Attribution, Work, attribution, current_work, working
-from litwatch.gates.database import DatabaseGate, LeaseLostError
+from litwatch.gates.database import Cursor, DatabaseGate, LeaseLostError, Query, WriteUnit
 from litwatch.gates.work import SYSTEM, Done, Later, Worker, WorkGate
 from litwatch.store import work as queue
 from tests.sessions import Session, in_read, sibling, staged
@@ -36,6 +37,12 @@ async def until(check: Callable[[], Awaitable[bool]], what: str) -> None:
 async def submit(db: DatabaseGate, kind: str, key: str, **kwargs) -> WorkItem:
     async with db.write("submit") as unit:
         return await queue.submit(unit, kind, key, **kwargs)
+
+
+async def take(gate: WorkGate, kinds: list[str]) -> WorkItem | None:
+    """The gate's next claim, leased as `run` leases it."""
+    taken = await gate._take(kinds)
+    return None if taken is None else taken[0]
 
 
 async def item(conn: Session, item_id: int) -> WorkItem:
@@ -141,7 +148,7 @@ async def test_an_open_key_is_the_same_item(conn: Session, db):
     sooner = await submit(db, "fulltext", "7")
     assert sooner.id == first.id and sooner.not_before < first.not_before
 
-    taken = await gate.take(["fulltext"])
+    taken = await take(gate, ["fulltext"])
     assert taken is not None and taken.id == first.id
     async with db.write("end") as unit:
         assert await queue.end(unit, taken, Outcome.DONE)
@@ -166,7 +173,7 @@ async def records(conn: Session, key: str) -> list[tuple]:
 async def test_a_resubmitted_item_that_ends_leaves_its_record_and_a_successor(conn: Session, db):
     gate = WorkGate(db)
     first = await submit(db, "fulltext", "7", scope={"pass": 7}, admission="text")
-    taken = await gate.take(["fulltext"])
+    taken = await take(gate, ["fulltext"])
     assert taken is not None
     # The owner's retry while it runs: the same item, marked.
     assert (await submit(db, "fulltext", "7")).id == first.id
@@ -176,7 +183,7 @@ async def test_a_resubmitted_item_that_ends_leaves_its_record_and_a_successor(co
         ("ended", "failed", "no text", False),
         ("pending", None, None, False),
     ]
-    successor = await gate.take(["fulltext"])
+    successor = await take(gate, ["fulltext"])
     assert successor is not None and successor.id != first.id
     assert (successor.scope, successor.admission, successor.attempts) == ({"pass": 7}, "text", 1)
 
@@ -201,7 +208,7 @@ async def test_a_resubmission_during_a_claim_marks_the_claimed_item(conn: Sessio
 async def test_a_resubmission_open_while_the_item_settles_is_not_lost(conn: Session, db, other):
     gate = WorkGate(db)
     first = await submit(db, "fulltext", "7")
-    taken = await gate.take(["fulltext"])
+    taken = await take(gate, ["fulltext"])
     assert taken is not None
     async with other.transaction():
         # The owner's retry, not yet committed, while the item's run settles.
@@ -221,7 +228,7 @@ async def test_a_resubmitted_item_that_runs_again_stays_one_item(conn: Session, 
     soon = datetime.now(UTC) + timedelta(minutes=5)
 
     async def taken_and_resubmitted(wanted: datetime | None = None) -> WorkItem:
-        taken = await gate.take(["fulltext"])
+        taken = await take(gate, ["fulltext"])
         assert taken is not None and taken.id == first.id
         await submit(db, "fulltext", "7", not_before=wanted)
         return taken
@@ -245,20 +252,90 @@ async def test_a_resubmitted_item_that_runs_again_stays_one_item(conn: Session, 
     assert [t.id for t in await gate.take_back(["fulltext"])] == [first.id]
     assert await records(conn, "7") == [("pending", None, None, False)]
     assert (await item(conn, first.id)).not_before < soon
-    assert (await gate.take(["fulltext"])) is not None
+    assert (await take(gate, ["fulltext"])) is not None
 
 
 async def test_a_scheduled_key_holds_after_its_item_ends(conn: Session, db):
     gate = WorkGate(db)
+    # Pending, a submission at another time leaves it as it is.
+    tomorrow = datetime.now(UTC) + timedelta(days=1)
+    next_fire = await submit(
+        db, "nightly", "2026-11-25T02:00+00:00", not_before=tomorrow, lasting=True
+    )
+    again = await submit(db, "nightly", "2026-11-25T02:00+00:00", lasting=True)
+    assert (again.id, again.state, again.not_before) == (next_fire.id, ItemState.PENDING, tomorrow)
+
     fire = await submit(db, "nightly", "2026-11-24T02:00+00:00", lasting=True)
-    taken = await gate.take(["nightly"])
+    taken = await take(gate, ["nightly"])
     assert taken is not None
     assert (await submit(db, "nightly", "2026-11-24T02:00+00:00", lasting=True)).id == fire.id
     async with db.write("end") as unit:
         await queue.end(unit, taken, Outcome.DONE)
     again = await submit(db, "nightly", "2026-11-24T02:00+00:00", lasting=True)
     assert again.id == fire.id and again.state == ItemState.ENDED  # not run again
-    assert await gate.take(["nightly"]) is None
+    assert await take(gate, ["nightly"]) is None
+
+
+class PausingUnit(WriteUnit):
+    """A submitter's unit on a session of its own, which stops before its second lookup of
+    the key until `resume` is set, having set `paused`."""
+
+    def __init__(self, conn: Session) -> None:
+        super().__init__("submitter", conn, None)
+        self.lookups = 0
+        self.paused, self.resume = asyncio.Event(), asyncio.Event()
+
+    async def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool = False,
+    ) -> Cursor:
+        if isinstance(query, str) and query.startswith("SELECT id, kind"):
+            self.lookups += 1
+            if self.lookups == 2:
+                self.paused.set()
+                await self.resume.wait()
+        return await super().execute(query, params, prepare=prepare, binary=binary)
+
+
+async def test_a_submission_follows_its_key_through_every_handoff(conn: Session, db, other):
+    gate = WorkGate(db)
+    first = await submit(db, "fulltext", "7")
+    taken = await take(gate, ["fulltext"])
+    assert taken is not None
+    await submit(db, "fulltext", "7")  # resubmitted: its end hands the key to a successor
+    async with await sibling(conn) as session:
+        submitter = PausingUnit(session)
+
+        async def submitting() -> WorkItem:
+            async with session.transaction():
+                return await queue.submit(submitter, "fulltext", "7")
+
+        async with other.transaction():
+            # The first handoff: the item ends, and its successor takes the key, as the
+            # submitter waits for the item's row.
+            assert await queue.end(staged(other), taken, Outcome.DONE)
+            found = asyncio.create_task(submitting())
+            await until(lambda: waiting_on_a_lock(conn, "SELECT id, kind"), "the lookup waits")
+        async with asyncio.timeout(WAIT):
+            await submitter.paused.wait()  # its insert met the successor
+        async with other.transaction():
+            # The second: the successor is claimed, resubmitted and ends, as the submitter
+            # waits for its row in turn.
+            successor = await queue.take(staged(other), ["fulltext"], LONG)
+            assert successor is not None and successor.id != first.id
+            successor = await queue.stamp(staged(other), successor, LONG)
+            await queue.submit(staged(other), "fulltext", "7")
+            assert await queue.end(staged(other), successor, Outcome.DONE)
+            submitter.resume.set()
+            await until(lambda: waiting_on_a_lock(conn, "SELECT id, kind"), "it waits again")
+        async with asyncio.timeout(WAIT):
+            last = await found
+    assert last.state == ItemState.PENDING and last.id not in (first.id, successor.id)
+    assert await records(conn, "7") == [ENDED_THEN_NEXT[0]] * 2 + [ENDED_THEN_NEXT[1]]
 
 
 # -- admission -------------------------------------------------------------------------------------
@@ -267,15 +344,19 @@ async def test_a_scheduled_key_holds_after_its_item_ends(conn: Session, db):
 async def test_items_wait_for_their_not_before(conn: Session, db):
     gate = WorkGate(db, poll=60)
     await submit(db, "fulltext", "later", not_before=datetime.now(UTC) + timedelta(hours=1))
-    assert await gate.take(["fulltext"]) is None
+    assert await take(gate, ["fulltext"]) is None
 
     # A gate asleep wakes when the next `not_before` comes, with no notification or poll.
-    ran = asyncio.Event()
-    async with serving(gate, {"soon": finished(ran)}):
-        await submit(db, "soon", "1", not_before=datetime.now(UTC) + timedelta(seconds=1))
+    async with serving(gate, {"soon": finished(asyncio.Event())}):
+        soon = await submit(db, "soon", "1", not_before=datetime.now(UTC) + timedelta(seconds=1))
         # The submission's own notification wakes the gate early; it then sleeps to the time.
-        async with asyncio.timeout(WAIT):
-            await ran.wait()
+        await until(state_is(conn, soon.id, ItemState.ENDED), "the item ran")
+    row = await (
+        await conn.execute(
+            "SELECT started_at >= not_before AS ok FROM work_items WHERE id = %s", (soon.id,)
+        )
+    ).fetchone()
+    assert row["ok"]  # claimed no earlier than its time
 
 
 async def test_admission_is_one_per_kind(conn: Session, db):
@@ -283,10 +364,10 @@ async def test_admission_is_one_per_kind(conn: Session, db):
     await submit(db, "fulltext", "1")
     await submit(db, "fulltext", "2")
     await submit(db, "deep", "1")
-    first = await gate.take(["fulltext"])
+    first = await take(gate, ["fulltext"])
     assert first is not None and first.key == "1"
-    assert await gate.take(["fulltext"]) is None
-    assert (await gate.take(["fulltext", "deep"])) is not None  # another kind runs beside it
+    assert await take(gate, ["fulltext"]) is None
+    assert (await take(gate, ["fulltext", "deep"])) is not None  # another kind runs beside it
 
 
 async def test_admission_is_one_per_integration_for_deliveries(conn: Session, db):
@@ -294,7 +375,7 @@ async def test_admission_is_one_per_integration_for_deliveries(conn: Session, db
     await submit(db, "deliver", "webhook:1", admission="deliver:webhook")
     await submit(db, "deliver", "webhook:2", admission="deliver:webhook")
     await submit(db, "deliver", "zotero:1", admission="deliver:zotero")
-    taken = [await gate.take(["deliver"]) for _ in range(3)]
+    taken = [await take(gate, ["deliver"]) for _ in range(3)]
     assert [t.key if t else None for t in taken] == ["webhook:1", "zotero:1", None]
 
 
@@ -306,7 +387,7 @@ async def test_two_processes_claiming_for_one_admission_get_one(conn: Session, d
         # Another process's claim, made and not yet committed.
         mine = await queue.take(staged(other), ["deliver"], LONG)
         assert mine is not None and mine.key == "webhook:1"
-        peer = asyncio.create_task(gate.take(["deliver"]))
+        peer = asyncio.create_task(take(gate, ["deliver"]))
         await until(lambda: waiting_on_a_lock(conn, "\n            WITH next"), "the peer waits")
     async with asyncio.timeout(WAIT):
         assert await peer is None
@@ -326,7 +407,7 @@ async def test_a_claim_kept_waiting_by_a_peer_starts_its_lease_when_it_wins(
     async with other.transaction():
         # A peer's claim, held open, then rolled back: the waiting claim wins after it.
         assert await queue.take(staged(other), ["deliver"], LONG) is not None
-        peer = asyncio.create_task(gate.take(["deliver"]))
+        peer = asyncio.create_task(take(gate, ["deliver"]))
         await until(lambda: waiting_on_a_lock(conn, "\n            WITH next"), "the claim waits")
         await until(lambda: passed(conn, before + SHORT), "a lease from before the wait lapsed")
         raise psycopg.Rollback()
@@ -342,7 +423,7 @@ async def test_a_claim_kept_waiting_by_a_peer_starts_its_lease_when_it_wins(
 async def test_an_expired_lease_is_taken_back_and_the_item_tried_again(conn: Session, db):
     dead = WorkGate(db, lease=SHORT)
     submitted = await submit(db, "fulltext", "1")
-    assert await dead.take(["fulltext"]) is not None  # and its process dies
+    assert await take(dead, ["fulltext"]) is not None  # and its process dies
 
     seen: list[int] = []
 
@@ -359,7 +440,7 @@ async def test_an_expired_lease_is_taken_back_and_the_item_tried_again(conn: Ses
 async def test_a_write_under_a_lost_lease_fails(conn: Session, db, probe):
     gate = WorkGate(db, lease=SHORT)
     await submit(db, "fulltext", "1")
-    held = await gate.take(["fulltext"])
+    held = await take(gate, ["fulltext"])
     assert held is not None and held.lease_until is not None
     with working(Work(held)):
         async with db.write("held") as unit:
@@ -371,7 +452,7 @@ async def test_a_write_under_a_lost_lease_fails(conn: Session, db, probe):
             await unit.execute("INSERT INTO probe VALUES (2)")
 
     assert [t.id for t in await gate.take_back(["fulltext"])] == [held.id]
-    again = await gate.take(["fulltext"])
+    again = await take(gate, ["fulltext"])
     assert again is not None and again.id == held.id
     with working(Work(held)), pytest.raises(LeaseLostError):  # a peer holds it now
         async with db.write("taken over") as unit:
@@ -382,7 +463,7 @@ async def test_a_write_under_a_lost_lease_fails(conn: Session, db, probe):
 async def test_a_fence_kept_waiting_past_the_lease_fails(conn: Session, db, other, probe):
     gate = WorkGate(db, lease=SHORT)
     await submit(db, "fulltext", "1")
-    held = await gate.take(["fulltext"])
+    held = await take(gate, ["fulltext"])
     assert held is not None and held.lease_until is not None
     async with other.transaction():
         await other.execute("SELECT 1 FROM work_items WHERE id = %s FOR UPDATE", (held.id,))
@@ -405,7 +486,7 @@ async def test_a_unit_holding_an_item_keeps_it_from_a_takeover(conn: Session, db
     gate = WorkGate(db, lease=SHORT)
     await submit(db, "fulltext", "1")
     await submit(db, "deep", "1")
-    held = await gate.take(["fulltext"])
+    held = await take(gate, ["fulltext"])
     assert held is not None and held.lease_until is not None
     inside, finish = asyncio.Event(), asyncio.Event()
 
@@ -423,7 +504,7 @@ async def test_a_unit_holding_an_item_keeps_it_from_a_takeover(conn: Session, db
     # Not taken back while the unit holds it, and the queue goes on meanwhile.
     async with asyncio.timeout(WAIT):
         assert await gate.take_back(["fulltext", "deep"]) == []
-    started = await gate.take(["fulltext", "deep"])
+    started = await take(gate, ["fulltext", "deep"])
     assert started is not None and started.kind == "deep"
     finish.set()
     async with asyncio.timeout(WAIT):
@@ -433,39 +514,55 @@ async def test_a_unit_holding_an_item_keeps_it_from_a_takeover(conn: Session, db
 
 
 async def test_a_heartbeat_blocked_by_a_unit_goes_through_once_it_ends(conn: Session, db):
-    await submit(db, "fulltext", "1")
-    held = await WorkGate(db, lease=SHORT).take(["fulltext"])
-    assert held is not None and held.lease_until is not None
-    inside, finish = asyncio.Event(), asyncio.Event()
+    attempts: list[int] = []
+    started = asyncio.Event()
 
-    async def writing() -> None:
-        with working(Work(held)):
-            async with db.write("held"):
-                inside.set()
-                await finish.wait()
+    async def worker(item: WorkItem) -> None:
+        attempts.append(item.attempts)
+        started.set()
+        await asyncio.Event().wait()
 
-    unit = asyncio.create_task(writing())
-    async with asyncio.timeout(WAIT):
-        await inside.wait()
-    renewal = asyncio.create_task(WorkGate(db, lease=LONG).renew(held))
-    await until(lambda: waiting_on_a_lock(conn, "SELECT 1 FROM work_items"), "the renewal waits")
-    finish.set()
-    async with asyncio.timeout(WAIT):
-        await unit
-        assert await renewal
-    renewed = await item(conn, held.id)
-    assert renewed.lease_until is not None and renewed.lease_until > held.lease_until
-    # The same token holds the item past where its first lease ended.
-    await until(lambda: passed(conn, held.lease_until), "the first lease's end passed")
-    with working(Work(held)):
-        async with db.write("still held"):
-            pass
+    submitted = await submit(db, "fulltext", "1")
+    async with serving(WorkGate(db, lease=timedelta(seconds=3), poll=60), {"fulltext": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+        held = await item(conn, submitted.id)
+        assert held.lease_until is not None
+        inside, finish = asyncio.Event(), asyncio.Event()
+
+        async def writing() -> None:
+            with working(Work(held)):
+                async with db.write("held"):
+                    inside.set()
+                    await finish.wait()
+
+        unit = asyncio.create_task(writing())
+        async with asyncio.timeout(WAIT):
+            await inside.wait()
+        await until(lambda: waiting_on_a_lock(conn, "SELECT 1 FROM work_items"), "the beat waits")
+        finish.set()
+        async with asyncio.timeout(WAIT):
+            await unit
+        assert not await passed(conn, held.lease_until)  # let go within the lease
+
+        leases = [held.lease_until]
+
+        async def extended_twice() -> bool:
+            now = await item(conn, submitted.id)
+            assert (now.state, now.lease_token) == (ItemState.RUNNING, held.lease_token)
+            assert now.lease_until is not None
+            if now.lease_until != leases[-1]:
+                leases.append(now.lease_until)
+            return len(leases) == 3
+
+        await until(extended_twice, "the lease renewed twice")
+        assert leases == sorted(leases) and attempts == [1]  # one lease, one run, extended
 
 
 async def test_a_write_waiting_on_a_paper_lock_does_not_deadlock_a_submitter(conn: Session, db):
     gate = WorkGate(db)
     submitted = await submit(db, "fulltext", "1")
-    held = await gate.take(["fulltext"])
+    held = await take(gate, ["fulltext"])
     assert held is not None
     paper = f"{uuid4().hex}.paper"
     locked, finish = asyncio.Event(), asyncio.Event()
@@ -499,12 +596,17 @@ async def test_a_write_waiting_on_a_paper_lock_does_not_deadlock_a_submitter(con
 
 async def test_a_renewal_that_fails_cancels_the_items_task(conn: Session, db, monkeypatch):
     started, cancelled = asyncio.Event(), asyncio.Event()
+    clock = asyncio.get_running_loop().time
+    lease = timedelta(seconds=3)
+    times: list[float] = []
 
     async def worker(item: WorkItem) -> None:
+        times.append(clock())
         started.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
+            times.append(clock())
             cancelled.set()
             raise
 
@@ -515,13 +617,15 @@ async def test_a_renewal_that_fails_cancels_the_items_task(conn: Session, db, mo
         raise psycopg.OperationalError("the connection is lost")
 
     await submit(db, "fulltext", "1")
-    async with serving(WorkGate(db, lease=SHORT, poll=60), {"fulltext": worker}):
+    async with serving(WorkGate(db, lease=lease, poll=60), {"fulltext": worker}):
         async with asyncio.timeout(WAIT):
             await started.wait()
         monkeypatch.setattr(queue, "renew", renew_lost)
         async with asyncio.timeout(WAIT):
             await cancelled.wait()
         assert len(renewals) == 1  # the first failure, not the lease's end
+    # Cancelled at the renewal, a third into the lease, well before the lease ends.
+    assert times[1] - times[0] < lease.total_seconds() - 1
 
 
 async def test_a_failed_heartbeat_cancels_the_items_task(conn: Session, db):
@@ -753,6 +857,28 @@ async def test_an_item_runs_under_its_lease_and_attribution(conn: Session, db):
     assert seen[0][1] != seen[1][1]  # a lease of its own each time
     assert (await (await conn.execute("SELECT count(*) AS n FROM workers")).fetchone())["n"] == 0
     assert current_work() is None and attribution() is None
+
+
+async def test_a_worker_that_waits_runs_again_no_sooner_than_it_asked(conn: Session, db):
+    asked: list[datetime] = []
+
+    async def worker(item: WorkItem) -> Later | Done:
+        if item.attempts == 1:
+            asked.append(datetime.now(UTC) + timedelta(seconds=1.5))
+            return Later(asked[0])
+        return Done()
+
+    submitted = await submit(db, "fulltext", "1")
+    async with serving(WorkGate(db, poll=60), {"fulltext": worker}):
+        await until(state_is(conn, submitted.id, ItemState.ENDED), "the item run twice")
+    row = await (
+        await conn.execute(
+            "SELECT attempts, not_before, started_at FROM work_items WHERE id = %s",
+            (submitted.id,),
+        )
+    ).fetchone()
+    assert (row["attempts"], row["not_before"]) == (2, asked[0])
+    assert row["started_at"] >= asked[0]
 
 
 async def test_the_gates_own_work_is_attributed_to_it(conn: Session, db, monkeypatch):

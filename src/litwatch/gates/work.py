@@ -125,6 +125,12 @@ async def _finished[T](task: asyncio.Task[T]) -> None:
         pass  # the task's own error is its owner's to read
 
 
+def _reap(item: WorkItem, handler: asyncio.Task) -> None:
+    """Log the error a Worker stopped by the gate raised as it stopped, if it raised one."""
+    if not handler.cancelled() and (error := handler.exception()) is not None:
+        log.warning("work: %s %s (item %s) raised as it stopped", *_name(item), exc_info=error)
+
+
 class WorkGate:
     """The work items of one database, as this process serves them. `lease` and `poll` are
     `LEASE` and `POLL_SECONDS` but in tests."""
@@ -150,11 +156,6 @@ class WorkGate:
         with attributed(SYSTEM):
             async with self.db.write(f"work: {name}") as unit:
                 yield unit
-
-    async def take(self, kinds: list[str]) -> WorkItem | None:
-        """Lease the next item of `kinds` that is due and admitted, if any."""
-        taken = await self._take(kinds)
-        return None if taken is None else taken[0]
 
     async def _take(self, kinds: list[str]) -> tuple[WorkItem, float] | None:
         """Lease the next item of `kinds` that is due and admitted, if any, with a time on the
@@ -222,6 +223,8 @@ class WorkGate:
                     for task in supervisors:
                         task.cancel()
                     await asyncio.gather(*supervisors, return_exceptions=True)
+                    # Renewals cut off are cancelled already; their Workers have stopped.
+                    await asyncio.gather(*self._unwinding, return_exceptions=True)
 
     async def _claim(
         self, kinds: list[str], workers: Mapping[str, Worker], supervisors: set[asyncio.Task[None]]
@@ -276,11 +279,13 @@ class WorkGate:
             except asyncio.CancelledError:
                 handler.cancel()
                 await asyncio.wait({handler})
+                _reap(item, handler)
                 if not lost.is_set():
                     await self._give_back(item)
                 raise
             if lost.is_set():
                 log.warning("work: %s %s (item %s) stopped: its lease is lost", *_name(item))
+                _reap(item, handler)
                 return
             if handler.cancelled():  # by no one here: it stopped, so it is given back
                 await self._give_back(item)

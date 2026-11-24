@@ -246,6 +246,13 @@ Found while building, owned by the stage named.
   batching nightly stretches its full-text claims. A pass item that finds its pass claimed by another owner (a dead
   process's claim not yet lapsed included) returns `Later(lease_until)` at the pass's stored `lease_until`, as the
   plan says, which covers all of these; "ends with nothing to do" is for a pass done or no longer wanted.
+- **P2: a lost database reaches the gate.** Only a Worker that raises a lost database gets its item back to try
+  again, but today's ports catch everything: `events/dispatch.py` (`integration.handle`) records any error as a
+  delivery failure with its backoff, and `jobs/worker.py` (`_chunk`) ends the job failed. Ported to Workers, they
+  let a lost database (`gates.work._lost`) propagate and keep the backoff for the integration's own errors.
+- **P2 (hindsight from P1's review): one task fewer per claim.** The run loop could own each claim through its
+  commit and hand the committed item straight to its supervisor, dropping the per-claim future and the `_take`
+  task. P1 keeps the supervisor taking its own claim; a simplification worth making when P2 changes the loop.
 - **P4: work context.** `gates.context.current_work()` gives the item, with `ceiling` and `deadline` left
   `None` for P4 to fill.
 - **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the
