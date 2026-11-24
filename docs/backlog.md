@@ -134,7 +134,9 @@ Built between milestones, on whatever structure exists then.
   ([`specs/deep-read.md`](specs/deep-read.md)) is built (P1 to P6) and off since 2026-11-15: the owner's read of P6
   found it still not well written. Needs shaping first: what to try (a newer model, a lighter setup) and how to
   judge it before switching on. To switch on: build the deep image from litwatch's commit, then enable the `deep`
-  service and `[integrations.deep]`; settling queues automatic reads only while that is configured. Then: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the
+  service and `[integrations.deep]`; settling queues automatic reads only while that is configured.
+  Once A2 is in, the deep service also runs the release-link finder, and automatic reads have a switch of their own
+  (A2's spec, "Release links"), which switching on sets too. Then: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the
   prose rules shared between `writing.py` and the deep prompt instead of copied.
 
 - **Frontend polish and speed** (review, project 2): elements jumping when a topic tab or paper loads the first
