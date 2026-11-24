@@ -523,7 +523,8 @@ async def test_a_heartbeat_blocked_by_a_unit_goes_through_once_it_ends(conn: Ses
         await asyncio.Event().wait()
 
     submitted = await submit(db, "fulltext", "1")
-    async with serving(WorkGate(db, lease=timedelta(seconds=3), poll=60), {"fulltext": worker}):
+    # A lease long enough to let the unit go well within it, renewed every two seconds.
+    async with serving(WorkGate(db, lease=timedelta(seconds=6), poll=60), {"fulltext": worker}):
         async with asyncio.timeout(WAIT):
             await started.wait()
         held = await item(conn, submitted.id)
@@ -598,34 +599,100 @@ async def test_a_renewal_that_fails_cancels_the_items_task(conn: Session, db, mo
     started, cancelled = asyncio.Event(), asyncio.Event()
     clock = asyncio.get_running_loop().time
     lease = timedelta(seconds=3)
-    times: list[float] = []
+    failed: list[float] = []
+    cancelled_at: list[float] = []
 
     async def worker(item: WorkItem) -> None:
-        times.append(clock())
         started.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            times.append(clock())
+            cancelled_at.append(clock())
             cancelled.set()
             raise
 
-    renewals: list[int] = []
-
     async def renew_lost(*args, **kwargs) -> bool:
-        renewals.append(1)
+        failed.append(clock())
         raise psycopg.OperationalError("the connection is lost")
 
+    monkeypatch.setattr(queue, "renew", renew_lost)
     await submit(db, "fulltext", "1")
     async with serving(WorkGate(db, lease=lease, poll=60), {"fulltext": worker}):
         async with asyncio.timeout(WAIT):
             await started.wait()
-        monkeypatch.setattr(queue, "renew", renew_lost)
-        async with asyncio.timeout(WAIT):
             await cancelled.wait()
-        assert len(renewals) == 1  # the first failure, not the lease's end
-    # Cancelled at the renewal, a third into the lease, well before the lease ends.
-    assert times[1] - times[0] < lease.total_seconds() - 1
+    assert len(failed) == 1  # the first failure, not the lease's end
+    # Cancelled at the failure, not when the lease would end, two seconds later.
+    assert cancelled_at[0] - failed[0] < lease.total_seconds() / 3
+
+
+async def test_a_worker_stopped_for_its_lease_finishes_its_cleanup_as_the_gate_stops(
+    conn: Session, db
+):
+    started, cleaning, cleaned = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cleaning.set()
+            await asyncio.sleep(0.5)  # its cleanup awaits, and the gate stops meanwhile
+            cleaned.set()
+            raise
+
+    submitted = await submit(db, "fulltext", "1")
+    async with serving(WorkGate(db, lease=SHORT, poll=60), {"fulltext": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+        # A peer takes the item over: the next heartbeat stops the Worker.
+        await conn.execute(
+            "UPDATE work_items SET lease_token = gen_random_uuid(), lease_until = now() + "
+            "interval '1 hour' WHERE id = %s",
+            (submitted.id,),
+        )
+        async with asyncio.timeout(WAIT):
+            await cleaning.wait()
+    assert cleaned.is_set()
+
+
+async def test_a_stopping_gate_returns_once_a_renewal_in_flight_has_ended(
+    conn: Session, db, monkeypatch
+):
+    gate = WorkGate(db, lease=timedelta(seconds=3), poll=60)
+    renewing, unwound = asyncio.Event(), asyncio.Event()
+
+    async def stuck(item: WorkItem) -> bool:
+        # A renewal whose unit hangs, and takes a while to unwind once cancelled.
+        try:
+            async with gate._write("renew") as unit:
+                await unit.execute("SELECT 1")
+                renewing.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    await asyncio.sleep(0.5)
+        finally:
+            unwound.set()  # its transaction is over
+        return True
+
+    monkeypatch.setattr(gate, "renew", stuck)
+    started = asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    await submit(db, "fulltext", "1")
+    running = asyncio.create_task(gate.run({"fulltext": worker}))
+    async with asyncio.timeout(WAIT):
+        await started.wait()
+        await renewing.wait()
+    running.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        async with asyncio.timeout(WAIT):
+            await running
+    assert unwound.is_set()
 
 
 async def test_a_failed_heartbeat_cancels_the_items_task(conn: Session, db):

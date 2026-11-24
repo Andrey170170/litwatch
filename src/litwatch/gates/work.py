@@ -277,7 +277,8 @@ class WorkGate:
             try:
                 await asyncio.wait({handler})
             except asyncio.CancelledError:
-                handler.cancel()
+                if not lost.is_set():  # else the heartbeat did: a second cancel cuts its cleanup
+                    handler.cancel()
                 await asyncio.wait({handler})
                 _reap(item, handler)
                 if not lost.is_set():
@@ -359,7 +360,8 @@ class WorkGate:
             try:
                 done, _ = await asyncio.wait({renewal}, timeout=lapses - asked)
             except asyncio.CancelledError:
-                renewal.cancel()
+                renewal.cancel()  # its unit ends before the gate's `run` returns
+                await asyncio.wait({renewal})
                 raise
             if not done:
                 renewal.cancel()  # left to unwind on its own: the handler stops first
