@@ -3,6 +3,7 @@ pass against the archive and the `brief` role, what it writes and settles, its f
 lease, revisions, and what the owner sees of it."""
 
 import asyncio
+import contextlib
 import json
 from collections import Counter
 from datetime import timedelta
@@ -11,8 +12,9 @@ import httpx
 import pytest
 
 from litwatch import fulltext
+from litwatch.api import create_app
 from litwatch.archive import URGENT, PaperText, PdfText
-from litwatch.config import Config, Models, RoleConfig
+from litwatch.config import Config, Models, RoleConfig, Schedule
 from litwatch.core import (
     FAILED_RUNS,
     Cause,
@@ -37,15 +39,20 @@ from litwatch.core.fulltext import (
 )
 from litwatch.feedback import word
 from litwatch.fulltext import brief, trim
+from litwatch.fulltext import deep as deep_passes
 from litwatch.fulltext import worker as text_worker
 from litwatch.fulltext.worker import TextPassWorker
 from litwatch.gates.database import LOCKS
 from litwatch.gates.work import WorkGate
-from litwatch.jobs import nightly
+from litwatch.intake import batch
+from litwatch.jobs import nightly, scheduler
+from litwatch.jobs import worker as jobs_worker
+from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway, ProviderError
 from litwatch.store import analyses as analyses_store
 from litwatch.store import digests as digests_store
 from litwatch.store import fulltext as fulltext_store
+from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
 from litwatch.store import runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
@@ -68,8 +75,9 @@ from tests.briefs import (
     work,
 )
 from tests.conftest import FAITH, INTERP, TREE, gate_on, paper
+from tests.deep_service import DONE, make
 from tests.fakes import ScriptedProvider
-from tests.fakes_http import FakeArchive
+from tests.fakes_http import FakeArchive, FakeDeep
 from tests.scripted import refusal
 from tests.sessions import Bridge, Session, in_read, in_write
 from tests.working import WAIT, items_of, serving, until
@@ -826,32 +834,187 @@ async def test_the_owners_run_now_runs_a_stopped_pass_while_the_gate_serves(db: 
     assert await state_is(db, "done") and len(writer.asked) == 1
 
 
-async def test_text_passes_run_as_many_at_once_as_a_wave_did(db: Session, gate):
-    other = paper("2610.00002", title="Another", abstract="Another.", version=1)
-    await in_write(db, papers_store.upsert, [other])
-    async with Bridge(db).write("queue two") as unit:
+async def test_text_passes_run_as_many_at_once_as_a_wave_did_and_no_more(db: Session, gate):
+    others = [paper(f"2610.0010{n}", title=f"T{n}", abstract=f"A{n}.", version=1) for n in range(4)]
+    await in_write(db, papers_store.upsert, others)
+    async with Bridge(db).write("queue five") as unit:
         ids = [
             await fulltext_store.queue(unit, pid, 1, PassKind.BRIEF, "focus", TEXT_PRIORITY)
-            for pid in (P.id, other.id)
+            for pid in [P.id, *(o.id for o in others)]
         ]
-    assert ids[0] % TEXT_WAVE != ids[1] % TEXT_WAVE  # two of the wave's slots
+    # Four of the wave's slots, and a fifth pass sharing the first's.
+    assert len({i % TEXT_WAVE for i in ids[:4]}) == 4 and ids[4] % TEXT_WAVE == ids[0] % TEXT_WAVE
     running: set[str] = set()
-    both = asyncio.Event()
+    release = asyncio.Event()
 
-    async def worker(item) -> None:  # holds its item until the other one runs too
+    async def worker(item) -> None:  # holds its item until released
         running.add(item.key)
-        if len(running) == 2:
-            both.set()
-        await asyncio.wait_for(both.wait(), WAIT)
+        await asyncio.wait_for(release.wait(), WAIT)
 
-    async with serving(WorkGate(gate), {"fulltext": worker}):
-        await until(lambda: _ended_all(db, ids), "both items end")
+    work_gate = WorkGate(gate)
+
+    async def four_and_asleep() -> bool:
+        return len(running) == 4 and work_gate.idle
+
+    async with serving(work_gate, {"fulltext": worker}):
+        await until(four_and_asleep, "four run, and the gate sleeps")
+        assert running == {str(i) for i in ids[:4]}  # the fifth waits for its slot
+        (fifth,) = await items_of(db, "fulltext", str(ids[4]))
+        assert (fifth["state"], fifth["attempts"]) == ("pending", 0)
+        release.set()
+        await until(lambda: _ended_all(db, ids), "all five end")
     assert running == {str(i) for i in ids}
 
 
 async def _ended_all(conn: Session, ids: list[int]) -> bool:
     items = [i for p in ids for i in await items_of(conn, "fulltext", str(p))]
     return len(items) == len(ids) and all(i["outcome"] == "done" for i in items)
+
+
+async def test_settling_a_processed_paper_again_leaves_its_passs_wait_alone(db: Session):
+    await graded(db, "central")
+    (row,) = await passes(db)
+    await in_write(db, fulltext_store.owners_first, [P.id])  # the owner had it processed
+    (item,) = await items_of(db, "fulltext", str(row["id"]))
+    assert item["not_before"].year == 1970  # first in line
+    # As a try that left it awaiting its text leaves it: waiting half a minute.
+    await db.execute("UPDATE work_items SET not_before = now() + interval '30 seconds'")
+    (item,) = await items_of(db, "fulltext", str(row["id"]))
+    await in_write(db, fulltext_store.owners_first, [P.id])  # each settle of it says so again
+    (again,) = await items_of(db, "fulltext", str(row["id"]))
+    assert again["not_before"] == item["not_before"]
+
+
+async def test_a_paper_brought_back_after_a_withdrawal_has_its_open_pass_run_again(
+    db: Session, gate
+):
+    await graded(db, "central")
+    (row,) = await passes(db)
+    v1 = {"version": 1, "date": "2026-09-10T12:00:00+00:00", "size": "412kb"}
+    v2 = {"version": 2, "date": "2026-10-21T06:28:10+00:00", "size": "0kb", "source_type": "I"}
+    v3 = {"version": 3, "date": "2026-11-02T09:00:00+00:00", "size": "430kb"}
+    pulled = P.model_copy(update={"version": 2, "version_history": [v1, v2]})
+    await batch.store(gate, [pulled], source="oai", rules=settling.RULES)
+    # While it was withdrawn no claim took the pass: its item ended with nothing to do.
+    await db.execute("UPDATE work_items SET state = 'ended', outcome = 'done', ended_at = now()")
+    back = P.model_copy(update={"version": 3, "version_history": [v1, v2, v3]})
+    await batch.store(gate, [back], source="oai", rules=settling.RULES)
+    assert [r["id"] for r in await passes(db)] == [row["id"]]  # the same pass, open
+    items = await items_of(db, "fulltext", str(row["id"]))
+    assert [i["state"] for i in items] == ["ended", "pending"]
+
+
+async def test_a_pass_a_unit_holds_as_its_item_claims_it_is_looked_at_again(db: Session, gate):
+    await graded(db, "central")
+    (row,) = await passes(db)
+    fake, writer = ready(FakeArchive()), Writer()
+    other = await sessions.sibling(db)
+
+    async def tried() -> bool:
+        (item,) = await items_of(db, "fulltext", str(row["id"]))
+        return item["attempts"] >= 1 and item["state"] == "pending"
+
+    try:
+        async with contextlib.AsyncExitStack() as held:
+            await held.enter_async_context(other.transaction())
+            # A settle relabelling it, say: the row is held, its state not settled yet.
+            await other.execute(
+                "SELECT 1 FROM fulltext_passes WHERE id = %s FOR UPDATE", (row["id"],)
+            )
+            async with serving(WorkGate(gate), workers(gate, fake, writer)):
+                await until(tried, "the item finds the row held, and waits")
+                await held.aclose()
+                await until(lambda: item_ended(db, row["id"]), "the item ends")
+    finally:
+        await other.close()
+    assert await state_is(db, "done") and len(writer.asked) == 1
+
+
+async def test_a_pass_gone_while_the_sweep_runs_is_left_out(db: Session, monkeypatch):
+    other = paper("2610.00002", title="Another", abstract="Another.", version=1)
+    await in_write(db, papers_store.upsert, [other])
+    async with Bridge(db).write("queue two") as unit:
+        first, second = [
+            await fulltext_store.queue(unit, pid, 1, PassKind.BRIEF, "focus", TEXT_PRIORITY)
+            for pid in (P.id, other.id)
+        ]
+    await db.execute("DELETE FROM work_items")  # as a process starting finds them
+    deleting = await sessions.sibling(db)
+    submit = fulltext_store.work.submit
+
+    async def submitting(unit, kind, key, **kwargs):
+        if key == str(first):  # the second pass is deleted meanwhile (a taxonomy edit, say)
+            await deleting.execute("DELETE FROM fulltext_passes WHERE id = %s", (second,))
+        return await submit(unit, kind, key, **kwargs)
+
+    monkeypatch.setattr(fulltext_store.work, "submit", submitting)
+    try:
+        await in_write(db, fulltext_store.submit_open)
+    finally:
+        await deleting.close()
+    assert [
+        i["key"] for i in await (await db.execute("SELECT key FROM work_items")).fetchall()
+    ] == [str(first)]
+
+
+async def test_serve_runs_text_and_deep_passes_as_its_work_items(db: Session, monkeypatch):
+    async def idle(*args):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(scheduler, "run_forever", idle)  # no nightly here
+    monkeypatch.setattr(jobs_worker, "run_forever", idle)
+    fake, writer, service = ready(FakeArchive()), Writer(), FakeDeep(DONE)
+    config = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})
+    dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
+    app = create_app(
+        dsn, "t", config, writer.gateway, archive=archive(fake), integrations=[make(service)]
+    )
+
+    async def carded() -> bool:
+        return bool((await in_read(db, cards.card, P.id) or {}).get("card"))
+
+    async with app.router.lifespan_context(app):
+        await graded(db, "central")  # a text pass, queued by the settle
+        async with settling.change(db, P.id, cause=Cause.OWNER) as change:
+            await deep_passes.request(change.unit, P.id)  # and the owner's Deep card
+        await until(lambda: state_is(db, "done"), "the text pass is done")
+        await until(carded, "the card is written")
+    assert len(writer.asked) == 1 and service.started == 1
+
+
+async def test_a_nightly_beside_the_gate_takes_over_an_abandoned_pass_and_works_it_once(
+    db: Session, gate, monkeypatch
+):
+    await graded(db, "central")
+    (row,) = await passes(db)
+    async with gate_on(db) as dead, dead.write("claim and die") as unit:
+        await fulltext_store.claim(unit, timedelta(seconds=1), 1, pass_id=row["id"])
+    fake, writer = ready(FakeArchive()), Writer()
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: archive(fake))
+
+    async def tried() -> bool:  # the item tried, and waits
+        (item,) = await items_of(db, "fulltext", str(row["id"]))
+        return item["attempts"] >= 1 and item["state"] == "pending"
+
+    async def lapsed() -> bool:
+        found = await db.execute(
+            "SELECT lease_until < now() AS lapsed FROM fulltext_passes WHERE id = %s",
+            (row["id"],),
+        )
+        return (await found.fetchone())["lapsed"]
+
+    async with serving(WorkGate(gate, poll=0.1), workers(gate, fake, writer)):
+        async with gate.held("run"):  # a nightly runs, as the scheduler starts it in `serve`
+            await until(tried, "the item finds its pass held")
+            await until(lapsed, "the abandoned claim lapses")
+            async with model_run(gate, CONFIG, "nightly", gateway=writer.gateway) as run:
+                done = await nightly.text_passes(gate, CONFIG, run, None)
+        assert done == {"briefs_written": 1}  # taken over by the nightly
+        # The item waits for whatever held its pass when it last looked (the nightly's claim,
+        # perhaps); due now, it finds the pass done.
+        await db.execute("UPDATE work_items SET not_before = now() WHERE state = 'pending'")
+        await until(lambda: item_ended(db, row["id"]), "the item finds its pass done")
+    assert await state_is(db, "done") and len(writer.asked) == 1  # one model call, not two
 
 
 # -- revisions -------------------------------------------------------------------------------------

@@ -41,7 +41,7 @@ import contextlib
 import logging
 import os
 import socket
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -144,6 +144,7 @@ class WorkGate:
         self._waiting = False
         # Renewals cut off at their lease's end, kept until they have unwound.
         self._unwinding: set[asyncio.Task[bool]] = set()
+        self._keys: Mapping[str, Collection[str]] | None = None  # as `run` was given them
 
     @property
     def idle(self) -> bool:
@@ -162,7 +163,7 @@ class WorkGate:
         event loop's clock no later than its lease's start: the lease runs from it."""
         try:
             async with self._write("take") as unit:
-                claimed = await queue.take(unit, kinds, self.lease)
+                claimed = await queue.take(unit, kinds, self.lease, self._keys)
                 if claimed is None:
                     return None
                 since = asyncio.get_running_loop().time()
@@ -180,15 +181,20 @@ class WorkGate:
     async def take_back(self, kinds: list[str]) -> list[WorkItem]:
         """Take back the items of `kinds` whose lease expired."""
         async with self._write("take back") as unit:
-            taken = await queue.take_back(unit, kinds)
+            taken = await queue.take_back(unit, kinds, self._keys)
         for item in taken:
             log.warning("work: took back %s %s (item %s), whose lease lapsed", *_name(item))
         return taken
 
-    async def run(self, workers: Mapping[str, Worker]) -> None:
-        """Serve the kinds of `workers`, each by its Worker, until cancelled. Cancelled, each
-        claim's supervisor stops its Worker and gives back the claim it still owns."""
+    async def run(
+        self, workers: Mapping[str, Worker], *, keys: Mapping[str, Collection[str]] | None = None
+    ) -> None:
+        """Serve the kinds of `workers`, each by its Worker, until cancelled; of a kind in
+        `keys`, only the items of those keys (an integration's deliveries, which only a process
+        that loads it can run). Cancelled, each claim's supervisor stops its Worker and gives
+        back the claim it still owns."""
         kinds = sorted(workers)
+        self._keys = keys
         supervisors: set[asyncio.Task[None]] = set()
         with attributed(SYSTEM):
             async with self._serving(kinds):
@@ -202,7 +208,7 @@ class WorkGate:
                             while await self._claim(kinds, workers, supervisors):
                                 pass
                             async with self.db.read("work: next wait") as unit:
-                                wait = await queue.wait_seconds(unit, kinds)
+                                wait = await queue.wait_seconds(unit, kinds, self._keys)
                         except asyncio.CancelledError:
                             raise
                         except Exception:

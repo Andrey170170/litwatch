@@ -14,6 +14,7 @@ from litwatch.gates.database import DatabaseGate, WriteUnit
 from litwatch.intake.search import fetch_by_ids, id_from_url
 from litwatch.store import classifications as classifications_store
 from litwatch.store import feedback as feedback_store
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
@@ -46,13 +47,15 @@ async def resolve(db: DatabaseGate, text: str) -> tuple[str, Paper | None]:
 
 
 async def keep(unit: WriteUnit, paper_id: str, fetched: Paper | None) -> tuple[Paper, bool]:
-    """Store the record `resolve` fetched, as intake stores one (`store.papers.upsert`), in a
-    unit holding the paper's settle lock, so a request or an intake storing it meanwhile went
-    first and this one stores over it as intake would; the unit settles the paper after it, a
-    rewrite included (a change of the paper, `word.change`). Returns the paper and whether it
-    was inserted just now."""
+    """Store the record `resolve` fetched, as intake stores one (`store.papers.upsert`), in a unit
+    holding the paper's settle lock, so a request or an intake storing it meanwhile went
+    first and this one stores over it as intake would, a paper brought back included
+    (`store.fulltext.submit_restored`); the unit settles the paper after it, a rewrite
+    included (a change of the paper, `word.change`). Returns the paper and whether it was
+    inserted just now."""
     if fetched is not None:
         stored = await papers_store.upsert(unit, [fetched], source="arxiv")
+        await fulltext_store.submit_restored(unit, stored.withdrawn)
     paper = await papers_store.get(unit, paper_id)
     assert paper is not None  # stored now, or held when resolve looked
     return paper, fetched is not None and stored.inserted > 0

@@ -7,8 +7,9 @@ write here that leaves such a pass where a claim can take it (ready, awaiting it
 running with its claim let go) submits the item in its unit, for when it may be taken, and
 `submit_open` submits what is open when a process starts serving them. The item claims its
 pass as every worker does (`claim`), so a pass worked inline by the nightly leaves its item
-nothing to do. As in the queue before: an owner's pass goes first (`OWNERS_FIRST`), text
-passes run a wave's width at once, and Deep passes one at a time (`_admission`)."""
+nothing to do. As in the queue before: due passes run in `claim`'s order of priorities
+(`_place`), text passes a wave's width at once, and Deep passes one at a time (`_admission`).
+A paper brought back after a withdrawal has its passes submitted again (`submit_restored`)."""
 
 from __future__ import annotations
 
@@ -35,7 +36,6 @@ from litwatch.core.fulltext import (
     PassState,
     TextPass,
     TextRead,
-    owners_pass,
 )
 from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import work
@@ -49,10 +49,17 @@ DEEP_WORK = "deep"
 _CLAIMABLE = [PassState.READY.value, PassState.AWAITING_TEXT.value, PassState.RUNNING.value]
 
 
-# When an owner's pass that is due now is to run: before every automatic one, as `claim` takes
-# the owner's first, since items are taken in `not_before` order. Submitting the key again
-# brings a pending automatic item forward to it.
-OWNERS_FIRST = datetime(1970, 1, 1, tzinfo=UTC)
+# Where in line a pass's item that is due now goes: `take` runs due items in `not_before` order,
+# so it is submitted at a time long past that stands for the pass's priority, a day apart from
+# the next, as `claim` takes passes: the owner's, then the automatic ones, then a re-run's. A
+# pending item submitted again is brought forward to it (the owner's request jumping the line).
+# One that waits (for its text, out the Deep pause) is due at its wait's end instead.
+_LINE = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _place(priority: int) -> datetime:
+    """The `not_before` of a pass due now at `priority`."""
+    return _LINE + timedelta(days=priority - TEXT_REQUEST_PRIORITY)
 
 
 def work_kind(kind: PassKind) -> str:
@@ -68,17 +75,21 @@ def _admission(kind: PassKind, pass_id: int) -> str | None:
 
 
 async def _submit(unit: WriteUnit, pass_id: int, at: datetime | None = None) -> None:
-    """Submit the pass's work item, to run no earlier than `at`; when not given, now, and an
-    owner's pass (`owners_pass`) before every automatic one (`OWNERS_FIRST`)."""
+    """Submit the pass's work item, to run no earlier than `at`; when not given, now, in its
+    priority's place in line (`_place`). A pass gone meanwhile (a sweep reads its passes
+    without locking them) has none."""
     row = await (
         await unit.execute("SELECT kind, priority FROM fulltext_passes WHERE id = %s", (pass_id,))
     ).fetchone()
-    assert row is not None  # the caller just wrote it
+    if row is None:
+        return
     kind = PassKind(row["kind"])
-    if at is None and owners_pass(kind, row["priority"]):
-        at = OWNERS_FIRST
     await work.submit(
-        unit, work_kind(kind), str(pass_id), not_before=at, admission=_admission(kind, pass_id)
+        unit,
+        work_kind(kind),
+        str(pass_id),
+        not_before=_place(row["priority"]) if at is None else at,
+        admission=_admission(kind, pass_id),
     )
 
 
@@ -96,6 +107,23 @@ async def submit_open(unit: WriteUnit, *, deep: bool = False) -> int:
     for r in rows:
         await _submit(unit, r["id"])
     return len(rows)
+
+
+async def submit_restored(unit: WriteUnit, paper_ids: Sequence[str]) -> None:
+    """Submit the work item of each pass of the regular queue that a claim can take, of those
+    of the papers not dropped: for papers withdrawn and brought back by a later version, in the
+    unit that stores it. While a paper was dropped no claim took its passes, and their items
+    ended with nothing to do; a version that changes neither title nor abstract queues none."""
+    rows = await (
+        await unit.execute(
+            "SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
+            "WHERE f.paper_id = ANY(%s) AND NOT p.dropped AND f.job_id IS NULL "
+            "AND f.state = ANY(%s) ORDER BY f.id",
+            (list(paper_ids), _CLAIMABLE),
+        )
+    ).fetchall()
+    for r in rows:
+        await _submit(unit, r["id"])
 
 
 # Whether text pass `f` read paper `p`'s text for its latest arXiv update, or none is known: what
@@ -245,14 +273,20 @@ async def owners_first(unit: WriteUnit, paper_ids: Sequence[str]) -> None:
     """The papers' open passes go as the owner's requests do: a text pass ahead of the others,
     a Deep pass ahead of the automatic ones (a paper the owner had processed, docs/plans/jobs.md),
     in the regular queue, a re-run's text pass too. The reason stays: a settle may still drop or
-    relabel the pass. Each that a claim can take has its work item submitted, to run before
-    the automatic ones."""
+    relabel the pass. A pass this moves (its priority raised, or taken from a re-run) has its
+    work item submitted, ahead of the automatic ones, if a claim can take it; one already the
+    owner's is left alone, so settling the paper again does not cut a try's wait short."""
+    first = "CASE WHEN kind = 'deep' THEN %(deep)s ELSE %(text)s END"
     rows = await (
         await unit.execute(
-            "UPDATE fulltext_passes SET priority = least(priority, "
-            "CASE WHEN kind = 'deep' THEN %s ELSE %s END), job_id = NULL "
-            "WHERE paper_id = ANY(%s) AND state <> 'done' RETURNING id, state",
-            (REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY, list(paper_ids)),
+            f"UPDATE fulltext_passes SET priority = least(priority, {first}), job_id = NULL "
+            "WHERE paper_id = ANY(%(papers)s) AND state <> 'done' "
+            f"AND (priority > {first} OR job_id IS NOT NULL) RETURNING id, state",
+            {
+                "deep": REQUEST_PRIORITY,
+                "text": TEXT_REQUEST_PRIORITY,
+                "papers": list(paper_ids),
+            },
         )
     ).fetchall()
     for r in rows:
@@ -445,17 +479,35 @@ async def claim(
     ]
 
 
-async def standing(unit: ReadUnit, pass_id: int) -> tuple[PassState, datetime | None] | None:
-    """The pass's state, with the end of its claim's lease while it runs under a live one (else
-    None); None when the pass is gone."""
+@dataclass(frozen=True)
+class Standing:
+    """A pass as a claim that did not take it finds it: its state, and the end of its claim's
+    lease while it runs under a live one (`held_until`); or `locked`, its row held by a unit
+    still open (a settle relabelling it), when what it will be is not known yet."""
+
+    state: PassState | None
+    held_until: datetime | None = None
+    locked: bool = False
+
+
+async def standing(unit: WriteUnit, pass_id: int) -> Standing | None:
+    """How the pass stands (`Standing`), in the unit of a claim that did not take it; None when
+    the pass is gone. A claim skips a row another unit holds, so the row is read the same way:
+    one held is `locked`, not judged by the state it had before that unit."""
     row = await (
         await unit.execute(
             "SELECT state, CASE WHEN state = 'running' AND lease_until > now() "
-            "THEN lease_until END AS held_until FROM fulltext_passes WHERE id = %s",
+            "THEN lease_until END AS held_until FROM fulltext_passes WHERE id = %s "
+            "FOR UPDATE SKIP LOCKED",
             (pass_id,),
         )
     ).fetchone()
-    return (PassState(row["state"]), row["held_until"]) if row else None
+    if row is not None:
+        return Standing(PassState(row["state"]), row["held_until"])
+    there = await (
+        await unit.execute("SELECT 1 FROM fulltext_passes WHERE id = %s", (pass_id,))
+    ).fetchone()
+    return Standing(None, locked=True) if there else None
 
 
 async def job_open(unit: ReadUnit, job_id: int) -> int:
@@ -532,13 +584,18 @@ async def label_of(unit: ReadUnit, pass_id: int) -> tuple[PassKind, str] | None:
 
 
 async def release(unit: WriteUnit, c: Claimed) -> None:
-    """Give a claimed pass back unworked: it awaits its next claim, behind those not tried."""
-    cur = await unit.execute(
-        "UPDATE fulltext_passes SET state = 'awaiting_text', lease_until = NULL "
-        "WHERE id = %s AND state = 'running' AND lease_until = %s",
-        (c.id, c.lease_until),
-    )
-    if cur.rowcount and c.job is None:
+    """Give a claimed pass back unworked: it awaits its next claim, behind those not tried. One
+    whose paper is dropped has no work item until the paper comes back (`submit_restored`): no
+    claim takes it meanwhile."""
+    row = await (
+        await unit.execute(
+            "UPDATE fulltext_passes f SET state = 'awaiting_text', lease_until = NULL "
+            "FROM papers p WHERE f.id = %s AND f.state = 'running' AND f.lease_until = %s "
+            "AND p.id = f.paper_id RETURNING p.dropped",
+            (c.id, c.lease_until),
+        )
+    ).fetchone()
+    if row is not None and not row["dropped"] and c.job is None:
         await _submit(unit, c.id)
 
 
@@ -972,26 +1029,24 @@ async def run_now(unit: WriteUnit, pass_id: int, runs: int, *, pdf: bool = False
     With `pdf` ("Use the PDF"), it reads the paper's PDF from then on, not its LaTeX. A re-run's
     pass leaves it for the regular queue: the owner asked for it. Returns False when it does
     not wait for the owner."""
-    row = await (
-        await unit.execute(
-            "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, unusable_runs = 0, "
-            "refused = false, job_id = NULL, "
-            "tried_at = NULL, acknowledged_at = NULL, "
-            "queued_at = now(), retry_text = true, use_pdf = f.use_pdf OR %(pdf)s, "
-            "reason = CASE WHEN f.kind = 'deep' THEN %(requested)s ELSE f.reason END, "
-            "priority = CASE WHEN f.kind = 'deep' THEN %(first)s ELSE %(text_first)s END "
-            f"FROM papers p WHERE f.id = %(id)s AND p.id = f.paper_id AND {STUCK} RETURNING f.kind",
-            {
-                "id": pass_id,
-                "requested": REQUESTED,
-                "first": REQUEST_PRIORITY,
-                "text_first": TEXT_REQUEST_PRIORITY,
-                "pdf": pdf,
-            }
-            | stuck_params(runs),
-        )
-    ).fetchone()
-    if row is None:
+    cur = await unit.execute(
+        "UPDATE fulltext_passes f SET state = 'ready', failed_runs = 0, unusable_runs = 0, "
+        "refused = false, job_id = NULL, "
+        "tried_at = NULL, acknowledged_at = NULL, "
+        "queued_at = now(), retry_text = true, use_pdf = f.use_pdf OR %(pdf)s, "
+        "reason = CASE WHEN f.kind = 'deep' THEN %(requested)s ELSE f.reason END, "
+        "priority = CASE WHEN f.kind = 'deep' THEN %(first)s ELSE %(text_first)s END "
+        f"FROM papers p WHERE f.id = %(id)s AND p.id = f.paper_id AND {STUCK}",
+        {
+            "id": pass_id,
+            "requested": REQUESTED,
+            "first": REQUEST_PRIORITY,
+            "text_first": TEXT_REQUEST_PRIORITY,
+            "pdf": pdf,
+        }
+        | stuck_params(runs),
+    )
+    if not cur.rowcount:
         return False
     await _submit(unit, pass_id)
     return True

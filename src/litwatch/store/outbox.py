@@ -99,13 +99,18 @@ async def emit(unit: WriteUnit, type: str, paper_id: str | None = None, **payloa
 
 
 async def wake_all(unit: WriteUnit) -> None:
-    """Wake the delivery of every integration with a cursor, but one waiting out a backoff: the
-    last write of a unit that emitted, since every such unit locks those items' rows."""
-    names = await (
-        await unit.execute("SELECT name FROM integration_cursors ORDER BY name")
+    """Wake the delivery of every integration with a cursor, no sooner than the backoff of a
+    failure or a failed setup it has recorded: the last write of a unit that emitted, since
+    every such unit locks those items' rows. One that waits keeps its time."""
+    rows = await (
+        await unit.execute(
+            "SELECT name, GREATEST(CASE WHEN failing IS NOT NULL THEN retry_at END, "
+            "CASE WHEN setup_failures > 0 THEN setup_retry_at END) AS backoff "
+            "FROM integration_cursors ORDER BY name"
+        )
     ).fetchall()
-    for r in names:
-        await wake(unit, r["name"], keep=True)
+    for r in rows:
+        await wake(unit, r["name"], at=r["backoff"], keep=True)
 
 
 async def wake(
@@ -160,7 +165,20 @@ async def of_paper(unit: ReadUnit, paper_id: str, type: str) -> list[Event]:
 
 async def cursor(unit: WriteUnit, name: str) -> Cursor:
     """The integration's cursor, made at the last settled event the first time it is asked
-    for: an integration enabled for the first time is not woken by what came before it."""
+    for: an integration enabled for the first time is not woken by what came before it.
+
+    It is made under the outbox's SHARE lock, which waits for every unit that wrote an event to
+    end, and makes each that writes one meanwhile wait for this unit: so every emitter either
+    ended before the cursor was made, its events placed as settled or not then, or looks up the
+    cursors to wake (`wake_all`) after it was made. Without it, an emitter that looked before
+    and committed after the first turn would leave events no turn is arranged for. Taken once
+    for an integration's lifetime; each emitting write waits for it meanwhile."""
+    found = await (
+        await unit.execute(f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s", (name,))
+    ).fetchone()
+    if found is not None:
+        return _cursor(found)
+    await unit.execute("LOCK TABLE outbox IN SHARE MODE")
     await unit.execute(
         f"""
         INSERT INTO integration_cursors (name, position_xid, position)

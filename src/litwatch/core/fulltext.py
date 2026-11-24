@@ -56,14 +56,6 @@ TEXT_WAVE = 4
 RECONCILE_LOOKBACK = timedelta(days=2)
 
 
-def owners_pass(kind: PassKind, priority: int) -> bool:
-    """Whether a pass of `kind` at `priority` is the owner's: a text pass they ran now, a Deep
-    pass they asked for or had processed. Their passes go before the automatic ones."""
-    if kind == PassKind.DEEP:
-        return priority <= REQUEST_PRIORITY
-    return priority < TEXT_PRIORITY
-
-
 @dataclass(frozen=True)
 class TextPass:
     """The newest Brief or Weight re-check queued for a paper's current revision."""

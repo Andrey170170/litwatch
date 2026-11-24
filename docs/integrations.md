@@ -25,7 +25,7 @@ integration, woken as each event commits: it hands the integration the events af
 - An integration enabled for the first time starts at the outbox's current end: it is not woken
   by anything that happened before it was turned on. Turning it off keeps its cursor, and
   turning it on again resumes from there.
-- When `handle` raises, the cursor stays before that event, the error is recorded, and the event
+- When `wants` or `handle` raises, the cursor stays before that event, the error is recorded, and the event
   is tried again after a backoff (30 seconds, doubling, at most an hour). That integration's
   later events wait behind it; every other integration goes on. The owner can retry the event
   at once or skip it, under Settings → Integrations (`POST /api/settings/integrations/<name>/retry`
@@ -79,6 +79,10 @@ a cursor. `deep`, whose work is the full-text queue's, is a plain `Integration`.
   - `async def aclose(self)`: awaited when the service stops. Close HTTP clients here.
   - `requires: tuple[str, ...]`: names of integrations that must be loaded too; loading fails
     otherwise.
+  - `async def idle(self, db)`: awaited on a delivery turn that hands the integration no event,
+    at most about once a minute, never beside a `handle` of the same integration, for work no
+    event brings (retrying a delivery that waits on something outside litwatch). A failure is
+    logged and changes nothing else; keep it short and bounded, since events wait while it runs.
 
 Deep reads come from the built-in `deep` integration only: the owner's request (`POST
 /api/papers/<id>/card`) queues a Deep pass, which the service's Deep pass worker submits to it, and

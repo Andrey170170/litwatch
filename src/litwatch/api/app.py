@@ -66,12 +66,14 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
             workers[fulltext_store.DEEP_WORK] = DeepPassWorker(
                 app.state.db, app.state.config, archive, maker
             )
+    keys: dict[str, list[str]] = {}
     if reacting := events.reacting(app.state.integrations):
-        workers[outbox.DELIVERY] = DeliveryWorker(app.state.db, reacting)
+        delivery = workers[outbox.DELIVERY] = DeliveryWorker(app.state.db, reacting)
+        keys[outbox.DELIVERY] = delivery.keys  # another process's integrations are not ours
     for each in workers.values():
         await each.sweep()
     if workers:
-        tasks.append(asyncio.create_task(WorkGate(app.state.db).run(workers)))
+        tasks.append(asyncio.create_task(WorkGate(app.state.db).run(workers, keys=keys)))
     if enabled:
         tasks.append(
             asyncio.create_task(

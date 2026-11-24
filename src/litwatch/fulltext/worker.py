@@ -12,16 +12,17 @@ as one job on the deep service. A pass it cannot claim says what follows:
   again;
 - one done, gone, or no longer the regular queue's: there is nothing to do.
 
-A pass awaiting its text is tried again after `TEXT_WAIT`, and a Deep pass the service failed
-after its pause, as the same item. An item whose try raised (but for a lost database, which the
-gate tries again) is failed, and its pass's next try submitted for when its claim lapses."""
+A pass whose row a unit holds as the item tries to claim it (a settle relabelling it) is looked
+at again after `BUSY`, as the same item. A pass awaiting its text is tried again after
+`TEXT_WAIT`, and a Deep pass the service failed after its pause, as the same item. An item whose
+try raised (but for a lost database, which the gate tries again) is failed, and its pass's next
+try submitted for when its claim lapses."""
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from litwatch import fulltext
 from litwatch.archive import ArchiveClient
@@ -38,19 +39,29 @@ from litwatch.jobs.worker import nightly_waits
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
 from litwatch.store import work
-from litwatch.store.fulltext import Claimed
+from litwatch.store.fulltext import Claimed, Standing
+
+# How soon an item looks again at a pass whose row a unit held as it tried to claim it (a
+# settle relabelling it): that unit is short, and the pass may well be claimable after it.
+BUSY = timedelta(seconds=1)
 
 
-def _unclaimed(standing: tuple[PassState, datetime | None] | None, held_back: bool) -> Later | None:
+def _unclaimed(standing: Standing | None, held_back: bool) -> Later | None:
     """What follows for an item whose pass was not claimed, as it stands (`store.fulltext.
-    standing`): the end of another owner's claim; another look after `TEXT_WAIT` when a claim
-    could take it but for what holds it back (`held_back`); else nothing to do."""
+    standing`): another look after `BUSY` while a unit holds its row; the end of another owner's
+    claim; another look after `TEXT_WAIT` when a claim could take it but for what holds it back
+    (`held_back`); else nothing to do."""
     if standing is None:
         return None
-    state, held_until = standing
-    if held_until is not None:
-        return Later(held_until)
-    if held_back and state in (PassState.READY, PassState.AWAITING_TEXT, PassState.RUNNING):
+    if standing.locked:
+        return Later(datetime.now(UTC) + BUSY)
+    if standing.held_until is not None:
+        return Later(standing.held_until)
+    if held_back and standing.state in (
+        PassState.READY,
+        PassState.AWAITING_TEXT,
+        PassState.RUNNING,
+    ):
         return Later(datetime.now(UTC) + TEXT_WAIT)
     return None
 
@@ -104,7 +115,7 @@ class TextPassWorker:
                 gateway=self.gateway,
                 owners=owners,
             )
-        return _awaiting(done)
+        return _awaiting(done["awaiting_text"] > 0)
 
 
 class DeepPassWorker:
@@ -142,9 +153,10 @@ class DeepPassWorker:
             )
         if why == "card_service_failed":
             return Later(datetime.now(UTC) + deep_passes.PAUSE)
-        return _awaiting(Counter([why]))
+        return _awaiting(why == "awaiting_text")
 
 
-def _awaiting(done: Counter[str]) -> Later | None:
-    """A try that left its pass awaiting its text is tried again after `TEXT_WAIT`."""
-    return Later(datetime.now(UTC) + TEXT_WAIT) if done["awaiting_text"] else None
+def _awaiting(waits: bool) -> Later | None:
+    """A try that left its pass awaiting its text (`waits`) is tried again after
+    `TEXT_WAIT`."""
+    return Later(datetime.now(UTC) + TEXT_WAIT) if waits else None

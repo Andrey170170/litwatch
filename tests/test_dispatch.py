@@ -30,6 +30,7 @@ class Recorder:
 
     def __init__(self, name="recorder", types=None, fail=()):
         self.name, self.types, self.fail = name, types, set(fail)
+        self.fail_all = False  # fail on every event, armed before one commits
         self.seen: list[int] = []
         self.before_failing = None  # awaited just before a failure, to stage a race
 
@@ -37,7 +38,7 @@ class Recorder:
         return self.types is None or event.type in self.types
 
     async def handle(self, db, event):
-        if event.id in self.fail:
+        if self.fail_all or event.id in self.fail:
             if self.before_failing:
                 await self.before_failing()
             raise RuntimeError(f"cannot handle {event.id}")
@@ -235,6 +236,11 @@ def delivering(db, *integrations) -> tuple[WorkGate, dict]:
     return WorkGate(db, poll=60), {outbox.DELIVERY: DeliveryWorker(db, list(integrations))}
 
 
+def served(gate: WorkGate, workers: dict):
+    """`serving` the delivery Worker for the keys it loads, as `serve` gives them."""
+    return serving(gate, workers, keys={outbox.DELIVERY: workers[outbox.DELIVERY].keys})
+
+
 async def turns(conn: Session, name: str) -> list[dict]:
     return await items_of(conn, outbox.DELIVERY, name)
 
@@ -243,10 +249,20 @@ async def test_each_event_wakes_its_integrations_delivery_as_it_commits(conn: Se
     rec = Recorder()
     gate, workers = delivering(db, rec)
     await workers[outbox.DELIVERY].sweep()  # as `serve` starts: set up, and its cursor made
-    async with serving(gate, workers):
+    async with served(gate, workers):
         await until(lambda: _ended(conn, rec.name), "the first turn ends")
         ids = await emit(conn, events.PAPER_SAVED, events.PAPER_UNSAVED)
-        await until(lambda: _seen(rec, ids), "the events are delivered")
+
+        async def delivered() -> bool:  # and the turn that handed them over has ended
+            at = (await in_write(conn, outbox.cursor, rec.name)).position.id
+            return (
+                at == ids[-1]
+                and len(await turns(conn, rec.name)) > 1
+                and await _ended(conn, rec.name)
+            )
+
+        await until(delivered, "the events are delivered, and the turn ends")
+    assert rec.seen == ids
     found = await turns(conn, rec.name)
     assert all(t["admission"] == f"deliver:{rec.name}" for t in found)
     assert {t["state"] for t in found} == {"ended"}  # nothing left: no turn waits
@@ -268,7 +284,7 @@ async def test_a_turn_that_leaves_events_arranges_the_next(conn: Session, db, mo
     ids = await emit(conn, *[events.PAPER_SAVED] * 5)  # waiting before any turn runs
     await settled(db)
     gate, workers = delivering(db, rec)
-    async with serving(gate, workers):
+    async with served(gate, workers):
         await until(lambda: _seen(rec, ids), "every event is delivered")
         await until(lambda: _ended(conn, rec.name), "the last turn ends")
     # A batch a turn, each turn its own record: the first was woken by the events, the next
@@ -282,9 +298,9 @@ async def test_a_failed_delivery_waits_out_its_backoff_which_new_events_do_not_c
     rec = Recorder()
     await start(db, rec)
     gate, workers = delivering(db, rec)
-    async with serving(gate, workers):
+    async with served(gate, workers):
+        rec.fail_all = True  # before the event commits, so no turn can deliver it first
         (a,) = await emit(conn, events.PAPER_SAVED)
-        rec.fail = {a}
 
         async def failing() -> bool:
             return (await in_write(conn, outbox.cursor, rec.name)).failing == a
@@ -298,7 +314,7 @@ async def test_a_failed_delivery_waits_out_its_backoff_which_new_events_do_not_c
         (still,) = [t for t in await turns(conn, rec.name) if t["state"] == "pending"]
         assert (still["id"], still["not_before"]) == (waiting["id"], cursor.retry_at)
         # The owner's retry runs the turn now.
-        rec.fail = set()
+        rec.fail_all = False
         assert await in_write(conn, outbox.retry, rec.name)
         await until(lambda: _seen(rec, [a, b]), "both are delivered")
 
@@ -327,7 +343,7 @@ async def test_a_lost_database_in_a_delivery_is_no_failure_and_its_turn_is_tried
     rec = Dropping()
     await start(db, rec)
     gate, workers = delivering(db, rec)
-    async with serving(gate, workers):
+    async with served(gate, workers):
         ids = await emit(conn, events.PAPER_SAVED)
         await until(lambda: _seen(rec, ids), "the event is delivered")
     cursor = await in_write(conn, outbox.cursor, rec.name)
@@ -336,23 +352,151 @@ async def test_a_lost_database_in_a_delivery_is_no_failure_and_its_turn_is_tried
     assert turn["attempts"] == 2  # given back, and the same item run again
 
 
-async def test_an_integration_this_process_does_not_load_waits_for_one_that_does(conn: Session, db):
+async def test_a_process_takes_only_the_deliveries_of_the_integrations_it_loads(conn: Session, db):
     gone, rec = Recorder("gone"), Recorder()
     for each in (gone, rec):
         await start(db, each)
-    gate, workers = delivering(db, rec)  # `gone` is not configured here
-    async with serving(gate, workers):
+    gate, workers = delivering(db, rec)  # `gone` is configured in another process, or none
+    # What a turn's item holds reads back in any session's zone (one parked at the end of time
+    # read as the year 10000 in Tokyo, and broke the emitting write).
+    await conn.execute("SET TimeZone = 'Asia/Tokyo'")
+    async with served(gate, workers):
         ids = await emit(conn, events.PAPER_SAVED)
         await until(lambda: _seen(rec, ids), "the loaded one gets it")
-        await until(lambda: _waits(conn, gone.name), "the other's turn waits")
         ids += await emit(conn, events.PAPER_SAVED, events.PAPER_SAVED)
         await until(lambda: _seen(rec, ids), "the loaded one gets them")
-    # One item, waiting: more events add none.
-    assert [(t["state"], t["attempts"]) for t in await turns(conn, gone.name)] == [("pending", 1)]
+        await until(lambda: _ended(conn, rec.name), "its last turn ends")
+    # Never taken here: one item, waiting for a process that loads it.
+    assert [(t["state"], t["attempts"]) for t in await turns(conn, gone.name)] == [("pending", 0)]
     gate, workers = delivering(db, gone)  # a process that loads it starts
     await workers[outbox.DELIVERY].sweep()
-    async with serving(gate, workers):
+    async with served(gate, workers):
         await until(lambda: _seen(gone, ids), "it delivers what waited")
+
+
+async def test_an_emitter_that_looked_before_the_first_cursor_was_made_strands_nothing(
+    conn: Session, db
+):
+    rec = Recorder("new")
+    gate, workers = delivering(db, rec)
+    other = await sessions.sibling(conn)
+
+    async def waits_for_the_emitter() -> bool:
+        found = await conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE relation = 'outbox'::regclass "
+            "AND mode = 'ShareLock' AND NOT granted) AS waits"
+        )
+        return (await found.fetchone())["waits"]
+
+    async def caught_up() -> bool:
+        cursors = await in_read(conn, outbox.cursors, [rec.name])
+        return rec.name in cursors and cursors[rec.name].lag == 0 and await _ended(conn, rec.name)
+
+    try:
+        async with served(gate, workers):
+            async with other.transaction():
+                unit = staged(other)
+                await outbox.emit(unit, events.PAPER_SAVED, "2610.00001")
+                await outbox.wake_all(unit)  # as its commit does: `new` has no cursor yet
+                await workers[outbox.DELIVERY].sweep()  # `new` is enabled: its first turn
+                await until(waits_for_the_emitter, "the first cursor waits for the emitter")
+            await until(caught_up, "no event is left behind the cursor")
+    finally:
+        await other.close()
+
+
+class Picky(Recorder):
+    """An integration whose filter raises while `unsure`."""
+
+    def __init__(self):
+        super().__init__("picky")
+        self.unsure = True
+
+    def wants(self, event):
+        if self.unsure:
+            raise RuntimeError("cannot tell")
+        return super().wants(event)
+
+
+async def test_a_filter_that_raises_fails_the_event_for_the_owner_to_retry(conn: Session, db):
+    rec = Picky()
+    await start(db, rec)
+    (a,) = await emit(conn, events.PAPER_SAVED)
+    assert await deliver(db, rec, NOW) == 0
+    cursor = await in_write(conn, outbox.cursor, rec.name)
+    assert (cursor.failing, cursor.failures) == (a, 1)
+    assert cursor.last_error == "RuntimeError: cannot tell"
+    rec.unsure = False
+    assert await in_write(conn, outbox.retry, rec.name)
+    assert await deliver(db, rec, NOW) == 1 and rec.seen == [a]
+
+
+class Idling(Recorder):
+    """An integration with an `idle` hook, which fails the first time."""
+
+    def __init__(self):
+        super().__init__("idling")
+        self.idled = 0
+
+    async def idle(self, db):
+        self.idled += 1
+        if self.idled == 1:
+            raise RuntimeError("the remote end is down")
+
+
+async def test_an_idle_hook_is_called_while_nothing_waits_and_its_failure_changes_nothing(
+    conn: Session, db, monkeypatch
+):
+    monkeypatch.setattr(dispatch, "IDLE_SECONDS", 0.05)
+    rec = Idling()
+    gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()
+
+    async def idled() -> bool:
+        return rec.idled >= 3
+
+    async with served(gate, workers):
+        await until(idled, "it idles again and again")
+        ids = await emit(conn, events.PAPER_SAVED)
+        await until(lambda: _seen(rec, ids), "events are still delivered")
+    found = await turns(conn, rec.name)
+    assert {t["outcome"] for t in found if t["state"] == "ended"} == {"done"}
+    assert (await in_write(conn, outbox.cursor, rec.name)).failing is None
+
+
+class Holding(Recorder):
+    """Holds the event it is handed until `release` is set, then fails it."""
+
+    def __init__(self):
+        super().__init__("holding")
+        self.handling, self.release = asyncio.Event(), asyncio.Event()
+
+    async def handle(self, db, event):
+        self.handling.set()
+        await self.release.wait()
+        raise RuntimeError(f"cannot handle {event.id}")
+
+
+async def test_an_event_during_a_failing_turn_does_not_cut_its_backoff_short(conn: Session, db):
+    rec = Holding()
+    await start(db, rec)
+    gate, workers = delivering(db, rec)
+    async with served(gate, workers):
+        await emit(conn, events.PAPER_SAVED)
+        await asyncio.wait_for(rec.handling.wait(), 10)
+        await emit(conn, events.PAPER_SAVED)  # wakes the turn while it runs
+        rec.release.set()
+        await until(lambda: _waits(conn, rec.name), "the next turn waits")
+        await until(lambda: _ended_before(conn, rec.name), "the failing turn ends")
+    cursor = await in_write(conn, outbox.cursor, rec.name)
+    found = await turns(conn, rec.name)
+    # One turn, which failed; the next waits out the backoff, with no turn run in between.
+    assert [(t["state"], t["outcome"]) for t in found] == [("ended", "done"), ("pending", None)]
+    assert found[1]["not_before"] == cursor.retry_at
+
+
+async def _ended_before(conn: Session, name: str) -> bool:
+    return any(t["state"] == "ended" for t in await turns(conn, name))
 
 
 async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_integration(
@@ -366,10 +510,11 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
         closed.append(recorder.name)
 
     recorder.aclose = aclose
-    served = {}
+    served, given = {}, {}
 
-    async def run(gate, workers):
+    async def run(gate, workers, *, keys=None):
         served.update(workers)
+        given.update(keys or {})
         await asyncio.Event().wait()
 
     async def sweep(worker):
@@ -383,4 +528,5 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
         await asyncio.sleep(0)
     assert list(served) == [outbox.DELIVERY]
     assert list(served[outbox.DELIVERY].loaded.values()) == [recorder]
+    assert given == {outbox.DELIVERY: [recorder.name]}  # its own integrations' turns alone
     assert deep.client.http.is_closed and closed == ["recorder"]

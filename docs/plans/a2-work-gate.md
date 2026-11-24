@@ -261,21 +261,29 @@ Found while building, owned by the stage named.
   `litwatch fulltext --deep` can work a Deep pass while `serve` serves its item. The pass claim keeps them off
   one pass, but no longer one at a time; P3's CLI-as-items closes it.
 - **P3 (from P2): events wake deliveries at commit.** `outbox.emit` registers `WriteUnit.at_commit`, which runs the
-  submit as the unit's last statement, once per unit for every integration with a cursor (`keep=True`, so a
-  backoff is not cut short). Submitting at emit time would hold the delivery item's row lock until commit and
-  queue every other emitter behind it. A P3 path that submits from a long unit should do the same.
-- **P3, P7 (from P2): items for an integration no process loads wait forever.** `DeliveryWorker` returns
-  `Later(datetime.max)` for a key it does not load, so the item stays pending until a process that loads it
-  submits it. An integration dropped from the configuration leaves one such row for good; P7's cleanup could end
-  them, or `wake_all` could skip cursors no loaded integration names.
-- **P3 (from P2): pass order and width, without a schema change.** An owner's pass due now is submitted at
-  `OWNERS_FIRST` (the epoch), so `take`'s `not_before` order runs it before every automatic one, as `claim`'s
-  priority order did; a pending automatic item is brought forward to it. One that waits (awaiting its text, the Deep
-  pause) keeps its wait's end instead, so after a wait it is ordered by that time, behind automatic passes already
-  due. Text-pass admission is spread over `TEXT_WAVE` slots (`fulltext:{id % 4}`), so up to four run at once as a
-  wave did; two passes in one slot wait for each other. Deep stays one per kind. Each text item opens its own
-  `fulltext` run and gateway, so four at once are four gateways until P4. `store.work.again` with no time now keeps
-  the item's place in line (`LEAST(not_before, now())`), so an owner's item given back stays first.
+  submit as the unit's last statement, once per unit for every integration with a cursor (`keep=True`, and no sooner
+  than a backoff the cursor has recorded). Submitting at emit time would hold the delivery item's row lock until
+  commit and queue every other emitter behind it. A P3 path that submits from a long unit should do the same. A first
+  cursor is made under `LOCK TABLE outbox IN SHARE MODE`, so no emitter looks up the cursors before it exists and
+  commits after its first turn.
+- **P3 (from P2): a turn decides its next run alone.** A delivery turn calls `store.work.forget_resubmission` in its
+  last unit, then reads the cursor and the outbox and submits its own key for when it wants to run again; what was
+  submitted while it ran is forgotten, since that read sees it. A P3 Worker that arranges its own next run (the
+  scheduler's fires, job chunks) can do the same.
+- **P3, P7 (from P2): deliveries are served by name.** `WorkGate.run(workers, keys=)` serves a kind for some keys alone;
+  `serve` gives it the integrations it loads, so a process takes, takes back and waits on only its own deliveries.
+  An integration no process loads keeps one pending item, never taken; one dropped from the configuration leaves it
+  for good, which P7's cleanup could end.
+- **P3 (from P2): pass order and width, without a schema change.** A pass due now is submitted at a time long past
+  that stands for its priority (`store.fulltext._place`: 1970-01-01 plus a day per step from the owner's text
+  priority), so `take`'s `not_before` order runs due passes as `claim`'s priority order did: the owner's, then the
+  automatic ones, then a re-run's. A pending item submitted again is brought forward to its place, and only a write
+  that moves a pass (`owners_first` changing its priority or job) submits it, so a settle does not cut a try's wait
+  short. One that waits (for its text, out the Deep pause) is due at its wait's end instead, so after a wait it is
+  ordered by that time, behind passes already due. Text-pass admission is spread over `TEXT_WAVE` slots
+  (`fulltext:{id % 4}`), so up to four run at once as a wave did; two passes in one slot wait for each other. Deep
+  stays one per kind. Each text item opens its own `fulltext` run and gateway, so four at once are four gateways
+  until P4. `store.work.again` with no time keeps the item's place in line (`LEAST(not_before, now())`).
 - **P3 (from P2): `fulltext.worker` imports `jobs.worker.nightly_waits`.** That is on the `(fulltext, jobs)` pair
   of `CYCLES_BEFORE_THE_RULE`; when P3 moves the nightly gating into items, the import can go with it.
 - **P3 (from P2): re-run passes stay off the gate.** A pass with a `job_id` is the re-run's, worked inline by its

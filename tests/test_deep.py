@@ -27,6 +27,7 @@ from litwatch.core import (
     Verdict,
 )
 from litwatch.core.fulltext import (
+    BACKGROUND_PRIORITY,
     FOCUS,
     PICK,
     RECONCILE_LOOKBACK,
@@ -1680,22 +1681,25 @@ async def test_a_deep_pass_waits_out_the_services_pause_as_the_same_item(
     assert (fake.started, await attempts(db)) == (0, [])  # the pass never claimed
 
 
-async def test_the_owners_request_runs_before_automatic_passes_already_due(db: Session, gate):
-    async with Bridge(db).write("queue automatic") as unit:
-        first = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
+async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns(db: Session, gate):
+    rerun = paper("2610.00003", title="Re-run", abstract="Graded again.", version=1)
+    await in_write(db, papers_store.upsert, [rerun])
+    async with Bridge(db).write("queue in reverse") as unit:  # each submitted before the next
+        background = await fulltext_store.queue_deep(unit, rerun.id, 1, FOCUS, BACKGROUND_PRIORITY)
+        automatic = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
         mine = await fulltext_store.queue_deep(unit, P.id, 1, FOCUS)
-    assert await ask(db, P.id) == mine  # takes over its automatic pass, queued after Q's
+    assert await ask(db, P.id) == mine  # takes over its automatic pass, queued last
     taken: list[str] = []
 
     async def worker(item) -> None:
         taken.append(item.key)
 
-    async def both_ran() -> bool:
-        return len(taken) == 2
+    async def all_ran() -> bool:
+        return len(taken) == 3
 
     async with serving(WorkGate(gate), {"deep": worker}):
-        await until(both_ran, "both items run")
-    assert taken == [str(mine), str(first)]
+        await until(all_ran, "the three items run")
+    assert taken == [str(mine), str(automatic), str(background)]
 
 
 async def _waits_until(conn: Session, pass_id: int | None, at: datetime) -> bool:

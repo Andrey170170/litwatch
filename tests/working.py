@@ -3,7 +3,7 @@ block (`serving`), and reading a key's work items back (`items_of`)."""
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping
 from typing import Any
 
 from litwatch.gates.work import Worker, WorkGate
@@ -21,10 +21,14 @@ async def until(check: Callable[[], Awaitable[bool]], what: str) -> None:
 
 
 @contextlib.asynccontextmanager
-async def serving(gate: WorkGate, workers: Mapping[str, Worker]) -> AsyncGenerator[asyncio.Task]:
-    """`gate.run(workers)` for the block, listening and asleep before it starts; stopped at the
-    end."""
-    task = asyncio.create_task(gate.run(workers))
+async def serving(
+    gate: WorkGate,
+    workers: Mapping[str, Worker],
+    keys: Mapping[str, Collection[str]] | None = None,
+) -> AsyncGenerator[asyncio.Task]:
+    """`gate.run(workers, keys=keys)` for the block, listening and asleep before it starts;
+    stopped at the end."""
+    task = asyncio.create_task(gate.run(workers, keys=keys))
 
     async def idle() -> bool:
         return gate.listening.is_set() and gate.idle

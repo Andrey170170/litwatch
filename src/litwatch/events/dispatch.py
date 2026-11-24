@@ -4,17 +4,19 @@ delivery work item (`events.worker`), whose admission lets one turn per integrat
 time, so one that fails or takes long (a WebDAV upload of a large PDF) delays nobody else.
 
 The bookkeeping (the cursor, a failure) is in units of its own; an integration's `handle` and
-`setup` are given the gate and open their own. When `handle` raises, the cursor stays before
-that event, the failure is recorded for the API, and the event is tried again after a backoff
-that doubles up to an hour; the integration's later events wait behind it, since they may
-depend on it. The owner can retry the event at once or skip it. A lost database is no failure
-of the integration's: it is raised, and the turn is tried again. A restart neither loses an
-event nor hands over one already done, apart from the one in hand when it stopped, which is
+`setup` are given the gate and open their own. When `wants` or `handle` raises, the cursor stays
+before that event, the failure is recorded for the API, and the event is tried again after a
+backoff that doubles up to an hour; the integration's later events wait behind it, since they
+may depend on it. The owner can retry the event at once or skip it. A lost database is no
+failure of the integration's: it is raised, and the turn is tried again. A restart neither loses
+an event nor hands over one already done, apart from the one in hand when it stopped, which is
 why `handle` must be idempotent.
 
 An integration's `setup` runs before its first event in each process that delivers to it. A
 failing setup is recorded for the API like a failing event, with no event attached, and tried
-again after the same backoff; the integration's events wait meanwhile.
+again after the same backoff; the integration's events wait meanwhile. One with an `idle(db)`
+hook (for work no event brings, outside litwatch) has it called on a turn that hands nothing
+over, at most once every `IDLE_SECONDS`; a failing `idle` is logged and changes nothing else.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from litwatch.store import outbox
 log = logging.getLogger(__name__)
 
 BATCH = 100
+IDLE_SECONDS = 60.0  # the least time between two `idle` calls to one integration
 
 
 def backoff(failures: int) -> timedelta:
@@ -58,34 +61,48 @@ async def deliver(db: DatabaseGate, integration: Reacting, now: datetime | None 
         todo = await outbox.after(unit, cursor.position, BATCH)
     position, passed = cursor.position, 0
     for event in todo:
-        if integration.wants(event):
-            try:
+        try:
+            if integration.wants(event):
                 await integration.handle(db, event)
-            except Exception as exc:
-                if database_lost(exc):
-                    raise
-                failures = cursor.failures + 1 if cursor.failing == event.id else 1
-                at = clock()
-                async with db.write(f"dispatch {name}: failed") as unit:
-                    await outbox.advance(unit, name, position)
-                    recorded = await outbox.failed(
-                        unit, name, event, failures, _describe(exc), at, at + backoff(failures)
-                    )
-                log.warning(
-                    "%s: event %s (%s) failed %d time(s)%s: %s",
-                    name,
-                    event.id,
-                    event.type,
-                    failures,
-                    "" if recorded else ", but the owner skipped it meanwhile",
-                    _describe(exc),
+        except Exception as exc:
+            if database_lost(exc):
+                raise
+            failures = cursor.failures + 1 if cursor.failing == event.id else 1
+            at = clock()
+            async with db.write(f"dispatch {name}: failed") as unit:
+                await outbox.advance(unit, name, position)
+                recorded = await outbox.failed(
+                    unit, name, event, failures, _describe(exc), at, at + backoff(failures)
                 )
-                return passed
+            log.warning(
+                "%s: event %s (%s) failed %d time(s)%s: %s",
+                name,
+                event.id,
+                event.type,
+                failures,
+                "" if recorded else ", but the owner skipped it meanwhile",
+                _describe(exc),
+            )
+            return passed
         position, passed = outbox.Position.of(event), passed + 1
     if passed:
         async with db.write(f"dispatch {name}: advance") as unit:
             await outbox.advance(unit, name, position)
     return passed
+
+
+async def idle(db: DatabaseGate, integration: Reacting) -> None:
+    """Call the integration's `idle` hook, if it has one. A failure is logged and goes no
+    further, but for a lost database, which is raised."""
+    hook = getattr(integration, "idle", None)
+    if hook is None:
+        return
+    try:
+        await hook(db)
+    except Exception as exc:
+        if database_lost(exc):
+            raise
+        log.exception("%s: idle work failed", integration.name)
 
 
 async def start(db: DatabaseGate, integration: Reacting, now: datetime | None = None) -> bool:

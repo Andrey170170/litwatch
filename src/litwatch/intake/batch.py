@@ -12,6 +12,7 @@ from datetime import date
 from litwatch.core import Cause, Paper
 from litwatch.feedback import word
 from litwatch.gates.database import DatabaseGate
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 
 # The most papers one unit stores, and so the most settle locks it holds at once.
@@ -30,7 +31,8 @@ async def store(
     its own that holds the page's settle locks: the papers, then a settle of each one
     rewritten, withdrawn or brought back, by `rules`. A rewrite's Weight went with the old
     text, so its grades fall back to solid until the new text is analysed, and a new arXiv
-    version queues the passes that read the text again. A paper fetched inside a change of it
+    version queues the passes that read the text again, and a paper brought back has its open
+    passes run again (`store.fulltext.submit_restored`). A paper fetched inside a change of it
     is stored there with `store.papers.upsert` instead, and that change settles it."""
     total = papers_store.Upserted()
     for start in range(0, len(papers), PAGE):
@@ -40,6 +42,7 @@ async def store(
             stored = await papers_store.upsert(unit, page, source=source, listed=listed)
             settled = list(dict.fromkeys(stored.rewritten + stored.withdrawn))
             await word.settle_many(unit, settled, cause=Cause.VERDICT, rules=rules)
+            await fulltext_store.submit_restored(unit, stored.withdrawn)
         total.inserted += stored.inserted
         total.updated += stored.updated
         total.rewritten += stored.rewritten

@@ -1,30 +1,32 @@
 """The delivery Worker (docs/plans/a2-work-gate.md, P2): each work item of kind `deliver` is one
-turn of one integration's delivery (`events.dispatch`), keyed by its name.
+turn of one integration's delivery (`events.dispatch`), keyed by its name. A process serves the
+keys of the integrations it loads alone (`keys`, which `serve` gives `WorkGate.run`): a turn for
+one it does not load waits for a process that does.
 
-A turn sets the integration up, the first time in this process, then delivers one batch. While
-it runs it arranges the next turn, by submitting its own key, which runs once this one ends: at
-once while settled events wait, a little later while only events an older transaction holds
-back wait (`RETRY`), and when a backoff ends while a failure or a failed setup waits one out.
-With nothing left, the next event's commit wakes it (`store.outbox.emit`), as the owner's retry
-or skip does. An integration this process does not load waits for one that does: a process
-submits each integration it loads as it starts (`sweep`)."""
+A turn sets the integration up, the first time in this process, then delivers one batch; one
+that hands nothing over calls the integration's `idle` hook, at most once every
+`dispatch.IDLE_SECONDS`. Then the turn arranges the next itself, and alone: it forgets what was
+submitted for it while it ran (`store.work.forget_resubmission`), reads the cursor and the
+outbox, and submits its own key, which runs once this turn ends: at once while settled events
+wait, a little later while only events an older transaction holds back wait (`RETRY`), when a
+backoff ends while a failure or a failed setup waits one out, and after `dispatch.IDLE_SECONDS`
+for an integration with an `idle` hook. With nothing left, the next event's commit wakes it
+(`store.outbox.emit`), no sooner than a backoff recorded by then; the owner's retry or skip
+wakes it at once."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 from litwatch.core.work import WorkItem
 from litwatch.events import Reacting, dispatch
 from litwatch.gates.database import DatabaseGate
-from litwatch.gates.work import Later
-from litwatch.store import outbox
+from litwatch.store import outbox, work
 
 # How soon a turn comes again for events that committed behind an older transaction still
 # running: the outbox reads them once it ends.
 RETRY = timedelta(seconds=5)
-# When an item for an integration this process does not load runs: not until one that does
-# submits it.
-NEVER = datetime.max.replace(tzinfo=UTC)
 
 
 class DeliveryWorker:
@@ -34,22 +36,30 @@ class DeliveryWorker:
         self.db = db
         self.loaded = {i.name: i for i in integrations}
         self.set_up: set[str] = set()  # those whose setup ran in this process
+        self.idled: dict[str, float] = {}  # when each one's `idle` last ran, on the loop's clock
+
+    @property
+    def keys(self) -> list[str]:
+        """The keys this Worker serves: the integrations it loads."""
+        return sorted(self.loaded)
 
     async def sweep(self) -> None:
         """Submit a turn for each integration loaded: its setup, and what waits for it."""
         async with self.db.write("deliveries: sweep") as unit:
-            for name in sorted(self.loaded):
+            for name in self.keys:
                 await outbox.wake(unit, name)
 
-    async def __call__(self, item: WorkItem) -> Later | None:
-        integration = self.loaded.get(item.key)
-        if integration is None:
-            return Later(NEVER)
+    async def __call__(self, item: WorkItem) -> None:
+        integration = self.loaded[item.key]
         if item.key not in self.set_up and await dispatch.start(self.db, integration):
             self.set_up.add(item.key)
+        idles = getattr(integration, "idle", None) is not None
         if item.key in self.set_up:
-            await dispatch.deliver(self.db, integration)
+            passed = await dispatch.deliver(self.db, integration)
+            if not passed and idles and self._idle_due(item.key):
+                await dispatch.idle(self.db, integration)
         async with self.db.write(f"dispatch {item.key}: next turn") as unit:
+            await work.forget_resubmission(unit, item)
             cursor = await outbox.cursor(unit, item.key)
             settled, waiting = await outbox.waiting(unit, item.key)
             now = datetime.now(UTC)
@@ -61,7 +71,17 @@ class DeliveryWorker:
                 at = now
             elif waiting:
                 at = now + RETRY
+            elif idles:
+                at = now + timedelta(seconds=dispatch.IDLE_SECONDS)
             else:
-                return None
+                return
             await outbox.wake(unit, item.key, at=at)
-        return None
+
+    def _idle_due(self, name: str) -> bool:
+        """Whether the integration's `idle` may run now, counting it as run if so."""
+        clock = asyncio.get_running_loop().time()
+        last = self.idled.get(name)
+        if last is not None and clock - last < dispatch.IDLE_SECONDS:
+            return False
+        self.idled[name] = clock
+        return True
