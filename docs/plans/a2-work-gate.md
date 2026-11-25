@@ -133,7 +133,7 @@ Found in a survey of the code at 548857e3:
   stops and before the image before starts, the command items left are ended (in the stack's terms):
 
   ```sh
-  docker compose exec db psql -U litwatch litwatch -c "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), error = 'its process stopped', lease_token = NULL, lease_until = NULL, resubmitted = false WHERE kind = 'command' AND state <> 'ended'"
+  dc exec -T litwatch-db psql -U litwatch -d litwatch -c "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), error = 'its process stopped', lease_token = NULL, lease_until = NULL, resubmitted = false WHERE kind = 'command' AND state <> 'ended'"
   ```
 
   The rehearsal shows it: a `fulltext --deep` killed, the rollback with this step, then the image before claims a

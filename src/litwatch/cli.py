@@ -27,6 +27,7 @@ from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
+from litwatch.jobs.context import UnclosedError
 from litwatch.publications import Dblp
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
@@ -222,9 +223,12 @@ def nightly(
     cfg = configuration.load(config)
 
     async def work(db: DatabaseGate) -> tuple[int, Any]:
-        run_id = await nightly_job.run(
-            db, cfg, fetch=fetch, days=days, limit=limit, with_digests=digests
-        )
+        try:
+            run_id = await nightly_job.run(
+                db, cfg, fetch=fetch, days=days, limit=limit, with_digests=digests
+            )
+        except UnclosedError as exc:  # its jobs wait for a nightly that closes: this one again
+            raise CommandCutOffError(str(exc)) from exc
         return run_id, await _run_record(db, run_id)
 
     run_id, run = _run(work, item="nightly")

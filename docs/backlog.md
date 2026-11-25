@@ -126,7 +126,10 @@ Its own project on top of A6: the labelled query set and goals first, then work 
   D4). Before a second process serves work, close the races it leaves, found in A2's reviews:
   - a nightly being taken back by one gate loses its place to a job chunk another gate admits (`SKIP LOCKED`);
   - a progress write whose commit acknowledgement is lost counts its papers twice on the retry (Process, replay,
-    a re-run's text passes: each counts from where its chunk began, `ModelRun.chunk_began`).
+    a re-run's text passes: each counts from where its chunk began, `ModelRun.chunk_began`);
+  - the same tallies live in the Worker's memory between a committed result and the chunk's progress write, so a
+    restart in between leaves a committed result out of the job's counts (a re-run's Brief, a replay result whose
+    acknowledgement is lost). Counts only; one fix closes both: derive a job's progress from its committed results.
 
 - **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
   `evals/` and homelab specifics out of the repository (the image ships `evals/labels/` for Run replay: they move

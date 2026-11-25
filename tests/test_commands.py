@@ -392,3 +392,28 @@ async def test_the_cli_nightly_runs_as_a_command_item(conn: Session, tmp_path, m
     assert seen["work"].item.id == item["id"]
     (run,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
     assert run["work_id"] == item["id"] and run["finished_at"] is not None
+
+
+async def test_a_cli_nightly_whose_close_fails_says_to_run_it_again(
+    conn: Session, tmp_path, monkeypatch
+):
+    """`litwatch nightly` whose close (with its jobs' release) fails ends its item failed and
+    tells the owner to run it again, rather than ending on an unhandled `UnclosedError`."""
+    from litwatch.jobs import nightly  # noqa: PLC0415
+    from litwatch.store import jobs as jobs_store  # noqa: PLC0415
+    from tests.scripted import Scripted  # noqa: PLC0415
+
+    real = nightly.run
+
+    async def scripted(db, cfg, **kwargs):
+        return await real(db, cfg, gateway=Scripted().gateway, **kwargs)
+
+    async def lost(unit):
+        raise psycopg.OperationalError("the server closed the connection unexpectedly")
+
+    monkeypatch.setattr(nightly, "run", scripted)
+    monkeypatch.setattr(jobs_store, "release", lost)
+    result = await command(conn, tmp_path, monkeypatch, "nightly", "--no-fetch", "--no-digests")
+    assert result.exit_code != 0 and "run it again" in result.output, result.output
+    (item,) = await commands(conn)
+    assert (item["attempts"], item["outcome"]) == (1, "failed")
