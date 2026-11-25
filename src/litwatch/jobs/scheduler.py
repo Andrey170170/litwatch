@@ -85,13 +85,6 @@ def fire_key(fired: datetime) -> str:
     return fired.astimezone(UTC).isoformat()
 
 
-async def submit(db: DatabaseGate) -> None:
-    """Have the scheduler look at the schedule now (as `serve` starts): its item, brought
-    forward."""
-    async with db.write("schedule: look now") as unit:
-        await work.submit(unit, SCHEDULE, SCHEDULE)
-
-
 class ScheduleWorker:
     """Submits the fires of `config`'s schedule as they come."""
 
@@ -101,9 +94,10 @@ class ScheduleWorker:
 
     async def sweep(self) -> None:
         """As `serve` starts: the fires due submitted before any other item can start, so no
-        job's chunk goes ahead of a nightly due; then the scheduler's item, to look again."""
-        await self.fires()
-        await submit(self.db)
+        job's chunk goes ahead of a nightly due; then the scheduler's item, for the next fire."""
+        after = await self.fires()
+        async with self.db.write("schedule: the next fire") as unit:
+            await work.submit(unit, SCHEDULE, SCHEDULE, not_before=after.at)
 
     async def __call__(self, item: WorkItem) -> Later:
         return await self.fires()
