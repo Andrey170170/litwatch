@@ -46,14 +46,14 @@ def at(hour, minute=0, days=0):
 
 def test_a_job_is_due_once_after_its_time_and_not_long_after():
     nightly = "0 6 * * *"
-    assert scheduler.is_due(nightly, at(6, 10), None)
-    assert scheduler.is_due(nightly, at(6, 10), last_run=at(6, 0, days=-1))
-    assert not scheduler.is_due(nightly, at(6, 10), last_run=at(6, 0, 5))  # ran already
-    assert not scheduler.is_due(nightly, at(5, 59), last_run=at(6, 0, days=-1))  # not yet
-    assert not scheduler.is_due(nightly, at(13, 0), last_run=None)  # missed by too long
+    assert scheduler.due_fire(nightly, at(6, 10), None) == at(6, 0)
+    assert scheduler.due_fire(nightly, at(6, 10), last_run=at(6, 0, days=-1)) == at(6, 0)
+    assert not scheduler.due_fire(nightly, at(6, 10), last_run=at(6, 0, 5))  # ran already
+    assert not scheduler.due_fire(nightly, at(5, 59), last_run=at(6, 0, days=-1))  # not yet
+    assert not scheduler.due_fire(nightly, at(13, 0), last_run=None)  # missed by too long
     weekly = "0 7 * * 1"
-    assert scheduler.is_due(weekly, at(7, 1), last_run=at(7, 0, days=-7))
-    assert not scheduler.is_due(weekly, at(7, 1, days=1), last_run=at(7, 0, days=-7))
+    assert scheduler.due_fire(weekly, at(7, 1), last_run=at(7, 0, days=-7)) == at(7, 0)
+    assert not scheduler.due_fire(weekly, at(7, 1, days=1), last_run=at(7, 0, days=-7))
 
 
 def test_the_repeated_hour_of_a_fall_back_is_scheduled_like_any_other():
@@ -63,7 +63,7 @@ def test_the_repeated_hour_of_a_fall_back_is_scheduled_like_any_other():
         2026, 11, 1, 8, 15, tzinfo=UTC
     )
     before_fallback = datetime(2026, 11, 1, 1, 59, tzinfo=denver)  # MDT, an hour earlier
-    assert scheduler.is_due("* * * * *", second, last_run=before_fallback)
+    assert scheduler.due_fire("* * * * *", second, last_run=before_fallback)
 
 
 def test_the_next_fire_steps_through_a_fall_back_in_the_zone():
@@ -303,22 +303,30 @@ async def test_a_nightly_brings_forward_the_chunks_it_held_back_as_it_lets_go(
     assert chunk["not_before"] <= datetime.now(UTC)
 
 
+LOST = psycopg.OperationalError("the server closed the connection unexpectedly")
+
+
 @pytest.mark.parametrize(
-    "error",
+    ("error", "then"),
     [
-        psycopg.OperationalError("the server closed the connection unexpectedly"),
-        RuntimeError("the release went wrong"),
+        (LOST, None),
+        (RuntimeError("the release went wrong"), None),
+        (RuntimeError("the release went wrong"), "a read lost"),
+        (RuntimeError("the release went wrong"), "many attempts"),
     ],
-    ids=["database lost", "another error"],
+    ids=["database lost", "another error", "then a read lost", "after many attempts"],
 )
 async def test_a_fire_whose_nightly_could_not_close_runs_it_again_and_releases_tonight(
-    conn: Session, db, monkeypatch, error
+    conn: Session, db, monkeypatch, error, then
 ):
     """The fire's nightly fails to close its run (and release tonight's jobs, in the same unit):
     the database lost, or any other error. Its own attempt, cut off, served nothing, so the
     same fire runs the nightly again, after a backoff, which closes, and the job on tonight's
-    run goes in the queue."""
+    run goes in the queue. So too when the database is lost for the next read after it, and
+    when the fire has waited many attempts before (the run lock's waits count): its backoff is
+    capped before it doubles."""
     monkeypatch.setattr(scheduler, "WAIT", timedelta(milliseconds=200))
+    monkeypatch.setattr(scheduler, "CLOSE_WAIT_MOST", timedelta(milliseconds=400))
     await settling.save_tree(conn, TREE)
     models = Scripted()
     monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False, with_digests=False))
@@ -335,8 +343,20 @@ async def test_a_fire_whose_nightly_could_not_close_runs_it_again_and_releases_t
         await real(unit)
 
     monkeypatch.setattr(jobs_store, "release", drops)
+    if then == "a read lost":  # the first read after it, but the gate's own
+        real_read, read_lost = db.read, []
+
+        def read(name, *args, **kwargs):
+            if lost and not read_lost and not name.startswith("work:"):
+                read_lost.append(name)
+                raise LOST
+            return real_read(name, *args, **kwargs)
+
+        monkeypatch.setattr(db, "read", read)
     async with db.write("a fire's item") as unit:
         item = await work.submit(unit, "nightly", scheduler.fire_key(DAY), lasting=True)
+    if then == "many attempts":
+        await conn.execute("UPDATE work_items SET attempts = 60 WHERE id = %s", (item.id,))
 
     async def ended() -> bool:
         (row,) = await items_of(conn, "nightly", item.key)
@@ -347,7 +367,9 @@ async def test_a_fire_whose_nightly_could_not_close_runs_it_again_and_releases_t
     ):
         await until(ended, "the fire's item to end")
     (row,) = await items_of(conn, "nightly", item.key)
-    assert lost and (row["outcome"], row["attempts"]) == ("done", 2)
+    assert lost and row["outcome"] == "done"
+    if then is None:
+        assert row["attempts"] == 2
     first, again = await (
         await conn.execute("SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id")
     ).fetchall()
@@ -356,13 +378,37 @@ async def test_a_fire_whose_nightly_could_not_close_runs_it_again_and_releases_t
     assert job in await in_read(conn, jobs_store.open_ids) and await stranded(conn) == []
 
 
+def test_a_failed_close_waits_longer_each_attempt_up_to_its_cap():
+    assert scheduler.close_backoff(1) == scheduler.WAIT
+    assert scheduler.close_backoff(3) == scheduler.WAIT * 4
+    assert scheduler.close_backoff(43) == scheduler.CLOSE_WAIT_MOST
+
+
 async def test_a_fire_whose_digests_lose_a_conflict_is_tried_again(conn: Session, db, monkeypatch):
     """A digest's write loses a serialization conflict inside the topics' task group: the group
-    is made of retryable errors alone, so the gate tries the same fire again, which runs."""
+    is made of retryable errors alone, so the gate tries the same fire again, which runs. Its
+    first attempt's run closed failed, and released the job it held back; but the fire still
+    owes its retry (the gate is slow to record it, here), so the job's chunk starts only once
+    the second attempt has closed."""
     from litwatch import digests  # noqa: PLC0415
+    from litwatch.jobs import worker  # noqa: PLC0415
 
     await settling.save_tree(conn, TREE)
+    a = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes.")
+    await in_write(conn, papers_store.upsert, [a])
+    config = CONFIG.model_copy(update={"schedule": QUIET})  # fires on: no fire due but ours
+    models = Scripted()
     monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False))
+    job = await in_write(conn, jobs_store.create, "process", {"papers": [a.id]}, 1, "queued")
+    real_again, slowed = work.again, []
+
+    async def again(unit, item, *args, **kwargs):
+        if item.kind == "nightly" and not slowed:
+            slowed.append(True)
+            await asyncio.sleep(1.5)  # the chunk it released has its chance meanwhile
+        return await real_again(unit, item, *args, **kwargs)
+
+    monkeypatch.setattr(work, "again", again)
     tries = []
 
     async def write(*_, **__) -> None:
@@ -382,11 +428,23 @@ async def test_a_fire_whose_digests_lose_a_conflict_is_tried_again(conn: Session
         (row,) = await items_of(conn, "nightly", item.key)
         return row["state"] == "ended"
 
-    workers = {"nightly": scheduler.NightlyWorker(db, CONFIG, Scripted().gateway)}
+    async def job_done() -> bool:
+        return await ended() and (await job_of(conn, job))["state"] == "done"
+
+    workers = {
+        "nightly": scheduler.NightlyWorker(db, config, models.gateway),
+        jobs_store.WORK: worker.JobWorker(db, config, models.gateway),
+    }
     async with serving(WorkGate(db, poll=0.1), workers):
-        await until(ended, "the fire's item to end")
+        await until(job_done, "the fire's item to end, and the job to be done")
     (row,) = await items_of(conn, "nightly", item.key)
-    assert tries and (row["outcome"], row["attempts"]) == ("done", 2)
+    assert tries and slowed and (row["outcome"], row["attempts"]) == ("done", 2)
+    first, second, chunk = await (
+        await conn.execute("SELECT * FROM runs WHERE kind IN ('nightly', 'job') ORDER BY id")
+    ).fetchall()
+    assert [r["kind"] for r in (first, second, chunk)] == ["nightly", "nightly", "job"]
+    assert first["error"] is not None and second["error"] is None
+    assert chunk["started_at"] >= second["finished_at"]
 
 
 # -- through `serve` -------------------------------------------------------------------------

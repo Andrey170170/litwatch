@@ -203,62 +203,20 @@ class WorkGate:
             # Another process took one for the same admission at once; its settling wakes us.
             return None
 
-    async def _admitted(self, key: str) -> tuple[WorkItem, float]:
-        """The one claim of the command item `key` (`inline`), once its admission is free:
-        looked for again every `RETRY_SECONDS` while another item holds it."""
-        self._keys = {queue.COMMAND: [key]}
-        while (taken := await self._take([queue.COMMAND])) is None:
+    async def _admitted(self, key: str, admission: str) -> tuple[WorkItem, float]:
+        """The command item `key` (`inline`), made and claimed in one unit once its `admission`
+        is free (`store.work.admit`), with a time on the event loop's clock no later than its
+        lease's start: looked for again every `RETRY_SECONDS` while another item holds it."""
+        while True:
+            since = asyncio.get_running_loop().time()
+            try:
+                async with self._write("admit") as unit:
+                    item = await queue.admit(unit, key, admission, self.lease)
+                if item is not None:
+                    return item, since
+            except psycopg.errors.UniqueViolation:
+                pass  # another took the admission at once
             await asyncio.sleep(RETRY_SECONDS)
-        return taken
-
-    async def _once[T](
-        self, name: str, item: WorkItem, since: float, work: Callable[[], Awaitable[T]]
-    ) -> T:
-        """Run the command `item`'s one claim (`inline`): `work` under its lease, kept beating,
-        then its end recorded, done only once `work` returned."""
-        results: list[T] = []
-
-        async def worker(_: WorkItem) -> None:
-            results.append(await work())
-
-        lost = asyncio.Event()
-        handler = asyncio.create_task(self._handle(item, worker))
-        beat = asyncio.create_task(self._heartbeat(item, handler, lost, since))
-        try:
-            try:
-                await asyncio.wait({handler})
-            except asyncio.CancelledError:
-                handler.cancel()
-                await asyncio.wait({handler})
-                raise
-        finally:
-            beat.cancel()
-            try:
-                await asyncio.wait({beat})
-            except asyncio.CancelledError:  # its renewal still ends before this returns
-                await asyncio.wait({beat})
-                raise
-        if lost.is_set():
-            raise CommandCutOffError(f"{name}: its lease was lost; run it again")
-        if handler.cancelled():
-            raise CommandCutOffError(f"{name}: its work stopped, cancelled; run it again")
-        if (error := handler.exception()) is not None:
-            await self._change(
-                "fail", lambda unit: queue.end(unit, item, Outcome.FAILED, error=_describe(error))
-            )
-            if _cut_off(error):
-                raise CommandCutOffError(f"{name}: {_describe(error)}; run it again") from error
-            raise error
-        try:
-            async with self._write("end") as unit:
-                ended = await queue.end(unit, item, Outcome.DONE)
-        except Exception as exc:
-            raise RuntimeError(f"{name}: its end was not recorded ({exc}); run it again") from exc
-        if not ended:
-            raise RuntimeError(
-                f"{name}: its end was not recorded (its lease is gone); run it again"
-            )
-        return results[0]
 
     async def renew(self, item: WorkItem) -> bool:
         """Renew the lease on `item`; False when it is lost."""
@@ -352,8 +310,13 @@ class WorkGate:
             return
         await self._run(item, worker, since)
 
-    async def _run(self, item: WorkItem, worker: Worker, since: float) -> None:
-        """Run `item` by `worker` under its lease and settle it."""
+    async def _run(
+        self, item: WorkItem, worker: Worker, since: float, *, once: bool = False
+    ) -> Result | None:
+        """Run `item` by `worker` under its lease and settle it. With `once`, a CLI command's
+        one attempt (`inline`), nothing is given back or tried again: a lost lease, or a Worker
+        that stopped cancelled, raises `CommandCutOffError`; an error ends the item failed and
+        is raised; and the item's end is recorded done before its result is returned."""
         lost = asyncio.Event()
         handler = asyncio.create_task(self._handle(item, worker))
         beat = asyncio.create_task(self._heartbeat(item, handler, lost, since))
@@ -365,17 +328,24 @@ class WorkGate:
                     handler.cancel()
                 await asyncio.wait({handler})
                 _reap(item, handler)
-                if not lost.is_set():
+                if not lost.is_set() and not once:
                     await self._give_back(item)
                 raise
             if lost.is_set():
                 log.warning("work: %s %s (item %s) stopped: its lease is lost", *_name(item))
                 _reap(item, handler)
-                return
+                if once:
+                    raise CommandCutOffError("its lease was lost")
+                return None
             if handler.cancelled():  # by no one here: it stopped, so it is given back
+                if once:
+                    raise CommandCutOffError("its work stopped, cancelled")
                 await self._give_back(item)
-                return
+                return None
+            if once:
+                return await self._settle_once(item, handler)
             await self._settle(item, handler)
+            return None
         finally:
             beat.cancel()
             try:
@@ -409,6 +379,26 @@ class WorkGate:
         else:
             cost = None if result is None else result.cost
             await self._change("end", lambda unit: queue.end(unit, item, Outcome.DONE, cost=cost))
+
+    async def _settle_once(
+        self, item: WorkItem, handler: asyncio.Task[Result | None]
+    ) -> Result | None:
+        """Record how a command's one attempt ended (`_run`, `once`): failed, raising its
+        error, or done, confirmed, returning its result."""
+        if (error := handler.exception()) is not None:
+            failure = _describe(error)
+            await self._change(
+                "fail", lambda unit: queue.end(unit, item, Outcome.FAILED, error=failure)
+            )
+            raise error
+        try:
+            async with self._write("end") as unit:
+                ended = await queue.end(unit, item, Outcome.DONE)
+        except Exception as exc:
+            raise CommandCutOffError(f"its end was not recorded ({exc})") from exc
+        if not ended:
+            raise CommandCutOffError("its end was not recorded (its lease is gone)")
+        return handler.result()
 
     async def _give_back(self, item: WorkItem) -> None:
         """Give back a claim whose Worker has stopped (or never started), its lease live or not,
@@ -541,28 +531,35 @@ async def inline[T](
     command that does what a kind of `serve`'s does takes that kind's (`deep`), so it waits
     while that kind runs, and the kind waits for it.
 
-    One item and one attempt, as a command run by hand has: it waits for its admission, takes
-    its one claim, runs `work` under it with the lease kept beating as `run`'s supervisors do,
-    and records its end. A lost database or a lost conflict, as it takes its claim, in its work
-    or as its end is recorded, and a lease lost (its heartbeat failed), end it failed
-    (`CommandCutOffError`): the owner runs it again. However it stops after its submission
-    (Ctrl-C at any point, a work that stops cancelled, an error of the gate's), its item is
-    ended failed unless it ended (`store.work.abandon`), so no command item is left pending or
-    running, and nothing runs one again (`store.work.take_back`)."""
+    One item and one attempt, as a command run by hand has: once its admission is free, it
+    makes and claims its item in one unit (`store.work.admit`), so one waiting leaves no row;
+    then runs `work` under it as `run`'s supervisors do, its lease kept beating (`_run`, with
+    `once`), and records its end. A lost database or a lost conflict, as it takes its claim, in
+    its work or as its end is recorded, a lease lost (its heartbeat failed), and a work that
+    stops cancelled end it failed (`CommandCutOffError`): the owner runs it again. However it
+    stops (Ctrl-C at any point, an error of the gate's), its item is ended failed unless it
+    ended (`store.work.abandon`), and nothing runs one again; one whose process died is ended
+    by the next command for its admission, or any `serve`'s take-back, once its lease lapses
+    (`store.work.take_back`)."""
     key = f"{name}:{uuid.uuid4()}"
     gate = WorkGate(db, lease=LEASE)
+    results: list[T] = []
+
+    async def worker(_: WorkItem) -> None:
+        results.append(await work())
+
     try:
-        try:
-            async with db.write(f"{name}: submit") as unit:
-                await queue.submit(unit, queue.COMMAND, key, admission=admission or key)
-            item, since = await gate._admitted(key)
-        except Exception as exc:
-            if _cut_off(exc):
-                raise CommandCutOffError(f"{name}: {_describe(exc)}; run it again") from exc
-            raise
-        return await gate._once(name, item, since, work)
+        item, since = await gate._admitted(key, admission or key)
+        await gate._run(item, worker, since, once=True)
+        return results[0]
+    except CommandCutOffError as exc:
+        raise CommandCutOffError(f"{name}: {exc}; run it again") from exc
+    except Exception as exc:
+        if _cut_off(exc):
+            raise CommandCutOffError(f"{name}: {_describe(exc)}; run it again") from exc
+        raise
     finally:
-        # Whatever happened, even cancelled (it waits for this), and its submission uncertain.
+        # Whatever happened, even cancelled (it waits for this), its claim's commit uncertain.
         await _finished(asyncio.create_task(_abandon(db, name, key)))
 
 

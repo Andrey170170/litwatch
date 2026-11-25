@@ -256,9 +256,15 @@ async def work(
         if left := await _open_passes(db, job):
             return Chunk("stopped", f"stopped with {left} full-text passes left: no archive")
     else:
+        # The passes count on the run as each commits; the job takes them from there, from
+        # where its chunk began (`chunk_began`), so a chunk tried again after its progress was
+        # not recorded counts the passes its first try committed too, which it then skips.
+        before = run.chunk_began()
         done = await fulltext.work(db, config, archive, run=run, job=job["id"], limit=size)
-        counts.update({k: v for k, v in done.items() if k != "awaiting_text"})
+        passes = run.tally() - before
+        counts.update({k: v for k, v in passes.items() if k != "awaiting_text"})
         after = await _progress(db, job, run, counts, job["done"], on_run=False)
+        run.chunk_recorded()
         if after is None:
             return Chunk("gone")
         if run.gateway.ceiling is not None and run.gateway.ceiling.reached:

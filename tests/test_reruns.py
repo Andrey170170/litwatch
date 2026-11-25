@@ -556,6 +556,32 @@ async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_
     assert (deep["job_id"], deep["priority"]) == (None, BACKGROUND_PRIORITY)
 
 
+async def test_a_reruns_brief_committed_before_its_progress_was_lost_is_counted_on_the_job(
+    conn: Session, db, models, monkeypatch
+):
+    """The database goes away as the chunk that wrote A's Brief records its progress: the gate
+    tries it again, which finds the pass done and writes none, yet the job counts the Brief."""
+    import psycopg  # noqa: PLC0415
+
+    await analysed(conn, "incremental", A.id)
+    job = await focus_rerun(conn, models, ceiling=1.0)
+    w = worker.JobWorker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
+    assert await step(w)  # the grading
+    real, lost = jobs_store.progress, []
+
+    async def drops(unit, job_id, done, counts, *args, **kwargs):
+        if counts.get("briefs_written") and not lost:
+            lost.append(True)
+            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+        return await real(unit, job_id, done, counts, *args, **kwargs)
+
+    monkeypatch.setattr(jobs_store, "progress", drops)
+    await work_out(w)
+    assert lost and (await text_pass(conn))["state"] == "done"
+    done = await job_of(conn, job)
+    assert (done["state"], done["counts"].get("briefs_written")) == ("done", 1)
+
+
 async def test_a_text_pass_that_does_not_fit_stops_the_rerun_and_waits_for_run_now(
     conn: Session, db, models
 ):

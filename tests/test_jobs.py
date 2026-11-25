@@ -22,7 +22,7 @@ from litwatch.feedback import misses
 from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Later, WorkGate
 from litwatch.jobs import nightly, worker
-from litwatch.jobs.context import model_run
+from litwatch.jobs.context import UnclosedError, model_run
 from litwatch.llm import Gateway, prices
 from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
@@ -901,7 +901,8 @@ async def test_a_nightly_closes_its_run_and_releases_its_jobs_together_or_not_at
     conn: Session, db, models, monkeypatch
 ):
     """The database is lost as the nightly releases its jobs: its run stays open too, so a job
-    on tonight's run is not left runnable with no chunk; it waits for a nightly that closes."""
+    on tonight's run is not left runnable with no chunk; it waits for a nightly that closes.
+    The nightly says its run did not close (`UnclosedError`), from the error that stopped it."""
 
     async def lost(unit):
         raise psycopg.OperationalError("the server closed the connection unexpectedly")
@@ -909,8 +910,9 @@ async def test_a_nightly_closes_its_run_and_releases_its_jobs_together_or_not_at
     job = await in_write(conn, jobs_store.create, "process", {"papers": [A.id]}, 1, "offered")
     await on_tonight(conn, job)
     monkeypatch.setattr(jobs_store, "release", lost)
-    with pytest.raises(psycopg.OperationalError):
+    with pytest.raises(UnclosedError) as raised:
         await nightly.run(db, CONFIG, fetch=False, gateway=models.gateway, with_digests=False)
+    assert isinstance(raised.value.__cause__, psycopg.OperationalError)
     (night,) = await rows(conn, "SELECT * FROM runs WHERE kind = 'nightly'")
     assert night["finished_at"] is None
     assert await stranded(conn) == [] and (await job_of(conn, job))["state"] == "tonight"

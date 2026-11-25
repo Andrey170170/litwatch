@@ -104,7 +104,7 @@ def today_run(
     if deadline <= due:
         deadline += timedelta(days=1)
     night = {"due": due, "deadline": deadline}
-    # Today's run started at or after tonight's fire, as the scheduler counts it (`is_due`): a run
+    # Today's run started at or after tonight's fire, as the scheduler counts it (`due_fire`): a run
     # by hand before it leaves the fire outstanding; one still going shows as it goes.
     started = run.get("started_at") if run else None
     ours = started is not None and started.astimezone(zone).date() == day

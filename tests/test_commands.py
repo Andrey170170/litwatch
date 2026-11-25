@@ -17,7 +17,7 @@ from litwatch.store import fulltext as fulltext_store
 from litwatch.store import runs
 from litwatch.store import work as queue
 from tests.sessions import Session
-from tests.working import command, serving, until
+from tests.working import command, serving
 
 
 async def commands(conn: Session) -> list[dict]:
@@ -100,25 +100,25 @@ async def test_a_command_the_database_was_lost_under_fails_once_with_its_item_en
 async def test_a_command_that_loses_a_conflict_taking_its_claim_fails_without_working(
     conn: Session, db, monkeypatch
 ):
-    """Taking its one claim loses a conflict: not tried again, the work never runs, and the
-    item is ended failed."""
+    """Taking its one claim loses a conflict: not tried again, the work never runs, and no
+    item is left."""
     worked = []
 
-    async def take(*_, **__):
+    async def admit(*_, **__):
         raise psycopg.errors.SerializationFailure("could not serialize access")
 
     async def work() -> None:
         worked.append(1)
 
-    monkeypatch.setattr(queue, "take", take)
+    monkeypatch.setattr(queue, "admit", admit)
     with pytest.raises(CommandCutOffError, match="run it again"):
         await asyncio.wait_for(inline(db, "intake", work), 10)
-    (item,) = await commands(conn)
-    assert worked == [] and (item["state"], item["outcome"]) == ("ended", "failed")
+    assert worked == [] and await commands(conn) == []
 
 
 async def test_a_command_waits_for_its_admission_then_runs_once(conn: Session, db):
-    """Its admission held by a running item (`serve`'s Deep pass), it waits, then runs."""
+    """Its admission held by a running item (`serve`'s Deep pass), it waits, with no item of its
+    own meanwhile (a process killed as it waits leaves none), then runs."""
     async with db.write("a Deep pass, running") as unit:
         await queue.submit(unit, fulltext_store.DEEP_WORK, "1")
     await conn.execute(
@@ -133,7 +133,7 @@ async def test_a_command_waits_for_its_admission_then_runs_once(conn: Session, d
 
     task = asyncio.create_task(inline(db, "fulltext --deep", work, admission="deep"))
     await asyncio.sleep(1.5)
-    assert ran == [] and not task.done()
+    assert ran == [] and not task.done() and await commands(conn) == []
     await conn.execute(
         "UPDATE work_items SET state = 'ended', outcome = 'done', lease_token = NULL, "
         "lease_until = NULL, ended_at = now() WHERE kind <> 'command'"
@@ -183,15 +183,37 @@ async def test_a_command_whose_heartbeat_fails_tells_its_waiter(conn: Session, d
     assert (item["state"], item["outcome"]) == ("ended", "failed")
 
 
+async def test_a_command_after_one_whose_process_died_takes_its_admission_back(conn: Session, db):
+    """A command killed with its claim left its item running under `deep`, its lease since
+    lapsed, and no `serve` runs: the next command for `deep` ends it failed and runs."""
+    await conn.execute(
+        "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until) "
+        "VALUES ('command', 'fulltext --deep:gone', 'deep', 'running', gen_random_uuid(), "
+        "now() - interval '1 second')"
+    )
+
+    async def work() -> str:
+        return "its result"
+
+    assert await asyncio.wait_for(inline(db, "fulltext --deep", work, admission="deep"), 10) == (
+        "its result"
+    )
+    gone, ran = await commands(conn)
+    assert (gone["outcome"], gone["error"]) == ("failed", "its process stopped")
+    assert (ran["outcome"], ran["attempts"]) == ("done", 1)
+
+
 @pytest.mark.parametrize("stops", ["Ctrl-C", "an error of the gate's"])
 async def test_a_command_stopped_before_its_claim_leaves_no_item_pending(
     conn: Session, db, monkeypatch, stops
 ):
-    """Cancelled just after its submission commits, before its claim, or its claim raising:
-    its item, pending with no attempt, is ended failed all the same."""
+    """Cancelled as it takes its claim, or its claim raising: no item of its own is left, ended
+    or not."""
     taking = asyncio.Event()
+    real = queue.admit
 
-    async def take(*_, **__):
+    async def admit(unit, *args, **kwargs):
+        await real(unit, *args, **kwargs)  # made in the unit, which then fails
         taking.set()
         if stops == "Ctrl-C":
             await asyncio.Event().wait()
@@ -200,7 +222,7 @@ async def test_a_command_stopped_before_its_claim_leaves_no_item_pending(
     async def work() -> None:
         raise AssertionError("it never runs")
 
-    monkeypatch.setattr(queue, "take", take)
+    monkeypatch.setattr(queue, "admit", admit)
     task = asyncio.create_task(inline(db, "intake", work))
     await asyncio.wait_for(taking.wait(), 10)
     if stops == "Ctrl-C":
@@ -210,8 +232,7 @@ async def test_a_command_stopped_before_its_claim_leaves_no_item_pending(
     else:
         with pytest.raises(RuntimeError, match="the gate broke"):
             await task
-    (item,) = await commands(conn)
-    assert (item["state"], item["outcome"], item["attempts"]) == ("ended", "failed", 0)
+    assert await commands(conn) == []
 
 
 async def test_a_command_stopped_by_ctrl_c_ends_its_item(conn: Session, db):
@@ -303,17 +324,20 @@ async def test_the_cli_deep_passes_wait_for_serves_and_close_their_clients_once(
     monkeypatch.setattr(deep_passes, "work", cli_passes)
     async with db.write("a Deep pass") as unit:
         await queue.submit(unit, fulltext_store.DEEP_WORK, "1")
+    real_admit, refused = queue.admit, asyncio.Event()
+
+    async def admit(unit, key, admission, lease):
+        if (found := await real_admit(unit, key, admission, lease)) is None:
+            assert admission == "deep"
+            refused.set()
+        return found
+
+    monkeypatch.setattr(queue, "admit", admit)
     async with serving(WorkGate(db), {fulltext_store.DEEP_WORK: pass_}):
         await asyncio.wait_for(deep.wait(), 10)
         cli = asyncio.create_task(command(conn, tmp_path, monkeypatch, "fulltext", "--deep"))
-
-        async def submitted() -> bool:
-            return bool(await commands(conn))
-
-        await until(submitted, "the CLI's item to be submitted")
-        await asyncio.sleep(0.3)
-        (waiting,) = await commands(conn)
-        assert waiting["state"] == "pending" and waiting["admission"] == "deep" and order == []
+        await asyncio.wait_for(refused.wait(), 10)  # it waits for `deep`, with no item yet
+        assert await commands(conn) == [] and order == []
         release.set()
         result = await asyncio.wait_for(cli, 20)
     assert result.exit_code != 0 and "run it again" in result.output, result.output

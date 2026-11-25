@@ -382,12 +382,13 @@ async def work(
         async for c in found:
             if c.error is not None and cut():
                 continue
-            mr.add("classified" if c.error is None else "classification_failed")
             async with db.write("replay: classified") as unit:
                 for topic in topics_of[c.paper.id]:
                     await store.put_classified(
                         unit, eval_run_id, c.paper, topic, **_concluded(tree, c, topic)
                     )
+            # Counted once its record commits: a retry after one rolled back counts it once.
+            mr.add("classified" if c.error is None else "classification_failed")
             if c.error is None:
                 r.classified.add(c.paper.id)
     due = [
@@ -400,7 +401,6 @@ async def work(
             v = g.verdict
             if v is None and cut():
                 continue
-            mr.add("graded" if v is not None else "grading_failed")
             async with db.write("replay: graded") as unit:
                 await store.put_graded(
                     unit,
@@ -413,6 +413,7 @@ async def work(
                     split=v.split if v else None,
                     error=None if v else (g.error or "no answer"),
                 )
+            mr.add("graded" if v is not None else "grading_failed")
             if v is not None:
                 r.graded.add((g.due.paper.id, g.due.topic.slug))
 

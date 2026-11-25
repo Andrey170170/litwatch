@@ -125,7 +125,8 @@ Its own project on top of A6: the labelled query set and goals first, then work 
 - **Work with more than one writer.** A2 is built for one `serve` ([`plans/a2-work-gate.md`](plans/a2-work-gate.md),
   D4). Before a second process serves work, close the races it leaves, found in A2's reviews:
   - a nightly being taken back by one gate loses its place to a job chunk another gate admits (`SKIP LOCKED`);
-  - a progress write whose commit acknowledgement is lost counts its papers twice on the retry (Process, replay).
+  - a progress write whose commit acknowledgement is lost counts its papers twice on the retry (Process, replay,
+    a re-run's text passes: each counts from where its chunk began, `ModelRun.chunk_began`).
 
 - **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
   `evals/` and homelab specifics out of the repository (the image ships `evals/labels/` for Run replay: they move

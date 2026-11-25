@@ -125,6 +125,21 @@ Found in a survey of the code at 548857e3:
   anyway is run again by its fire's item once the receiving image takes it back (a run cut off served nothing); the
   image before counts it served, as a nightly whose process dies does today, and its work waits for the next night or
   a nightly run by hand.
+- **Rolling back from P3: the CLI's command items, ended by hand.** The image before admits one running item per
+  admission, whatever its lease, and takes back only its own kinds: a P3 `command` item its process left running
+  (`fulltext --deep` under `deep`, `publications` under `publications`) would hold that admission there for good.
+  P3 ends one wherever it runs (the next command for its admission, any `serve`'s take-back), but not one left as
+  the switch is made. So the switch to the image before is made with no CLI command running, and after `serve`
+  stops and before the image before starts, the command items left are ended (in the stack's terms):
+
+  ```sh
+  docker compose exec db psql -U litwatch litwatch -c "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), error = 'its process stopped', lease_token = NULL, lease_until = NULL, resubmitted = false WHERE kind = 'command' AND state <> 'ended'"
+  ```
+
+  The rehearsal shows it: a `fulltext --deep` killed, the rollback with this step, then the image before claims a
+  pending Deep pass. Chosen over a row shape the image before does not count (the shared admission in a column of
+  its own): kept race-free between a command and `serve`, the admission index must cover that column, and then it
+  fails the image before's claim on the same stale row.
 - **The scheduler's handoff.** A fire the old scheduler already served (a run started after it) stays served when P3
   starts inside the catch-up window: the submitter checks the runs before using the key. A run of the image before
   (`runs.work_id` unset) serves its fire by starting, as it did there; a run of this image only once it closed without
@@ -331,15 +346,17 @@ Found while building, owned by the stage named.
   run its chunk's), and an item its latest run (`work_items.run_id`), so a chunk taken back keeps the run before.
   A run opened outside any item reads dead at once: today only the API's grade now (`api/settings.py`, kind
   `grading`), whose liveness nothing reads. P5's request attribution can give it one, or say why not.
-- **P5 (from P3): the CLI's commands are items in their own process.** `gates.work.inline` submits a `command`
-  item keyed `{name}:{uuid}`, admitted by its own key or by the kind whose work it does (`deep` for
-  `fulltext --deep`, `publications` for the lookup), waits for its admission, and runs that one claim itself under
-  the gate's heartbeat (`WorkGate._admitted`, `_once`); no gate serves it. It has one attempt, as a command run by
-  hand has: a lost database or a lost conflict as it claims or works, a lost lease, or work that stops cancelled ends
-  it failed with a message to run it again (`CommandCutOffError`), and it is never given back; it returns once its
-  end is recorded done. Whatever stops it after the submit (Ctrl-C, an error of the gate's, its end not recorded),
-  its `finally` ends the item failed by its key (`store.work.abandon`), so none is left pending or running. Any
-  `serve`'s take-back ends failed a `command` item whose lease lapsed, whatever its admission. P5 replaces this with
+- **P5 (from P3): the CLI's commands are items in their own process.** `gates.work.inline` runs a `command` item
+  keyed `{name}:{uuid}`, admitted by its own key or by the kind whose work it does (`deep` for `fulltext --deep`,
+  `publications` for the lookup). Once that admission is free, it inserts its item already claimed, in one unit
+  (`store.work.admit`), so a command waiting leaves no row; then runs that claim under the supervision `serve`'s
+  claims have, its heartbeat included (`WorkGate._run`, `once`); no gate serves it. It has one attempt, as a
+  command run by hand has: a lost database or a lost conflict as it claims or works, a lost lease, or work that
+  stops cancelled ends it failed with a message to run it again (`CommandCutOffError`), and it is never given back;
+  it returns once its end is recorded done. Whatever stops it after its claim (Ctrl-C, an error of the gate's, its
+  end not recorded), its `finally` ends the item failed by its key (`store.work.abandon`). One whose process died
+  is ended failed once its lease lapses, by the next command for its admission (`admit`, so it recovers with no
+  `serve`) or by any `serve`'s take-back, whatever its admission. P5 replaces this with
   submit and wait (spec, "The CLI"), where `serve`'s gate tries again. The callers to move:
   - [ ] `intake`, `intake --catalog-from`, `intake archive` (inline today)
   - [ ] `nightly`, `digests write` (inline today)
@@ -349,12 +366,14 @@ Found while building, owned by the stage named.
   - [ ] `ping` (not inline)
   - [ ] the unjournaled evaluations: `eval classify`, `eval digests`, `eval briefs`, `eval ladders` (not inline)
 - **P5 (from P3): the nightly and the chunks.** No chunk starts while a `nightly` item is pending, or running
-  without having closed the run that claim opened (opening it included; a lapsed lease too, until the item is taken
-  back), or a nightly run is open and alive (the CLI's) (`store.jobs.nightly_waits`). The item clauses count only
+  without having closed the run that claim opened without an error (opening it included; a lapsed lease too, until
+  the item is taken back; a failed run too, which the gate may try again), or a nightly run is open and alive (the
+  CLI's) (`store.jobs.nightly_waits`). The item clauses count only
   where this process's configuration runs fires (`fires=`, the schedule on): a fire left pending by a `serve` since
   started with the schedule off holds back no job, re-run pass or `fulltext --deep`. A close that fails leaves the
-  run open and the fire's item running: it is tried again on the same fire after a backoff (`jobs.scheduler.WAIT`,
-  doubling, at most an hour), and the chunks wait until it closes; a chunk reads that before the run lock and again under it, before
+  run open: the run context says so (`jobs.context.UnclosedError`, raised for a run whose close carries a write),
+  and the fire is tried again after a backoff (`jobs.scheduler.close_backoff`: `WAIT`, doubling, at most an hour),
+  its item waiting meanwhile, so the chunks wait until it closes; a chunk reads that before the run lock and again under it, before
   it claims its job, and a waiting one looks again after `jobs.worker.WAIT`. The nightly releases every runnable
   job's chunk in the unit that closes its run, failed or cut off too (`store.jobs.release`, `model_run(closing=)`),
   so they go at once. Tonight's run and that release both take the `tonight` lock, so one of them sees the

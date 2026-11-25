@@ -8,7 +8,6 @@ from typing import Any
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from litwatch.core.work import WorkItem
 from litwatch.gates.context import current_work
 from litwatch.gates.database import ReadUnit, WriteUnit
 
@@ -129,19 +128,6 @@ async def served(unit: ReadUnit, kind: str, fired: datetime) -> bool:
     ).fetchone()
     assert row is not None  # a SELECT of a value has its row
     return row["served"]
-
-
-async def unclosed(unit: ReadUnit, item: WorkItem) -> bool:
-    """Whether a run opened under this claim of `item` (its lease token) has not closed."""
-    row = await (
-        await unit.execute(
-            "SELECT EXISTS (SELECT 1 FROM runs WHERE lease_token = %s AND finished_at IS NULL) "
-            "AS open",
-            (item.lease_token,),
-        )
-    ).fetchone()
-    assert row is not None  # a SELECT of a value has its row
-    return row["open"]
 
 
 async def first_since(unit: ReadUnit, kind: str, since: datetime) -> datetime | None:

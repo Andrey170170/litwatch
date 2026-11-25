@@ -1339,10 +1339,11 @@ async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_star
 async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_directly(
     db: Session, gate, monkeypatch
 ):
-    """V3 (docs/plans/a2-work-gate.md): the same seeded nightly, its digests written and its
-    Brief written inline through the real pass (the archive and the models faked), run directly
-    on one schema and as the fire of a strict `serve` on another: their run records' counts,
-    cost and digests match, and the fire's item ended done with its run."""
+    """V3 (docs/plans/a2-work-gate.md): the same seeded nightly, a new paper classified,
+    analysed and graded, its digests written and its Brief written inline through the real pass
+    (the archive and the models faked), run directly on one schema and as the fire of a strict
+    `serve` on another: their run records' counts, cost and digests match, and the fire's item
+    ended done with its run."""
     from functools import partial  # noqa: PLC0415
 
     from litwatch.config import Models as Roles  # noqa: PLC0415
@@ -1352,11 +1353,15 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
     from tests.fakes_http import FakeArchive  # noqa: PLC0415
     from tests.sessions import schema  # noqa: PLC0415
 
+    new = paper("2610.00099", title="Probing a reasoning trace", abstract="We probe traces.")
+
     class Models:
         """The nightly steps scripted (`tests.scripted`), the Brief and the digests' writer."""
 
         def __init__(self) -> None:
             self.steps, self.brief, self.writer = scripted.Scripted(), briefs.Writer(), Writer()
+            faith = {"cot-faithfulness": 0.9}
+            self.steps.decisions[new.title] = scripted.decision("cot-faithfulness", **faith)
 
         def respond(self, role, request):
             if role.model == briefs.BRIEF_ROLE.model:
@@ -1388,7 +1393,9 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
     async def seed(conn: Session) -> None:
         await focus(conn, P, "central")  # queues P's Brief, worked inline
         await in_write(conn, verdicts.passed, [(P.id, 1)])
-        await conn.execute("UPDATE papers SET dismissed_at = now() WHERE id <> %s", (P.id,))
+        await conn.execute(
+            "UPDATE papers SET dismissed_at = now() WHERE id <> ALL(%s)", ([P.id, new.id],)
+        )
         await listed(conn, today, P)
 
     texts = FakeArchive()
@@ -1403,13 +1410,14 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
         ).fetchall()
         return run["error"], run["counts"], run["cost"], digests, run["work_id"]
 
+    await in_write(db, papers_store.upsert, [new])  # not yet classified, analysed or graded
     await seed(db)
     await nightly.run(gate, config, fetch=False, gateway=Models().gateway)
     direct = await record(db)
 
     async with schema(db.test_dsn) as other:
         await settling.save_tree(other, TREE)
-        await in_write(other, papers_store.upsert, [P, Q, R, S])
+        await in_write(other, papers_store.upsert, [P, Q, R, S, new])
         await seed(other)
         async with gate_on(other) as theirs:
 
@@ -1428,6 +1436,7 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
             await other.execute("SELECT * FROM work_items WHERE kind = 'nightly'")
         ).fetchall()
     assert direct[0] is None and direct[1].get("briefs_written") == 1  # its Brief, inline
+    assert all(direct[1].get(step, 0) >= 1 for step in ("classified", "analysed", "graded"))
     assert any(d["state"] == "written" for d in direct[3]) and direct[4] is None
     assert fire[:4] == direct[:4]
     assert item["key"] == scheduler.fire_key(scheduler.last_fire(config.schedule.nightly, now))

@@ -557,6 +557,31 @@ async def test_a_replay_chunk_tried_again_after_a_lost_database_counts_what_it_g
     assert lost and (done["state"], done["done"], done["counts"]["graded"]) == ("done", 3, 3)
 
 
+@pytest.mark.parametrize(
+    ("put", "counted"), [("put_classified", "classified"), ("put_graded", "graded")]
+)
+async def test_a_replay_result_that_rolled_back_is_counted_once_when_tried_again(
+    conn: Session, db, priced, monkeypatch, put, counted
+):
+    """The database goes away as a stage's first result is written, which rolls back: the gate
+    tries the chunk again, which concludes that paper again, and the job counts it once."""
+    import psycopg  # noqa: PLC0415
+
+    job = await run_replay(conn)
+    real, lost = getattr(evaluation, put), []
+
+    async def drops(unit, *args, **kwargs):
+        await real(unit, *args, **kwargs)
+        if not lost:
+            lost.append(True)
+            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+
+    monkeypatch.setattr(evaluation, put, drops)
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    done = await job_of(conn, job["id"])
+    assert lost and (done["state"], done["done"], done["counts"][counted]) == ("done", 3, 3)
+
+
 async def test_a_replay_job_taken_back_goes_on_without_redoing_what_it_concluded(
     conn: Session, db, priced, monkeypatch
 ):

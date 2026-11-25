@@ -299,16 +299,9 @@ async def take_back(
     back.
 
     A CLI command's item (`gates.work.inline`) whose lease expired ends failed, whatever
-    admission it holds: a command has one attempt, its process is gone, and no other runs it."""
+    admission it holds (`_retire_commands`)."""
     params = _serving(kinds, keys)
-    await unit.execute(
-        "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
-        "error = 'its process stopped', lease_token = NULL, lease_until = NULL, "
-        "resubmitted = false "
-        "WHERE id IN (SELECT id FROM work_items c WHERE c.kind = %(command)s "
-        "AND c.state = 'running' AND c.lease_until < now() FOR UPDATE SKIP LOCKED)",
-        params | {"command": COMMAND},
-    )
+    await _retire_commands(unit)
     rows = await (
         await unit.execute(
             "UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
@@ -333,6 +326,45 @@ async def abandon(unit: WriteUnit, key: str, error: str) -> None:
         (_stored(error), COMMAND, key),
     )
     await _notify(unit, COMMAND)
+
+
+async def _retire_commands(unit: WriteUnit, admission: str | None = None) -> None:
+    """End failed the CLI commands' items (of `admission`, or all) whose lease expired: a
+    command has one attempt, its process is gone, and no other runs it."""
+    retired = await unit.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
+        "error = 'its process stopped', lease_token = NULL, lease_until = NULL, "
+        "resubmitted = false "
+        "WHERE id IN (SELECT id FROM work_items c WHERE c.kind = %(command)s "
+        "AND (%(admission)s::text IS NULL OR c.admission = %(admission)s) "
+        "AND c.state = 'running' AND c.lease_until < now() FOR UPDATE SKIP LOCKED)",
+        {"command": COMMAND, "admission": admission},
+    )
+    if retired.rowcount:
+        await _notify(unit, COMMAND)  # their admissions are free
+
+
+async def admit(unit: WriteUnit, key: str, admission: str, lease: timedelta) -> WorkItem | None:
+    """Make and claim a CLI command's item `key` (`gates.work.inline`) at once, once its
+    `admission` is free: inserted running, its one attempt, its lease `lease` from the clock
+    now. None while another item runs for that admission. A command's item there whose lease
+    expired is ended failed first (`_retire_commands`), so a command after one killed takes its
+    admission back with no `serve` running. Two claiming for one admission at once: the later
+    waits for the earlier's commit, then fails on `work_items_admitted`."""
+    await _retire_commands(unit, admission)
+    row = await (
+        await unit.execute(
+            "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until, "
+            "started_at, attempts) "
+            "SELECT %(kind)s, %(key)s, %(admission)s, 'running', gen_random_uuid(), "
+            "c.at + %(lease)s, c.at, 1 FROM (SELECT clock_timestamp() AS at) c "
+            "WHERE NOT EXISTS (SELECT 1 FROM work_items r "
+            "WHERE r.admission = %(admission)s AND r.state = 'running') "
+            f"RETURNING {_COLUMNS}",
+            {"kind": COMMAND, "key": key, "admission": admission, "lease": lease},
+        )
+    ).fetchone()
+    return _item(row) if row else None
 
 
 async def take(

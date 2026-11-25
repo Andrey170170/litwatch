@@ -57,6 +57,17 @@ class RunRecord:
         self.counts[name] = self.counts.get(name, 0) + n
 
 
+class UnclosedError(RuntimeError):
+    """A run whose close carries a write (`closing`) did not close: that unit failed, so
+    neither the run's end nor its write stands. Raised from the close's error, in place of the
+    job's own when the job failed first (`failure`), so its caller knows the run is still open
+    and the write left to do: the scheduled nightly tries its fire again."""
+
+    def __init__(self, run_id: int, failure: BaseException | None) -> None:
+        super().__init__(f"run {run_id} did not close; its jobs wait for it")
+        self.run_id, self.failure = run_id, failure
+
+
 @asynccontextmanager
 async def run_record(
     db: DatabaseGate,
@@ -70,19 +81,28 @@ async def run_record(
     and close it with what the job recorded on it and the error that ended it, whatever happens
     inside, a cancelled job included. Each is a unit of its own; `closing` is written in the
     closing one, under its locks, so it stands or falls with the run's end (the nightly's
-    release of the jobs it held back)."""
+    release of the jobs it held back): when that unit fails, `UnclosedError` is raised."""
     async with db.write(f"open {kind} run") as unit:
         run_id = await runs.start(unit, kind, *(window or (None, None)), job_id=job_id)
     record = RunRecord(run_id)
-    failed = True
+    failure: BaseException | None = None
     try:
         yield record
-        failed = False
     except BaseException as exc:
+        failure = exc
         record.fields["error"] = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        await _closing(_finish(db, record, closing), failed, record.run_id, "closing it")
+        try:
+            await _finish(db, record, closing)
+        except BaseException as exc:
+            # A failure here after the job's (a cancellation included) is logged, so the job's
+            # error is the one recorded and raised; but not a close that carried a write.
+            if closing is not None and isinstance(exc, Exception):
+                raise UnclosedError(record.run_id, failure) from exc
+            if failure is None:
+                raise
+            log.exception("run %s: closing it failed after the job did", record.run_id)
 
 
 async def _finish(db: DatabaseGate, record: RunRecord, closing: Closing | None) -> None:

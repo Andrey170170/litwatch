@@ -162,12 +162,13 @@ async def wake(unit: WriteUnit) -> None:
 async def nightly_waits(unit: ReadUnit, *, fires: bool = True) -> bool:
     """Whether a nightly run is due or running: a nightly run open and alive (the CLI's); and,
     with `fires` (the reader's configuration has the schedule on, so its `serve` runs them), a
-    scheduled fire's work item that waits to run (for its time, or the run lock), or is running
-    and has not closed its run (opening it included, before its run's row exists; its lease
-    lapsed too, as a take-back makes it pending again). No job's chunk starts then, and no
-    re-run's pass. A fire's item that has closed its run is running no more: what the nightly
-    held back goes as it closes (`release`). Without `fires`, a fire no process here runs holds
-    nothing back."""
+    scheduled fire's work item that waits to run (for its time, the run lock, or a retry), or
+    is running and has not closed its run without an error (opening it included, before its
+    run's row exists; its lease lapsed too, as a take-back makes it pending again; a run that
+    failed too, which its item may try again). No job's chunk starts then, and no re-run's
+    pass. A fire's item whose run closed cleanly is running no more: what the nightly held back
+    goes as it closes (`release`). Without `fires`, a fire no process here runs holds nothing
+    back."""
     row = await (
         await unit.execute(
             "SELECT %(fires)s AND (EXISTS (SELECT 1 FROM work_items "
@@ -175,7 +176,7 @@ async def nightly_waits(unit: ReadUnit, *, fires: bool = True) -> bool:
             "OR EXISTS (SELECT 1 FROM work_items w WHERE w.kind = 'nightly' "
             "AND w.state = 'running' AND NOT EXISTS ("
             "SELECT 1 FROM runs r WHERE r.lease_token = w.lease_token "
-            "AND r.finished_at IS NOT NULL))) "
+            "AND r.finished_at IS NOT NULL AND r.error IS NULL))) "
             "OR EXISTS (SELECT 1 FROM runs r WHERE r.kind = 'nightly' AND r.finished_at IS NULL "
             f"AND {ALIVE}) AS waits",
             {"fires": fires},
