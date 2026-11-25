@@ -40,7 +40,6 @@ WAIT = 10.0  # how long a test waits on something that must happen; a deadlock e
 TAXONOMY = (0, 7213913, 1)
 REPLAY = (0, 7213917, 1)
 RUN = (0, 7213911, 1)
-DEEP_WORKER = (0, 7213915, 1)
 
 
 @pytest.fixture
@@ -476,8 +475,6 @@ async def test_a_keyed_session_lock_is_busy_only_for_its_key(db):
 SESSION = {
     "run": ("7213911", None),
     "schedule": ("7213913, hashtext(%s)", "publications"),
-    "dispatch": ("7213914, hashtext(%s)", "zotero"),
-    "deep-worker": ("7213915", None),
 }
 
 
@@ -572,13 +569,13 @@ async def test_only_the_listed_session_locks_are_held_across_calls(db):
 
 async def test_a_session_lock_lost_with_its_connection_is_logged(db, conn: Session, caplog):
     with caplog.at_level(logging.ERROR, logger=LOG):
-        async with db.held("deep-worker"):
-            (pid,) = await holders(conn, DEEP_WORKER)
+        async with db.held("run"):
+            (pid,) = await holders(conn, RUN)
             await conn.execute("SELECT pg_terminate_backend(%s)", (pid,))
     assert [r.getMessage() for r in logged(caplog)] == [
-        "the deep-worker lock was lost while held: its connection ended"
+        "the run lock was lost while held: its connection ended"
     ]
-    async with db.held("deep-worker"):  # kept to the end, it is let go without a word
+    async with db.held("run"):  # kept to the end, it is let go without a word
         pass
     assert len(logged(caplog)) == 1
 

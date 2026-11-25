@@ -505,14 +505,6 @@
         "lineCount": 1
       }
     ],
-    "src/litwatch/events/dispatch.py": [
-      {
-        "rule": "deprecated",
-        "startColumn": 1,
-        "endColumn": 31,
-        "lineCount": 1
-      }
-    ],
     "src/litwatch/feedback/word.py": [
       {
         "rule": "deprecated",
@@ -1292,12 +1284,6 @@
       }
     ],
     "src/litwatch/store/fulltext.py": [
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 11,
-        "endColumn": 20,
-        "lineCount": 1
-      },
       {
         "rule": "not-subscriptable",
         "startColumn": 11,

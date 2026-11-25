@@ -68,8 +68,8 @@ good, so a fire is submitted once even after it finished, by however many proces
 being a loop that runs work: it submits each fire, a missed one too within today's catch-up window, and its key
 replaces the schedule-kind lock.
 
-**Admission keeps today's concurrency** (Q3): one item at a time per kind, and per integration for deliveries, so a
-slow integration does not hold up the others. The run lock still decides between the nightly and job chunks: a
+**Admission keeps today's concurrency** (Q3): one item at a time per kind, but four text passes at once as a wave
+works them today, and one per integration for deliveries, so a slow integration does not hold up the others. The run lock still decides between the nightly and job chunks: a
 nightly that finds the lock taken stays pending rather than failing, no job chunk starts while a nightly is due or
 running, and a lease never stands in for the run lock. A3 replaces all of this with lanes.
 

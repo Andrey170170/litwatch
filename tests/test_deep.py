@@ -27,6 +27,8 @@ from litwatch.core import (
     Verdict,
 )
 from litwatch.core.fulltext import (
+    AUTOMATIC_PRIORITY,
+    BACKGROUND_PRIORITY,
     FOCUS,
     PICK,
     RECONCILE_LOOKBACK,
@@ -40,7 +42,9 @@ from litwatch.core.fulltext import (
 )
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
+from litwatch.fulltext.worker import DeepPassWorker
 from litwatch.gates.database import identity_of
+from litwatch.gates.work import WorkGate
 from litwatch.intake import search
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
@@ -52,7 +56,7 @@ from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
-from tests import sessions, settling
+from tests import settling
 from tests.conftest import (
     AGENTS,
     BLUE,
@@ -73,6 +77,7 @@ from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.seed import analyse, classify
 from tests.seed import grade as verdict
 from tests.sessions import Bridge, Session, in_read, in_write
+from tests.working import items_of, serving, until
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=2)
 BODY = "\\section{Method} We read hidden steps off the residual stream. " * 40
@@ -939,6 +944,30 @@ async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_que
     assert fake.requests[1]["paper"]["id"] != tried_first  # the failed one went to the back
 
 
+async def test_a_service_failure_whose_answer_holds_a_nul_is_recorded_and_pauses(db: Session):
+    """JSONB refuses a NUL as a text column does: what the service returned is stored with it
+    replaced, so the failure and the pause still commit."""
+    await grade(db, Fit.CENTRAL)
+    said = "stopped\x00here"
+    fake = FakeDeep(
+        {
+            "error": f"usage limit reached: {said}",
+            "failure": "service",
+            "stats": USAGE,
+            "trace": trace(said),
+            "reviews": [{"round": 1, "note": said}],
+        }
+    )
+    assert await work(db, with_text(P), make(fake)) == {"card_service_failed": 1}
+    kept = "stopped\ufffdhere"
+    (failed,) = await attempts(db)
+    assert (failed["failure"], failed["trace"]) == ("service", trace(kept))
+    assert failed["reviews"] == [{"round": 1, "note": kept}]
+    (tried,) = await deep_rows(db, P.id)
+    assert tried["state"] == "ready"
+    assert await in_read(db, cards.paused_until, deep_passes.PAUSE) is not None
+
+
 async def deep_status(conn: Session, d: Deep) -> dict:
     found = await monitor.facts(Bridge(conn), Config(), [d], None)
     return next(c for c in monitor.components(found, Config()) if c["id"] == "deep")
@@ -1317,15 +1346,6 @@ async def test_a_job_queued_past_its_deadline_is_kept_however_often_it_is_follow
     assert fake.started == 1 and len(await attempts(db)) == 1
 
 
-async def test_one_worker_at_a_time_works_the_deep_passes(db: Session):
-    await grade(db, Fit.CENTRAL)
-    fake = FakeDeep(DONE)
-    async with gate_on(db) as other, other.held("deep-worker"):  # another process's worker
-        assert await work(db, with_text(P), make(fake)) == {}
-    assert fake.requests == [] and [r["state"] for r in await deep_rows(db)] == ["awaiting_text"]
-    assert await work(db, with_text(P), make(fake)) == {"cards_written": 1}
-
-
 async def test_a_pass_no_longer_wanted_at_claim_spends_nothing(db: Session):
     await grade(db, Fit.CENTRAL)
     # Unsaved by a write that missed its settle: the claim settles it first.
@@ -1633,7 +1653,10 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
         again = await http.post(f"/api/papers/{P.id}/card")
         quality = (await http.get("/api/settings/quality")).json()
     assert missing.status_code == 404
-    assert asked.status_code == 202 and app.state.deep_wake.is_set()
+    assert asked.status_code == 202
+    items = await items_of(db, "deep", str(asked.json()["pass_id"]))
+    # Worked here inline, by `work`, which retires its item.
+    assert [(i["state"], i["outcome"]) for i in items] == [("ended", "done")]
     assert queued["card_pass"]["reason"] == "request" and not queued["card_requestable"]
     assert queued["card_pass"]["state"] == "awaiting_text" and queued["card"] is None
     card = written["card"]
@@ -1650,27 +1673,115 @@ async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_a
     assert quality["deep"] == {"attempts": 1, "list_cost": USAGE["list_cost"], "unknown": 0}
 
 
-async def test_the_deep_worker_runs_a_requested_card_as_soon_as_it_is_woken(db: Session, gate):
+async def test_a_requested_card_runs_as_its_passs_work_item_while_the_gate_serves(
+    db: Session, gate
+):
     fake = FakeDeep(DONE)
-    d = make(fake)
-    wake = asyncio.Event()
-    worker = asyncio.create_task(
-        deep_passes.run_forever(gate, archive(with_text(P)), d, wake, rules=settling.RULES)
-    )
-    try:
-        await ask(db, P.id)
-        wake.set()
-        for _ in range(200):
-            if (await in_read(db, cards.card, P.id) or {}).get("card"):
-                break
-            await asyncio.sleep(0.05)
-    finally:
-        worker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await worker
+    workers = {"deep": DeepPassWorker(gate, Config(), archive(with_text(P)), make(fake))}
+    async with serving(WorkGate(gate), workers):
+        pass_id = await ask(db, P.id)
+
+        async def ended() -> bool:  # its try over, not only the card written
+            return [i["state"] for i in await items_of(db, "deep", str(pass_id))] == ["ended"]
+
+        await until(ended, "the item ends")
     assert (await in_read(db, cards.card, P.id))["card"] == CARD
 
 
-async def test_connect_reaches_the_test_schema(db: Session):
-    async with await sessions.connect(f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"):
-        pass
+async def test_a_deep_pass_waits_out_the_services_pause_as_the_same_item(
+    db: Session, gate, monkeypatch
+):
+    fake = FakeDeep(DONE)
+    workers = {"deep": DeepPassWorker(gate, Config(), archive(with_text(P)), make(fake))}
+    pass_id = await ask(db, P.id)
+    paused = datetime.now(UTC) + timedelta(minutes=5)
+
+    async def until_paused(_db) -> datetime:
+        return paused
+
+    monkeypatch.setattr(deep_passes, "paused", until_paused)
+    async with serving(WorkGate(gate), workers):
+        await until(lambda: _waits_until(db, pass_id, paused), "the item waits out the pause")
+    (item,) = await items_of(db, "deep", str(pass_id))
+    assert item["attempts"] == 1  # one try, which found the queue paused
+    assert (fake.started, await attempts(db)) == (0, [])  # the pass never claimed
+
+
+async def test_due_deep_passes_run_the_owners_first_then_automatic_then_a_reruns(db: Session, gate):
+    rerun = paper("2610.00003", title="Re-run", abstract="Graded again.", version=1)
+    await in_write(db, papers_store.upsert, [rerun])
+    async with Bridge(db).write("queue in reverse") as unit:  # each submitted before the next
+        background = await fulltext_store.queue_deep(unit, rerun.id, 1, FOCUS, BACKGROUND_PRIORITY)
+        automatic = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
+        mine = await fulltext_store.queue_deep(unit, P.id, 1, FOCUS)
+    assert await ask(db, P.id) == mine  # takes over its automatic pass, queued last
+    taken: list[str] = []
+
+    async def worker(item) -> None:
+        taken.append(item.key)
+
+    async def all_ran() -> bool:
+        return len(taken) == 3
+
+    async with serving(WorkGate(gate), {"deep": worker}):
+        await until(all_ran, "the three items run")
+    assert taken == [str(mine), str(automatic), str(background)]
+
+
+async def test_after_the_services_pause_the_owners_pass_runs_before_an_automatic_one(
+    db: Session, gate, monkeypatch
+):
+    monkeypatch.setattr(deep_passes, "PAUSE", timedelta(seconds=3))
+    service_failed = cards.service_failed
+
+    async def slowly(unit, attempt_id, error):  # the clock moves on before the pass is let go
+        await service_failed(unit, attempt_id, error)
+        await asyncio.sleep(1.5)
+
+    monkeypatch.setattr(cards, "service_failed", slowly)
+    fake = FakeDeep(DONE)
+    fake.fail_submits = 1  # the owner's, tried first, finds the service down
+    async with Bridge(db).write("queue") as unit:
+        automatic = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
+    mine = await ask(db, P.id)
+    workers = {"deep": DeepPassWorker(gate, Config(), archive(with_text(P, Q)), make(fake))}
+
+    async def both_ran_again() -> bool:  # each tried after the pause, and ended
+        found = [i for k in (mine, automatic) for i in await items_of(db, "deep", str(k))]
+        return len(found) == 2 and all(i["state"] == "ended" for i in found)
+
+    async with serving(WorkGate(gate), workers):
+        await until(both_ran_again, "both are tried again once the pause ends")
+    (owners,) = await items_of(db, "deep", str(mine))
+    (others,) = await items_of(db, "deep", str(automatic))
+    # Both waited for the one deadline the failure stored, so the owner's went first again.
+    assert owners["not_before"] == others["not_before"]
+    assert owners["started_at"] < others["started_at"]
+    assert ((await in_read(db, cards.card, P.id)) or {}).get("card") == CARD
+
+
+async def test_a_deep_pass_tried_again_after_an_error_keeps_its_priority(
+    db: Session, gate, monkeypatch
+):
+    async def broken(*args):
+        raise RuntimeError("the deep service answered without the job's id")
+
+    monkeypatch.setattr(deep_passes, "work_one", broken)
+    async with Bridge(db).write("queue") as unit:
+        automatic = await fulltext_store.queue_deep(unit, Q.id, 1, FOCUS)
+    workers = {"deep": DeepPassWorker(gate, Config(), archive(with_text(Q)), make(FakeDeep(DONE)))}
+
+    async def failed_and_next() -> bool:
+        found = await items_of(db, "deep", str(automatic))
+        return [i["state"] for i in found] == ["ended", "pending"]
+
+    async with serving(WorkGate(gate), workers):
+        await until(failed_and_next, "the try fails, and the next waits for its claim to lapse")
+    tried, following = await items_of(db, "deep", str(automatic))
+    assert tried["outcome"] == "failed"
+    assert following["priority"] == tried["priority"] == AUTOMATIC_PRIORITY
+
+
+async def _waits_until(conn: Session, pass_id: int | None, at: datetime) -> bool:
+    items = await items_of(conn, "deep", str(pass_id))
+    return bool(items) and items[-1]["state"] == "pending" and items[-1]["not_before"] == at

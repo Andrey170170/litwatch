@@ -262,7 +262,6 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
         if processing:
             await jobs_store.process(unit, paper_id)
         await word.settle_many(unit, [paper_id], cause=Cause.OWNER, rules=rules)
-    request.app.state.deep_wake.set()
     if processing:
         request.app.state.jobs_wake.set()
     return s.CardRequested(pass_id=pass_id)

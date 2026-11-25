@@ -66,7 +66,8 @@ The commands below assume the dev setup in [dev-host.md](dev-host.md).
   own port (a card request is a real, paid job); the archive's search against the live archive with
   `register = false`. Registration and PDF fetches write to the archive (a fetch queues a job), so they run only
   against a disposable archive.
-- How: integration configured in a dev `litwatch.toml` on the sandbox; the dispatcher run; the target inspected.
+- How: integration configured in a dev `litwatch.toml` on the sandbox; `litwatch serve` run, whose Work gate runs the
+  integration's deliveries (`events/worker.py`); the target inspected.
   A disposable archive: `scripts/disposable-archive.sh start <port>` (this checkout's `archive/`, its API and its
   worker over a scratch directory; it prints the URL and token to export) and `stop <dir>` when done. Its worker
   downloads from arXiv, so ask it for a handful of papers.

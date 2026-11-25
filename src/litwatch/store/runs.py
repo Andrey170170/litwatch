@@ -8,6 +8,7 @@ from typing import Any
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from litwatch.gates.context import current_work
 from litwatch.gates.database import Identity, ReadUnit, WriteUnit
 
 _JSON = {"counts", "intake"}
@@ -25,12 +26,15 @@ async def start(
 ) -> int:
     """Open a run in the name of `me`, the session that stands for its process
     (`DatabaseGate.identity`): the run is alive while that session lasts (`ALIVE`). A run of
-    kind `job` names its job."""
+    kind `job` names its job; a standalone one opened by a work item (a pass's) names that item
+    (`work_id`, docs/specs/architecture/a2-work-gate.md, "Work records")."""
+    work = current_work()
+    work_id = work.item.id if work is not None and job_id is None else None
     row = await (
         await unit.execute(
-            "INSERT INTO runs (kind, window_from, window_to, job_id, backend_pid, backend_start) "
-            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-            (kind, window_from, window_to, job_id, me.pid, me.started),
+            "INSERT INTO runs (kind, window_from, window_to, job_id, work_id, backend_pid, "
+            "backend_start) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (kind, window_from, window_to, job_id, work_id, me.pid, me.started),
         )
     ).fetchone()
     return row["id"]

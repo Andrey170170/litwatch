@@ -6,25 +6,27 @@ and records how each ended.
     await gate.run({"fulltext": fulltext_worker, "deliver": deliver_worker})   # until cancelled
 
 Work is submitted elsewhere, by `store.work.submit` in the submitter's own unit. `run` takes
-what is due, one item at a time per admission (a kind, or an integration for deliveries). Each
-claim has one supervisor, from the claim's commit to the item's settling: it runs the Worker in
-a task of its own under the work context (`gates.context`), where the item's lease fences the
-task's write units (`gates.database`) and its gate calls are attributed to the item, and it
-keeps the lease beating. A lease starts when its claim wins admission, and a claim whose lease
-ran out before its Worker could start is given back. A renewal is bounded by the lease it
-renews: one that fails, finds the lease lost, or does not confirm it before it lapses, cancels
-the Worker, and whatever the Worker returns after that is ignored. An item whose lease expires
-(its process died, or lost the database) is taken back and run again, by this process or
-another.
+what is due, one item at a time per admission (a kind, a slot of text passes, or an integration
+for deliveries). The run loop takes each claim through its commit and hands it to a supervisor
+of its own, which owns it to the item's settling: it runs the Worker in a task of its own under
+the work context (`gates.context`), where the item's lease fences the task's write units
+(`gates.database`) and its gate calls are attributed to the item, and it keeps the lease
+beating. A lease starts when its claim wins admission, and a claim whose lease ran out before
+its Worker could start is given back. A renewal is bounded by the lease it renews: one that
+fails, finds the lease lost, or does not confirm it before it lapses, cancels the Worker, and
+whatever the Worker returns after that is ignored. An item whose lease expires (its process
+died, or lost the database) is taken back and run again, by this process or another.
 
 A Worker returns how the item ended: `Done` (or None), or `Later` to have it wait and run again.
-One that raises fails the item, unless the database was lost under it: then the item is given
-back to be tried again. Settling needs the lease still live. A failed settling (the database
-lost) is logged, and the item is left to its lease, so it is taken back once that lapses.
+One that raises fails the item, unless the database was lost under it, or a statement lost a
+deadlock or a serialization conflict to another transaction (`conflicted`): then the item is
+given back to be tried again, so a turn or a pass is never left with no item to run it.
+Settling needs the lease still live. A failed settling (the database lost) is logged, and the
+item is left to its lease, so it is taken back once that lapses.
 
 Stopping (`run` cancelled) has one path: each supervisor cancels its Worker, waits for it to
-stop, and gives back the claim it still owns, a claim whose commit it was waiting on included;
-a settling under way finishes first.
+stop, and gives back the claim it still owns, and a claim whose commit the run loop was waiting
+on is given back too; a settling under way finishes first.
 
 The gate wakes when a submission or an item's settling is notified (LISTEN on its own
 connection, `db.listen`), when an item's `not_before` comes or a lease is due to lapse, and on a
@@ -41,7 +43,7 @@ import contextlib
 import logging
 import os
 import socket
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -98,13 +100,13 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _lost(exc: BaseException) -> bool:
+def database_lost(exc: BaseException) -> bool:
     """Whether `exc` says the database went away under the work (its connection dropped, the
     server shut down or ended the session, the pool had none to give), not that a statement
     failed: such an item is tried again, not failed. A group of errors says so when each of
     them does."""
     if isinstance(exc, BaseExceptionGroup):
-        return all(_lost(e) for e in exc.exceptions)
+        return all(database_lost(e) for e in exc.exceptions)
     if isinstance(exc, PoolTimeoutError):
         return True
     if isinstance(exc, psycopg.Error) and exc.sqlstate in _SESSION_ENDED:
@@ -112,6 +114,17 @@ def _lost(exc: BaseException) -> bool:
     if not isinstance(exc, psycopg.OperationalError):
         return False
     return exc.sqlstate is None or exc.sqlstate.startswith(("08", "57P"))
+
+
+# The errors of a statement another transaction made fail, which succeeds when tried again: a
+# deadlock it lost, a serialization conflict.
+_CONFLICTS = ("40P01", "40001")
+
+
+def conflicted(exc: BaseException) -> bool:
+    """Whether `exc` says a statement lost a deadlock or a serialization conflict to another
+    transaction: such an item is tried again, not failed."""
+    return isinstance(exc, psycopg.Error) and exc.sqlstate in _CONFLICTS
 
 
 async def _finished[T](task: asyncio.Task[T]) -> None:
@@ -144,6 +157,7 @@ class WorkGate:
         self._waiting = False
         # Renewals cut off at their lease's end, kept until they have unwound.
         self._unwinding: set[asyncio.Task[bool]] = set()
+        self._keys: Mapping[str, Collection[str]] | None = None  # as `run` was given them
 
     @property
     def idle(self) -> bool:
@@ -162,7 +176,7 @@ class WorkGate:
         event loop's clock no later than its lease's start: the lease runs from it."""
         try:
             async with self._write("take") as unit:
-                claimed = await queue.take(unit, kinds, self.lease)
+                claimed = await queue.take(unit, kinds, self.lease, self._keys)
                 if claimed is None:
                     return None
                 since = asyncio.get_running_loop().time()
@@ -180,15 +194,20 @@ class WorkGate:
     async def take_back(self, kinds: list[str]) -> list[WorkItem]:
         """Take back the items of `kinds` whose lease expired."""
         async with self._write("take back") as unit:
-            taken = await queue.take_back(unit, kinds)
+            taken = await queue.take_back(unit, kinds, self._keys)
         for item in taken:
             log.warning("work: took back %s %s (item %s), whose lease lapsed", *_name(item))
         return taken
 
-    async def run(self, workers: Mapping[str, Worker]) -> None:
-        """Serve the kinds of `workers`, each by its Worker, until cancelled. Cancelled, each
-        claim's supervisor stops its Worker and gives back the claim it still owns."""
+    async def run(
+        self, workers: Mapping[str, Worker], *, keys: Mapping[str, Collection[str]] | None = None
+    ) -> None:
+        """Serve the kinds of `workers`, each by its Worker, until cancelled; of a kind in
+        `keys`, only the items of those keys (an integration's deliveries, which only a process
+        that loads it can run). Cancelled, each claim's supervisor stops its Worker and gives
+        back the claim it still owns."""
         kinds = sorted(workers)
+        self._keys = keys
         supervisors: set[asyncio.Task[None]] = set()
         with attributed(SYSTEM):
             async with self._serving(kinds):
@@ -202,7 +221,7 @@ class WorkGate:
                             while await self._claim(kinds, workers, supervisors):
                                 pass
                             async with self.db.read("work: next wait") as unit:
-                                wait = await queue.wait_seconds(unit, kinds)
+                                wait = await queue.wait_seconds(unit, kinds, self._keys)
                         except asyncio.CancelledError:
                             raise
                         except Exception:
@@ -229,44 +248,34 @@ class WorkGate:
     async def _claim(
         self, kinds: list[str], workers: Mapping[str, Worker], supervisors: set[asyncio.Task[None]]
     ) -> bool:
-        """Start a supervisor on the next claim; whether there was one to take."""
-        claimed: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-        task = asyncio.create_task(self._supervise(kinds, workers, claimed))
-        supervisors.add(task)
-        task.add_done_callback(supervisors.discard)
-        if not await asyncio.shield(claimed):
-            return False
-        task.add_done_callback(lambda _: self._wake.set())  # its admission is free again
-        return True
-
-    async def _supervise(
-        self, kinds: list[str], workers: Mapping[str, Worker], claimed: asyncio.Future[bool]
-    ) -> None:
-        """Own one claim from its commit to its settling: take it, run its Worker, settle it."""
+        """Take the next claim, through its commit, and hand it to a supervisor of its own;
+        whether there was one to take. Stopped meanwhile, a claim that committed is given
+        back."""
         taking = asyncio.create_task(self._take(kinds))
         try:
             await _finished(taking)
         except asyncio.CancelledError:
-            # The claim may have committed while we were stopped: it is ours to give back.
             if not taking.cancelled() and taking.exception() is None and (taken := taking.result()):
                 await self._give_back(taken[0])
-            if not claimed.done():
-                claimed.cancel()
             raise
-        if (error := taking.exception()) is not None:
-            claimed.set_exception(error)
-            return
-        taken = taking.result()
-        claimed.set_result(taken is not None)
-        if taken is None:
-            return
+        if (taken := taking.result()) is None:
+            return False
         item, since = taken
+        task = asyncio.create_task(self._supervise(item, workers[item.kind], since))
+        supervisors.add(task)
+        task.add_done_callback(supervisors.discard)
+        task.add_done_callback(lambda _: self._wake.set())  # its admission is free again
+        return True
+
+    async def _supervise(self, item: WorkItem, worker: Worker, since: float) -> None:
+        """Own one committed claim to its settling: run its Worker under its lease, unless the
+        lease ran out before it could start."""
         if asyncio.get_running_loop().time() >= since + self.lease.total_seconds():
             # Its lease ran out before it could start: whoever runs next takes it.
             log.warning("work: %s %s (item %s) leased too late to start", *_name(item))
             await self._give_back(item)
             return
-        await self._run(item, workers[item.kind], since)
+        await self._run(item, worker, since)
 
     async def _run(self, item: WorkItem, worker: Worker, since: float) -> None:
         """Run `item` by `worker` under its lease and settle it."""
@@ -310,8 +319,8 @@ class WorkGate:
         error = handler.exception()
         if isinstance(error, LeaseLostError):
             log.warning("work: %s %s (item %s) lost its lease", *_name(item))
-        elif error is not None and _lost(error):
-            log.warning("work: %s %s (item %s) lost the database: %s", *_name(item), error)
+        elif error is not None and (database_lost(error) or conflicted(error)):
+            log.warning("work: %s %s (item %s) is tried again: %s", *_name(item), error)
             await self._change("try again", lambda unit: queue.again(unit, item))
         elif error is not None:
             log.error("work: %s %s (item %s) failed", *_name(item), exc_info=error)
@@ -406,7 +415,7 @@ class WorkGate:
                     name = f"{socket.gethostname()}:{os.getpid()}"
                     return await queue.register(unit, name, kinds)
             except Exception as exc:
-                if not _lost(exc):
+                if not database_lost(exc):
                     raise
                 log.warning("work: registering failed, trying again: %s", exc)
             await asyncio.sleep(RETRY_SECONDS)

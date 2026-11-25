@@ -12,8 +12,10 @@ what an integration may read, how it is configured and loaded, and a worked exam
 
 Every pipeline step writes an **event** to the **outbox** (a table) in the same transaction as
 the data the event describes, so an event exists exactly when its change does. A
-**dispatcher** runs inside `litwatch serve` and hands each loaded integration that reacts to events
-(a `Reacting` one, below) the events after its own **cursor**, in order:
+**delivery** runs inside `litwatch serve` for each loaded integration that reacts to events (a
+`Reacting` one, below), as work items of the service's Work gate, one at a time per
+integration, woken as each event commits: it hands the integration the events after its own
+**cursor**, in order:
 
 - The order is the order of transactions, then of events within one: an event's place is its
   writing transaction's id, then its own id. Only events whose transactions are older than every
@@ -23,14 +25,16 @@ the data the event describes, so an event exists exactly when its change does. A
 - An integration enabled for the first time starts at the outbox's current end: it is not woken
   by anything that happened before it was turned on. Turning it off keeps its cursor, and
   turning it on again resumes from there.
-- When `handle` raises, the cursor stays before that event, the error is recorded, and the event
+- When `wants` or `handle` raises, the cursor stays before that event, the error is recorded, and the event
   is tried again after a backoff (30 seconds, doubling, at most an hour). That integration's
   later events wait behind it; every other integration goes on. The owner can retry the event
   at once or skip it, under Settings → Integrations (`POST /api/settings/integrations/<name>/retry`
   and `/skip`). A failing `setup` is retried the same way, and Retry tries it again at once; the
   integrations API reports it as `setup_failing`, apart from a failing event.
-- After a failure or a restart, the event in hand is handed over again. **`handle` must be
-  idempotent.**
+- The cursor is saved once a turn's batch (up to 100 events) is handed over, or where a failure
+  stops it. After a failure, the failing event is handed over again; after a restart, every event
+  after the cursor last saved is, up to a batch of them, those already handled included.
+  **`handle` must be idempotent.**
 
 Delivery is therefore **at least once, and in transaction order, not commit order**: of two
 transactions, the one that began first is delivered first even if it committed second, and an
@@ -69,20 +73,21 @@ a cursor. `deep`, whose work is the full-text queue's, is a plain `Integration`.
   not nest.
 - Optional, used when present (`aclose` and `requires` on any integration, the rest on a
   `Reacting` one):
-  - `async def setup(self, db)`: awaited whenever the dispatcher starts, before any event, under
-    the same lock as `handle`. It must be safe to run again. When it raises, no event is handed
+  - `async def setup(self, db)`: awaited before the first event in each `litwatch serve` that
+    delivers to it, never beside a `handle` of the same integration. It must be safe to run
+    again. When it raises, no event is handed
     over; the error is shown under Settings → Integrations and setup is tried again after the
     same backoff as a failed event (or at once, on Retry).
   - `async def aclose(self)`: awaited when the service stops. Close HTTP clients here.
   - `requires: tuple[str, ...]`: names of integrations that must be loaded too; loading fails
     otherwise.
-  - `async def idle(self, db)`: awaited when the integration has no event to be handed, at
-    most about once a minute, under the same lock as `handle`, for work no event brings
-    (retrying a delivery that waits on something outside litwatch). A failure is logged and changes
-    nothing else; keep it short and bounded, since events wait while it runs.
+  - `async def idle(self, db)`: awaited on a delivery turn that hands the integration no event,
+    at most about once a minute, never beside a `handle` of the same integration, for work no
+    event brings (retrying a delivery that waits on something outside litwatch). A failure is
+    logged and changes nothing else; keep it short and bounded, since events wait while it runs.
 
 Deep reads come from the built-in `deep` integration only: the owner's request (`POST
-/api/papers/<id>/card`) queues a Deep pass, which the service's Deep worker submits to it, and
+/api/papers/<id>/card`) queues a Deep pass, which the service's Deep pass worker submits to it, and
 only with it loaded does the paper page offer the request. Another integration may react to
 `card.requested` (a webhook passes it on) but makes no card. What the deep service returns, and
 what litwatch stores of it, is under "The deep service's result" below.
@@ -447,7 +452,7 @@ class Ntfy:
             content=paper.title.encode(),
             headers={"Title": "Must read", "Click": f"https://arxiv.org/abs/{paper.id}"},
         )
-        resp.raise_for_status()  # raising makes the dispatcher retry later
+        resp.raise_for_status()  # raising makes the delivery retry later
 
     async def aclose(self) -> None:
         await self.http.aclose()

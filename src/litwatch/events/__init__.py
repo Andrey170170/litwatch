@@ -1,6 +1,6 @@
 """The integration contract and the event types. A pipeline step writes its event in the same
-unit as its data (`store.outbox.emit`); the dispatcher (`events.dispatch`) hands events to
-integrations."""
+unit as its data (`store.outbox.emit`); deliveries (`events.dispatch`), each a work item of the
+Work gate (`events.worker`), hand events to integrations."""
 
 from __future__ import annotations
 
@@ -61,21 +61,19 @@ class Integration(Protocol):
 
 @runtime_checkable
 class Reacting(Integration, Protocol):
-    """An integration the dispatcher hands events to.
+    """An integration events are delivered to (`events.dispatch`).
 
     `wants` is a cheap filter on the event alone; `handle` does the work and must be
     idempotent, because an event is handed over again after a failure or a restart. It is
     given the Database gate, `db`, and opens its own units on it: it reads what it needs
     through `store` in read units, keeps its own state in its own table, and may emit events
     of its own (`store.outbox.emit`), each write in a write unit, and makes its network calls
-    with no unit open. Raising tells the dispatcher to retry the event later; the
+    with no unit open. Raising tells the delivery to retry the event later; the
     integration's later events wait behind it, nobody else's do.
 
-    Optional hooks, used when present: `setup(db)`, awaited once whenever the dispatcher
-    starts, before any event and under the same lock as `handle` (a failure is shown and tried
-    again after a backoff, and events wait for it); `idle(db)`, awaited when it has no event
-    to be handed, at most about once a minute, for work no event brings (a failure there is
-    logged and changes nothing else).
+    Optional hook, used when present: `setup(db)`, awaited before the first event in each
+    process that delivers to it, one delivery to it at a time as `handle` is (a failure is
+    shown and tried again after a backoff, and events wait for it).
     """
 
     def wants(self, event: Event) -> bool: ...
@@ -84,6 +82,6 @@ class Reacting(Integration, Protocol):
 
 
 def reacting(integrations: list[Integration]) -> list[Reacting]:
-    """The integrations that react to events: the ones the dispatcher delivers to, and the only
+    """The integrations that react to events: the ones events are delivered to, and the only
     ones with a cursor to show."""
     return [i for i in integrations if isinstance(i, Reacting)]

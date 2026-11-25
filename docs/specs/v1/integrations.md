@@ -7,7 +7,8 @@ Mostly carried from the first v1 (built in M6, PRs #26 and #28). Changes are mar
 A transactional outbox: a pipeline step writes its event in the same transaction as its data. The `Integration`
 protocol is `name`, `wants(event)`, `handle(db, event)`, idempotent; **Changed** (A1, P5): it is given the Database
 gate, on which it opens units of its own to read through the repositories and emit events of its own, with no network
-call inside a unit. A dispatcher delivers per integration with its own cursor, retries with
+call inside a unit. **Changed** (A2, P2): delivery is a work item per integration, woken as each event commits, with
+its own cursor; it retries with
 backoff and exposes failures to the API, a failing setup's as well as a failing event's. Integrations deliver only events below the cluster's oldest open
 transaction, so litwatch's Postgres should not be shared with services that hold transactions open.
 

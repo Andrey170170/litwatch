@@ -500,24 +500,22 @@ PASS_WAITING = {
 
 
 @router.post("/fulltext/{pass_id}/now", status_code=204, responses=PASS_WAITING)
-async def run_pass_now(pass_id: int, request: Request, db: Db, rules: Rules) -> None:
+async def run_pass_now(pass_id: int, db: Db, rules: Rules) -> None:
     """A full-text pass (a Deep card's included) failed three runs in a row, or awaits its text
     over a week: run it now. It is first in line for its worker, with three more runs; its text
     is asked for again at urgent priority. 409 when it no longer waits for the owner (it ran,
     the paper's text changed, it was dropped)."""
-    await _run_now(pass_id, request, db, rules, pdf=False)
+    await _run_now(pass_id, db, rules, pdf=False)
 
 
 @router.post("/fulltext/{pass_id}/pdf", status_code=204, responses=PASS_WAITING)
-async def use_pdf(pass_id: int, request: Request, db: Db, rules: Rules) -> None:
+async def use_pdf(pass_id: int, db: Db, rules: Rules) -> None:
     """ "Use the PDF", for a paper whose LaTeX reads badly: run the pass now, as above, reading
     the paper's PDF from then on instead of its LaTeX."""
-    await _run_now(pass_id, request, db, rules, pdf=True)
+    await _run_now(pass_id, db, rules, pdf=True)
 
 
-async def _run_now(
-    pass_id: int, request: Request, db: DatabaseGate, rules: Rules, *, pdf: bool
-) -> None:
+async def _run_now(pass_id: int, db: DatabaseGate, rules: Rules, *, pdf: bool) -> None:
     async with db.read("run pass now: paper") as unit:
         paper_id = await fulltext_store.paper_of(unit, pass_id)  # a pass never changes paper
     if paper_id is None:
@@ -527,8 +525,6 @@ async def _run_now(
     ) as done:
         if not await fulltext_store.run_now(done.unit, pass_id, FAILED_RUNS, pdf=pdf):
             raise HTTPException(status_code=409, detail="the pass is not waiting for the owner")
-    request.app.state.fulltext_wake.set()
-    request.app.state.deep_wake.set()
 
 
 # -- calibrate -------------------------------------------------------------------------------------

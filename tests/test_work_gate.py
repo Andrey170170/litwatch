@@ -20,18 +20,10 @@ from litwatch.gates.database import Cursor, DatabaseGate, LeaseLostError, Query,
 from litwatch.gates.work import SYSTEM, Done, Later, Worker, WorkGate
 from litwatch.store import work as queue
 from tests.sessions import Session, in_read, sibling, staged
+from tests.working import WAIT, serving, until
 
-WAIT = 10.0  # how long a test waits on something that must happen
 SHORT = timedelta(seconds=1.5)  # a lease that lapses within a test
 LONG = timedelta(minutes=5)  # one that does not
-
-
-async def until(check: Callable[[], Awaitable[bool]], what: str) -> None:
-    """Wait until `check` holds, looking again every 50 ms, for at most `WAIT`."""
-    async with asyncio.timeout(WAIT):
-        while not await check():
-            await asyncio.sleep(0.05)
-    del what  # named for the reader of a timeout's traceback
 
 
 async def submit(db: DatabaseGate, kind: str, key: str, **kwargs) -> WorkItem:
@@ -96,24 +88,6 @@ async def other(conn: Session) -> AsyncGenerator[Session]:
         yield session
 
 
-@contextlib.asynccontextmanager
-async def serving(gate: WorkGate, workers: dict[str, Worker]) -> AsyncGenerator[asyncio.Task]:
-    """`gate.run(workers)` for the block, listening and asleep before it starts; stopped at the
-    end."""
-    task = asyncio.create_task(gate.run(workers))
-
-    async def idle() -> bool:
-        return gate.listening.is_set() and gate.idle
-
-    try:
-        await until(idle, "the gate listens and sleeps")
-        yield task
-    finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-
 def finished(event: asyncio.Event) -> Worker:
     """A Worker that sets `event` and is done."""
 
@@ -153,6 +127,37 @@ async def test_an_open_key_is_the_same_item(conn: Session, db):
     async with db.write("end") as unit:
         assert await queue.end(unit, taken, Outcome.DONE)
     assert (await submit(db, "fulltext", "7")).id != first.id  # ended, the key is free
+
+
+async def test_due_items_are_taken_by_priority_then_by_how_long_they_waited(conn: Session, db):
+    gate = WorkGate(db)
+    past = datetime.now(UTC) - timedelta(minutes=5)
+    await submit(db, "pass", "old", not_before=past, admission="a", priority=1)
+    await submit(db, "pass", "urgent", admission="b")
+    await submit(
+        db, "pass", "newer", not_before=past + timedelta(minutes=1), admission="c", priority=1
+    )
+    await submit(db, "pass", "moved", not_before=past, admission="d", priority=2)
+    # Submitted again more urgently (the owner's request), a pending item moves up, and keeps
+    # its time; one later than it has keeps it too.
+    soon = datetime.now(UTC) + timedelta(hours=1)
+    moved = await submit(db, "pass", "moved", not_before=soon, priority=-1)
+    assert (moved.priority, moved.not_before) == (-1, past)
+    taken = [await take(gate, ["pass"]) for _ in range(4)]
+    assert [t.key for t in taken if t] == ["moved", "urgent", "old", "newer"]
+
+    # A resubmission while it runs is kept by the item that takes its key.
+    running = taken[0]
+    assert running is not None
+    await submit(db, "pass", "moved", priority=-3)
+    async with db.write("end") as unit:
+        assert await queue.end(unit, running, Outcome.DONE)
+    successor = await (
+        await conn.execute(
+            "SELECT priority FROM work_items WHERE key = 'moved' AND state = 'pending'"
+        )
+    ).fetchone()
+    assert successor["priority"] == -3
 
 
 # A resubmitted item ended done, and the item that took its key.
@@ -786,10 +791,22 @@ def _session_ended(code: str) -> Exception:
             Outcome.FAILED,
         ),
         (lambda: psycopg.errors.QueryCanceled("statement timeout"), Outcome.FAILED),
+        (lambda: psycopg.errors.DeadlockDetected("deadlock detected"), None),
+        (lambda: psycopg.errors.SerializationFailure("could not serialize"), None),
     ],
-    ids=["idle-timeout", "transaction-timeout", "all-lost", "mixed", "statement-timeout"],
+    ids=[
+        "idle-timeout",
+        "transaction-timeout",
+        "all-lost",
+        "mixed",
+        "statement-timeout",
+        "deadlock",
+        "serialization",
+    ],
 )
-async def test_only_a_lost_database_tries_an_item_again(conn: Session, db, raised, outcome):
+async def test_only_a_lost_database_or_a_lost_conflict_tries_an_item_again(
+    conn: Session, db, raised, outcome
+):
     async def worker(item: WorkItem) -> None:
         if item.attempts == 1:
             raise raised()

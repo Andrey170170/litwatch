@@ -1,12 +1,24 @@
 """The full-text queue and what its passes wrote (data.md: `fulltext_passes`, `briefs`, and the
-full-text rows of `weights` and `gists`)."""
+full-text rows of `weights` and `gists`).
+
+Each pass of the regular queue (not a re-run's, which its job works) has a work item, keyed by
+the pass's id, of the kind its Worker runs (`work_kind`; docs/plans/a2-work-gate.md, P2): every
+write here that leaves such a pass where a claim can take it (ready, awaiting its text, or
+running with its claim let go) submits the item in its unit, for when it may be taken, at its
+pass's priority, and `submit_open` makes sure each open one has an item when a process starts
+serving them.
+The item decides what to do with its pass under the pass's row lock, and claims it as every
+worker does (`decide`); a pass worked inline (the nightly) retires its item as it ends
+(`done`, `failed`). As in the queue before: due passes run in `claim`'s order of priorities,
+text passes a wave's width at once, and Deep passes one at a time (`_admission`). A paper
+brought back after a withdrawal has its passes submitted again (`submit_restored`)."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, LiteralString
 
 from litwatch.core import FAILED_RUNS, Paper, TaxonomyClass, Weight
 from litwatch.core.digests import PUBLISHED
@@ -18,6 +30,8 @@ from litwatch.core.fulltext import (
     REQUESTED,
     TEXT_PRIORITY,
     TEXT_REQUEST_PRIORITY,
+    TEXT_WAIT,
+    TEXT_WAVE,
     UNSTARTED,
     DeepPass,
     PassKind,
@@ -25,9 +39,163 @@ from litwatch.core.fulltext import (
     TextPass,
     TextRead,
 )
+from litwatch.gates.context import current_work
 from litwatch.gates.database import ReadUnit, WriteUnit
+from litwatch.store import work
 from litwatch.store.papers import COLUMNS, row_to_paper
 from litwatch.store.taxonomy import require_lock, row_to_class
+from litwatch.store.text import stored
+
+# The kinds of the passes' work items: text passes, and Deep passes, each run by its Worker.
+TEXT_WORK = "fulltext"
+DEEP_WORK = "deep"
+# The states in which a claim can take a pass (a running one once its claim's lease lapsed).
+_CLAIMABLE = [PassState.READY.value, PassState.AWAITING_TEXT.value, PassState.RUNNING.value]
+
+
+def work_kind(kind: PassKind) -> str:
+    """The kind of work item a pass of `kind` is."""
+    return DEEP_WORK if kind == PassKind.DEEP else TEXT_WORK
+
+
+def _admission(kind: PassKind, pass_id: int) -> str | None:
+    """Which items a pass's item is admitted one at a time with: a text pass's spread over
+    `TEXT_WAVE` slots by its id, so the service works as many text passes at once as a wave
+    did; Deep passes one at a time, by their kind."""
+    return None if kind == PassKind.DEEP else f"{TEXT_WORK}:{pass_id % TEXT_WAVE}"
+
+
+async def submit(
+    unit: WriteUnit, pass_id: int, at: datetime | None = None, *, ensure: bool = False
+) -> None:
+    """Submit the pass's work item, to run no earlier than `at` (now when not given), in line
+    by the pass's priority, as `claim` takes passes: the owner's, then the automatic ones, then
+    a re-run's: every submission of a pass's item, a Worker's retry after an error included,
+    comes through here, so its admission and priority come from one place. With `ensure`, an
+    open item is left as it stands (`store.work.ensure`). A pass gone meanwhile has none."""
+    row = await (
+        await unit.execute("SELECT kind, priority FROM fulltext_passes WHERE id = %s", (pass_id,))
+    ).fetchone()
+    if row is None:
+        return
+    kind = PassKind(row["kind"])
+    await (work.ensure if ensure else work.submit)(
+        unit,
+        work_kind(kind),
+        str(pass_id),
+        not_before=at,
+        admission=_admission(kind, pass_id),
+        priority=row["priority"],
+    )
+
+
+def _by_id(row: dict[str, Any]) -> int:
+    """A bulk write submits its passes' items in pass id order, as every unit that locks
+    several of them does, so no two lock them in opposite orders."""
+    return row["id"]
+
+
+async def _retire(unit: WriteUnit, c: Claimed) -> None:
+    """The pass ended where it was claimed: its work item has nothing left to do, unless it is
+    the item doing this (`store.work.done_elsewhere`)."""
+    work_ = current_work()
+    await work.done_elsewhere(
+        unit, work_kind(c.kind), str(c.id), besides=work_.item.id if work_ else None
+    )
+
+
+# Of `fulltext_passes f` and its paper `p`: the passes a claim of `deep` ones may take at all,
+# with the parameter `job` (the re-run's whose text passes it takes; None for the regular
+# queue). A text pass is for its paper's current revision and the paper not dropped; a Deep
+# pass of any revision, and one whose job was submitted whatever a dismissal says.
+def _eligible(deep: bool) -> LiteralString:
+    if deep:
+        return f"f.kind = 'deep' AND ({STARTED} OR NOT p.dropped)"
+    return (
+        "f.kind <> 'deep' AND f.paper_revision = p.revision AND NOT p.dropped "
+        "AND f.job_id IS NOT DISTINCT FROM %(job)s"
+    )
+
+
+# ...those a claim may take now, as it is run: text passes the owner ran only (`owners` True),
+# or none of them (False); no background Deep pass but one whose job was submitted, without
+# `background`.
+def _allowed(deep: bool, owners: bool | None, background: bool) -> LiteralString:
+    if not deep and owners is not None:
+        return f"f.priority {'<' if owners else '>='} {TEXT_PRIORITY}"
+    if deep and not background:
+        return f"(f.priority < {BACKGROUND_PRIORITY} OR {STARTED})"
+    return "true"
+
+
+# ...and those it may take as they stand: to try, or running under a claim whose lease lapsed.
+_TAKEABLE = (
+    "(f.state IN ('awaiting_text', 'ready') OR (f.state = 'running' AND f.lease_until < now()))"
+)
+
+
+# Of `fulltext_passes f` and its paper `p`: the regular queue's passes of `deep` ones or not
+# that a claim can take, or will once another owner's claim lapses, with the parameters `job`
+# (None) and `claimable`.
+def _open(deep: bool) -> LiteralString:
+    return f"{_eligible(deep)} AND f.job_id IS NULL AND f.state = ANY(%(claimable)s)"
+
+
+async def open_ids(unit: ReadUnit, *, deep: bool = False) -> list[int]:
+    """The text passes of the regular queue that a claim can take, or with `deep` the Deep
+    passes, read without locking them: what a process that starts serving them looks at, each
+    in a unit of its own (`submit_open`), a pass claimed by a process now gone included, and
+    that a claim may take at all (`_eligible`: not a dropped paper's, nor a text pass of an
+    older revision)."""
+    rows = await (
+        await unit.execute(
+            "SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
+            f"WHERE {_open(deep)} ORDER BY f.id",
+            {"job": None, "claimable": _CLAIMABLE},
+        )
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
+async def submit_open(unit: WriteUnit, pass_id: int, *, deep: bool = False) -> bool:
+    """Make sure a pass `open_ids` found has a work item, if it is still open: its row is
+    locked first and read again under the lock, so a pass worked inline meanwhile (its item
+    retired) is not given another, and the unit locks one item alone. An item it has is kept as
+    it stands (`store.work.ensure`): a retry waiting out its time still waits, and a running one
+    is not wanted again. Returns whether the pass was open."""
+    await unit.execute("SELECT 1 FROM fulltext_passes WHERE id = %s FOR UPDATE", (pass_id,))
+    row = await (
+        await unit.execute(
+            "SELECT 1 FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
+            f"WHERE f.id = %(pass)s AND {_open(deep)}",
+            {"pass": pass_id, "job": None, "claimable": _CLAIMABLE},
+        )
+    ).fetchone()
+    if row is None:
+        return False
+    await submit(unit, pass_id, ensure=True)
+    return True
+
+
+async def submit_restored(unit: WriteUnit, paper_ids: Sequence[str]) -> None:
+    """Submit the work item of each pass of the regular queue that a claim can take, of those
+    of the papers not dropped: for papers withdrawn and brought back by a later version, in the
+    unit that stores it. While a paper was dropped no claim took its passes, and their items
+    ended with nothing to do; a version that changes neither title nor abstract queues none."""
+    if not paper_ids:
+        return
+    rows = await (
+        await unit.execute(
+            "SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id "
+            f"WHERE f.paper_id = ANY(%(papers)s) AND (({_eligible(False)}) "
+            f"OR ({_eligible(True)})) AND f.job_id IS NULL AND f.state = ANY(%(claimable)s) "
+            "ORDER BY f.id",
+            {"papers": list(paper_ids), "job": None, "claimable": _CLAIMABLE},
+        )
+    ).fetchall()
+    for r in rows:
+        await submit(unit, r["id"])
+
 
 # Whether text pass `f` read paper `p`'s text for its latest arXiv update, or none is known: what
 # keeps a done pass current while the paper's version is unknown.
@@ -157,6 +325,7 @@ async def request_card(unit: WriteUnit, paper_id: str, revision: int) -> int:
             "state = CASE WHEN state = 'failed' THEN 'ready' ELSE state END WHERE id = %s",
             (REQUESTED, REQUEST_PRIORITY, open_pass.id),
         )
+        await submit(unit, open_pass.id)
         return open_pass.id
     return await queue(unit, paper_id, revision, PassKind.DEEP, REQUESTED, REQUEST_PRIORITY)
 
@@ -175,13 +344,25 @@ async def owners_first(unit: WriteUnit, paper_ids: Sequence[str]) -> None:
     """The papers' open passes go as the owner's requests do: a text pass ahead of the others,
     a Deep pass ahead of the automatic ones (a paper the owner had processed, docs/plans/jobs.md),
     in the regular queue, a re-run's text pass too. The reason stays: a settle may still drop or
-    relabel the pass."""
-    await unit.execute(
-        "UPDATE fulltext_passes SET priority = least(priority, "
-        "CASE WHEN kind = 'deep' THEN %s ELSE %s END), job_id = NULL "
-        "WHERE paper_id = ANY(%s) AND state <> 'done'",
-        (REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY, list(paper_ids)),
-    )
+    relabel the pass. A pass this moves (its priority raised, or taken from a re-run) has its
+    work item submitted, ahead of the automatic ones, if a claim can take it; one already the
+    owner's is left alone, so settling the paper again does not cut a try's wait short."""
+    first = "CASE WHEN kind = 'deep' THEN %(deep)s ELSE %(text)s END"
+    rows = await (
+        await unit.execute(
+            f"UPDATE fulltext_passes SET priority = least(priority, {first}), job_id = NULL "
+            "WHERE paper_id = ANY(%(papers)s) AND state <> 'done' "
+            f"AND (priority > {first} OR job_id IS NOT NULL) RETURNING id, state",
+            {
+                "deep": REQUEST_PRIORITY,
+                "text": TEXT_REQUEST_PRIORITY,
+                "papers": list(paper_ids),
+            },
+        )
+    ).fetchall()
+    for r in sorted(rows, key=_by_id):  # items locked in pass order
+        if r["state"] in _CLAIMABLE:
+            await submit(unit, r["id"])
 
 
 async def open_deep(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
@@ -204,7 +385,8 @@ async def queue(
     priority: int,
     job_id: int | None = None,
 ) -> int:
-    """Queue a pass; one `job_id` names is that re-run's to work (docs/plans/jobs.md)."""
+    """Queue a pass; one `job_id` names is that re-run's to work (docs/plans/jobs.md), and the
+    others have their work item submitted."""
     row = await (
         await unit.execute(
             "INSERT INTO fulltext_passes (paper_id, paper_revision, kind, reason, priority, "
@@ -212,6 +394,9 @@ async def queue(
             (paper_id, revision, kind.value, reason, priority, job_id),
         )
     ).fetchone()
+    assert row is not None  # the insert returns it
+    if job_id is None:
+        await submit(unit, row["id"])
     return row["id"]
 
 
@@ -286,6 +471,7 @@ async def claim(
     owners: bool | None = None,
     job: int | None = None,
     background: bool = True,
+    pass_id: int | None = None,
 ) -> list[Claimed]:
     """Take up to `limit` text passes to try, least recently tried first, `besides` those
     already tried: passes awaiting text, those to be tried again, and running ones whose lease
@@ -297,25 +483,15 @@ async def claim(
     the owner ran now only when `owners` is True, none of them when it is False. Text passes a
     re-run works only for that `job`, and none of them without it. Without `background`, no
     Deep pass at a background priority but one whose job was submitted (a nightly is running
-    or due, pipeline.md, section 10)."""
-    which = (
-        f"f.kind = 'deep' AND ({STARTED} OR NOT p.dropped)"
-        if deep
-        else "f.kind <> 'deep' AND f.paper_revision = p.revision AND NOT p.dropped "
-        "AND f.job_id IS NOT DISTINCT FROM %(job)s"
-    )
-    if not deep and owners is not None:
-        which += f" AND f.priority {'<' if owners else '>='} {TEXT_PRIORITY}"
-    if deep and not background:
-        which += f" AND (f.priority < {BACKGROUND_PRIORITY} OR {STARTED})"
+    or due, pipeline.md, section 10). With `pass_id`, that pass alone (`decide`)."""
     rows = await (
         await unit.execute(
             f"""
             WITH taken AS (
                 SELECT f.id FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id
-                WHERE {which} AND NOT f.id = ANY(%(besides)s)
-                  AND (f.state IN ('awaiting_text', 'ready')
-                       OR (f.state = 'running' AND f.lease_until < now()))
+                WHERE {_eligible(deep)} AND {_allowed(deep, owners, background)}
+                  AND NOT f.id = ANY(%(besides)s)
+                  AND (%(pass)s::bigint IS NULL OR f.id = %(pass)s) AND {_TAKEABLE}
                 ORDER BY f.priority, f.tried_at NULLS FIRST, f.id
                 LIMIT %(limit)s FOR UPDATE OF f SKIP LOCKED
             ), claimed AS (
@@ -340,6 +516,7 @@ async def claim(
                 "limit": limit,
                 "lease": lease,
                 "job": job,
+                "pass": pass_id,
             },
         )
     ).fetchall()
@@ -361,6 +538,60 @@ async def claim(
     ]
 
 
+@dataclass(frozen=True)
+class Decision:
+    """What a pass's work item finds to do with its pass (`decide`): work it, `claimed`; wait
+    for another owner's live claim to end at `held_until`; look again later, `held_back`, as a
+    claim could take it but for what holds it back now (a nightly batching the automatic text
+    passes, or due before a background Deep pass); or nothing, as it is done, failed, gone, or
+    not the regular queue's to take."""
+
+    claimed: Claimed | None = None
+    held_until: datetime | None = None
+    held_back: bool = False
+
+
+async def decide(
+    unit: WriteUnit,
+    pass_id: int,
+    lease: timedelta,
+    *,
+    deep: bool = False,
+    owners: bool | None = None,
+    background: bool = True,
+) -> Decision:
+    """Decide what the pass's work item does with it (`Decision`), claiming it for `lease` when
+    a claim on these terms (`claim`'s `deep`, `owners` and `background`) takes it. The pass's
+    row is locked first, a unit that holds it (a settle relabelling it) waited for, and then
+    read in a statement of its own, so the decision is on the pass as it stands, and the claim
+    is made under that same lock: a runnable pass never ends untried."""
+    await unit.execute("SELECT 1 FROM fulltext_passes WHERE id = %s FOR UPDATE", (pass_id,))
+    # The claim is one statement; why it took nothing is read in another. What the two read
+    # beside the pass's row (its paper: a withdrawal, say) may change between them: a pass
+    # the second finds runnable is claimed again.
+    while True:
+        claimed = await claim(
+            unit, lease, 1, deep=deep, owners=owners, background=background, pass_id=pass_id
+        )
+        if claimed:
+            return Decision(claimed=claimed[0])
+        row = await (
+            await unit.execute(
+                f"SELECT {_eligible(deep)} AND f.state = ANY(%(claimable)s) AS open, "
+                f"{_TAKEABLE} AS takeable, {_allowed(deep, owners, background)} AS allowed, "
+                "CASE WHEN f.state = 'running' THEN f.lease_until END AS held_until "
+                "FROM fulltext_passes f JOIN papers p ON p.id = f.paper_id WHERE f.id = %(pass)s",
+                {"job": None, "claimable": _CLAIMABLE, "pass": pass_id},
+            )
+        ).fetchone()
+        if row is None or not row["open"]:
+            return Decision()
+        if not row["takeable"]:
+            return Decision(held_until=row["held_until"])
+        if not row["allowed"]:
+            return Decision(held_back=True)
+
+
 async def job_open(unit: ReadUnit, job_id: int) -> int:
     """The re-run's text passes it still works: to try, running, or awaiting their text, short
     of the wait after which a pass is the owner's (`STUCK`)."""
@@ -379,12 +610,19 @@ async def job_open(unit: ReadUnit, job_id: int) -> int:
 async def release_job(unit: WriteUnit, job_id: int) -> None:
     """The re-run ended: what it left of its text passes (failed, or awaiting text too long)
     goes to the regular queue, where a nightly tries it again or the owner sees it. The
-    taxonomy lock is taken shared first, as in `retry_failed`."""
+    taxonomy lock is taken shared first, as in `retry_failed`. Those a claim can take have their
+    work items submitted."""
     require_lock(unit)
-    await unit.execute(
-        "UPDATE fulltext_passes SET job_id = NULL WHERE job_id = %s AND state <> 'done'",
-        (job_id,),
-    )
+    rows = await (
+        await unit.execute(
+            "UPDATE fulltext_passes SET job_id = NULL WHERE job_id = %s AND state <> 'done' "
+            "RETURNING id, state",
+            (job_id,),
+        )
+    ).fetchall()
+    for r in sorted(rows, key=_by_id):  # items locked in pass order
+        if r["state"] in _CLAIMABLE:
+            await submit(unit, r["id"])
 
 
 async def take_back(unit: WriteUnit, lease: timedelta) -> int:
@@ -392,12 +630,18 @@ async def take_back(unit: WriteUnit, lease: timedelta) -> int:
     nightly holding the run lock calls, so the run that held them is dead. Returns how many. The
     unit holds the taxonomy lock shared, as in `retry_failed`."""
     require_lock(unit)
-    cur = await unit.execute(
-        "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' "
-        "WHERE kind <> 'deep' AND state = 'running' AND lease_until - tried_at > %s",
-        (lease,),
-    )
-    return cur.rowcount
+    rows = await (
+        await unit.execute(
+            "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' "
+            "WHERE kind <> 'deep' AND state = 'running' AND lease_until - tried_at > %s "
+            "RETURNING id, job_id",
+            (lease,),
+        )
+    ).fetchall()
+    for r in sorted(rows, key=_by_id):  # items locked in pass order
+        if r["job_id"] is None:
+            await submit(unit, r["id"])
+    return len(rows)
 
 
 async def held(unit: WriteUnit, c: Claimed) -> bool:
@@ -422,34 +666,53 @@ async def label_of(unit: ReadUnit, pass_id: int) -> tuple[PassKind, str] | None:
 
 
 async def release(unit: WriteUnit, c: Claimed) -> None:
-    """Give a claimed pass back unworked: it awaits its next claim, behind those not tried."""
-    await unit.execute(
-        "UPDATE fulltext_passes SET state = 'awaiting_text', lease_until = NULL "
-        "WHERE id = %s AND state = 'running' AND lease_until = %s",
-        (c.id, c.lease_until),
-    )
+    """Give a claimed pass back unworked: it awaits its next claim, behind those not tried. Its
+    work item is submitted if the pass is the regular queue's now (here and below, by its job
+    as it stands: the owner's Process may have taken it from a re-run since the claim). One
+    whose paper is dropped has no work item until the paper comes back (`submit_restored`): no
+    claim takes it meanwhile."""
+    row = await (
+        await unit.execute(
+            "UPDATE fulltext_passes f SET state = 'awaiting_text', lease_until = NULL "
+            "FROM papers p WHERE f.id = %s AND f.state = 'running' AND f.lease_until = %s "
+            "AND p.id = f.paper_id RETURNING p.dropped, f.job_id",
+            (c.id, c.lease_until),
+        )
+    ).fetchone()
+    if row is not None and not row["dropped"] and row["job_id"] is None:
+        await submit(unit, c.id)
 
 
-async def let_go(unit: WriteUnit, c: Claimed, error: str) -> None:
+async def let_go(unit: WriteUnit, c: Claimed, error: str, again: datetime) -> None:
     """End the worker's lease on a pass it started, now: it stays running, so no settle drops
-    it, and the next claim takes it over at once."""
-    await unit.execute(
-        "UPDATE fulltext_passes SET lease_until = now(), last_error = %s "
-        "WHERE id = %s AND state = 'running' AND lease_until = %s",
-        (error[:2000], c.id, c.lease_until),
-    )
+    it, and the next claim takes it over at once, its work item from `again`."""
+    row = await (
+        await unit.execute(
+            "UPDATE fulltext_passes SET lease_until = now(), last_error = %s "
+            "WHERE id = %s AND state = 'running' AND lease_until = %s RETURNING job_id",
+            (stored(error), c.id, c.lease_until),
+        )
+    ).fetchone()
+    if row is not None and row["job_id"] is None:
+        await submit(unit, c.id, again)
 
 
-async def wait_again(unit: WriteUnit, c: Claimed, error: str) -> None:
+async def wait_again(
+    unit: WriteUnit, c: Claimed, error: str, again: datetime | None = None
+) -> None:
     """A pass that could not be worked through no fault of its paper (a Deep pass the service
     failed, with no job of it left; a re-run's pass its ceiling stopped): back in the queue,
-    the failure not counted, behind those tried less recently. Call it in a transaction that
-    `held` it."""
-    await unit.execute(
-        "UPDATE fulltext_passes SET state = 'ready', lease_until = NULL, last_error = %s "
-        "WHERE id = %s",
-        (error[:2000], c.id),
-    )
+    the failure not counted, behind those tried less recently, its work item from `again`
+    (now when not given). Call it in a transaction that `held` it."""
+    row = await (
+        await unit.execute(
+            "UPDATE fulltext_passes SET state = 'ready', lease_until = NULL, last_error = %s "
+            "WHERE id = %s RETURNING job_id",
+            (stored(error), c.id),
+        )
+    ).fetchone()
+    if row is not None and row["job_id"] is None:
+        await submit(unit, c.id, again)
 
 
 async def retry_asked(unit: WriteUnit, c: Claimed) -> None:
@@ -458,12 +721,18 @@ async def retry_asked(unit: WriteUnit, c: Claimed) -> None:
 
 
 async def awaiting(unit: WriteUnit, c: Claimed, error: str | None = None) -> None:
-    """The archive has no text for it yet (or cannot be reached: `error`): it waits again."""
-    await unit.execute(
-        "UPDATE fulltext_passes SET state = 'awaiting_text', lease_until = NULL, "
-        "last_error = %s WHERE id = %s AND state = 'running' AND lease_until = %s",
-        (error, c.id, c.lease_until),
-    )
+    """The archive has no text for it yet (or cannot be reached: `error`): it waits again, and
+    is tried again after `TEXT_WAIT`."""
+    row = await (
+        await unit.execute(
+            "UPDATE fulltext_passes SET state = 'awaiting_text', lease_until = NULL, "
+            "last_error = %s WHERE id = %s AND state = 'running' AND lease_until = %s "
+            "RETURNING job_id",
+            (error and stored(error), c.id, c.lease_until),
+        )
+    ).fetchone()
+    if row is not None and row["job_id"] is None:
+        await submit(unit, c.id, datetime.now(UTC) + TEXT_WAIT)
 
 
 def _read(text: TextRead | None) -> dict[str, Any]:
@@ -490,7 +759,9 @@ async def failed(
     starts the next try one model further down `brief`'s list; one every model of `brief`
     `refused` stops at once, counted as `FAILED_RUNS`. A pass left for the owner is not run
     again but on their word, or while it awaits its text, so a failure here is a new one: it
-    clears the owner's Acknowledge. Call it in a transaction that `held` the pass."""
+    clears the owner's Acknowledge. Call it in a transaction that `held` the pass. Its work item,
+    if another's, is retired (`_retire`): a failed pass waits for its next run's retry."""
+    await _retire(unit, c)
     await unit.execute(
         """
         UPDATE fulltext_passes SET state = 'failed', lease_until = NULL, last_error = %(error)s,
@@ -508,7 +779,7 @@ async def failed(
         """,
         {
             "id": c.id,
-            "error": error[:2000],
+            "error": stored(error),
             "counts": int(counts),
             "unusable": int(unusable),
             "refused": refused,
@@ -566,7 +837,9 @@ async def add(
 
 
 async def done(unit: WriteUnit, c: Claimed, text: TextRead) -> None:
-    """The pass wrote what it writes from `text`. Call it in a transaction that `held` it."""
+    """The pass wrote what it writes from `text`. Call it in a transaction that `held` it. Its
+    work item, if another's, is retired (`_retire`)."""
+    await _retire(unit, c)
     await unit.execute(
         """
         UPDATE fulltext_passes SET state = 'done', lease_until = NULL, last_error = NULL,
@@ -740,12 +1013,17 @@ async def retry_failed(unit: WriteUnit, runs: int) -> int:
     and the archive what it gave up on. The unit holds the taxonomy lock shared, as every settle
     does, so this never deadlocks with a taxonomy save dropping passes."""
     require_lock(unit)
-    cur = await unit.execute(
-        "UPDATE fulltext_passes SET state = 'ready', retry_text = true "
-        "WHERE state = 'failed' AND failed_runs < %s",
-        (runs,),
-    )
-    return cur.rowcount
+    rows = await (
+        await unit.execute(
+            "UPDATE fulltext_passes SET state = 'ready', retry_text = true "
+            "WHERE state = 'failed' AND failed_runs < %s RETURNING id, job_id",
+            (runs,),
+        )
+    ).fetchall()
+    for r in sorted(rows, key=_by_id):  # items locked in pass order
+        if r["job_id"] is None:
+            await submit(unit, r["id"])
+    return len(rows)
 
 
 # A pass that waits on the owner: failed `runs` runs in a row, or awaiting text too long. Of
@@ -863,7 +1141,10 @@ async def run_now(unit: WriteUnit, pass_id: int, runs: int, *, pdf: bool = False
         }
         | stuck_params(runs),
     )
-    return cur.rowcount == 1
+    if not cur.rowcount:
+        return False
+    await submit(unit, pass_id)
+    return True
 
 
 # Whether paper `p` has a text pass waiting on the owner, for a query with the parameters

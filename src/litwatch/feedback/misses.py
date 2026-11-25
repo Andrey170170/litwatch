@@ -46,8 +46,8 @@ async def resolve(db: DatabaseGate, text: str) -> tuple[str, Paper | None]:
 
 
 async def keep(unit: WriteUnit, paper_id: str, fetched: Paper | None) -> tuple[Paper, bool]:
-    """Store the record `resolve` fetched, as intake stores one (`store.papers.upsert`), in a
-    unit holding the paper's settle lock, so a request or an intake storing it meanwhile went
+    """Store the record `resolve` fetched, as intake stores one (`store.papers.upsert`), in a unit
+    holding the paper's settle lock, so a request or an intake storing it meanwhile went
     first and this one stores over it as intake would; the unit settles the paper after it, a
     rewrite included (a change of the paper, `word.change`). Returns the paper and whether it
     was inserted just now."""

@@ -46,7 +46,6 @@ from tests.conftest import (
     AppClient,
     deliver,
     fixture_read,
-    gate_on,
     paper,
     settled,
 )
@@ -789,16 +788,6 @@ async def test_an_implementation_without_setup_clears_its_predecessors_failure(w
 
     assert await start(db, Plain())
     assert (await in_write(conn, outbox.cursor, "notion")).setup_failures == 0
-
-
-async def test_a_setup_while_another_holds_the_lock_makes_nothing(world: Session, db):
-    conn, fake = world, FakeNotion(PARENT)
-    n = notion(fake)
-    async with gate_on(conn) as other, other.held("dispatch", n.name):  # another process's
-        assert not await start(db, n)
-        assert fake.requests == []
-    assert await start(db, n)
-    assert len(fake.kept("POST", "/databases")) == 1
 
 
 async def test_another_parent_page_drops_the_old_state(world: Session, db):

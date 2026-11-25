@@ -13,15 +13,17 @@ waited."""
 
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, LiteralString
 from uuid import UUID
 
 from psycopg.types.json import Jsonb
 
 from litwatch.core.work import ItemState, Outcome, WorkItem
 from litwatch.gates.database import ReadUnit, WriteUnit
+from litwatch.store.text import stored
 
 # The channel a submission, and an item's settling, notify the Work gates on; the payload is the
 # item's kind.
@@ -29,7 +31,7 @@ CHANNEL = "litwatch_work"
 
 _COLUMNS = (
     "id, kind, key, admission, state, not_before, attempts, scope, lease_token, lease_until, "
-    "outcome, error"
+    "outcome, error, priority"
 )
 # An item whose key is taken: open, or lasting. As the unique index `work_items_key` says.
 _TAKEN = "(lasting OR state <> 'ended')"
@@ -39,6 +41,29 @@ _WANTED = (
     "CASE WHEN resubmitted THEN LEAST(not_before, COALESCE(%(at)s::timestamptz, now())) "
     "ELSE COALESCE(%(at)s::timestamptz, now()) END"
 )
+
+
+def _served(alias: LiteralString) -> LiteralString:
+    """Whether item `alias` is one a process serves (`_serving`'s parameters): of its kinds,
+    and of a kind it serves for some keys alone, of those keys."""
+    return (
+        f"{alias}.kind = ANY(%(kinds)s) AND (NOT {alias}.kind = ANY(%(limited)s) "
+        f"OR ({alias}.kind, {alias}.key) IN "
+        "(SELECT * FROM unnest(%(limited_kinds)s::text[], %(limited_keys)s::text[])))"
+    )
+
+
+def _serving(kinds: list[str], keys: Mapping[str, Collection[str]] | None) -> dict[str, Any]:
+    """The parameters of `_served` for a process serving `kinds`, and of a kind in `keys` only
+    those keys (an integration's deliveries, which only a process that loads it can run)."""
+    limited = keys or {}
+    pairs = [(kind, key) for kind in sorted(limited) for key in sorted(limited[kind])]
+    return {
+        "kinds": kinds,
+        "limited": sorted(limited),
+        "limited_kinds": [kind for kind, _ in pairs],
+        "limited_keys": [key for _, key in pairs],
+    }
 
 
 def _item(row: dict[str, Any]) -> WorkItem:
@@ -55,6 +80,7 @@ def _item(row: dict[str, Any]) -> WorkItem:
         lease_until=row["lease_until"],
         outcome=Outcome(row["outcome"]) if row["outcome"] else None,
         error=row["error"],
+        priority=row["priority"],
     )
 
 
@@ -71,15 +97,19 @@ async def submit(
     not_before: datetime | None = None,
     admission: str | None = None,
     lasting: bool = False,
+    priority: int = 0,
+    _ensure: bool = False,
 ) -> WorkItem:
     """Submit the work `key` of `kind`, to run no earlier than `not_before` (now when not
-    given), admitted one at a time per `admission` (its kind when not given). Returns the item.
+    given), admitted one at a time per `admission` (its kind when not given), in line among the
+    items due by `priority`, the lowest first (`take`). Returns the item.
 
     A key is the work within its kind (a pass's id, an integration's name). A submission whose
     key is still open is the same item, and its scope stays: a pending one is brought forward
-    to `not_before` when that is sooner; a running one is marked as resubmitted, wanted again
-    at `not_before` (the sooner of two such submissions), so work asked for while it ran is not
-    lost: when that run ends, a fresh item takes the key (`end`). A `lasting` key, a scheduled
+    to `not_before` when that is sooner, and up to `priority` when that is more urgent; a
+    running one is marked as resubmitted, wanted again at `not_before` (the sooner of two such
+    submissions, and the more urgent priority), so work asked for while it ran is not lost:
+    when that run ends, a fresh item takes the key (`end`). A `lasting` key, a scheduled
     occurrence's (the fire time), holds for good: once submitted, it returns its item, pending,
     running or ended, unchanged, and never runs it again.
 
@@ -95,6 +125,7 @@ async def submit(
         "at": not_before,
         "admission": kind if admission is None else admission,
         "lasting": lasting,
+        "priority": priority,
     }
     # A key found free may be taken by a concurrent insert before ours, or the item found may end
     # and hand its key to a successor while we wait for its row: either way it is looked up
@@ -110,9 +141,10 @@ async def submit(
         if row is None:
             inserted = await (
                 await unit.execute(
-                    f"INSERT INTO work_items (kind, key, scope, not_before, admission, lasting) "
-                    f"VALUES (%(kind)s, %(key)s, %(scope)s, "
-                    f"COALESCE(%(at)s::timestamptz, now()), %(admission)s, %(lasting)s) "
+                    "INSERT INTO work_items (kind, key, scope, not_before, admission, lasting, "
+                    "priority) VALUES (%(kind)s, %(key)s, %(scope)s, "
+                    "COALESCE(%(at)s::timestamptz, now()), %(admission)s, %(lasting)s, "
+                    "%(priority)s) "
                     f"ON CONFLICT (kind, key) WHERE {_TAKEN} DO NOTHING RETURNING {_COLUMNS}",
                     params,
                 )
@@ -123,13 +155,29 @@ async def submit(
             return _item(inserted)
         if row["state"] == "ended" or row["lasting"]:
             return _item(row)
+        if _ensure:
+            if row["priority"] <= priority:
+                return _item(row)
+            urgent = await (
+                await unit.execute(
+                    f"UPDATE work_items SET priority = %s WHERE id = %s RETURNING {_COLUMNS}",
+                    (priority, row["id"]),
+                )
+            ).fetchone()
+            assert urgent is not None  # locked above
+            if urgent["state"] == "pending":
+                await _notify(unit, kind)
+            return _item(urgent)
         if row["state"] == "pending":
             sooner = await (
                 await unit.execute(
-                    "UPDATE work_items SET not_before = COALESCE(%(at)s::timestamptz, now()) "
-                    "WHERE id = %(id)s AND not_before > COALESCE(%(at)s::timestamptz, now()) "
+                    "UPDATE work_items SET "
+                    "not_before = LEAST(not_before, COALESCE(%(at)s::timestamptz, now())), "
+                    "priority = LEAST(priority, %(priority)s) WHERE id = %(id)s "
+                    "AND (not_before > COALESCE(%(at)s::timestamptz, now()) "
+                    "OR priority > %(priority)s) "
                     f"RETURNING {_COLUMNS}",
-                    {"id": row["id"], "at": not_before},
+                    {"id": row["id"], "at": not_before, "priority": priority},
                 )
             ).fetchone()
             if sooner is None:
@@ -138,36 +186,136 @@ async def submit(
             return _item(sooner)
         marked = await (
             await unit.execute(
-                f"UPDATE work_items SET not_before = {_WANTED}, resubmitted = true "
+                f"UPDATE work_items SET not_before = {_WANTED}, resubmitted = true, "
+                "priority = LEAST(priority, %(priority)s) "
                 f"WHERE id = %(id)s RETURNING {_COLUMNS}",
-                {"id": row["id"], "at": not_before},
+                {"id": row["id"], "at": not_before, "priority": priority},
             )
         ).fetchone()
         assert marked is not None  # locked above
         return _item(marked)
 
 
-async def take_back(unit: WriteUnit, kinds: list[str]) -> list[WorkItem]:
-    """Put the running items of `kinds` whose lease expired back to pending, to be taken again
-    at once (a resubmission's later wish included): their worker died or lost the database. One
-    whose row a unit holds (one fenced on it, or a settling) is left for a later call. Returns
-    those taken back."""
+async def ensure(
+    unit: WriteUnit,
+    kind: str,
+    key: str,
+    *,
+    not_before: datetime | None = None,
+    admission: str | None = None,
+    priority: int = 0,
+) -> WorkItem:
+    """Make sure the work `key` of `kind` has an open item: submit one when it has none, as
+    `submit` would, and otherwise keep the open item's time, state and whether it was
+    resubmitted, raising only its priority to `priority` when that is more urgent, as a
+    resubmission does. What a process that starts serving a kind runs for the work it finds
+    open (a pass's item, `store.fulltext.submit_open`): finding an item is no reason to run it
+    sooner, nor again.
+
+    What it reconciles after a rollback to the image before the gate and an upgrade again
+    (docs/plans/a2-work-gate.md, "Rollback is a handoff of live work"): work the old image
+    queued has no item, and gets one here; work it made more urgent (an automatic Deep pass the
+    owner requested, whose priority the old image raised on the pass alone) has its item's
+    priority raised to match, so it does not wait behind automatic items. An item it keeps needs
+    nothing more: a running one, its `serve` stopped, is taken back once its lease lapses
+    (`take`); a pending one waits no longer than the claim, the retry or the pause it was set to
+    wait for, then decides afresh (finding its pass done, say, if the old image worked it)."""
+    return await submit(
+        unit,
+        kind,
+        key,
+        not_before=not_before,
+        admission=admission,
+        priority=priority,
+        _ensure=True,
+    )
+
+
+async def forget_resubmission(unit: WriteUnit, item: WorkItem) -> None:
+    """Forget the submissions of the running item's key made while it ran, its row locked to
+    the end of the unit, which is the item's own (fenced on it): a Worker that reads what
+    stands after this, and submits its key in the same unit if it wants another run, alone
+    decides when that run is (a delivery arranging its next turn). A submission that commits
+    after this unit is kept."""
+    await unit.execute(
+        "UPDATE work_items SET resubmitted = false WHERE id = %s AND state = 'running'",
+        (item.id,),
+    )
+
+
+async def done_elsewhere(
+    unit: WriteUnit, kind: str, key: str, *, besides: int | None = None
+) -> None:
+    """The work `key` of `kind` was done elsewhere (a pass a nightly worked inline): its pending
+    item ends done, with nothing left to do, and a running one other than `besides` (the
+    caller's own item) is wanted again at once, so a Worker that is about to have it wait looks
+    again first, and finds the work done. In the unit that did the work.
+
+    Its row is locked as `submit` locks it, and its state read after, in a statement of its
+    own: a take or a settling in flight is waited for. One found ended meanwhile may have handed
+    its key to a successor, which is looked up again."""
+    while True:
+        found = await (
+            await unit.execute(
+                f"SELECT id FROM work_items WHERE kind = %s AND key = %s AND {_TAKEN} "
+                "AND NOT lasting",
+                (kind, key),
+            )
+        ).fetchone()
+        if found is None or found["id"] == besides:
+            return
+        await unit.execute(
+            "SELECT 1 FROM work_items WHERE id = %s FOR NO KEY UPDATE", (found["id"],)
+        )
+        row = await (
+            await unit.execute("SELECT state FROM work_items WHERE id = %s", (found["id"],))
+        ).fetchone()
+        assert row is not None  # items are never deleted
+        if row["state"] == "pending":
+            await unit.execute(
+                "UPDATE work_items SET state = 'ended', outcome = 'done', ended_at = now() "
+                "WHERE id = %s",
+                (found["id"],),
+            )
+            return
+        if row["state"] == "running":
+            await unit.execute(
+                "UPDATE work_items SET resubmitted = true, not_before = now() WHERE id = %s",
+                (found["id"],),
+            )
+            return
+
+
+async def take_back(
+    unit: WriteUnit, kinds: list[str], keys: Mapping[str, Collection[str]] | None = None
+) -> list[WorkItem]:
+    """Put the running items of `kinds` (and of a kind in `keys`, only those keys) whose lease
+    expired back to pending, to be taken again at once in the place in line they had (a
+    resubmission's later wish included): their worker died or lost the database. One whose row
+    a unit holds (one fenced on it, or a settling) is left for a later call. Returns those taken
+    back."""
     rows = await (
         await unit.execute(
             "UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
             "not_before = LEAST(not_before, now()), resubmitted = false "
-            "WHERE id IN (SELECT id FROM work_items WHERE kind = ANY(%s) AND state = 'running' "
-            "AND lease_until < now() FOR UPDATE SKIP LOCKED) "
+            f"WHERE id IN (SELECT id FROM work_items w WHERE {_served('w')} "
+            "AND state = 'running' AND lease_until < now() FOR UPDATE SKIP LOCKED) "
             f"RETURNING {_COLUMNS}",
-            (kinds,),
+            _serving(kinds, keys),
         )
     ).fetchall()
     return [_item(r) for r in rows]
 
 
-async def take(unit: WriteUnit, kinds: list[str], lease: timedelta) -> WorkItem | None:
-    """Claim the pending item of `kinds` that has waited longest past its `not_before` and
-    whose admission has no item running. None when there is none. Two processes claiming for
+async def take(
+    unit: WriteUnit,
+    kinds: list[str],
+    lease: timedelta,
+    keys: Mapping[str, Collection[str]] | None = None,
+) -> WorkItem | None:
+    """Claim the pending item of `kinds` (and of a kind in `keys`, only those keys) that is due,
+    of the lowest `priority`, then the one that has waited longest past its `not_before`, whose
+    admission has no item running. None when there is none. Two processes claiming for
     one admission at once: the later waits for the earlier's commit, then fails on
     `work_items_admitted`. The lease it is given is stamped by `stamp`, in the same unit: this
     statement may have waited for that admission."""
@@ -176,17 +324,17 @@ async def take(unit: WriteUnit, kinds: list[str], lease: timedelta) -> WorkItem 
             f"""
             WITH next AS (
                 SELECT id FROM work_items w
-                WHERE kind = ANY(%(kinds)s) AND state = 'pending' AND not_before <= now()
+                WHERE {_served("w")} AND state = 'pending' AND not_before <= now()
                   AND NOT EXISTS (SELECT 1 FROM work_items r
                                   WHERE r.admission = w.admission AND r.state = 'running')
-                ORDER BY not_before, id LIMIT 1 FOR UPDATE SKIP LOCKED
+                ORDER BY priority, not_before, id LIMIT 1 FOR UPDATE SKIP LOCKED
             )
             UPDATE work_items SET state = 'running', lease_token = gen_random_uuid(),
                                   lease_until = now() + %(lease)s,
                                   attempts = attempts + 1, resubmitted = false
             WHERE id = (SELECT id FROM next) RETURNING {_COLUMNS}
             """,
-            {"kinds": kinds, "lease": lease},
+            {**_serving(kinds, keys), "lease": lease},
         )
     ).fetchone()
     return _item(row) if row else None
@@ -259,8 +407,9 @@ async def end(
     )
     if held["resubmitted"]:
         await unit.execute(
-            "INSERT INTO work_items (kind, key, scope, admission, not_before) "
-            "SELECT kind, key, scope, admission, not_before FROM work_items WHERE id = %s",
+            "INSERT INTO work_items (kind, key, scope, admission, not_before, priority) "
+            "SELECT kind, key, scope, admission, not_before, priority FROM work_items "
+            "WHERE id = %s",
             (item.id,),
         )
     await _notify(unit, item.kind)
@@ -269,42 +418,47 @@ async def end(
 
 def _stored(error: str | None) -> str | None:
     """An error as stored: at most 2000 characters, without NULs, which text columns refuse."""
-    return None if error is None else error.replace("\x00", "\ufffd")[:2000]
+    return None if error is None else stored(error)
 
 
 async def again(
     unit: WriteUnit, item: WorkItem, not_before: datetime | None = None, *, live: bool = True
 ) -> bool:
     """Put the item, held under its lease, back to pending, to run again no earlier than
-    `not_before` (now when not given; sooner if it was resubmitted meanwhile). The lease must
-    be unexpired but without `live`, which is for an item whose Worker has stopped (the gate
-    giving it back as it stops). False when the lease is no longer held."""
+    `not_before` (sooner if it was resubmitted meanwhile); when not given, at once, in the place
+    in line it had (its `not_before`, as `take_back` keeps it). The lease must be unexpired but
+    without `live`, which is for an item whose Worker has stopped (the gate giving it back as it
+    stops). False when the lease is no longer held."""
     assert item.lease_token is not None  # a taken item has its lease
     if await _held(unit, item.id, item.lease_token, live=live) is None:
         return False
+    wanted = "LEAST(not_before, now())" if not_before is None else _WANTED
     await unit.execute(
         f"UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
-        f"not_before = {_WANTED}, resubmitted = false WHERE id = %(id)s",
+        f"not_before = {wanted}, resubmitted = false WHERE id = %(id)s",
         {"at": not_before, "id": item.id},
     )
     await _notify(unit, item.kind)
     return True
 
 
-async def wait_seconds(unit: ReadUnit, kinds: list[str]) -> float | None:
-    """Seconds until something of `kinds` changes without a notification: a pending item whose
-    admission is free comes to its `not_before`, or a running one's lease expires. None when
-    nothing waits; 0 or less when it is due already."""
+async def wait_seconds(
+    unit: ReadUnit, kinds: list[str], keys: Mapping[str, Collection[str]] | None = None
+) -> float | None:
+    """Seconds until something of `kinds` (and of a kind in `keys`, only those keys) changes
+    without a notification: a pending item whose admission is free comes to its `not_before`,
+    or a running one's lease expires. None when nothing waits; 0 or less when it is due
+    already."""
     row = await (
         await unit.execute(
             "SELECT EXTRACT(EPOCH FROM min(at) - now())::float AS seconds FROM ("
             "SELECT w.not_before AS at FROM work_items w "
-            "WHERE w.kind = ANY(%(kinds)s) AND w.state = 'pending' "
+            f"WHERE {_served('w')} AND w.state = 'pending' "
             "AND NOT EXISTS (SELECT 1 FROM work_items r "
             "WHERE r.admission = w.admission AND r.state = 'running') "
-            "UNION ALL SELECT lease_until FROM work_items "
-            "WHERE kind = ANY(%(kinds)s) AND state = 'running') due",
-            {"kinds": kinds},
+            "UNION ALL SELECT l.lease_until FROM work_items l "
+            f"WHERE {_served('l')} AND l.state = 'running') due",
+            _serving(kinds, keys),
         )
     ).fetchone()
     assert row is not None  # an aggregate has its row
