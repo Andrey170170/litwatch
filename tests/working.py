@@ -1,15 +1,19 @@
 """A Work gate in a test: waiting on what must happen (`until`), serving a gate's Workers for a
 block (`serving`), reading a key's work items back (`items_of`), and running the jobs' chunks
 through a gate (`chunks`, `step`, `work_out`), or killed in one (`killed`), beside a scheduled
-nightly (`nightly_due`); and `litwatch serve`'s app with its Work gate running (`served`)."""
+nightly (`nightly_due`); `litwatch serve`'s app with its Work gate running (`served`); and a
+`litwatch` command through its real CLI (`command`)."""
 
 import asyncio
 import contextlib
 from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from typer.testing import CliRunner
+from typer.testing import Result as Ran
 
 from litwatch.api import create_app
 from litwatch.config import Config, Schedule
@@ -18,7 +22,7 @@ from litwatch.gates.database import DatabaseGate, LeaseLostError
 from litwatch.gates.work import Result, Worker, WorkGate
 from litwatch.jobs.worker import JobWorker
 from litwatch.store import jobs as jobs_store
-from tests.sessions import Session, in_read
+from tests.sessions import Bridge, Session, in_read
 
 WAIT = 10.0  # how long a test waits on something that must happen
 # The schedule on, but no fire near now (29 February only), so `serve` submits none.
@@ -153,6 +157,24 @@ async def job_of(conn: Session, job_id: int) -> dict[str, Any]:
     return found
 
 
+async def stranded(conn: Session) -> list[int]:
+    """The jobs that may run but have no open chunk item: nothing would ever run them."""
+    runnable = await in_read(conn, jobs_store.open_ids)
+    rows = await (
+        await conn.execute(
+            "SELECT key FROM work_items WHERE kind = %s AND state <> 'ended'", (jobs_store.WORK,)
+        )
+    ).fetchall()
+    return sorted(set(runnable) - {int(r["key"]) for r in rows})
+
+
+async def on_tonight(conn: Session, job_id: int) -> None:
+    """Put the job not run on tonight's run, as With tonight's run does: under the `tonight`
+    lock."""
+    async with Bridge(conn).write("with tonight's run", locks=["tonight"]) as unit:
+        assert await jobs_store.move(unit, job_id, jobs_store.NOT_RUN, "tonight") is not None
+
+
 async def nightly_due(conn: Session) -> None:
     """A scheduled nightly fire waits to run: its item is pending."""
     await conn.execute(
@@ -176,3 +198,25 @@ async def served(db: DatabaseGate, config: Config, **kwargs: Any) -> AsyncGenera
     app = create_app("postgresql://unused", TOKEN, config, db=db, **kwargs)
     async with app.router.lifespan_context(app):
         yield app
+
+
+# A command's configuration when the test gives none: the defaults, the zone pinned.
+CONFIG_TOML = '[schedule]\ntimezone = "UTC"\n'
+
+
+async def command(
+    conn: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *argv: str,
+    config: str = CONFIG_TOML,
+) -> Ran:  # fmt: skip
+    """The `litwatch` command `argv` through its real CLI, in a thread of its own (it runs its
+    own event loop), on the test's schema, with a configuration file of `config`: in
+    `tmp_path`, as every command loads ./.env."""
+    from litwatch import cli  # noqa: PLC0415
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        "LITWATCH_DATABASE_URL", f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    )
+    path = tmp_path / "litwatch.toml"
+    path.write_text(config)
+    return await asyncio.to_thread(CliRunner().invoke, cli.app, [*argv, "--config", str(path)])

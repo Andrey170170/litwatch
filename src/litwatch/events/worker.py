@@ -62,6 +62,12 @@ class DeliveryWorker:
 
     async def __call__(self, item: WorkItem) -> None:
         integration = self.loaded[item.key]
+        if item.key in self.set_up:
+            # A setup that failed since in another process serving it undoes this one's, before
+            # anything is delivered on it: it runs again here too, after the failure's backoff.
+            async with self.db.read(f"dispatch {item.key}: set up elsewhere") as unit:
+                if await outbox.setup_failing(unit, item.key):
+                    self.set_up.discard(item.key)
         if item.key not in self.set_up and await dispatch.start(self.db, integration):
             self.set_up.add(item.key)
         if item.key in self.set_up:
@@ -78,9 +84,9 @@ class DeliveryWorker:
         one ending, after forgetting what was submitted for it while it ran. Its time is the
         sooner of when its setup may run, if it has not in this process (it holds back the
         rest), or else when events may be delivered and when its `idle` is due. A setup that
-        failed since in another process serving it, recorded on the cursor, undoes this one's:
-        it runs again here too, after the failure's backoff. One with no cursor yet has its
-        first turn now, which makes it (`dispatch.start`)."""
+        failed since in another process serving it, recorded on the cursor, undoes this one's
+        (as the turn's start reads it too): it runs again here too, after the failure's backoff.
+        One with no cursor yet has its first turn now, which makes it (`dispatch.start`)."""
         cursor = await outbox.locked(unit, name)
         if turn is not None:
             await work.forget_resubmission(unit, turn)

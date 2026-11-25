@@ -26,8 +26,8 @@ from croniter import croniter
 
 from litwatch.config import Config
 from litwatch.core.work import WorkItem
-from litwatch.gates.database import BusyError, DatabaseGate
-from litwatch.gates.work import Later
+from litwatch.gates.database import BusyError, DatabaseGate, LeaseLostError
+from litwatch.gates.work import Later, conflicted, database_lost
 from litwatch.jobs import nightly, publications
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.publications import Dblp, PublicationSource
@@ -73,6 +73,13 @@ def is_due(cron: str, now: datetime, last_run: datetime | None) -> bool:
     return last_run is None or last_run.astimezone(UTC) < fired
 
 
+def soonest(crons: list[str], now: datetime) -> datetime:
+    """The soonest of the expressions' next fires after `now`, in UTC: each converted before
+    they are compared, as two times in the zone compare by their wall clocks when a fall-back's
+    `fold` sets them apart."""
+    return min(next_fire(cron, now).astimezone(UTC) for cron in crons)
+
+
 def jobs(config: Config) -> list[Job]:
     return [
         Job("nightly", config.schedule.nightly),
@@ -81,7 +88,8 @@ def jobs(config: Config) -> list[Job]:
 
 
 def fire_key(fired: datetime) -> str:
-    """A fire's work item key: its time, in UTC."""
+    """A fire's work item key: its time, in UTC. One fire per catch-up, the latest: fires missed
+    while nothing looked are not each made up, only the last of them within `CATCH_UP`."""
     return fired.astimezone(UTC).isoformat()
 
 
@@ -100,7 +108,15 @@ class ScheduleWorker:
             await work.submit(unit, SCHEDULE, SCHEDULE, not_before=after.at)
 
     async def __call__(self, item: WorkItem) -> Later:
-        return await self.fires()
+        """Submit the fires due, then wait for the next. One that fails waits `WAIT` and looks
+        again rather than ending the item, which would leave the schedule with none."""
+        try:
+            return await self.fires()
+        except Exception as exc:
+            if database_lost(exc) or conflicted(exc) or isinstance(exc, LeaseLostError):
+                raise  # the gate tries the item again
+            log.exception("scheduler: submitting the fires failed")
+            return Later(datetime.now(UTC) + WAIT)
 
     async def fires(self) -> Later:
         """Submit each job's fire that is due; returns when the next one is."""
@@ -114,7 +130,7 @@ class ScheduleWorker:
                         unit, job.kind, fire_key(fired), not_before=fired, lasting=True
                     )
                     log.info("scheduler: %s of %s submitted (item %s)", job.kind, fired, found.id)
-        return Later(min(next_fire(job.cron, now) for job in self.todo).astimezone(UTC))
+        return Later(soonest([job.cron for job in self.todo], now))
 
 
 async def _served(db: DatabaseGate, kind: str, item: WorkItem) -> bool:

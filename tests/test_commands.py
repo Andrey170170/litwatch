@@ -16,7 +16,7 @@ from litwatch.store import fulltext as fulltext_store
 from litwatch.store import runs
 from litwatch.store import work as queue
 from tests.sessions import Session
-from tests.working import serving, until
+from tests.working import command, serving, until
 
 
 async def commands(conn: Session) -> list[dict]:
@@ -56,6 +56,29 @@ async def test_a_command_runs_as_an_item_of_its_own_whose_lease_keeps_its_run_al
     assert run["backend_pid"] is not None  # the columns the image before the gate reads
 
 
+async def test_a_run_is_alive_by_its_claim_and_not_revived_when_its_item_is_taken_again(
+    conn: Session, db
+):
+    """The item's process died; `serve` takes it back and leases it again, the same item under
+    a new claim: the run the dead claim opened stays dead."""
+    seen = {}
+
+    async def work() -> None:
+        async with db.write("the command's run") as unit:
+            seen["run"] = await runs.start(unit, "nightly")
+
+    await inline(db, "nightly", work)
+    assert not await alive(conn, seen["run"])
+    await conn.execute(  # the item running again, as the dead claim had it
+        "UPDATE work_items SET state = 'running', outcome = NULL, lease_until = now() + "
+        "interval '1 hour', lease_token = (SELECT lease_token FROM runs WHERE id = %s)",
+        (seen["run"],),
+    )
+    assert await alive(conn, seen["run"])
+    await conn.execute("UPDATE work_items SET lease_token = gen_random_uuid()")  # taken again
+    assert not await alive(conn, seen["run"])
+
+
 async def test_a_command_the_database_was_lost_under_is_tried_again(conn: Session, db):
     tries = []
 
@@ -70,6 +93,28 @@ async def test_a_command_the_database_was_lost_under_is_tried_again(conn: Sessio
     assert (item["attempts"], item["outcome"]) == (2, "done")
 
 
+async def test_a_command_that_loses_the_database_reading_its_item_reads_it_again(
+    conn: Session, db, monkeypatch
+):
+    """The command's own read of whether its item ended loses the database: it reads again,
+    rather than leave its item running with no one waiting on it."""
+    real, lost = queue.get, []
+
+    async def get(unit, item_id):
+        if not lost:
+            lost.append(item_id)
+            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+        return await real(unit, item_id)
+
+    async def work() -> str:
+        return "its result"
+
+    monkeypatch.setattr(queue, "get", get)
+    assert await inline(db, "intake", work) == "its result"
+    (item,) = await commands(conn)
+    assert lost == [item["id"]] and item["outcome"] == "done"
+
+
 async def test_a_command_that_fails_fails_its_item_and_raises(conn: Session, db):
     async def work() -> None:
         raise ValueError("no such category")
@@ -80,9 +125,26 @@ async def test_a_command_that_fails_fails_its_item_and_raises(conn: Session, db)
     assert item["outcome"] == "failed" and "no such category" in item["error"]
 
 
-async def test_a_second_deep_job_waits_for_the_deep_admission(conn: Session, db):
-    """`serve` works a Deep pass; `litwatch fulltext --deep` meanwhile waits for it to end, then
-    works, never beside it."""
+async def test_the_cli_deep_passes_wait_for_serves_and_keep_their_clients_across_tries(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """`serve` works a Deep pass; `litwatch fulltext --deep`, through its real command, waits
+    for it to end, then works, never beside it. Its first try loses the database: the try made
+    again works on the same clients, still open, which close once, at the end."""
+    from collections import Counter  # noqa: PLC0415
+
+    from litwatch import fulltext, integrations  # noqa: PLC0415
+    from litwatch.fulltext import deep as deep_passes  # noqa: PLC0415
+    from litwatch.integrations import deep as deep_integration  # noqa: PLC0415
+
+    class Client:
+        def __init__(self) -> None:
+            self.closed = 0
+
+        async def aclose(self) -> None:
+            self.closed += 1
+
+    archive, maker = Client(), Client()
     deep, release, order = asyncio.Event(), asyncio.Event(), []
 
     async def pass_(_) -> None:
@@ -90,14 +152,23 @@ async def test_a_second_deep_job_waits_for_the_deep_admission(conn: Session, db)
         await release.wait()
         order.append("serve's pass")
 
-    async def cli() -> None:
+    async def cli_passes(_, given_archive, given_maker, **kwargs) -> Counter[str]:
+        assert (given_archive, given_maker) == (archive, maker)
+        assert (archive.closed, maker.closed) == (0, 0)
         order.append("the CLI's")
+        if order.count("the CLI's") == 1:
+            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+        return Counter()
 
+    monkeypatch.setattr(fulltext, "archive_for", lambda cfg: archive)
+    monkeypatch.setattr(integrations, "enabled_using", lambda cfg, name: {"use": name})
+    monkeypatch.setattr(deep_integration, "load", lambda name, options, cfg: maker)
+    monkeypatch.setattr(deep_passes, "work", cli_passes)
     async with db.write("a Deep pass") as unit:
         await queue.submit(unit, fulltext_store.DEEP_WORK, "1")
     async with serving(WorkGate(db), {fulltext_store.DEEP_WORK: pass_}):
         await asyncio.wait_for(deep.wait(), 10)
-        command = asyncio.create_task(inline(db, "fulltext --deep", cli, admission="deep"))
+        cli = asyncio.create_task(command(conn, tmp_path, monkeypatch, "fulltext", "--deep"))
 
         async def submitted() -> bool:
             return bool(await commands(conn))
@@ -105,10 +176,14 @@ async def test_a_second_deep_job_waits_for_the_deep_admission(conn: Session, db)
         await until(submitted, "the CLI's item to be submitted")
         await asyncio.sleep(0.3)
         (waiting,) = await commands(conn)
-        assert waiting["state"] == "pending" and order == []
+        assert waiting["state"] == "pending" and waiting["admission"] == "deep" and order == []
         release.set()
-        await asyncio.wait_for(command, 10)
-    assert order == ["serve's pass", "the CLI's"]
+        result = await asyncio.wait_for(cli, 20)
+    assert result.exit_code == 0, result.output
+    assert order == ["serve's pass", "the CLI's", "the CLI's"]
+    assert (archive.closed, maker.closed) == (1, 1)
+    (item,) = await commands(conn)
+    assert (item["attempts"], item["outcome"]) == (2, "done")
 
 
 async def test_a_command_whose_process_died_is_ended_by_the_serve_sharing_its_admission(
@@ -138,9 +213,6 @@ async def test_a_command_whose_process_died_is_ended_by_the_serve_sharing_its_ad
 async def test_the_cli_nightly_runs_as_a_command_item(conn: Session, tmp_path, monkeypatch):
     """`litwatch nightly` through its real command: its run is the command item's, alive by its
     lease, and the item ends done."""
-    from typer.testing import CliRunner  # noqa: PLC0415
-
-    from litwatch import cli  # noqa: PLC0415
     from litwatch.jobs import nightly  # noqa: PLC0415
     from tests.scripted import Scripted  # noqa: PLC0415
 
@@ -151,14 +223,7 @@ async def test_the_cli_nightly_runs_as_a_command_item(conn: Session, tmp_path, m
         return await real(db, cfg, gateway=Scripted().gateway, **kwargs)
 
     monkeypatch.setattr(nightly, "run", scripted)
-    monkeypatch.chdir(tmp_path)  # every command loads ./.env
-    monkeypatch.setenv(
-        "LITWATCH_DATABASE_URL", f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    )
-    config = tmp_path / "litwatch.toml"
-    config.write_text('[schedule]\ntimezone = "UTC"\n')
-    argv = ["nightly", "--no-fetch", "--no-digests", "--config", str(config)]
-    result = await asyncio.to_thread(CliRunner().invoke, cli.app, argv)
+    result = await command(conn, tmp_path, monkeypatch, "nightly", "--no-fetch", "--no-digests")
     assert result.exit_code == 0, result.output
     (item,) = await commands(conn)
     assert item["key"].startswith("nightly:") and item["outcome"] == "done"

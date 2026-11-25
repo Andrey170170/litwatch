@@ -303,32 +303,52 @@ Found while building, owned by the stage named.
 - **P4 (from P3): a job's ceiling across its chunks.** A chunk's run is opened at the job's first chunk in a
   process and kept across its chunks there (`JobWorker.open`); its ceiling is set once, when the run opens, to the
   job's ceiling less what all its runs spent (`reruns.ceiling`, `jobs_store.spent`). A chunk on another process, or
-  after a restart, opens a run of its own and starts from that spend. P4's ceiling from the work context keeps this
-  reading: the item is the chunk, the ceiling is the job's.
-- **P4, P5 (from P3): runs and their items.** A run is alive while a work item that runs it holds a live lease
-  (`store.runs.ALIVE`): the item it was opened in (`runs.work_id`), or, for a job's run, each chunk's item, linked
-  as the chunk starts (`work_items.run_id`, `store.work.link_run`). A run opened outside any item reads dead at
-  once: today only the API's grade now (`api/settings.py`, kind `grading`), whose liveness nothing reads. P5's
-  request attribution can give it one, or say why not.
+  after a restart, opens a run of its own and starts from that spend. A process reuses the run it kept only while it
+  is still the job's latest (`jobs.run_id`, written as each chunk links its run): once another process's chunk ran
+  the job, the kept run is closed and the next chunk here opens one from the spend, so chunks going back and forth
+  between processes never spend past the ceiling, and a run kept for a job that moved on holds none of `OPEN_MOST`.
+  P4's ceiling from the work context keeps this reading: the item is the chunk, the ceiling is the job's.
+- **P4, P5 (from P3): runs and their items.** A run is alive while the claim it runs under holds a live lease
+  (`store.runs.ALIVE`): `runs.lease_token` is the lease token of the item it was opened in, or, for a job's run, of
+  its latest chunk's, moved as each chunk links it (`store.work.link_run`, migration 0049). An item taken again gets
+  a new token, so it revives no run of the claim before. `runs.work_id` and `work_items.run_id` stay as the
+  history of which item ran what. A run opened outside any item reads dead at once: today only the API's grade now
+  (`api/settings.py`, kind `grading`), whose liveness nothing reads. P5's request attribution can give it one, or
+  say why not.
 - **P5 (from P3): the CLI's commands are items in their own process.** `gates.work.inline` submits a `command`
   item keyed `{name}:{uuid}`, admitted by its own key or by the kind whose work it does (`deep` for
   `fulltext --deep`, `publications` for the lookup), and serves it on a Work gate of its own, so a lost database
   tries it again. `serve`'s take-back ends failed a `command` item whose lease lapsed while it holds an admission
-  `serve` serves; others are left. P5 replaces this with submit and wait; `inline`'s callers in `cli.py` are the list
-  to move.
-- **P5 (from P3): the nightly and the chunks.** No chunk starts while a `nightly` item is pending or a nightly run
-  is open and alive (`store.jobs.nightly_waits`); a waiting chunk looks again after `jobs.worker.WAIT`, and the
-  nightly's end submits every runnable job's chunk (`store.jobs.release`), so it goes at once. `serve`'s sweep
-  submits the fires due before its gate starts. Between a fire's time and its scheduler item's run (milliseconds) a
-  chunk may start: the nightly then waits that chunk, as the plan allows.
-- **P5, P7 (from P3): every job write submits its chunk.** A job's chunk is a `job` item keyed by its id; every
-  write that makes a job runnable submits it in its unit, after locking the job's row (`store.jobs.submit`), and a
-  chunk's last unit decides the next under that lock (`next_chunk`): the lock order is the job's row, then its
-  item's, a settle's paper locks before either. A chunk item that fails outside its kind's handler (a bug in the
-  claim) leaves its job running with no item until the next `serve`'s sweep submits it.
+  `serve` serves; others are left. A lost database while the command reads its item's state is read again. A try
+  made again reuses what the command opened for all its tries (`_run(closing=)`, the full-text clients) and reads
+  what earlier tries committed, not what they held (`eval replay` resumes its replay). P5 replaces this with submit
+  and wait (spec, "The CLI"). The callers to move:
+  - [ ] `intake`, `intake --catalog-from`, `intake archive` (inline today)
+  - [ ] `nightly`, `digests write` (inline today)
+  - [ ] `fulltext`, `fulltext --deep` (inline today, the latter under the `deep` admission)
+  - [ ] `publications` (inline today, under the `publications` admission) and `publications --paper` (not inline)
+  - [ ] `eval replay` (inline today)
+  - [ ] `ping` (not inline)
+  - [ ] the unjournaled evaluations: `eval classify`, `eval digests`, `eval briefs`, `eval ladders` (not inline)
+- **P5 (from P3): the nightly and the chunks.** No chunk starts while a `nightly` item is pending, or running under
+  a live lease without having closed the run that claim opened (opening it included), or a nightly run is open and
+  alive (the CLI's) (`store.jobs.nightly_waits`); a chunk reads that before the run lock and again under it, before
+  it claims its job, and a waiting one looks again after `jobs.worker.WAIT`. The nightly releases every runnable
+  job's chunk in the unit that closes its run, failed or cut off too (`store.jobs.release`, `model_run(closing=)`),
+  so they go at once; With tonight's run and that release both take the `tonight` lock, so one of them sees the
+  other. `serve`'s sweep submits the fires due before its gate starts. Between a fire's time and the scheduler
+  item's run that submits it (milliseconds) a chunk may start: the nightly then waits that chunk, as the plan
+  allows.
+- **P5, P7 (from P3): every job write arranges its chunk.** A job's chunk is a `job` item keyed by its id; every
+  write to a job's row arranges its next chunk in its unit, after locking the row (`store.jobs.arrange`, `submit`):
+  submitted if the job may run, and, written by the job's own chunk, after forgetting what was submitted while it
+  ran, so the chunk's item ends with the decision of the job's last write. An error the chunk's handling did not
+  record fails the job, which arranges none (`JobWorker._fail`); closing a run only records it. The lock order is
+  the job's row, then its item's, a settle's paper locks before either.
 - **P7 (from P3): the old liveness columns.** `runs.start` and `jobs.claim` still write `backend_pid` and
-  `backend_start` (`store.runs.SESSION`) and `jobs.finish` clears them, for the image before the Work gate; jobs keep
-  their states. Nothing in this image reads them. P7 drops them with `SESSION`. The held-across-calls list is down
+  `backend_start` (`store.runs.SESSION`) and `jobs.finish` and `jobs.fail` clear them, for the image before the
+  Work gate; jobs keep their states. Nothing in this image reads them. Migration 0049's columns
+  (`runs.lease_token`, `jobs.run_id`) are additive: the image before ignores them. P7 drops them with `SESSION`. The held-across-calls list is down
   to the run lock already (the `schedule` lock went in P3, with `held`'s key argument).
 
 ## Evidence

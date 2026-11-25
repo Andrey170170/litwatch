@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -13,7 +13,7 @@ from typing import Any
 
 from litwatch import llm
 from litwatch.config import Config
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import DatabaseGate, Named, WriteUnit
 from litwatch.store import runs
 from litwatch.store.calls import EVAL, CallJournal
 
@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 # Tests swap this for a gateway over scripted providers.
 GatewayFactory = Callable[[Config, CallJournal], llm.Gateway]
+# What a job writes in the unit that closes its run, and the locks that unit takes for it.
+Closing = tuple[Callable[[WriteUnit], Awaitable[None]], Sequence[Named]]
 
 
 def default_gateway(config: Config, journal: CallJournal) -> llm.Gateway:
@@ -62,10 +64,13 @@ async def run_record(
     *,
     window: tuple[datetime, datetime] | None = None,
     job_id: int | None = None,
+    closing: Closing | None = None,
 ) -> AsyncIterator[RunRecord]:
     """Open a run, alive while the work item it runs in holds its lease (`store.runs.ALIVE`),
     and close it with what the job recorded on it and the error that ended it, whatever happens
-    inside, a cancelled job included. Each is a unit of its own."""
+    inside, a cancelled job included. Each is a unit of its own; `closing` is written in the
+    closing one, under its locks, so it stands or falls with the run's end (the nightly's
+    release of the jobs it held back)."""
     async with db.write(f"open {kind} run") as unit:
         run_id = await runs.start(unit, kind, *(window or (None, None)), job_id=job_id)
     record = RunRecord(run_id)
@@ -77,12 +82,15 @@ async def run_record(
         record.fields["error"] = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        await _closing(_finish(db, record), failed, record.run_id, "closing it")
+        await _closing(_finish(db, record, closing), failed, record.run_id, "closing it")
 
 
-async def _finish(db: DatabaseGate, record: RunRecord) -> None:
-    async with db.write("close run") as unit:
+async def _finish(db: DatabaseGate, record: RunRecord, closing: Closing | None) -> None:
+    write, locks = closing or (None, ())
+    async with db.write("close run", locks=locks) as unit:
         await runs.finish(unit, record.run_id, counts=record.counts, **record.fields)
+        if write is not None:
+            await write(unit)
 
 
 async def _closing(step: Awaitable[None], failed: bool, run_id: int, what: str) -> None:
@@ -129,10 +137,11 @@ async def model_run(
     window: tuple[datetime, datetime] | None = None,
     gateway: GatewayFactory = default_gateway,
     job_id: int | None = None,
+    closing: Closing | None = None,
 ) -> AsyncIterator[ModelRun]:
-    """A run record (`run_record`) that also closes with the calls' cost and counts by role.
-    Its journal writes each call in units of its own on `db`."""
-    async with run_record(db, kind, window=window, job_id=job_id) as record:
+    """A run record (`run_record`, with `closing`) that also closes with the calls' cost and
+    counts by role. Its journal writes each call in units of its own on `db`."""
+    async with run_record(db, kind, window=window, job_id=job_id, closing=closing) as record:
         # An evaluation run writes its own tables only (AGENTS.md): no provider observations.
         journal = CallJournal(db, record.run_id, observes=kind != EVAL)
         failed = True

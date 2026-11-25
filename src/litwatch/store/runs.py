@@ -19,11 +19,13 @@ _FIELDS = {"fetched", "inserted", "updated", "cost", "error", *_JSON}
 # liveness columns (`backend_pid`, `backend_start`) are written from.
 SESSION = "pg_stat_activity a WHERE a.pid = pg_backend_pid()"
 
-# Whether run `r` is alive: a work item that runs it, the one it was opened in or a chunk of
-# its job, holds an unexpired lease. A process that dies without closing its run (killed, out
-# of memory) stops renewing the lease, so its run is over once that lapses: open, not alive.
+# Whether run `r` is alive: the claim of the work item it runs in (`runs.lease_token`, the one
+# it was opened under, or its job's latest chunk's) is still held, unexpired. A process that
+# dies without closing its run (killed, out of memory) stops renewing the lease, so its run is
+# over once that lapses: open, not alive; and the item taken again is a new claim, with a token
+# of its own, which revives no run of the one before.
 ALIVE = (
-    "EXISTS (SELECT 1 FROM work_items w WHERE (w.id = r.work_id OR w.run_id = r.id) "
+    "EXISTS (SELECT 1 FROM work_items w WHERE w.lease_token = r.lease_token "
     "AND w.state = 'running' AND w.lease_until > now())"
 )
 
@@ -35,20 +37,22 @@ async def start(
     window_to: datetime | None = None,
     job_id: int | None = None,
 ) -> int:
-    """Open a run. A run of kind `job` names its job, and each chunk item that works it names
-    the run (`store.work.link_run`); a standalone one names the work item it runs in
-    (`work_id`, docs/specs/architecture/a2-work-gate.md, "Work records"), whose lease says
-    whether it is alive (`ALIVE`). The old liveness columns get the session writing it, which
-    ends with the process: until P7 they are what the image before the Work gate reads
-    (docs/plans/a2-work-gate.md, "Rollback is a handoff of live work")."""
+    """Open a run, alive by the claim of the work item it runs in (its `lease_token`, `ALIVE`).
+    A run of kind `job` names its job, and each chunk item that works it names the run and moves
+    its claim to that chunk's (`store.jobs.link`); a standalone one names the work item it runs
+    in (`work_id`, docs/specs/architecture/a2-work-gate.md, "Work records"). The old liveness
+    columns get the session writing it, which ends with the process: until P7 they are what the
+    image before the Work gate reads (docs/plans/a2-work-gate.md, "Rollback is a handoff of live
+    work")."""
     work = current_work()
     work_id = work.item.id if work is not None and job_id is None else None
+    token = work.item.lease_token if work is not None else None
     row = await (
         await unit.execute(
-            "INSERT INTO runs (kind, window_from, window_to, job_id, work_id, backend_pid, "
-            "backend_start) SELECT %s, %s, %s, %s, %s, a.pid, a.backend_start "
+            "INSERT INTO runs (kind, window_from, window_to, job_id, work_id, lease_token, "
+            "backend_pid, backend_start) SELECT %s, %s, %s, %s, %s, %s, a.pid, a.backend_start "
             f"FROM {SESSION} RETURNING id",
-            (kind, window_from, window_to, job_id, work_id),
+            (kind, window_from, window_to, job_id, work_id, token),
         )
     ).fetchone()
     return row["id"]

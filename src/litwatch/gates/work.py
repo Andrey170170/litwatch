@@ -463,7 +463,7 @@ async def inline[T](
     (`store.runs.ALIVE`). Its `admission` is its own unless given: a command that does what a
     kind of `serve`'s does takes that kind's (`deep`), so it waits while that kind runs, and
     the kind waits for it. A try the database was lost under is made again, as the gate makes
-    any item's."""
+    any item's, and a read of the item's state it was lost under is made again too."""
     key = f"{name}:{uuid.uuid4()}"
     async with db.write(f"{name}: submit") as unit:
         item = await queue.submit(unit, queue.COMMAND, key, admission=admission or key)
@@ -478,8 +478,16 @@ async def inline[T](
     try:
         while True:
             gate.settled.clear()
-            async with db.read(f"{name}: has it ended") as unit:
-                found = await queue.get(unit, item.id)
+            try:
+                async with db.read(f"{name}: has it ended") as unit:
+                    found = await queue.get(unit, item.id)
+            except Exception as exc:
+                if not database_lost(exc):
+                    raise
+                # The command still owns its item, which its gate serves: look again.
+                log.warning("work: %s could not read its item, looking again: %s", name, exc)
+                await asyncio.sleep(RETRY_SECONDS)
+                continue
             assert found is not None  # items are never deleted
             if found.state == ItemState.ENDED:
                 break

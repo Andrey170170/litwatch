@@ -423,6 +423,8 @@ async def act(
     # One replay under way at a time: the replay lock before the row, as Run replay.
     replaying = job is not None and job["kind"] == "replay" and to in ("queued", "tonight")
     locks = ["replay"] if replaying else []
+    if to == "tonight":  # as a nightly releases the jobs there (`store.jobs.release`)
+        locks.append("tonight")
     async with db.write(f"job {action}", taxonomy="shared", papers=papers, locks=locks) as unit:
         if again and await failures.waits_on_owner(unit, papers, FAILED_RUNS):
             raise HTTPException(status_code=409, detail=WAITS)

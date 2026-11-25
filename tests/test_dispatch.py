@@ -826,14 +826,20 @@ async def test_the_owners_retry_during_a_failing_setup_runs_it_again_at_once(
 
 
 class Counting(Recorder):
-    """Sets up every time, counting the setups."""
+    """Sets up every time, counting the setups, and records the order of its setups and
+    events."""
 
     def __init__(self):
         super().__init__("counting")
-        self.setups = 0
+        self.setups, self.order = 0, []
 
     async def setup(self, db):
         self.setups += 1
+        self.order.append("setup")
+
+    async def handle(self, db, event):
+        await super().handle(db, event)
+        self.order.append("handle")
 
 
 async def test_a_setup_failed_in_another_process_is_run_again_where_setup_is_cached(
@@ -841,7 +847,7 @@ async def test_a_setup_failed_in_another_process_is_run_again_where_setup_is_cac
 ):
     """Two processes serve one integration; this one set it up, the other's setup failed and
     was recorded. This one's next turn reads the failure and sets up again, which clears it,
-    rather than leave it for the owner's Retry."""
+    rather than leave it for the owner's Retry, and before it hands the turn's event over."""
     rec = Counting()
     gate, workers = delivering(db, rec)
     await workers[outbox.DELIVERY].sweep()
@@ -855,8 +861,10 @@ async def test_a_setup_failed_in_another_process_is_run_again_where_setup_is_cac
         assert rec.setups == 1
         at = datetime.now(UTC)
         await in_write(conn, outbox.setup_failed, rec.name, 1, "down elsewhere", at, at)
-        await emit(conn, events.PAPER_SAVED)  # a turn for it
+        ids = await emit(conn, events.PAPER_SAVED)  # a turn for it
         await until(set_up_again, "the setup runs again here")
+        await until(lambda: _seen(rec, ids), "the event is handled")
+    assert rec.order == ["setup", "setup", "handle"]
 
 
 class Conflicting(Recorder):

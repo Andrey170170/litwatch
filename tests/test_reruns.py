@@ -39,7 +39,7 @@ from tests.fakes import SdkClient, openai_response, openrouter_completion
 from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.priced import CONFIG, COST, Priced, charged
 from tests.scripted import LISTS, ROLES, refusal
-from tests.sessions import Session, in_read, in_write
+from tests.sessions import Bridge, Session, in_read, in_write
 from tests.working import (
     QUIET,
     chunks,
@@ -609,7 +609,8 @@ async def test_a_pass_the_rerun_queues_for_a_paper_being_processed_is_the_owners
     """A's Process job is under way (on tonight's run): the Brief its re-run grading queues goes
     as the owner's requests do, in the regular queue, which works it even once the re-run
     stopped."""
-    await in_write(conn, jobs_store.create, "process", {"papers": [A.id]}, 1, "tonight")
+    async with Bridge(conn).write("with tonight's run", locks=["tonight"]) as unit:
+        await jobs_store.create(unit, "process", {"papers": [A.id]}, 1, "tonight")
     job = await focus_rerun(conn, models, ceiling=1.0)
     assert await step(worker.JobWorker(db, CONFIG, models.gateway))  # the grading
     await in_write(conn, jobs_store.finish, job, "stopped", "stopped at the ceiling")

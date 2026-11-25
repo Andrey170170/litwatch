@@ -295,7 +295,8 @@ async def start(
     params: dict[str, Any],
     note: str | None = None,
 ) -> int:
-    """Record the run and freeze its labels, in the caller's unit."""
+    """Record the run and freeze its labels, in the caller's unit; returns its id, which the
+    caller gives `r` once the unit commits (a unit rolled back leaves `r` unstarted)."""
     models = {role: config.models.role(role).model_dump(mode="json") for role in ROLES}
     topics = {t.slug: t.version for t in r.tree.topics if t.slug in focus(r.tree)}
     params = params | {
@@ -304,11 +305,11 @@ async def start(
         "thresholds": config.classification.model_dump(mode="json"),
         "left_out": r.left_out,
     }
-    r.eval_run_id = await store.start(unit, KIND, models, topics, params, note)
+    eval_run_id = await store.start(unit, KIND, models, topics, params, note)
     await store.put_labels(
-        unit, r.eval_run_id, [(x.paper_id, x.topic, x.cohort, x.positive) for x in r.labels]
+        unit, eval_run_id, [(x.paper_id, x.topic, x.cohort, x.positive) for x in r.labels]
     )
-    return r.eval_run_id
+    return eval_run_id
 
 
 def _concluded(tree: Taxonomy, c: classification.Classification, topic: str) -> dict[str, Any]:

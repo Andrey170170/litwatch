@@ -138,6 +138,9 @@ REGISTRY: tuple[Lock, ...] = (
     Lock("rerun", 7213916, "unit", "text"),
     # Making replays, likewise.
     Lock("replay", 7213917, "unit"),
+    # Putting jobs on tonight's run, and a nightly releasing them as it closes its run, so one
+    # of the two sees the other (`store.jobs.release`).
+    Lock("tonight", 7213918, "unit"),
     # One retally of a run's totals at a time, by run id.
     Lock("retally", 7213912, "unit", "int"),
     # One job that changes pipeline state at a time.

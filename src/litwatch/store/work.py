@@ -485,8 +485,10 @@ async def wait_seconds(
 
 async def link_run(unit: WriteUnit, item: WorkItem, run_id: int) -> None:
     """Record that the running item works the run `run_id` (a job's chunk, on the job's run):
-    the run is alive while the item's lease is (`store.runs.ALIVE`). In the item's own unit."""
+    the run is alive by this claim of the item, while its lease is (`store.runs.ALIVE`), and no
+    longer by an earlier chunk's. In the item's own unit."""
     await unit.execute("UPDATE work_items SET run_id = %s WHERE id = %s", (run_id, item.id))
+    await unit.execute("UPDATE runs SET lease_token = %s WHERE id = %s", (item.lease_token, run_id))
 
 
 async def get(unit: ReadUnit, item_id: int) -> WorkItem | None:

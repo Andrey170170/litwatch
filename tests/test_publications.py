@@ -2,7 +2,7 @@
 correction, and Copy BibTeX looking up only a single paper."""
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -11,7 +11,7 @@ import pytest
 from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Hand, Publication
-from litwatch.gates.work import WorkGate, inline
+from litwatch.gates.work import inline
 from litwatch.jobs import publications as lookups
 from litwatch.jobs import scheduler
 from litwatch.publications import SourceError, dblp
@@ -21,8 +21,9 @@ from litwatch.store import publications as store
 from litwatch.store import work
 from tests import settling
 from tests.conftest import AppClient, gate_on, paper
+from tests.scripted import CONFIG
 from tests.sessions import Session, in_read, in_write
-from tests.working import items_of, serving, until
+from tests.working import QUIET, items_of, served, until
 
 TOKEN = "s3cret"
 NIPS = Publication(
@@ -202,33 +203,40 @@ async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db
 
 async def test_runs_never_overlap(db: Session, gate):
     """Each run takes its due papers once: one beside another could die unseen (monitoring).
-    The CLI's run holds the `publications` admission, so the scheduled fire's item waits for it,
-    then finds its fire served by that run, and looks nothing up again."""
-    source, going, hold = Source(), asyncio.Event(), asyncio.Event()
+    The CLI's run holds the `publications` admission; a fire after it started, which it does not
+    serve, waits in `serve` for it to end, then runs a lookup of its own, after it."""
 
-    async def by_hand():
-        going.set()
-        await hold.wait()
-        return await lookups.run(gate, source)
+    class Held(Source):
+        def __init__(self) -> None:
+            super().__init__()
+            self.going, self.hold = asyncio.Event(), asyncio.Event()
 
-    cli = asyncio.create_task(inline(gate, "publications", by_hand, admission="publications"))
-    await asyncio.wait_for(going.wait(), 10)
-    fired = datetime.now(UTC) - timedelta(minutes=1)
+        async def find(self, paper_id, title=None, doi=None):
+            self.going.set()
+            await self.hold.wait()
+            return await super().find(paper_id, title, doi)
+
+    source = Held()
+    cli = asyncio.create_task(run(gate, source))
+    await asyncio.wait_for(source.going.wait(), 10)  # its run started
     async with gate.write("a fire") as unit:
+        fired = datetime.now(UTC)
         fire = await work.submit(unit, "publications", scheduler.fire_key(fired), lasting=True)
-    workers = {"publications": scheduler.PublicationsWorker(gate, source)}
 
     async def ended() -> bool:
         (row,) = await items_of(db, "publications", fire.key)
         return row["state"] == "ended"
 
-    async with serving(WorkGate(gate, poll=0.1), workers):
-        assert not await ended() and source.asked == []  # it waits for the CLI's run
-        hold.set()
+    async with served(gate, CONFIG.model_copy(update={"schedule": QUIET}), publications=source):
+        await asyncio.sleep(0.3)
+        assert not await ended()  # it waits for the CLI's run
+        source.hold.set()
         await cli
-        assert len(source.asked) == 2
         await until(ended, "the fire's item to end")
-    assert len(source.asked) == 2  # served by the CLI's run
+    first, second = await (
+        await db.execute("SELECT * FROM runs WHERE kind = 'publications' ORDER BY id")
+    ).fetchall()
+    assert second["started_at"] >= first["finished_at"]
 
 
 async def test_a_run_stops_when_dblp_keeps_failing(db: Session, gate, monkeypatch):

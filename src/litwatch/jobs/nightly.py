@@ -253,14 +253,18 @@ async def locked(
     takes all. The digests are those of `today`, by default the day the run started on in the
     schedule's zone, however long it runs. Without `with_digests` the run neither waits for
     the passes nor writes digests: a window's are written by `jobs.digests.window` (the
-    restart), which today's would otherwise take the papers of. Once the run is closed, the
-    jobs it held back go, those on tonight's run included (`store.jobs.release`).
+    restart), which today's would otherwise take the papers of. As the run closes, failed or
+    cut off too, the jobs it held back go, those on tonight's run included: released in the
+    unit that closes it, under the `tonight` lock (`store.jobs.release`).
     """
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
     batch_night = config.schedule.night(until) if night == "schedule" else night
     today = today or until.astimezone(config.schedule.zone).date()
-    async with model_run(db, config, "nightly", window=(since, until), gateway=gateway) as run:
+    release = (jobs_store.release, ["tonight"])
+    async with model_run(
+        db, config, "nightly", window=(since, until), gateway=gateway, closing=release
+    ) as run:
         if fetch:
             result = await intake.collect(
                 db,
@@ -285,8 +289,6 @@ async def locked(
             await run.gateway.settle()  # the batches a dead run left are accounted for too
         finally:
             await run.gateway.close()
-    async with db.write("nightly: release the jobs") as unit:
-        await jobs_store.release(unit)
     return run.run_id
 
 

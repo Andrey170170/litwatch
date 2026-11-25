@@ -148,9 +148,47 @@ async def models(conn: Session):
     return Scripted()
 
 
+async def test_the_cli_replay_tried_again_starts_once_its_start_commits(
+    conn: Session, models, tmp_path, monkeypatch
+):
+    """`litwatch eval replay`: the database is lost as its first try's start commits, so that
+    start is rolled back; the try made again starts the replay anew, and runs the one that
+    stands, not the id the rolled-back unit gave."""
+    import psycopg  # noqa: PLC0415
+
+    from tests.working import command  # noqa: PLC0415
+
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    (labels / "fit.csv").write_text(
+        f"paper_id,topic,cohort,fit\n{A.id},{TOPIC},owner,central\n{C.id},{TOPIC},owner,none\n"
+    )
+    (labels / "regression.csv").write_text("paper_id,topic,source,tier\n")
+    real, ran = replay.start, []
+
+    async def lost_once(unit, *args, **kwargs):
+        started = await real(unit, *args, **kwargs)
+        if not ran:
+            ran.append("lost")
+            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+        return started
+
+    async def runs_it(db, config, r, **kwargs):
+        ran.append(r.eval_run_id)
+        return {}
+
+    monkeypatch.setattr(replay, "start", lost_once)
+    monkeypatch.setattr(replay, "run", runs_it)
+    argv = ("eval", "replay", "--labels", str(labels), "--yes")
+    result = await command(conn, tmp_path, monkeypatch, *argv)
+    assert result.exit_code == 0, result.output
+    (stands,) = await rows(conn, "SELECT id FROM eval_runs")
+    assert ran == ["lost", stands["id"]]
+
+
 async def start(conn: Session, models, labels=LABELLED, config=CONFIG) -> replay.Replay:
     r = await in_read(conn, replay.prepare, labels)
-    await in_write(conn, replay.start, config, r, {})
+    r.eval_run_id = await in_write(conn, replay.start, config, r, {})
     async with gate_on(conn) as db:
         await replay.run(db, config, r, gateway=models.gateway)
     return r
@@ -565,6 +603,34 @@ async def test_a_replay_jobs_ceiling_covers_all_its_chunks(conn: Session, db, pr
     assert 3 * COST <= spent <= 7 * COST  # the second's calls fit what the first left
     executions = await rows(conn, "SELECT id FROM runs WHERE job_id = %s", job["id"])
     assert len(executions) == 2
+
+
+async def test_a_replay_jobs_ceiling_holds_as_its_chunks_go_back_and_forth(
+    conn: Session, db, priced, monkeypatch
+):
+    """A chunk a paper, under a ceiling two papers' calls fit in. One process runs the first
+    chunk, another the second, then the first the third: the run it kept is no longer the
+    job's (the other's ran since), so it is closed, and the third chunk opens one under what
+    the ceiling has left after both, which no third paper fits in: the job stops within it."""
+    monkeypatch.setattr(worker, "CHUNK", 1)
+    # A paper's calls spend 3 COST and need more than 4 COST left to be sent (the test above).
+    job = await run_replay(conn, ceiling=10 * COST)
+    first = worker.JobWorker(db, SCHEDULED, priced.gateway)
+    async with gate_on(conn) as elsewhere:
+        other = worker.JobWorker(elsewhere, SCHEDULED, priced.gateway)
+        assert await step(first)
+        assert await step(other)
+        assert await step(first)
+        await other.close(RuntimeError("the service stopped"))
+    stopped = await job_of(conn, job["id"])
+    assert (stopped["state"], stopped["error"]) == (
+        "stopped",
+        "stopped at the ceiling after 2 of 3",
+    )
+    assert await in_read(conn, jobs_store.spent, job["id"]) <= 10 * COST
+    executions = await rows(conn, "SELECT * FROM runs WHERE job_id = %s ORDER BY id", job["id"])
+    assert len(executions) == 3 and all(r["finished_at"] for r in executions)
+    assert first.open == {}
 
 
 async def test_serve_runs_a_replay_as_a_worker(conn: Session, db, priced):

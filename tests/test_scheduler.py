@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from litwatch.config import Schedule
 from litwatch.core.work import ItemState, WorkItem
 from litwatch.gates.work import Later, WorkGate
-from litwatch.jobs import nightly, scheduler
+from litwatch.jobs import nightly, scheduler, worker
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import work
@@ -68,6 +68,14 @@ def test_the_next_fire_steps_through_a_fall_back_in_the_zone():
     # Exactly on a fire the next one is the one after; a weekly fires on its day.
     assert scheduler.next_fire("0 6 * * *", at(6, 0)) == at(6, 0, days=1)
     assert scheduler.next_fire("0 7 * * 1", at(7, 1)) == at(7, 0, days=7)
+
+
+def test_the_soonest_fire_of_two_is_compared_in_utc_through_a_fall_back():
+    """01:30 MDT on the morning the clocks go back: 01:45 MDT comes before 01:15 MST, which
+    reads earlier on the wall clock."""
+    now = datetime(2026, 11, 1, 1, 30, tzinfo=ZoneInfo("America/Denver"))
+    soonest = scheduler.soonest(["15 1 * * *", "45 1 * * *"], now)
+    assert soonest == datetime(2026, 11, 1, 7, 45, tzinfo=UTC)
 
 
 def test_a_bad_cron_expression_is_refused_at_load():
@@ -146,6 +154,40 @@ async def test_a_fire_a_run_served_already_is_neither_submitted_nor_run(
     assert await scheduler.NightlyWorker(db, config)(item) is None
 
 
+async def test_a_run_started_before_a_fire_does_not_serve_it(conn: Session, db, monkeypatch):
+    """A nightly run by hand before the fire's time: the fire is submitted, and its item runs
+    the nightly. Only a run started at or after a fire serves it."""
+    config = schedule(daily(timedelta(minutes=2)))
+    fired = scheduler.last_fire(config.schedule.nightly, datetime.now(ZONE))
+    before = await started(conn, "nightly")
+    await conn.execute(
+        "UPDATE runs SET started_at = %s, finished_at = %s WHERE id = %s",
+        (fired - timedelta(minutes=1), fired - timedelta(seconds=30), before),
+    )
+    await scheduler.ScheduleWorker(db, config)(ITEM)
+    (row,) = await items_of(conn, "nightly", scheduler.fire_key(fired))
+    ran = []
+
+    async def runs_it(*args, **kwargs):
+        ran.append("the fire's nightly")
+
+    monkeypatch.setattr(nightly, "locked", runs_it)
+    item = WorkItem(**{k: row[k] for k in ("id", "kind", "key", "admission", "not_before")},
+                    state=ItemState.RUNNING, attempts=1)  # fmt: skip
+    assert await scheduler.NightlyWorker(db, config)(item) is None
+    assert ran == ["the fire's nightly"]
+
+
+async def test_the_scheduler_that_fails_looks_again_rather_than_ends_its_item(db, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("no such zone today")
+
+    monkeypatch.setattr(scheduler, "last_fire", broken)
+    worker = scheduler.ScheduleWorker(db, schedule(daily(timedelta(minutes=2))))
+    waits = await worker(ITEM)
+    assert isinstance(waits, Later) and waits.at > datetime.now(UTC)
+
+
 async def test_a_nightly_blocked_by_the_run_lock_stays_pending_then_runs(
     conn: Session, db, monkeypatch
 ):
@@ -212,32 +254,45 @@ async def test_serve_runs_the_due_nightly_then_the_job_it_held_back(conn: Sessio
     assert schedule_item["state"] == "pending" and schedule_item["not_before"] > datetime.now(UTC)
 
 
-async def test_serve_stopping_lets_the_running_nightly_close_its_run_and_gives_its_item_back(
+async def test_serve_stopping_mid_nightly_closes_its_run_and_the_next_serve_runs_its_job(
     conn: Session, db, monkeypatch
 ):
-    """The service stops mid-nightly: the nightly's run closes before the lifespan ends, and its
-    item goes back to pending for the next `serve`, which finds its fire served."""
-    started_, recorded = asyncio.Event(), []
+    """The service stops in the middle of a real (scripted) nightly: its run closes, cut off,
+    before the lifespan ends, and the Process job it held back stays queued. The next `serve`
+    finds the fire served by that run, runs no nightly again, and runs the job."""
+    await settling.save_tree(conn, TREE)
+    a = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes.")
+    await in_write(conn, papers_store.upsert, [a])
+    models = Scripted()
+    monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False, with_digests=False))
+    classify, in_steps = nightly.classify, asyncio.Event()
 
-    async def forever(*args, **kwargs):
-        async with db.write("the nightly's run") as unit:
-            await unit.execute("INSERT INTO runs (kind) VALUES ('nightly')")
-        started_.set()
-        try:
-            await asyncio.sleep(3600)
-        finally:
-            await asyncio.sleep(0)  # a run's cleanup awaits, as model_run's does
-            recorded.append("finished")
+    async def held(*args, **kwargs):
+        in_steps.set()
+        await asyncio.sleep(3600)
 
-    monkeypatch.setattr(nightly, "locked", forever)
+    monkeypatch.setattr(nightly, "classify", held)
     config = schedule(daily(timedelta(minutes=2)))
-    async with served(db, config):
-        await asyncio.wait_for(started_.wait(), 10)
-    assert recorded == ["finished"]
+    job = await in_write(conn, jobs_store.create, "process", {"papers": [a.id]}, 1, "queued")
+    async with served(db, config, gateway=models.gateway):
+        await asyncio.wait_for(in_steps.wait(), 10)
+    (night,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
+    assert night["finished_at"] is not None and "CancelledError" in night["error"]
     (item,) = await (
         await conn.execute("SELECT * FROM work_items WHERE kind = 'nightly'")
     ).fetchall()
-    assert item["state"] == "pending"
-    assert await scheduler.NightlyWorker(db, config)(WorkItem(**{
-        k: item[k] for k in ("id", "kind", "key", "admission", "not_before", "attempts")
-    }, state=ItemState.PENDING)) is None  # fmt: skip
+    assert item["state"] == "pending" and (await job_of(conn, job))["state"] == "queued"
+
+    monkeypatch.setattr(nightly, "classify", classify)
+
+    async def done() -> bool:
+        return (await job_of(conn, job))["state"] == "done"
+
+    # The chunk may look while the served fire's item is still open: it looks again soon.
+    monkeypatch.setattr(worker, "WAIT", timedelta(milliseconds=200))
+    async with served(db, config, gateway=models.gateway):
+        await until(done, "the job to be done")
+    nights = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
+    assert [n["id"] for n in nights] == [night["id"]]  # the fire was served: no second nightly
+    (chunk,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'job'")).fetchall()
+    assert chunk["started_at"] >= night["finished_at"]
