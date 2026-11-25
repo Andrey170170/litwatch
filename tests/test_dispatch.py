@@ -871,11 +871,40 @@ async def test_a_conflict_in_a_delivery_is_no_failure_and_its_turn_is_tried_agai
     async with served(gate, workers):
         await until(tried_again, "the turn that lost the conflict is run again")
         await until(lambda: _seen(rec, ids), "the event is delivered")
+        if where == "idle":  # the call that lost is not counted: the retry calls it again
+
+            async def idled_again() -> bool:
+                return rec.idled >= 2
+
+            await until(idled_again, "the idle hook runs again on the retry")
     cursor = await in_write(conn, outbox.cursor, rec.name)
     assert (cursor.failing, cursor.failures, cursor.last_error) == (None, 0, None)
     assert (cursor.setup_failures, cursor.setup_error) == (0, None)
     found = await turns(conn, rec.name)
     assert {t["outcome"] for t in found if t["state"] == "ended"} == {"done"}
+
+
+async def test_a_conflict_partway_through_a_batch_keeps_the_events_handed_over_before_it(
+    conn: Session, db
+):
+    rec = Recorder()
+    await start(db, rec)
+    first, second = await emit(conn, events.PAPER_SAVED, events.PAPER_SAVED)
+    handle, lost = rec.handle, []
+
+    async def loses_on_the_second(db, event):
+        if event.id == second and not lost:
+            lost.append(event.id)
+            raise psycopg.errors.SerializationFailure("could not serialize access")
+        await handle(db, event)
+
+    rec.handle = loses_on_the_second
+    with pytest.raises(psycopg.errors.SerializationFailure):
+        await deliver(db, rec, NOW)
+    assert await deliver(db, rec, NOW) == 1  # the retry starts at the event that lost
+    assert rec.seen == [first, second]
+    cursor = await in_write(conn, outbox.cursor, rec.name)
+    assert (cursor.failing, cursor.failures) == (None, 0)
 
 
 class SetUpAndIdling(Recorder):

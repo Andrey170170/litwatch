@@ -75,6 +75,9 @@ async def deliver(db: DatabaseGate, integration: Reacting, now: datetime | None 
                 await integration.handle(db, event)
         except Exception as exc:
             if _not_theirs(exc):
+                if passed and conflicted(exc):  # the retry starts at this event, not before it
+                    async with db.write(f"dispatch {name}: advance") as unit:
+                        await outbox.advance(unit, name, position)
                 raise
             failures = cursor.failures + 1 if cursor.failing == event.id else 1
             at = clock()

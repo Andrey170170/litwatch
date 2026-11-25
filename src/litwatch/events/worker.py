@@ -68,6 +68,8 @@ class DeliveryWorker:
             passed = await dispatch.deliver(self.db, integration)
             if not passed and self._idles(item.key) and self._idle_due(item.key):
                 await dispatch.idle(self.db, integration)
+                # Counted once it returns: a conflict raised from it leaves it due for the retry.
+                self.idled[item.key] = asyncio.get_running_loop().time()
         async with self.db.write(f"dispatch {item.key}: next turn") as unit:
             await self._arrange(unit, item.key, item)
 
@@ -110,10 +112,6 @@ class DeliveryWorker:
         return now + timedelta(seconds=max(0.0, dispatch.IDLE_SECONDS - since))
 
     def _idle_due(self, name: str) -> bool:
-        """Whether the integration's `idle` may run now, counting it as run if so."""
-        clock = asyncio.get_running_loop().time()
+        """Whether the integration's `idle` may run now."""
         last = self.idled.get(name)
-        if last is not None and clock - last < dispatch.IDLE_SECONDS:
-            return False
-        self.idled[name] = clock
-        return True
+        return last is None or asyncio.get_running_loop().time() - last >= dispatch.IDLE_SECONDS

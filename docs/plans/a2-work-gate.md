@@ -116,11 +116,12 @@ Found in a survey of the code at 548857e3:
   the passes' leases, job states, the old liveness columns (`backend_pid`, `backend_start`). A version switch stops
   `serve` first; the receiving version resumes from the current pass, job, run and cursor records (the old image takes
   back sessionless jobs and lapsed passes; the new one's startup sweep submits what is queued or runnable). P2 and P3
-  each rehearse upgrade, rollback and upgrade again with unfinished work on a migrated sandbox. The sweep only makes
-  sure an item exists (`store.work.ensure`): one the old image left keeps its time and state, so a pending item
-  waits out at most the claim, retry or pause it was set for, and a running one is taken back as its lease lapses.
-  A switch is not made while a nightly runs. One interrupted anyway counts its fire as served, as a nightly whose
-  process dies does today, and its work waits for the next night or a nightly run by hand.
+  each rehearse upgrade, rollback and upgrade again with unfinished work on a migrated sandbox. The pass sweep only
+  makes sure an item exists (`store.work.ensure`; the delivery sweep reschedules its turn through `submit`): one the
+  old image left keeps its time and state, so a pending item waits out at most the claim, retry or pause it was set
+  for, and a running one is taken back as its lease lapses. A switch is not made while a nightly runs. One interrupted
+  anyway counts its fire as served, as a nightly whose process dies does today, and its work waits for the next night
+  or a nightly run by hand.
 - **The scheduler's handoff.** A fire the old scheduler already served (a run started after it) stays served when P3
   starts inside the catch-up window: the submitter checks the runs as today before using the key.
 - **Release links:**
