@@ -9,9 +9,10 @@ before that event, the failure is recorded for the API, and the event is tried a
 backoff that doubles up to an hour; the integration's later events wait behind it, since they
 may depend on it. The owner can retry the event at once or skip it. A lost database, or a
 statement that lost a deadlock or a serialization conflict, is no failure of the
-integration's: it is raised, and the turn is tried again. A restart neither loses
-an event nor hands over one already done, apart from the one in hand when it stopped, which is
-why `handle` must be idempotent.
+integration's: it is raised, and the turn is tried again. The cursor is saved once a batch is
+handed over, or as a failure or a conflict stops it, so a restart loses no event but may hand
+over again every event after the cursor last saved, up to a batch of them, those handled
+already included: `handle` must be idempotent.
 
 An integration's `setup` runs before its first event in each process that delivers to it. A
 failing setup is recorded for the API like a failing event, with no event attached, and tried

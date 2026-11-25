@@ -153,8 +153,21 @@ async def submit(
                 continue
             await _notify(unit, kind)
             return _item(inserted)
-        if row["state"] == "ended" or row["lasting"] or _ensure:
+        if row["state"] == "ended" or row["lasting"]:
             return _item(row)
+        if _ensure:
+            if row["priority"] <= priority:
+                return _item(row)
+            urgent = await (
+                await unit.execute(
+                    f"UPDATE work_items SET priority = %s WHERE id = %s RETURNING {_COLUMNS}",
+                    (priority, row["id"]),
+                )
+            ).fetchone()
+            assert urgent is not None  # locked above
+            if urgent["state"] == "pending":
+                await _notify(unit, kind)
+            return _item(urgent)
         if row["state"] == "pending":
             sooner = await (
                 await unit.execute(
@@ -193,17 +206,20 @@ async def ensure(
     priority: int = 0,
 ) -> WorkItem:
     """Make sure the work `key` of `kind` has an open item: submit one when it has none, as
-    `submit` would, and otherwise return the open item as it stands, its time, its priority and
-    whether it was resubmitted all kept. What a process that starts serving a kind runs for the
-    work it finds open (a pass's item, `store.fulltext.submit_open`): finding an item is no
-    reason to run it sooner, nor again.
+    `submit` would, and otherwise keep the open item's time, state and whether it was
+    resubmitted, raising only its priority to `priority` when that is more urgent, as a
+    resubmission does. What a process that starts serving a kind runs for the work it finds
+    open (a pass's item, `store.fulltext.submit_open`): finding an item is no reason to run it
+    sooner, nor again.
 
     What it reconciles after a rollback to the image before the gate and an upgrade again
     (docs/plans/a2-work-gate.md, "Rollback is a handoff of live work"): work the old image
-    queued has no item, and gets one here. An item it keeps needs nothing more: a running one,
-    its `serve` stopped, is taken back once its lease lapses (`take`); a pending one waits no
-    longer than the claim, the retry or the pause it was set to wait for, then decides afresh
-    (finding its pass done, say, if the old image worked it)."""
+    queued has no item, and gets one here; work it made more urgent (an automatic Deep pass the
+    owner requested, whose priority the old image raised on the pass alone) has its item's
+    priority raised to match, so it does not wait behind automatic items. An item it keeps needs
+    nothing more: a running one, its `serve` stopped, is taken back once its lease lapses
+    (`take`); a pending one waits no longer than the claim, the retry or the pause it was set to
+    wait for, then decides afresh (finding its pass done, say, if the old image worked it)."""
     return await submit(
         unit,
         kind,

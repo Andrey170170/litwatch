@@ -119,7 +119,9 @@ Found in a survey of the code at 548857e3:
   each rehearse upgrade, rollback and upgrade again with unfinished work on a migrated sandbox. The pass sweep only
   makes sure an item exists (`store.work.ensure`; the delivery sweep reschedules its turn through `submit`): one the
   old image left keeps its time and state, so a pending item waits out at most the claim, retry or pause it was set
-  for, and a running one is taken back as its lease lapses. A switch is not made while a nightly runs. One interrupted
+  for, and a running one is taken back as its lease lapses. Only its priority is raised to its pass's when that is
+  more urgent: the old image raises a pass's priority on the pass row alone (the owner's request for an automatic
+  Deep pass), and the item would otherwise wait behind automatic ones. A switch is not made while a nightly runs. One interrupted
   anyway counts its fire as served, as a nightly whose process dies does today, and its work waits for the next night
   or a nightly run by hand.
 - **The scheduler's handoff.** A fire the old scheduler already served (a run started after it) stays served when P3

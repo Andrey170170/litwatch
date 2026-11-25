@@ -27,8 +27,10 @@ from litwatch.core import (
     Verdict,
 )
 from litwatch.core.fulltext import (
+    AUTOMATIC_PRIORITY,
     LEASE,
     RECONCILE_LOOKBACK,
+    REQUEST_PRIORITY,
     TEXT_PRIORITY,
     TEXT_REQUEST_PRIORITY,
     TEXT_WAVE,
@@ -58,6 +60,7 @@ from litwatch.store import integrations as cards
 from litwatch.store import papers as papers_store
 from litwatch.store import runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store import work as work_store
 from tests import sessions, settling
 from tests.briefs import (
     ANSWER,
@@ -771,6 +774,33 @@ async def item_ended(conn: Session, pass_id: int) -> bool:
     return [i["state"] for i in await items_of(conn, "fulltext", str(pass_id))] == ["ended"]
 
 
+# A claim abandoned in these tests holds for an hour, so the gate's first look always finds it
+# live however long startup takes; the tests then end it by SQL (`lapse`) rather than wait.
+ABANDONED = timedelta(hours=1)
+
+
+async def deferred(conn: Session, pass_id: int, until_: datetime) -> bool:
+    """The pass's item looked, found the claim live, and waits for its end, `until_`."""
+    found = await items_of(conn, "fulltext", str(pass_id))
+    return [(i["state"], i["not_before"]) for i in found if i["attempts"] >= 1] == [
+        ("pending", until_)
+    ]
+
+
+async def lapse(conn: Session, pass_id: int) -> None:
+    """The abandoned claim on the pass lapses now, and its item is due: the gate is woken."""
+    await conn.execute(
+        "UPDATE fulltext_passes SET lease_until = now() - interval '1 second' WHERE id = %s",
+        (pass_id,),
+    )
+    await conn.execute(
+        "UPDATE work_items SET not_before = now() WHERE kind = 'fulltext' AND key = %s "
+        "AND state = 'pending'",
+        (str(pass_id),),
+    )
+    await conn.execute("SELECT pg_notify(%s, 'fulltext')", (work_store.CHANNEL,))
+
+
 async def test_a_pass_awaiting_its_text_runs_as_one_item_once_the_text_is_there(
     db: Session, gate, soon
 ):
@@ -811,15 +841,18 @@ async def test_a_claim_a_process_abandoned_is_taken_by_the_passs_item_once_it_la
     await graded(db, "central")
     (row,) = await passes(db)
     async with gate_on(db) as gone, gone.write("claim and die") as unit:
-        (taken,) = await fulltext_store.claim(unit, timedelta(seconds=1), 1, pass_id=row["id"])
+        (taken,) = await fulltext_store.claim(unit, ABANDONED, 1, pass_id=row["id"])
     fake, writer = ready(FakeArchive()), Writer()
     async with serving(WorkGate(gate), workers(gate, fake, writer)):
+        await until(
+            lambda: deferred(db, row["id"], taken.lease_until), "the item waits for the claim"
+        )
+        await lapse(db, row["id"])
         await until(lambda: item_ended(db, row["id"]), "the item ends")
     assert await state_is(db, "done")
     (item,) = await items_of(db, "fulltext", str(row["id"]))
     # One try found it held and waited for its lease to end; the next took it over.
-    assert item["attempts"] == 2
-    assert item["not_before"] >= taken.lease_until and len(writer.asked) == 1
+    assert item["attempts"] == 2 and len(writer.asked) == 1
 
 
 @contextlib.asynccontextmanager
@@ -1044,6 +1077,25 @@ async def test_the_sweep_keeps_an_open_items_time_and_wants_no_running_one_again
     assert (running["state"], running["resubmitted"]) == ("running", False)
 
 
+async def test_the_sweep_raises_an_items_priority_the_old_image_raised_on_its_pass(db: Session):
+    async with Bridge(db).write("queue") as unit:
+        deep = await fulltext_store.queue_deep(unit, P.id, 1, "focus")
+    (item,) = await items_of(db, "deep", str(deep))
+    assert item["priority"] == AUTOMATIC_PRIORITY
+    # Rolled back: the old image's Deep request makes the pass the owner's on its row alone,
+    # while the item waits out a pause.
+    later = datetime.now(UTC) + timedelta(minutes=10)
+    await db.execute(
+        "UPDATE fulltext_passes SET reason = 'request', priority = %s WHERE id = %s",
+        (REQUEST_PRIORITY, deep),
+    )
+    await db.execute("UPDATE work_items SET not_before = %s WHERE id = %s", (later, item["id"]))
+    assert await swept(db, deep=True) == [deep]
+    (kept,) = await items_of(db, "deep", str(deep))
+    assert kept["id"] == item["id"] and kept["priority"] == REQUEST_PRIORITY
+    assert (kept["state"], kept["not_before"], kept["resubmitted"]) == ("pending", later, False)
+
+
 async def swept(db: Session, *, deep: bool = False) -> list[int]:
     """The startup sweep as a Worker makes it: the open passes, then each in a unit of its own.
     Returns those submitted."""
@@ -1147,10 +1199,22 @@ async def test_serve_runs_text_and_deep_passes_as_its_work_items(db: Session, mo
     async with settling.change(db, P.id, cause=Cause.OWNER) as change:
         await deep_passes.request(change.unit, P.id)  # and the owner's Deep card
     await db.execute("DELETE FROM work_items")  # queued before passes had items (rollback)
+    (text,) = await passes(db)
+    found = await db.execute("SELECT id FROM fulltext_passes WHERE kind = 'deep'")
+    (deep,) = [r["id"] for r in await found.fetchall()]
+    swept_items = [("fulltext", text["id"]), ("deep", deep)]
+
+    async def items_ended() -> bool:  # each pass has its item from the sweep, and it ended
+        found = [await items_of(db, kind, str(pass_id)) for kind, pass_id in swept_items]
+        return all(items and all(i["state"] == "ended" for i in items) for items in found)
+
     async with serve(db, monkeypatch, fake, writer, make(service)):  # its sweeps submit both
         await until(lambda: state_is(db, "done"), "the text pass is done")
         await until(carded, "the card is written")
+        await until(items_ended, "each pass's item ends")
     assert len(writer.asked) == 1 and service.started == 1
+    for kind, pass_id in swept_items:
+        assert [i["outcome"] for i in await items_of(db, kind, str(pass_id))] == ["done"]
 
 
 async def test_a_nightly_beside_the_gate_takes_over_an_abandoned_pass_and_works_it_once(
@@ -1159,29 +1223,20 @@ async def test_a_nightly_beside_the_gate_takes_over_an_abandoned_pass_and_works_
     await graded(db, "central")
     (row,) = await passes(db)
     async with gate_on(db) as dead, dead.write("claim and die") as unit:
-        await fulltext_store.claim(unit, timedelta(seconds=1), 1, pass_id=row["id"])
+        (taken,) = await fulltext_store.claim(unit, ABANDONED, 1, pass_id=row["id"])
     fake, writer = ready(FakeArchive()), Writer()
     monkeypatch.setattr(fulltext, "archive_for", lambda config: archive(fake))
-
-    async def tried() -> bool:  # the item tried, and waits
-        (item,) = await items_of(db, "fulltext", str(row["id"]))
-        return item["attempts"] >= 1 and item["state"] == "pending"
 
     async def looked_again() -> bool:
         (item,) = await items_of(db, "fulltext", str(row["id"]))
         return item["attempts"] >= 2 and item["state"] == "pending"
 
-    async def lapsed() -> bool:
-        found = await db.execute(
-            "SELECT lease_until < now() AS lapsed FROM fulltext_passes WHERE id = %s",
-            (row["id"],),
-        )
-        return (await found.fetchone())["lapsed"]
-
     async with serving(WorkGate(gate, poll=0.1), workers(gate, fake, writer)):
         async with gate.held("run"):  # a nightly runs, as the scheduler starts it in `serve`
-            await until(tried, "the item finds its pass held")
-            await until(lapsed, "the abandoned claim lapses")
+            await until(
+                lambda: deferred(db, row["id"], taken.lease_until), "the item finds it held"
+            )
+            await lapse(db, row["id"])
             # Due again, the item looks once more, and leaves it to the nightly that runs: its
             # look holds the pass's row a moment, which the nightly's claim would skip.
             await until(looked_again, "the item looks again, and waits")
@@ -1206,16 +1261,19 @@ async def test_serve_takes_over_a_pass_claimed_before_it_had_an_item_once_the_cl
     await graded(db, "central")
     (row,) = await passes(db)
     async with gate_on(db) as gone, gone.write("claim and die") as unit:
-        (taken,) = await fulltext_store.claim(unit, timedelta(seconds=1), 1, pass_id=row["id"])
+        (taken,) = await fulltext_store.claim(unit, ABANDONED, 1, pass_id=row["id"])
     await db.execute("DELETE FROM work_items")  # claimed by the release before the gate
     fake, writer = ready(FakeArchive()), Writer()
     async with serve(db, monkeypatch, fake, writer):  # its sweep gives the pass an item
+        await until(
+            lambda: deferred(db, row["id"], taken.lease_until), "the item waits for the claim"
+        )
+        await lapse(db, row["id"])
         await until(lambda: item_ended(db, row["id"]), "the item ends")
     assert await state_is(db, "done") and len(writer.asked) == 1
     (item,) = await items_of(db, "fulltext", str(row["id"]))
     # One try found it held and waited for its lease to end; the next took it over.
     assert (item["outcome"], item["attempts"]) == ("done", 2)
-    assert item["not_before"] >= taken.lease_until
     linked = await db.execute("SELECT work_id FROM runs WHERE kind = 'fulltext'")
     assert [r["work_id"] for r in await linked.fetchall()] == [item["id"]]
 

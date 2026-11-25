@@ -31,8 +31,10 @@ integration, woken as each event commits: it hands the integration the events af
   at once or skip it, under Settings → Integrations (`POST /api/settings/integrations/<name>/retry`
   and `/skip`). A failing `setup` is retried the same way, and Retry tries it again at once; the
   integrations API reports it as `setup_failing`, apart from a failing event.
-- After a failure or a restart, the event in hand is handed over again. **`handle` must be
-  idempotent.**
+- The cursor is saved once a turn's batch (up to 100 events) is handed over, or where a failure
+  stops it. After a failure, the failing event is handed over again; after a restart, every event
+  after the cursor last saved is, up to a batch of them, those already handled included.
+  **`handle` must be idempotent.**
 
 Delivery is therefore **at least once, and in transaction order, not commit order**: of two
 transactions, the one that began first is delivered first even if it committed second, and an
