@@ -178,6 +178,14 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
   `paper.ts` parser goes; its numbering and appendix detection move into the Python parser, which MCP then gains.
   deep's PDF parts (`pdfParts`) stay: they are not LaTeX. Chosen over deep's parser behind an endpoint, which would
   break MCP's outline whenever deep is down.
+- **D4. A2 is built for one `serve`** (the owner, 2026-11-25, after P3's third review round). It keeps correct:
+  one `serve` whose Workers run concurrently, CLI commands run beside it, crashes and restarts (take-back once a lease
+  lapses), and the rollback switch to the previous image, which stops `serve` first. It need not handle, until after
+  A7: two `serve`s, CLI commands racing each other or the nightly's start, and a commit whose acknowledgement is lost.
+  There an extra run, a wait or an error is acceptable; lost or corrupted data is not. P3–P7 are built and reviewed to
+  this bar, and what falls outside it goes to the backlog ("Work with more than one writer"). Chosen over closing
+  every race between writers now, which kept P2's and P3's reviews open round after round; once every kind runs on
+  the gate, those races can be closed in one place.
 
 ## Risks
 
