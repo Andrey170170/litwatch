@@ -9,7 +9,7 @@ import pytest
 
 from litwatch import grading
 from litwatch.api import create_app
-from litwatch.config import Classification, Config, Schedule
+from litwatch.config import Classification, Config
 from litwatch.core import Depth, Fit, Status, Taxonomy, TaxonomyClass, Topic
 from litwatch.core.classification import Source
 from litwatch.core.evaluation import Outcome, recall
@@ -148,12 +148,12 @@ async def models(conn: Session):
     return Scripted()
 
 
-async def test_the_cli_replay_tried_again_starts_once_its_start_commits(
+async def test_the_cli_replay_that_loses_the_database_as_it_starts_ends_failed_once(
     conn: Session, models, tmp_path, monkeypatch
 ):
-    """`litwatch eval replay`: the database is lost as its first try's start commits, so that
-    start is rolled back; the try made again starts the replay anew, and runs the one that
-    stands, not the id the rolled-back unit gave."""
+    """`litwatch eval replay`: the database is lost as its start commits, so that start is
+    rolled back; the command is not tried again in process: it fails with a message to run it
+    again, nothing ran, and its item is ended failed."""
     import psycopg  # noqa: PLC0415
 
     from tests.working import command  # noqa: PLC0415
@@ -166,24 +166,23 @@ async def test_the_cli_replay_tried_again_starts_once_its_start_commits(
     (labels / "regression.csv").write_text("paper_id,topic,source,tier\n")
     real, ran = replay.start, []
 
-    async def lost_once(unit, *args, **kwargs):
-        started = await real(unit, *args, **kwargs)
-        if not ran:
-            ran.append("lost")
-            raise psycopg.OperationalError("the server closed the connection unexpectedly")
-        return started
+    async def lost(unit, *args, **kwargs):
+        await real(unit, *args, **kwargs)
+        ran.append("started")
+        raise psycopg.OperationalError("the server closed the connection unexpectedly")
 
     async def runs_it(db, config, r, **kwargs):
         ran.append(r.eval_run_id)
         return {}
 
-    monkeypatch.setattr(replay, "start", lost_once)
+    monkeypatch.setattr(replay, "start", lost)
     monkeypatch.setattr(replay, "run", runs_it)
     argv = ("eval", "replay", "--labels", str(labels), "--yes")
     result = await command(conn, tmp_path, monkeypatch, *argv)
-    assert result.exit_code == 0, result.output
-    (stands,) = await rows(conn, "SELECT id FROM eval_runs")
-    assert ran == ["lost", stands["id"]]
+    assert result.exit_code != 0 and "run it again" in result.output, result.output
+    assert ran == ["started"] and await rows(conn, "SELECT id FROM eval_runs") == []
+    (item,) = await rows(conn, "SELECT * FROM work_items WHERE kind = 'command'")
+    assert (item["state"], item["outcome"], item["attempts"]) == ("ended", "failed", 1)
 
 
 async def start(conn: Session, models, labels=LABELLED, config=CONFIG) -> replay.Replay:
@@ -451,7 +450,7 @@ async def test_quality_shows_recall_from_the_latest_replay_and_the_report_names_
 
 # -- a replay as a job (docs/plans/jobs.md, P3: V6) ---------------------------------------------
 
-SCHEDULED = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})  # the worker runs
+SCHEDULED = CONFIG.model_copy(update={"schedule": QUIET})  # the worker runs, no fire near
 FIT_HEAD = "paper_id,topic,fit,legacy,cohort,origin,labelled_at,note\n"
 
 
@@ -533,6 +532,29 @@ async def test_a_replay_job_from_overview_writes_only_to_the_evaluation_tables(
     assert (owner.positives, owner.grading.n) == (2, 2)
     (run,) = await rows(conn, "SELECT kind FROM runs WHERE job_id = %s", job["id"])
     assert run["kind"] == "eval"  # an evaluation's run, carried by the job: its cost is the job's
+
+
+async def test_a_replay_chunk_tried_again_after_a_lost_database_counts_what_it_graded(
+    conn: Session, db, priced, monkeypatch
+):
+    """The database goes away after a chunk's papers are graded, before its progress is
+    recorded: the gate tries it again, which finds them concluded and grades none, yet the job
+    counts what the first try graded."""
+    import psycopg  # noqa: PLC0415
+
+    job = await run_replay(conn)
+    real, lost = replay.work, []
+
+    async def drops(*args, **kwargs):
+        await real(*args, **kwargs)
+        if not lost:
+            lost.append(True)
+            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+
+    monkeypatch.setattr(replay, "work", drops)
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    done = await job_of(conn, job["id"])
+    assert lost and (done["state"], done["done"], done["counts"]["graded"]) == ("done", 3, 3)
 
 
 async def test_a_replay_job_taken_back_goes_on_without_redoing_what_it_concluded(

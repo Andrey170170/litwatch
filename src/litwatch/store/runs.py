@@ -99,6 +99,23 @@ async def last_started(unit: ReadUnit, kind: str) -> datetime | None:
     return row["at"]
 
 
+async def served(unit: ReadUnit, kind: str, fired: datetime) -> bool:
+    """Whether a run of `kind` served the fire at `fired`: one started at or after it that closed
+    without an error (by hand, or the fire's own earlier attempt, its item's end lost after it).
+    One cut off (the database lost, its process or the service stopping) served nothing. Read
+    where no other run of `kind` can be under way (under the run lock, or the kind's admission),
+    so a run not closed is a dead one."""
+    row = await (
+        await unit.execute(
+            "SELECT EXISTS (SELECT 1 FROM runs WHERE kind = %s AND started_at >= %s "
+            "AND finished_at IS NOT NULL AND error IS NULL) AS served",
+            (kind, fired),
+        )
+    ).fetchone()
+    assert row is not None  # a SELECT of a value has its row
+    return row["served"]
+
+
 async def first_since(unit: ReadUnit, kind: str, since: datetime) -> datetime | None:
     """When the first run of `kind` started at or after `since`."""
     row = await (
@@ -133,8 +150,10 @@ async def update(unit: WriteUnit, run_id: int, **fields: Any) -> None:
 
 
 async def finish(unit: WriteUnit, run_id: int, **fields: Any) -> None:
-    """Close the run, setting any of the fields `update` takes."""
-    await _set(unit, run_id, [sql.SQL("finished_at = now()")], fields)
+    """Close the run, setting any of the fields `update` takes. Its end is the clock's as this
+    is written, after the locks its unit waited for: a nightly's, compared with when a job was
+    put on tonight's run under the same lock (`store.jobs.release`), says which went first."""
+    await _set(unit, run_id, [sql.SQL("finished_at = clock_timestamp()")], fields)
 
 
 async def _set(

@@ -21,7 +21,7 @@ from litwatch.archive import ArchiveError
 from litwatch.core import Paper, Taxonomy
 from litwatch.feedback import word
 from litwatch.gates.database import BusyError, DatabaseGate, PoolTimeoutError, ReadUnit
-from litwatch.gates.work import inline
+from litwatch.gates.work import CommandCutOffError, inline
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
@@ -74,32 +74,27 @@ def _run[T](
     db: DatabaseGate | None = None,
     item: str | None = None,
     admission: str | None = None,
-    closing: Callable[[], Awaitable[None]] | None = None,
 ) -> T:
     """Run `work` with the command's Database gate, the process's one, on the configured
     database, migrated first: `db` when the command built it already (unopened), else a new
     one. The gate is open for the run and closed at its end. Named an `item`, a command that
     does pipeline work runs it as a work item in this process (`gates.work.inline`, admitted by
-    `admission` when given), whose lease keeps its run alive, until P5 sends it to `serve`; a
-    try the database was lost under is made again, so `work` closes nothing it does not open
-    itself. `closing` closes what the command opened for every try (its clients), at the end."""
+    `admission` when given), whose lease keeps its run alive, until P5 sends it to `serve`. It
+    has one attempt: the database lost under it fails it (`CommandCutOffError`), and the owner runs
+    it again."""
     logs.setup()
 
     async def main() -> T:
-        try:
-            async with db or DatabaseGate(configuration.database_url()) as gate:
-                if migrate:
-                    await _migrate(gate)
-                if item is None:
-                    return await work(gate)
-                return await inline(gate, item, lambda: work(gate), admission=admission)
-        finally:
-            if closing is not None:
-                await closing()
+        async with db or DatabaseGate(configuration.database_url()) as gate:
+            if migrate:
+                await _migrate(gate)
+            if item is None:
+                return await work(gate)
+            return await inline(gate, item, lambda: work(gate), admission=admission)
 
     try:
         return asyncio.run(main())
-    except (store.LegacyDatabaseError, BusyError, PoolTimeoutError) as exc:
+    except (store.LegacyDatabaseError, BusyError, PoolTimeoutError, CommandCutOffError) as exc:
         raise SystemExit(str(exc)) from exc
 
 
@@ -578,18 +573,12 @@ def eval_replay(
         raise typer.Exit(1)
 
     async def work(db: DatabaseGate) -> dict[str, Any]:
-        # A try the database was lost under is made again: the replay is started once its unit
-        # commits, and each try goes on from what the replay recorded, not from what an earlier
-        # try held in memory.
         if r.eval_run_id is None:
             params = {"cohorts": cohort, "negatives": sample, "seed": replay.SEED, "limit": limit}
             async with db.write("replay: start") as unit:
-                started = await replay.start(unit, cfg, r, params, note)
-            r.eval_run_id = started
-            console.print(f"replay {started}")
-        async with db.read("replay: as far as it got") as unit:
-            now = await replay.resume(unit, cfg, r.eval_run_id)
-        return await replay.run(db, cfg, now)
+                r.eval_run_id = await replay.start(unit, cfg, r, params, note)
+            console.print(f"replay {r.eval_run_id}")
+        return await replay.run(db, cfg, r)
 
     counts = _run(work, item="eval replay")
     console.print_json(data=counts)
@@ -1082,21 +1071,20 @@ def fulltext_queue(
             await asyncio.sleep(min(fulltext.TICK_SECONDS, left))
 
     async def work(db: DatabaseGate) -> Counter[str]:
-        if maker is not None:
-            return await work_deep(db)
-        return await fulltext.work_waiting(
-            db, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
-        )
-
-    async def closing() -> None:  # after every try: the clients serve them all
-        await archive.aclose()
-        if maker is not None:
-            await maker.aclose()
+        try:
+            if maker is not None:
+                return await work_deep(db)
+            return await fulltext.work_waiting(
+                db, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
+            )
+        finally:
+            await archive.aclose()
+            if maker is not None:
+                await maker.aclose()
 
     # Deep passes are admitted as `serve`'s are, so one Deep job runs at a time between them.
     item, admission = ("fulltext --deep", fulltext_store.DEEP_WORK) if deep else ("fulltext", None)
-    counts = _run(work, item=item, admission=admission, closing=closing)
-    console.print_json(data=dict(counts))
+    console.print_json(data=dict(_run(work, item=item, admission=admission)))
 
 
 @app.command()

@@ -8,6 +8,7 @@ chunk runs as a work item through a Work gate (`tests.working`). Models are scri
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 import psycopg
 import pytest
@@ -15,24 +16,25 @@ import pytest
 from litwatch.api import create_app
 from litwatch.api import jobs as jobs_api
 from litwatch.api import reading as api_reading
-from litwatch.config import Schedule
 from litwatch.core import Cause, Depth, Status
 from litwatch.core.fulltext import REQUEST_PRIORITY, TEXT_REQUEST_PRIORITY
 from litwatch.feedback import misses
 from litwatch.gates.database import DatabaseGate
-from litwatch.gates.work import Later
+from litwatch.gates.work import Later, WorkGate
 from litwatch.jobs import nightly, worker
 from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway, prices
 from litwatch.store import failures, runs
 from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
+from litwatch.store import work as queue
 from tests import sessions, settling
 from tests.conftest import AGENTS, TREE, AppClient, answering, lease_lapses, paper, started
 from tests.fakes import FAST, BatchingProvider, ScriptedProvider
 from tests.scripted import CONFIG, Scripted, decision
 from tests.sessions import Session, in_read, in_write, staged
 from tests.working import (
+    QUIET,
     chunks,
     job_of,
     killed,
@@ -44,7 +46,7 @@ from tests.working import (
     work_out,
 )
 
-SCHEDULED = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})  # the worker runs
+SCHEDULED = CONFIG.model_copy(update={"schedule": QUIET})  # the worker runs, no fire near
 
 A = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes on activations.")
 B = paper("2610.00002", title="Is the chain of thought faithful?", abstract="We test traces.")
@@ -475,8 +477,70 @@ async def test_a_chunk_that_loses_the_database_is_tried_again_by_the_gate(
     assert isinstance(found[0], psycopg.OperationalError) and found[1:] == [None]
     finished = await job_of(conn, job)
     assert (finished["state"], finished["error"]) == ("done", None)
+    # What the cut-off attempt did before the loss counts once its retry records the chunk.
+    counted = {k: finished["counts"].get(k) for k in ("classified", "analysed")}
+    assert counted == {"classified": 1, "analysed": 1}
     (run,) = await rows(conn, "SELECT * FROM runs WHERE job_id = %s", job)
     assert run["error"] is None and run["finished_at"] is not None
+
+
+@pytest.mark.parametrize("recorded", [True, False])
+async def test_a_chunk_whose_first_look_fails_fails_its_job_or_keeps_its_chunk(
+    conn: Session, db, models, monkeypatch, recorded
+):
+    """The chunk's read before the run lock raises (a statement failed): the job fails, as for a
+    chunk's own error, rather than left runnable with its item ended; when that failure cannot
+    be recorded either, the chunk is kept, to look again. Never a job with no chunk."""
+    monkeypatch.setattr(worker, "WAIT", timedelta(0))
+    job = await queued(conn, A.id)
+    real_waits, real_fail, raised = jobs_store.nightly_waits, jobs_store.fail, []
+
+    async def waits(unit):
+        if not raised:
+            raised.append(True)
+            raise RuntimeError("the read failed")
+        return await real_waits(unit)
+
+    async def fail(unit, *args, **kwargs):
+        if not recorded:
+            raise RuntimeError("the failure is not recorded")
+        return await real_fail(unit, *args, **kwargs)
+
+    monkeypatch.setattr(jobs_store, "nightly_waits", waits)
+    monkeypatch.setattr(jobs_store, "fail", fail)
+    (ended,) = await chunks(worker.JobWorker(db, CONFIG, models.gateway), limit=1)
+    assert await stranded(conn) == []
+    if recorded:
+        assert isinstance(ended, RuntimeError)
+        assert (await job_of(conn, job))["state"] == "failed"
+    else:
+        assert isinstance(ended, Later) and (await job_of(conn, job))["state"] == "queued"
+        assert await step(worker.JobWorker(db, CONFIG, models.gateway))  # it looks again
+        assert (await job_of(conn, job))["state"] == "done"
+
+
+async def test_a_chunk_linking_its_run_and_the_sweep_take_the_job_then_its_item(
+    conn: Session, db, models, monkeypatch
+):
+    """The chunk links its run to its item while the startup sweep makes sure the job has its
+    item: both take the job's row before the item's, so neither deadlocks the other."""
+    job = await queued(conn, A.id)
+    real, linked = queue.link_run, asyncio.Event()
+
+    async def slow(unit, *args, **kwargs):
+        await real(unit, *args, **kwargs)
+        linked.set()
+        await asyncio.sleep(0.5)  # holding what it locked, while the sweep runs
+
+    monkeypatch.setattr(queue, "link_run", slow)
+    w = worker.JobWorker(db, CONFIG, models.gateway)
+
+    async def sweeps() -> None:
+        await asyncio.wait_for(linked.wait(), 10)
+        await worker.JobWorker(db, CONFIG, models.gateway).sweep()
+
+    found, _ = await asyncio.gather(chunks(w, limit=1), sweeps())
+    assert found == [None] and (await job_of(conn, job))["state"] == "done"
 
 
 async def test_a_running_job_is_alive_while_its_chunk_holds_its_lease(
@@ -564,6 +628,46 @@ async def test_a_nightly_due_mid_job_runs_before_its_next_chunk(
     assert asked(models, "classify", B.title) == 1  # not again for the job
 
 
+async def test_a_chunk_claimed_as_a_fire_is_published_waits_for_that_nightly(
+    conn: Session, db, models
+):
+    """The scheduler publishes a nightly fire under the `fire` lock, not committed yet, as the
+    chunk comes to its claim: the claim waits for the lock, then sees the fire's item, and the
+    chunk waits for that nightly, not claimed."""
+    job = await queued(conn, A.id)
+    published, commit = asyncio.Event(), asyncio.Event()
+
+    async def publish() -> None:
+        async with sessions.Bridge(conn).write("schedule: nightly", locks=["fire"]) as unit:
+            await queue.submit(unit, "nightly", "a fire", lasting=True)
+            published.set()
+            await commit.wait()
+
+    publisher = asyncio.create_task(publish())
+    await asyncio.wait_for(published.wait(), 10)
+    stepping = asyncio.create_task(chunks(worker.JobWorker(db, SCHEDULED, models.gateway), 1))
+    await asyncio.sleep(0.5)  # the chunk comes to its claim and waits on the lock
+    commit.set()
+    await publisher
+    (waited,) = await asyncio.wait_for(stepping, 10)
+    assert isinstance(waited, Later)
+    assert (await job_of(conn, job))["state"] == "queued" and not await classified(conn)
+
+
+async def test_a_chunk_waits_for_a_nightly_fire_due_but_not_published_yet(
+    conn: Session, db, models
+):
+    """The nightly fired two minutes ago and the scheduler has not submitted its item yet (it
+    is about to, or late): the chunk counts it as a nightly that waits."""
+    fired = datetime.now(CONFIG.schedule.zone) - timedelta(minutes=2)
+    cron = f"{fired.minute} {fired.hour} * * *"
+    due = CONFIG.model_copy(update={"schedule": QUIET.model_copy(update={"nightly": cron})})
+    job = await queued(conn, A.id)
+    (waited,) = await chunks(worker.JobWorker(db, due, models.gateway), limit=1)
+    assert isinstance(waited, Later)
+    assert (await job_of(conn, job))["state"] == "queued" and not await classified(conn)
+
+
 async def test_a_held_run_lock_holds_every_chunk(conn: Session, db, models, monkeypatch):
     job = await queued(conn, A.id)
     w = worker.JobWorker(db, CONFIG, models.gateway)
@@ -637,6 +741,83 @@ async def test_a_job_put_on_tonights_run_as_the_nightly_closes_is_released(
     assert await stranded(conn) == []
     assert await step(worker.JobWorker(db, CONFIG, models.gateway))
     assert (await job_of(conn, job))["state"] == "done"
+
+
+async def test_a_job_put_on_tonights_run_while_the_fires_close_waits_is_released(
+    conn: Session, db, models, monkeypatch
+):
+    """The fire's nightly begins its closing unit, which waits on its item's row (a settling
+    holds it) before the `tonight` lock; meanwhile With tonight's run puts the job there and
+    commits. The close, stamped by the clock after the lock rather than as its unit began,
+    comes after the job's move, so it releases the job."""
+    from litwatch.jobs import scheduler  # noqa: PLC0415
+    from tests.working import items_of, serving, until  # noqa: PLC0415
+
+    monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False, with_digests=False))
+    job = await in_write(conn, jobs_store.create, "process", {"papers": [A.id]}, 1, "offered")
+    in_steps, go, held, let_go = (asyncio.Event() for _ in range(4))
+
+    async def steps(*_, **__) -> None:
+        in_steps.set()
+        await go.wait()
+
+    async def hold() -> None:  # the fire's item's row, as its gate's settling holds it
+        async with sessions.Bridge(conn).write("hold the fire's item") as unit:
+            await unit.execute("SELECT 1 FROM work_items WHERE kind = 'nightly' FOR UPDATE")
+            held.set()
+            await let_go.wait()
+
+    monkeypatch.setattr(nightly, "_steps", steps)
+    async with db.write("a fire's item") as unit:
+        fired = scheduler.fire_key(datetime(2026, 10, 12, tzinfo=UTC))
+        item = await queue.submit(unit, "nightly", fired, lasting=True)
+    nightly_worker = scheduler.NightlyWorker(db, CONFIG, models.gateway)
+    async with serving(WorkGate(db, poll=0.1), {"nightly": nightly_worker}):
+        await asyncio.wait_for(in_steps.wait(), 10)
+        holder = asyncio.create_task(hold())
+        await asyncio.wait_for(held.wait(), 10)
+        go.set()
+        await asyncio.sleep(0.5)  # its closing unit has begun, and waits on the row
+        async with db.write("with tonight's run", locks=["tonight"]) as unit:
+            assert await jobs_store.move(unit, job, jobs_store.NOT_RUN, "tonight") is not None
+        let_go.set()
+        await holder
+
+        async def ended() -> bool:
+            (row,) = await items_of(conn, "nightly", item.key)
+            return row["state"] == "ended"
+
+        await until(ended, "the fire's nightly to end")
+    assert job in await in_read(conn, jobs_store.open_ids) and await stranded(conn) == []
+
+
+async def test_a_job_put_on_tonights_run_waiting_on_the_close_waits_for_the_next_nightly(
+    conn: Session, db, models, monkeypatch
+):
+    """With tonight's run begins while the nightly's close holds the `tonight` lock, before the
+    close stamps its run, and waits on the lock: stamped by the clock after the lock rather than
+    as its unit began, its job comes after that close, so it waits for the next nightly rather
+    than reading as released with no chunk submitted."""
+    job = await in_write(conn, jobs_store.create, "process", {"papers": [A.id]}, 1, "offered")
+    real, closing = runs.finish, asyncio.Event()
+
+    async def slow(unit, *args, **kwargs) -> None:
+        closing.set()
+        await asyncio.sleep(0.5)  # the close holds the lock while the move begins, and waits
+        await real(unit, *args, **kwargs)
+
+    async def put_on_tonight() -> None:
+        await asyncio.wait_for(closing.wait(), 10)
+        async with db.write("with tonight's run", locks=["tonight"]) as unit:
+            assert await jobs_store.move(unit, job, jobs_store.NOT_RUN, "tonight") is not None
+
+    monkeypatch.setattr(runs, "finish", slow)
+    await asyncio.gather(
+        nightly.run(db, CONFIG, fetch=False, gateway=models.gateway, with_digests=False),
+        put_on_tonight(),
+    )
+    assert (await job_of(conn, job))["state"] == "tonight" and await stranded(conn) == []
+    assert job not in await in_read(conn, jobs_store.open_ids)
 
 
 async def test_a_nightly_that_fails_still_releases_tonights_jobs(

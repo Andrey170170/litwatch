@@ -1634,6 +1634,36 @@ async def test_a_first_deep_read_asked_while_its_process_job_runs_does_not_ask_t
     assert (await job_of(db, job))["state"] == "done"
 
 
+async def test_a_deep_read_that_stores_new_text_asks_its_running_process_job_again(
+    db: Session, monkeypatch
+):
+    """arXiv's record, fetched while litwatch lacked the paper, is rewritten text by the time
+    it is stored (another stored the paper meanwhile, its revision since): the request's write
+    makes the paper's steps due again, so the Process job under way is asked again, queued."""
+    scheduled = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
+    revised = P.model_copy(
+        update={
+            "abstract": "Sparse autoencoders recover planted features in toy models.",
+            "version": 3,
+        }
+    )
+
+    async def resolved(_db, text):
+        return P.id, revised
+
+    monkeypatch.setattr(misses, "resolve", resolved)
+    job = await in_write(db, jobs_store.create, "process", {"papers": [P.id]}, 1, "queued")
+    await in_write(db, jobs_store.claim, job, afresh=True)
+    _, http = client(db, [make(FakeDeep(DONE))], scheduled)
+    async with http:
+        asked = await http.post(f"/api/papers/{P.id}/card")
+    assert asked.status_code == 202
+    stored = await in_read(db, papers_store.get, P.id)
+    assert stored is not None and stored.revision == 2
+    await in_write(db, jobs_store.finish, job, "done")
+    assert (await job_of(db, job))["state"] == "queued"
+
+
 async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_again(
     db: Session, monkeypatch, slow_arxiv
 ):

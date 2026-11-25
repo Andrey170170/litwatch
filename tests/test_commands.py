@@ -1,8 +1,8 @@
 """The CLI's commands as work items (docs/plans/a2-work-gate.md, P3): each runs its work as an
 item of kind `command` in its own process (`gates.work.inline`), whose lease keeps its runs
-alive; a lost database tries it again; one that does what a kind of `serve`'s does takes that
-kind's admission, so the two run one at a time; and one whose process died is ended by the
-`serve` that shares its admission. On real Postgres."""
+alive; one attempt, a lost database ending it failed, and its item settled however it stops;
+one that does what a kind of `serve`'s does takes that kind's admission, so the two run one at a
+time; and one whose process died is ended by any `serve`'s take-back. On real Postgres."""
 
 import asyncio
 
@@ -11,7 +11,7 @@ import pytest
 
 from litwatch.core.work import ItemState, Outcome
 from litwatch.gates.context import current_work
-from litwatch.gates.work import WorkGate, inline
+from litwatch.gates.work import CommandCutOffError, WorkGate, inline
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import runs
 from litwatch.store import work as queue
@@ -79,40 +79,88 @@ async def test_a_run_is_alive_by_its_claim_and_not_revived_when_its_item_is_take
     assert not await alive(conn, seen["run"])
 
 
-async def test_a_command_the_database_was_lost_under_is_tried_again(conn: Session, db):
+async def test_a_command_the_database_was_lost_under_fails_once_with_its_item_ended(
+    conn: Session, db
+):
+    """Not tried again in process: the owner runs it again."""
     tries = []
 
     async def work() -> int:
         tries.append(1)
-        if len(tries) == 1:
-            raise psycopg.OperationalError("the server closed the connection unexpectedly")
-        return len(tries)
+        raise psycopg.OperationalError("the server closed the connection unexpectedly")
 
-    assert await inline(db, "intake", work) == 2
+    with pytest.raises(CommandCutOffError, match="run it again"):
+        await inline(db, "intake", work)
     (item,) = await commands(conn)
-    assert (item["attempts"], item["outcome"]) == (2, "done")
+    assert tries == [1]
+    assert (item["state"], item["outcome"], item["attempts"]) == ("ended", "failed", 1)
 
 
-async def test_a_command_that_loses_the_database_reading_its_item_reads_it_again(
+async def test_a_command_that_loses_the_database_reading_its_item_fails_with_its_item_ended(
     conn: Session, db, monkeypatch
 ):
-    """The command's own read of whether its item ended loses the database: it reads again,
-    rather than leave its item running with no one waiting on it."""
+    """The command's own read of whether its item ended loses the database: it is not read
+    again; the command fails, and its item is not left running with no one waiting on it."""
     real, lost = queue.get, []
+    ran = asyncio.Event()
 
     async def get(unit, item_id):
-        if not lost:
+        if ran.is_set() and not lost:
             lost.append(item_id)
             raise psycopg.OperationalError("the server closed the connection unexpectedly")
         return await real(unit, item_id)
 
     async def work() -> str:
+        await asyncio.sleep(0.2)  # read at least once while it works
+        ran.set()
+        await asyncio.sleep(0.2)
         return "its result"
 
     monkeypatch.setattr(queue, "get", get)
-    assert await inline(db, "intake", work) == "its result"
+    with pytest.raises(CommandCutOffError, match="run it again"):
+        await inline(db, "intake", work)
     (item,) = await commands(conn)
-    assert lost == [item["id"]] and item["outcome"] == "done"
+    assert lost == [item["id"]] and item["state"] == "ended"
+
+
+async def test_a_command_stopped_by_ctrl_c_ends_its_item(conn: Session, db):
+    """Cancelled as it works (Ctrl-C), its item is ended failed, not left pending."""
+    working = asyncio.Event()
+
+    async def work() -> None:
+        working.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(inline(db, "intake", work))
+    await asyncio.wait_for(working.wait(), 10)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    (item,) = await commands(conn)
+    assert (item["state"], item["outcome"]) == ("ended", "failed")
+    assert item["error"] == "the command stopped before its item ended"
+
+
+async def test_a_command_whose_end_was_not_recorded_does_not_succeed(
+    conn: Session, db, monkeypatch
+):
+    """Its work returned, but recording its item done failed: the command fails rather than
+    report a success that is not on record, and its item is ended failed."""
+    real = queue.end
+
+    async def end(unit, item, outcome, **kwargs):
+        if item.kind == queue.COMMAND and outcome == Outcome.DONE:
+            raise RuntimeError("the end is not recorded")
+        return await real(unit, item, outcome, **kwargs)
+
+    async def work() -> str:
+        return "its result"
+
+    monkeypatch.setattr(queue, "end", end)
+    with pytest.raises(RuntimeError, match="its end was not recorded"):
+        await inline(db, "intake", work)
+    (item,) = await commands(conn)
+    assert (item["state"], item["outcome"]) == ("ended", "failed")
 
 
 async def test_a_command_that_fails_fails_its_item_and_raises(conn: Session, db):
@@ -125,12 +173,12 @@ async def test_a_command_that_fails_fails_its_item_and_raises(conn: Session, db)
     assert item["outcome"] == "failed" and "no such category" in item["error"]
 
 
-async def test_the_cli_deep_passes_wait_for_serves_and_keep_their_clients_across_tries(
+async def test_the_cli_deep_passes_wait_for_serves_and_close_their_clients_once(
     conn: Session, db, tmp_path, monkeypatch
 ):
     """`serve` works a Deep pass; `litwatch fulltext --deep`, through its real command, waits
-    for it to end, then works, never beside it. Its first try loses the database: the try made
-    again works on the same clients, still open, which close once, at the end."""
+    for it to end, then works, never beside it. It loses the database: it fails at once, not
+    tried again, and its clients close once."""
     from collections import Counter  # noqa: PLC0415
 
     from litwatch import fulltext, integrations  # noqa: PLC0415
@@ -156,9 +204,7 @@ async def test_the_cli_deep_passes_wait_for_serves_and_keep_their_clients_across
         assert (given_archive, given_maker) == (archive, maker)
         assert (archive.closed, maker.closed) == (0, 0)
         order.append("the CLI's")
-        if order.count("the CLI's") == 1:
-            raise psycopg.OperationalError("the server closed the connection unexpectedly")
-        return Counter()
+        raise psycopg.OperationalError("the server closed the connection unexpectedly")
 
     monkeypatch.setattr(fulltext, "archive_for", lambda cfg: archive)
     monkeypatch.setattr(integrations, "enabled_using", lambda cfg, name: {"use": name})
@@ -179,22 +225,23 @@ async def test_the_cli_deep_passes_wait_for_serves_and_keep_their_clients_across
         assert waiting["state"] == "pending" and waiting["admission"] == "deep" and order == []
         release.set()
         result = await asyncio.wait_for(cli, 20)
-    assert result.exit_code == 0, result.output
-    assert order == ["serve's pass", "the CLI's", "the CLI's"]
+    assert result.exit_code != 0 and "run it again" in result.output, result.output
+    assert order == ["serve's pass", "the CLI's"]
     assert (archive.closed, maker.closed) == (1, 1)
     (item,) = await commands(conn)
-    assert (item["attempts"], item["outcome"]) == (2, "done")
+    assert (item["attempts"], item["outcome"]) == (1, "failed")
 
 
-async def test_a_command_whose_process_died_is_ended_by_the_serve_sharing_its_admission(
-    conn: Session, db
-):
-    """Its item holds the `deep` admission until its lease lapses; then `serve`'s take-back
-    ends it failed (no process serves it), and the Deep passes go on."""
+@pytest.mark.parametrize("admission", ["deep", "intake:gone"])
+async def test_a_command_whose_process_died_is_ended_by_any_take_back(conn: Session, db, admission):
+    """Its item holds its admission (`deep`, or its own) until its lease lapses; then any
+    `serve`'s take-back ends it failed (no process serves it again), and the Deep passes go
+    on."""
     await conn.execute(
         "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until) "
-        "VALUES ('command', 'fulltext --deep:gone', 'deep', 'running', gen_random_uuid(), "
-        "now() - interval '1 second')"
+        "VALUES ('command', 'intake:gone', %s, 'running', gen_random_uuid(), "
+        "now() - interval '1 second')",
+        (admission,),
     )
     async with db.write("a Deep pass") as unit:
         waiting = await queue.submit(unit, fulltext_store.DEEP_WORK, "1")

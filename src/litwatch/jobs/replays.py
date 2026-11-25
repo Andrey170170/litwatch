@@ -127,7 +127,7 @@ async def work(
         r = await replay.resume(unit, config, eval_run)
     tried.difference_update(r.stale)  # a paper whose text changed since is to do again
     ids = [p for p in r.left if p not in tried][:size]
-    before = run.tally()
+    before = run.chunk_began()
     await replay.work(db, config, r, run, ids)
     cut = run.gateway.ceiling is not None and run.gateway.ceiling.reached
     if not cut:
@@ -136,6 +136,7 @@ async def work(
     concluded = len(r.papers) - len(r.left)
     async with db.write("replay: progress") as unit:
         after = await jobs_store.progress(unit, job["id"], concluded, dict(counts))
+    run.chunk_recorded()
     if after is None:
         return Chunk("gone")
     if cut:

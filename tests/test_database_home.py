@@ -97,6 +97,7 @@ def test_the_registry_has_todays_keys():
         ("rerun", 7213916, "unit", "text"),
         ("replay", 7213917, "unit", None),
         ("tonight", 7213918, "unit", None),
+        ("fire", 7213919, "unit", None),
         ("retally", 7213912, "unit", "int"),
         ("run", 7213911, "session", None),
         ("migration", 7213910, "startup", None),

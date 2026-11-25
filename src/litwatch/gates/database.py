@@ -141,6 +141,9 @@ REGISTRY: tuple[Lock, ...] = (
     # Putting jobs on tonight's run, and a nightly releasing them as it closes its run, so one
     # of the two sees the other (`store.jobs.release`).
     Lock("tonight", 7213918, "unit"),
+    # Publishing a nightly fire and admitting a job's chunk, so a due nightly and a chunk are
+    # one decision (`jobs.scheduler.unpublished`).
+    Lock("fire", 7213919, "unit"),
     # One retally of a run's totals at a time, by run id.
     Lock("retally", 7213912, "unit", "int"),
     # One job that changes pipeline state at a time.

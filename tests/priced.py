@@ -13,7 +13,9 @@ from tests.scripted import ROLES, Scripted
 from tests.sessions import Session, in_write
 
 BRIEF = RoleConfig(provider="anthropic", model="test-brief")
-CONFIG = Config(models=Models(**ROLES, brief=BRIEF), schedule=Schedule(enabled=True))
+# The schedule on (the workers run), with no fire near now (`tests.working.QUIET`).
+QUIET = Schedule(enabled=True, nightly="0 0 29 2 *", publications="0 0 29 2 *")
+CONFIG = Config(models=Models(**ROLES, brief=BRIEF), schedule=QUIET)
 ZONE = CONFIG.schedule.zone
 COST = 0.01  # what every call costs
 

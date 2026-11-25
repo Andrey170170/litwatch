@@ -236,7 +236,8 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
     # stands, before any change. Under the paper's locks, so a request in flight has either
     # committed or not started. Its settle leaves the paper's steps as they were (`steps`): a
     # Process job running asks nothing more of them, so it is not asked again, and not run
-    # once more for nothing.
+    # once more for nothing; unless its write stored new text (arXiv's record fetched before
+    # another stored the paper, a revision since), which makes the steps due again.
     async with db.write("request card", taxonomy="shared", papers=[paper_id]) as unit:
         open_pass = await fulltext_store.open_deep(unit, paper_id)
         if (
@@ -247,7 +248,9 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
             and not await papers_store.dropped(unit, paper_id)
         ):
             return s.CardRequested(pass_id=open_pass["id"])
-        await misses.keep(unit, paper_id, fetched)
+        held = await papers_store.get(unit, paper_id)
+        kept, _ = await misses.keep(unit, paper_id, fetched)
+        rewritten = held is not None and held.revision != kept.revision
         pass_id = await deep_passes.request(unit, paper_id)
         if pass_id is None:
             raise HTTPException(status_code=409, detail=DROPPED)
@@ -262,7 +265,7 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
         )
         if processing:
             await jobs_store.process(unit, paper_id)
-        await word.settle_many(unit, [paper_id], cause=Cause.OWNER, rules=rules, steps=False)
+        await word.settle_many(unit, [paper_id], cause=Cause.OWNER, rules=rules, steps=rewritten)
     return s.CardRequested(pass_id=pass_id)
 
 

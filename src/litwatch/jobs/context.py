@@ -110,6 +110,7 @@ class ModelRun:
     record: RunRecord
     gateway: llm.Gateway
     journal: CallJournal
+    began: Counter[str] | None = None  # `chunk_began`
 
     @property
     def run_id(self) -> int:
@@ -126,6 +127,19 @@ class ModelRun:
         """What the run has counted so far, its numbers alone: a job adds what a chunk counted
         (`tally()` after it less before) to its own counts."""
         return Counter({k: v for k, v in self.counts.items() if isinstance(v, int)})
+
+    def chunk_began(self) -> Counter[str]:
+        """What the run had counted as the job's chunk under way began (`tally`), which the
+        chunk's counts are taken from: kept until its progress is recorded (`chunk_recorded`),
+        so a chunk tried again after a lost database counts what its first try recorded too,
+        whose steps it then skips."""
+        if self.began is None:
+            self.began = self.tally()
+        return self.began
+
+    def chunk_recorded(self) -> None:
+        """The chunk's progress is recorded: the next one counts from here."""
+        self.began = None
 
 
 @asynccontextmanager

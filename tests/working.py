@@ -125,15 +125,39 @@ async def chunks(
 
 
 async def killed(gone: JobWorker, monkeypatch: pytest.MonkeyPatch, at: str) -> None:
-    """`gone`'s process is killed at its method `at`: its chunk's item, running, is given back
-    as its gate stops, and the run it had open stays open (`gone.close` ends it later)."""
+    """`gone`'s process is killed at its method `at`: it stops there, gives nothing back, and
+    its chunk's item stays running until its lease lapses (made to here at once), so the next
+    gate takes it back; the run it had open stays open (`gone.close` ends it later)."""
+    reached = asyncio.Event()
 
     async def dies(*_):
-        raise asyncio.CancelledError
+        reached.set()
+        await asyncio.Event().wait()  # never set: the process is gone
+
+    async def nothing(_: WorkItem) -> None:
+        pass  # a killed process gives no claim back
 
     monkeypatch.setattr(gone, at, dies)
-    (ended,) = await chunks(gone, limit=1)
-    assert isinstance(ended, asyncio.CancelledError)
+    gate = WorkGate(gone.db)
+    monkeypatch.setattr(gate, "_give_back", nothing)
+    task = asyncio.create_task(gate.run({jobs_store.WORK: gone}))
+
+    async def stopped() -> bool:
+        return reached.is_set()
+
+    try:
+        await until(stopped, f"the chunk to reach {at}")
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    async with gone.db.write("test: the dead process's lease lapses") as unit:
+        found = await unit.execute(
+            "UPDATE work_items SET lease_until = now() - interval '1 second' "
+            "WHERE kind = %s AND state = 'running'",
+            (jobs_store.WORK,),
+        )
+        assert found.rowcount == 1
 
 
 async def step(worker: JobWorker) -> bool:
@@ -206,17 +230,19 @@ CONFIG_TOML = '[schedule]\ntimezone = "UTC"\n'
 
 async def command(
     conn: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *argv: str,
-    config: str = CONFIG_TOML,
+    config: str | None = CONFIG_TOML,
 ) -> Ran:  # fmt: skip
     """The `litwatch` command `argv` through its real CLI, in a thread of its own (it runs its
-    own event loop), on the test's schema, with a configuration file of `config`: in
-    `tmp_path`, as every command loads ./.env."""
+    own event loop), on the test's schema, with a configuration file of `config` (None: a
+    command that takes none): in `tmp_path`, as every command loads ./.env."""
     from litwatch import cli  # noqa: PLC0415
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(
         "LITWATCH_DATABASE_URL", f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
     )
-    path = tmp_path / "litwatch.toml"
-    path.write_text(config)
-    return await asyncio.to_thread(CliRunner().invoke, cli.app, [*argv, "--config", str(path)])
+    if config is not None:
+        path = tmp_path / "litwatch.toml"
+        path.write_text(config)
+        argv = (*argv, "--config", str(path))
+    return await asyncio.to_thread(CliRunner().invoke, cli.app, list(argv))

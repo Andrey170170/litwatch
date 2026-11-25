@@ -25,7 +25,7 @@ from litwatch.core.digests import DigestPeriod, listing_day, plain, voice_proble
 from litwatch.digests import writer
 from litwatch.gates.database import DatabaseGate
 from litwatch.jobs import digests as digests_job
-from litwatch.jobs import nightly, worker
+from litwatch.jobs import nightly, scheduler, worker
 from litwatch.jobs.context import model_run
 from litwatch.llm import ProviderError, Reply, Stop, Usage
 from litwatch.store import classifications as classifications_store
@@ -1336,6 +1336,106 @@ async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_star
     assert (await shown(db, FAITH.slug, "week", MON - timedelta(days=7)))[0] == "nothing_new"
 
 
+async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_directly(
+    db: Session, gate, monkeypatch
+):
+    """V3 (docs/plans/a2-work-gate.md): the same seeded nightly, its digests written and its
+    full-text passes worked inline, run directly on one schema and as the fire of a strict
+    `serve` on another: their run records' counts, cost and digests match."""
+    from functools import partial  # noqa: PLC0415
+
+    from litwatch.llm import Gateway  # noqa: PLC0415
+    from tests import scripted  # noqa: PLC0415
+    from tests.fakes import ScriptedProvider  # noqa: PLC0415
+    from tests.sessions import schema  # noqa: PLC0415
+
+    class Models:
+        """The nightly steps scripted (`tests.scripted`), the digests' writer too."""
+
+        def __init__(self) -> None:
+            self.steps, self.writer = scripted.Scripted(), Writer()
+
+        def respond(self, role, request):
+            by = self.steps if role.model in scripted.BY_MODEL else self.writer
+            return by.respond(role, request)
+
+        def gateway(self, config: Config, journal) -> Gateway:
+            return Gateway(
+                config.models,
+                {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")},
+                journal,
+                retry_delays=(0.0,),
+            )
+
+    now = datetime.now(UTC)
+    fired = now - timedelta(minutes=2)
+    config = scripted.CONFIG.model_copy(
+        update={"schedule": Schedule(
+            enabled=True,
+            timezone="UTC",
+            nightly=f"{fired.minute} {fired.hour} * * *",
+            publications=QUIET.publications,
+            deadline=(fired + timedelta(minutes=1)).time(),  # past: neither run batches
+        )}
+    )  # fmt: skip
+    today = config.schedule.today(now)
+
+    async def seed(conn: Session) -> None:
+        await focus(conn, P, "central")  # queues P's Brief, worked inline
+        await in_write(conn, verdicts.passed, [(P.id, 1)])
+        await conn.execute("UPDATE papers SET dismissed_at = now() WHERE id <> %s", (P.id,))
+        await listed(conn, today, P)
+
+    async def passes(db: DatabaseGate, config, archive, run=None, limit=None, deadline=None):
+        async with db.write("the passes worked") as unit:
+            done = await unit.execute(
+                "UPDATE fulltext_passes SET state = 'done' WHERE state <> 'done'"
+            )
+        if run is not None and done.rowcount:
+            run.add("briefs_written", done.rowcount)  # as the passes' work counts on the run
+        return Counter(briefs_written=done.rowcount)
+
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
+    monkeypatch.setattr(fulltext, "work", passes)
+    monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False))
+
+    async def record(conn: Session) -> tuple:
+        (run,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
+        digests = await (
+            await conn.execute("SELECT topic, period, day, state FROM digests ORDER BY 1, 2, 3")
+        ).fetchall()
+        return run["error"], run["counts"], run["cost"], digests
+
+    await seed(db)
+    await nightly.run(gate, config, fetch=False, gateway=Models().gateway)
+    direct = await record(db)
+
+    async with schema(db.test_dsn) as other:
+        await settling.save_tree(other, TREE)
+        await in_write(other, papers_store.upsert, [P, Q, R, S])
+        await seed(other)
+        async with gate_on(other) as theirs:
+
+            async def closed() -> bool:
+                found = await (
+                    await other.execute(
+                        "SELECT 1 FROM runs WHERE kind = 'nightly' AND finished_at IS NOT NULL"
+                    )
+                ).fetchall()
+                return bool(found)
+
+            async with served(theirs, config, gateway=Models().gateway):
+                await until(closed, "the fire's nightly to close")
+        fire = await record(other)
+        (item,) = await (
+            await other.execute("SELECT * FROM work_items WHERE kind = 'nightly'")
+        ).fetchall()
+    assert direct[0] is None and direct[1].get("briefs_written")  # its passes worked inline
+    assert any(d["state"] == "written" for d in direct[3])
+    assert fire == direct
+    assert item["key"] == scheduler.fire_key(scheduler.last_fire(config.schedule.nightly, now))
+
+
 async def test_a_nightly_run_without_digests_writes_none(db: Session, gate):
     """`nightly --no-digests` (the restart, whose digests `digests write` makes for its window):
     on a Monday with a paper listed, neither the day's dailies nor last week's weeklies."""
@@ -1597,7 +1697,7 @@ async def test_the_tab_steps_only_through_the_digests_it_shows(db: Session, gate
     assert (wed["previous"], history["start"]) == (None, str(WED))
 
 
-SCHEDULED = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
+SCHEDULED = Config(schedule=working.QUIET)  # the jobs worker runs, no fire near
 
 
 async def failed_day(db: Session, w: Writer) -> int:

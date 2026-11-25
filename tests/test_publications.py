@@ -2,6 +2,7 @@
 correction, and Copy BibTeX looking up only a single paper."""
 
 import asyncio
+import threading
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlsplit
 
@@ -201,24 +202,36 @@ async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db
     assert await events(db) == [P.id]
 
 
-async def test_runs_never_overlap(db: Session, gate):
+async def test_runs_never_overlap(db: Session, gate, tmp_path, monkeypatch):
     """Each run takes its due papers once: one beside another could die unseen (monitoring).
-    The CLI's run holds the `publications` admission; a fire after it started, which it does not
-    serve, waits in `serve` for it to end, then runs a lookup of its own, after it."""
+    `litwatch publications`, through its real command, holds the `publications` admission; a
+    fire after it started, which it does not serve, waits in `serve` for it to end, then runs a
+    lookup of its own, after it."""
+    from litwatch import cli  # noqa: PLC0415
+    from tests.working import command  # noqa: PLC0415
 
     class Held(Source):
+        """Held at its first lookup until let go: across threads, as the command runs its own
+        event loop in one."""
+
         def __init__(self) -> None:
             super().__init__()
-            self.going, self.hold = asyncio.Event(), asyncio.Event()
+            self.going, self.hold = threading.Event(), threading.Event()
 
         async def find(self, paper_id, title=None, doi=None):
             self.going.set()
-            await self.hold.wait()
+            while not self.hold.is_set():
+                await asyncio.sleep(0.02)
             return await super().find(paper_id, title, doi)
 
     source = Held()
-    cli = asyncio.create_task(run(gate, source))
-    await asyncio.wait_for(source.going.wait(), 10)  # its run started
+    monkeypatch.setattr(cli, "Dblp", lambda: source)
+    ran = asyncio.create_task(command(db, tmp_path, monkeypatch, "publications", config=None))
+
+    async def going() -> bool:
+        return source.going.is_set()
+
+    await until(going, "the command's run to start")
     async with gate.write("a fire") as unit:
         fired = datetime.now(UTC)
         fire = await work.submit(unit, "publications", scheduler.fire_key(fired), lasting=True)
@@ -229,14 +242,17 @@ async def test_runs_never_overlap(db: Session, gate):
 
     async with served(gate, CONFIG.model_copy(update={"schedule": QUIET}), publications=source):
         await asyncio.sleep(0.3)
-        assert not await ended()  # it waits for the CLI's run
+        assert not await ended()  # it waits for the command's run
         source.hold.set()
-        await cli
+        result = await ran
         await until(ended, "the fire's item to end")
+    assert result.exit_code == 0, result.output
     first, second = await (
         await db.execute("SELECT * FROM runs WHERE kind = 'publications' ORDER BY id")
     ).fetchall()
     assert second["started_at"] >= first["finished_at"]
+    (item,) = await (await db.execute("SELECT * FROM work_items WHERE kind = 'command'")).fetchall()
+    assert (item["admission"], item["outcome"]) == ("publications", "done")
 
 
 async def test_a_run_stops_when_dblp_keeps_failing(db: Session, gate, monkeypatch):

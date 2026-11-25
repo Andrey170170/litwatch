@@ -298,18 +298,15 @@ async def take_back(
     a unit holds (one fenced on it, or a settling) is left for a later call. Returns those taken
     back.
 
-    A CLI command's item (`gates.work.inline`) whose lease expired while it holds an admission
-    one of these kinds is admitted by (the `deep` one) ends failed: its process is gone, and no
-    other serves it."""
+    A CLI command's item (`gates.work.inline`) whose lease expired ends failed, whatever
+    admission it holds: a command has one attempt, its process is gone, and no other runs it."""
     params = _serving(kinds, keys)
     await unit.execute(
         "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
         "error = 'its process stopped', lease_token = NULL, lease_until = NULL, "
         "resubmitted = false "
         "WHERE id IN (SELECT id FROM work_items c WHERE c.kind = %(command)s "
-        "AND c.state = 'running' AND c.lease_until < now() AND c.admission IN "
-        f"(SELECT w.admission FROM work_items w WHERE {_served('w')}) "
-        "FOR UPDATE SKIP LOCKED)",
+        "AND c.state = 'running' AND c.lease_until < now() FOR UPDATE SKIP LOCKED)",
         params | {"command": COMMAND},
     )
     rows = await (
@@ -317,12 +314,25 @@ async def take_back(
             "UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
             "not_before = LEAST(not_before, now()), resubmitted = false "
             f"WHERE id IN (SELECT id FROM work_items w WHERE {_served('w')} "
+            "AND w.kind <> %(command)s "
             "AND state = 'running' AND lease_until < now() FOR UPDATE SKIP LOCKED) "
             f"RETURNING {_COLUMNS}",
-            params,
+            params | {"command": COMMAND},
         )
     ).fetchall()
     return [_item(r) for r in rows]
+
+
+async def abandon(unit: WriteUnit, item_id: int, error: str) -> None:
+    """End a CLI command's item failed with `error` unless it has ended: its one attempt is
+    over (cut off, or the command cancelled), and nothing runs a command's item again."""
+    await unit.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', error = %s, "
+        "ended_at = now(), lease_token = NULL, lease_until = NULL, resubmitted = false "
+        "WHERE id = %s AND state <> 'ended'",
+        (_stored(error), item_id),
+    )
+    await _notify(unit, COMMAND)
 
 
 async def take(
@@ -489,6 +499,35 @@ async def link_run(unit: WriteUnit, item: WorkItem, run_id: int) -> None:
     longer by an earlier chunk's. In the item's own unit."""
     await unit.execute("UPDATE work_items SET run_id = %s WHERE id = %s", (run_id, item.id))
     await unit.execute("UPDATE runs SET lease_token = %s WHERE id = %s", (item.lease_token, run_id))
+
+
+async def submitted(unit: ReadUnit, kind: str, key: str) -> bool:
+    """Whether an item of `kind` and `key` was ever submitted: for a `lasting` key, whether its
+    one item exists."""
+    row = await (
+        await unit.execute(
+            "SELECT 1 FROM work_items WHERE kind = %s AND key = %s LIMIT 1", (kind, key)
+        )
+    ).fetchone()
+    return row is not None
+
+
+async def bring_forward(unit: WriteUnit, kind: str, due: Mapping[str, datetime]) -> None:
+    """Bring the pending items of `kind` keyed in `due` forward to their time there, where that
+    is sooner: work that waited on something now over (a lock let go of) goes when it is due."""
+    if not due:
+        return
+    rows = await (
+        await unit.execute(
+            "UPDATE work_items w SET not_before = d.at "
+            "FROM unnest(%s::text[], %s::timestamptz[]) AS d (key, at) "
+            "WHERE w.kind = %s AND w.key = d.key AND w.state = 'pending' AND w.not_before > d.at "
+            "RETURNING w.id",
+            (list(due), list(due.values()), kind),
+        )
+    ).fetchall()
+    if rows:
+        await _notify(unit, kind)
 
 
 async def get(unit: ReadUnit, item_id: int) -> WorkItem | None:

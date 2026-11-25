@@ -64,8 +64,8 @@ async def create(
         _holds(unit, "tonight")
     row = await (
         await unit.execute(
-            "INSERT INTO jobs (kind, scope, papers, state, ceiling, estimate) "
-            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            "INSERT INTO jobs (kind, scope, papers, state, ceiling, estimate, queued_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, clock_timestamp()) RETURNING id",
             (kind, Jsonb(scope), papers, state, ceiling, estimate),
         )
     ).fetchone()
@@ -124,11 +124,24 @@ async def release(unit: WriteUnit) -> None:
     """Submit the chunk of every job that may run, in id order, as a nightly closes its run, in
     the unit that closes it (`jobs.nightly.locked`): one that waited for the nightly runs now, in
     its place in line, and those on tonight's run go in the queue. Under the `tonight` lock, which
-    putting a job there holds too: one put there before this unit is released here, one put
-    there after it sees the run closed and submits itself."""
+    putting a job there holds too, each side stamped by the clock after taking it (`queued_at`,
+    the run's `finished_at`): one put there before this unit is released here, one put there
+    after it sees the run closed after it, and waits for the next nightly."""
     _holds(unit, "tonight")
     for job_id in await open_ids(unit):
         await submit(unit, job_id)
+
+
+async def wake(unit: WriteUnit) -> None:
+    """Bring the waiting chunk of every job that may run forward to when it is due: one a
+    nightly held back (looking again after `jobs.worker.WAIT`, or the run lock taken) goes once
+    the nightly let go of the run lock."""
+    rows = await (
+        await unit.execute(
+            f"SELECT j.id, GREATEST(j.queued_at, j.wake_at) AS due FROM jobs j WHERE {_RUNNABLE}"
+        )
+    ).fetchall()
+    await work.bring_forward(unit, WORK, {str(r["id"]): r["due"] for r in rows})
 
 
 async def nightly_waits(unit: ReadUnit) -> bool:
@@ -274,15 +287,15 @@ async def move(
     queue or on tonight's run, it waits from now, under `ceiling` when given; a failed job put
     back starts over, its steps taking only what is still due; a stopped one goes on from
     where it stopped. Put in the queue, its chunk is submitted (`submit`). Put on tonight's
-    run, under the `tonight` lock (`release`)."""
+    run, under the `tonight` lock, stamped by the clock after it (`release`)."""
     if to == "tonight":
         _holds(unit, "tonight")
     moved = await (
         await unit.execute(
             """
             UPDATE jobs SET state = %(to)s, changed_at = now(), wake_at = NULL,
-                   queued_at = CASE WHEN %(to)s IN ('tonight', 'queued') THEN now()
-                                    ELSE queued_at END,
+                   queued_at = CASE WHEN %(to)s IN ('tonight', 'queued')
+                                    THEN clock_timestamp() ELSE queued_at END,
                    ceiling = coalesce(%(ceiling)s, ceiling),
                    done = CASE WHEN state = 'failed' THEN 0 ELSE done END,
                    counts = CASE WHEN state = 'failed' THEN '{}' ELSE counts END,
@@ -336,9 +349,10 @@ async def claim(unit: WriteUnit, job_id: int, *, afresh: bool) -> dict[str, Any]
 async def link(unit: WriteUnit, job_id: int, item: WorkItem, run_id: int) -> None:
     """Record that the job's chunk `item` works on the run `run_id`: the run is alive by this
     claim of the item (`store.work.link_run`), and the job's latest run is this one, which a
-    process that kept another open for it reads as that one no longer being the job's."""
-    await work.link_run(unit, item, run_id)
+    process that kept another open for it reads as that one no longer being the job's. The
+    job's row first, then its item's, as every path that takes both."""
     await unit.execute("UPDATE jobs SET run_id = %s WHERE id = %s", (run_id, job_id))
+    await work.link_run(unit, item, run_id)
 
 
 async def progress(

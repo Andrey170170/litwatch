@@ -4,12 +4,16 @@ submits it wherever the job becomes runnable). `litwatch serve` runs it under `[
 enabled`.
 
 A chunk works up to `CHUNK` papers under the run lock, and none starts while a nightly run is due
-or running (`store.jobs.nightly_waits`, read before the lock and again under it), so the nightly
-waits at most one chunk (pipeline.md, section 10): such an item waits `WAIT` and looks again, as
-one that finds the run lock taken does. Under the lock it claims its job, the job's row locked,
-and works the chunk. Each write to the job's row arranges its next chunk in its own unit
-(`store.jobs.arrange`), so the chunk's item ends with the decision of the job's last write; an
-error the chunk's own handling did not record fails the job, which arranges none. One chunk runs
+or running (`store.jobs.nightly_waits`, or a fire due that the scheduler has yet to publish,
+`jobs.scheduler.unpublished`), read before the lock and again as it claims its job, under the
+`fire` lock a fire's publication takes, so the nightly waits at most one chunk (pipeline.md,
+section 10): such an item waits `WAIT` and looks again, as one that finds the run lock taken
+does, unless the nightly brings it forward as it ends. Under the lock it claims its job, the
+job's row locked, and works the chunk. One whose look before the claim fails ends as a chunk's
+error does: the job failed, or, that not recorded, the chunk kept to look again. Each write to
+the job's row arranges its next chunk in its own unit (`store.jobs.arrange`), so the chunk's
+item ends with the decision of the job's last write; an error the chunk's own handling did not
+record fails the job, which arranges none. One chunk runs
 at a time, and the due one most urgent goes first: Process jobs and digests written again (the
 owner waits on them), then the oldest in the queue. So a Process job queued during a long job
 goes at its next chunk.
@@ -50,10 +54,10 @@ from litwatch.config import Config
 from litwatch.core import FAILED_RUNS
 from litwatch.core.work import WorkItem
 from litwatch.feedback import word
-from litwatch.gates.database import BusyError, DatabaseGate, LeaseLostError
+from litwatch.gates.database import BusyError, DatabaseGate, LeaseLostError, ReadUnit
 from litwatch.gates.work import Later, conflicted, database_lost
 from litwatch.jobs import digests as digest_jobs
-from litwatch.jobs import nightly, replays, reruns
+from litwatch.jobs import nightly, replays, reruns, scheduler
 from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
 from litwatch.quality import replay
 from litwatch.store import failures
@@ -124,8 +128,22 @@ class JobWorker:
 
     async def __call__(self, item: WorkItem) -> Later | None:
         waited = Later(datetime.now(UTC) + WAIT)
+        try:
+            return await self._chunk_for(item, waited)
+        except Exception as exc:
+            if _retried(exc):
+                raise
+            try:
+                await self._fail(int(item.key), exc)
+            except Exception:
+                # Its end not recorded, the job may still run: the chunk is kept, to try again.
+                log.exception("jobs: job %s's failure could not be recorded", item.key)
+                return waited
+            raise
+
+    async def _chunk_for(self, item: WorkItem, waited: Later) -> Later | None:
         async with self.db.read("does the nightly wait") as unit:
-            if await jobs_store.nightly_waits(unit):
+            if await self._nightly_first(unit):
                 return waited
         await self._evict()
         # The job is claimed under the run lock, so no other job's chunk, nor a nightly, runs
@@ -136,25 +154,27 @@ class JobWorker:
         except BusyError:
             return waited
         async with held:
-            try:
-                return await self._claimed(item, waited)
-            except Exception as exc:
-                if _retried(exc):
-                    raise
-                await self._fail(int(item.key), exc)
-                raise
+            return await self._claimed(item, waited)
+
+    async def _nightly_first(self, unit: ReadUnit) -> bool:
+        """Whether a nightly goes before any chunk now: one due or running
+        (`store.jobs.nightly_waits`), or a fire due that the scheduler has yet to publish."""
+        return await jobs_store.nightly_waits(unit) or await scheduler.unpublished(
+            unit, self.config
+        )
 
     async def _claimed(self, item: WorkItem, waited: Later) -> Later | None:
-        """Under the run lock: claim the item's job and work its chunk."""
-        async with self.db.write("claim a job") as unit:
-            # Again under the lock: a fire's nightly taken since, opening its run, waits for it.
-            if await jobs_store.nightly_waits(unit):
-                return waited
+        """Under the run lock: claim the item's job and work its chunk. The claim is decided
+        under the `fire` lock, which publishing a fire takes, after the job's row is had: a
+        nightly published, or due, by then goes first."""
+        async with self.db.write("claim a job", locks=["fire"]) as unit:
             job = await jobs_store.get(unit, int(item.key), lock=True)
             if job is None or not await jobs_store.may_run(unit, job):
                 if job is not None:
                     await jobs_store.arrange(unit, job["id"])
                 return None  # ended, or not run, meanwhile: nothing to do
+            if await self._nightly_first(unit):
+                return waited
             if job["wake_at"] is not None and job["wake_at"] > datetime.now(UTC):
                 return Later(job["wake_at"])
             mine = self._mine(job)
@@ -246,14 +266,16 @@ class JobWorker:
         """The job's next chunk of papers through classification, analysis and grading; returns
         the job as recorded after it."""
         ids = job["scope"]["papers"][job["done"] : job["done"] + CHUNK]
-        before = run.tally()
+        before = run.chunk_began()
         await nightly.classify(self.db, self.config, run, ids=ids)
         await nightly.analyse(self.db, self.config, run, ids=ids)
         await nightly.grade(self.db, self.config, run, ids=ids)
         counts = Counter(job["counts"]) + (run.tally() - before)
         done = job["done"] + len(ids)
         async with self.db.write("job progress") as unit:
-            return await jobs_store.progress(unit, job["id"], done, dict(counts))
+            after = await jobs_store.progress(unit, job["id"], done, dict(counts))
+        run.chunk_recorded()
+        return after
 
     async def _ceiling(self, job: dict[str, Any], run: ModelRun, roles: tuple[str, ...]) -> None:
         if run.gateway.ceiling is None:

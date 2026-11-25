@@ -122,10 +122,15 @@ Found in a survey of the code at 548857e3:
   for, and a running one is taken back as its lease lapses. Only its priority is raised to its pass's when that is
   more urgent: the old image raises a pass's priority on the pass row alone (the owner's request for an automatic
   Deep pass), and the item would otherwise wait behind automatic ones. A switch is not made while a nightly runs. One interrupted
-  anyway counts its fire as served, as a nightly whose process dies does today, and its work waits for the next night
-  or a nightly run by hand.
+  anyway is run again by its fire's item once the receiving image takes it back (a run cut off served nothing); the
+  image before counts it served, as a nightly whose process dies does today, and its work waits for the next night or
+  a nightly run by hand.
 - **The scheduler's handoff.** A fire the old scheduler already served (a run started after it) stays served when P3
-  starts inside the catch-up window: the submitter checks the runs as today before using the key.
+  starts inside the catch-up window: the submitter checks the runs as today before using the key. Once submitted, a
+  fire's item runs its job unless a run of its kind started since the fire closed without an error (`store.runs.served`):
+  one by hand, or the item's own earlier attempt whose end was lost. An attempt cut off (the database lost, its
+  close failed, its process or `serve` stopped) served nothing, so the retry runs the job again, whose steps take only
+  what is still due. An expression that never fires again, or never fired (one bound to a year), is left out.
 - **Release links:**
   - a `release_links` table holds paper, version, url, kind, state, license, `checked_at` and `found_by` (the
     finder, a re-check or the owner's action);
@@ -202,7 +207,7 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
 | **P4** | **One Model gate.** Providers, limits and batchers per (provider, deadline) in one gate per process; ceiling, deadline and journal from the work context; recovery once at startup; `work_id` on calls; `eval ladders` through it. | V4; V3 again; then merge and deploy. |
 | **P5** | **CLI and attribution.** The model and pipeline commands submit and wait; evaluations carry their inputs and stream their results to their files; Ctrl-C asks whether to cancel or detach, and `litwatch work follow ID` picks an item back up. The API, MCP, monitor and CLI set request attribution, and the check turns strict. | V5, V6; then merge and deploy. |
 | **P6** | **Release links.** The finder's endpoint and prompt in deep; `release_links`; the triggers (an analysis, a new version, the owner's action); placeholder re-checks; the paper's page, the API and MCP; the automatic Deep read switch. | V7; then merge and deploy with deep's image. |
-| **P7** | **Cleanup.** The old liveness columns dropped, now that no image reads them; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
+| **P7** | **Cleanup.** The old liveness columns (`backend_pid`, `backend_start`, written through `store.runs.SESSION`) dropped, now that no image reads them; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
 | **T1** ∥ | **Deep track:** the shared contracts (D2), one LaTeX parser (D3), Pi to the newest release, `gpt-6.2-sol` for the Deep read (high effort), the finder's own model setting (`gpt-6.2-sol`, medium). Starts with P1; P6 needs it. | V8; deployed, and rolled back if need be, as a litwatch and deep image pair. |
 | **T2** ∥ | **OpenAI adapter:** the Responses API with structured output, the Batch API behind the batcher's interface, prices and bounds. Built against today's provider interface from P1 on; it moves into the gate in P4. | V4's adapter part; merged before P4 starts. |
 
@@ -317,12 +322,12 @@ Found while building, owned by the stage named.
   say why not.
 - **P5 (from P3): the CLI's commands are items in their own process.** `gates.work.inline` submits a `command`
   item keyed `{name}:{uuid}`, admitted by its own key or by the kind whose work it does (`deep` for
-  `fulltext --deep`, `publications` for the lookup), and serves it on a Work gate of its own, so a lost database
-  tries it again. `serve`'s take-back ends failed a `command` item whose lease lapsed while it holds an admission
-  `serve` serves; others are left. A lost database while the command reads its item's state is read again. A try
-  made again reuses what the command opened for all its tries (`_run(closing=)`, the full-text clients) and reads
-  what earlier tries committed, not what they held (`eval replay` resumes its replay). P5 replaces this with submit
-  and wait (spec, "The CLI"). The callers to move:
+  `fulltext --deep`, `publications` for the lookup), and serves it on a Work gate of its own. It has one attempt, as
+  a command run by hand has: a lost database or a lost conflict, in its work or as it reads how its item ended, ends it
+  failed with a message to run it again (`CommandCutOffError`); it returns only once its item has ended done; and
+  stopped before its item ended (Ctrl-C, its end not recorded), it ends its item failed (`store.work.abandon`). Any
+  `serve`'s take-back ends failed a `command` item whose lease lapsed, whatever its admission. P5 replaces this with
+  submit and wait (spec, "The CLI"), where `serve`'s gate tries again. The callers to move:
   - [ ] `intake`, `intake --catalog-from`, `intake archive` (inline today)
   - [ ] `nightly`, `digests write` (inline today)
   - [ ] `fulltext`, `fulltext --deep` (inline today, the latter under the `deep` admission)
@@ -336,9 +341,12 @@ Found while building, owned by the stage named.
   it claims its job, and a waiting one looks again after `jobs.worker.WAIT`. The nightly releases every runnable
   job's chunk in the unit that closes its run, failed or cut off too (`store.jobs.release`, `model_run(closing=)`),
   so they go at once; With tonight's run and that release both take the `tonight` lock, so one of them sees the
-  other. `serve`'s sweep submits the fires due before its gate starts. Between a fire's time and the scheduler
-  item's run that submits it (milliseconds) a chunk may start: the nightly then waits that chunk, as the plan
-  allows.
+  other, each stamped by the clock after taking it (`jobs.queued_at`, `runs.finished_at`: `clock_timestamp()`, not
+  the transaction's start, which a unit waiting on its fence or the lock has long passed). `serve`'s sweep submits
+  the fires due before its gate starts. A fire's publication and a chunk's claim are one decision: both take the
+  `fire` lock, and the claim, under it and after its job's row, counts a nightly fire due but not published yet as a
+  nightly that waits (`jobs.scheduler.unpublished`), so either the nightly goes first or it waits that one chunk.
+  Once a nightly lets go of the run lock, it brings forward the chunks it held back (`jobs.nightly.wake`).
 - **P5, P7 (from P3): every job write arranges its chunk.** A job's chunk is a `job` item keyed by its id; every
   write to a job's row arranges its next chunk in its unit, after locking the row (`store.jobs.arrange`, `submit`):
   submitted if the job may run, and, written by the job's own chunk, after forgetting what was submitted while it

@@ -212,19 +212,32 @@ async def run(
     night: tuple[datetime, datetime] | None | Literal["schedule"] = "schedule",
 ) -> int:
     """One run (`locked`) under the run lock, taken here: `BusyError` when another job holds
-    it. Returns the run id."""
-    async with db.held("run"):
-        return await locked(
-            db,
-            config,
-            fetch=fetch,
-            days=days,
-            limit=limit,
-            gateway=gateway,
-            today=today,
-            with_digests=with_digests,
-            night=night,
-        )
+    it. Returns the run id. Once it lets go of the lock, the chunks it held back go (`wake`)."""
+    try:
+        async with db.held("run"):
+            return await locked(
+                db,
+                config,
+                fetch=fetch,
+                days=days,
+                limit=limit,
+                gateway=gateway,
+                today=today,
+                with_digests=with_digests,
+                night=night,
+            )
+    finally:
+        await wake(db)
+
+
+async def wake(db: DatabaseGate) -> None:
+    """Bring forward the job chunks a nightly held back, its run lock let go of
+    (`store.jobs.wake`). A failure is logged: they go at their next look."""
+    try:
+        async with db.write("nightly: wake the jobs") as unit:
+            await jobs_store.wake(unit)
+    except Exception:
+        log.exception("nightly: waking the jobs it held back failed")
 
 
 async def locked(
