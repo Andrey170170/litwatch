@@ -944,6 +944,30 @@ async def test_a_service_failure_counts_against_nothing_and_pauses_the_whole_que
     assert fake.requests[1]["paper"]["id"] != tried_first  # the failed one went to the back
 
 
+async def test_a_service_failure_whose_answer_holds_a_nul_is_recorded_and_pauses(db: Session):
+    """JSONB refuses a NUL as a text column does: what the service returned is stored with it
+    replaced, so the failure and the pause still commit."""
+    await grade(db, Fit.CENTRAL)
+    said = "stopped\x00here"
+    fake = FakeDeep(
+        {
+            "error": f"usage limit reached: {said}",
+            "failure": "service",
+            "stats": USAGE,
+            "trace": trace(said),
+            "reviews": [{"round": 1, "note": said}],
+        }
+    )
+    assert await work(db, with_text(P), make(fake)) == {"card_service_failed": 1}
+    kept = "stopped\ufffdhere"
+    (failed,) = await attempts(db)
+    assert (failed["failure"], failed["trace"]) == ("service", trace(kept))
+    assert failed["reviews"] == [{"round": 1, "note": kept}]
+    (tried,) = await deep_rows(db, P.id)
+    assert tried["state"] == "ready"
+    assert await in_read(db, cards.paused_until, deep_passes.PAUSE) is not None
+
+
 async def deep_status(conn: Session, d: Deep) -> dict:
     found = await monitor.facts(Bridge(conn), Config(), [d], None)
     return next(c for c in monitor.components(found, Config()) if c["id"] == "deep")

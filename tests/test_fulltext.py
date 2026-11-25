@@ -1020,6 +1020,30 @@ async def test_the_sweep_submits_only_the_passes_a_claim_may_take(db: Session):
     del older, gone  # an older revision's, and a dismissed paper's: no claim takes them
 
 
+async def test_the_sweep_keeps_an_open_items_time_and_wants_no_running_one_again(db: Session):
+    other = paper("2610.00002", title="Another", abstract="Another.", version=1)
+    await in_write(db, papers_store.upsert, [other])
+    async with Bridge(db).write("queue two") as unit:
+        waits, runs_ = [
+            await fulltext_store.queue(unit, pid, 1, PassKind.BRIEF, "focus", TEXT_PRIORITY)
+            for pid in (P.id, other.id)
+        ]
+    # As a process starts: one item waits out a retry's hour; the other runs in a process
+    # still serving it.
+    later = datetime.now(UTC) + timedelta(hours=1)
+    await db.execute("UPDATE work_items SET not_before = %s WHERE key = %s", (later, str(waits)))
+    await db.execute(
+        "UPDATE work_items SET state = 'running', lease_token = gen_random_uuid(), "
+        "lease_until = now() + interval '1 hour', attempts = 1 WHERE key = %s",
+        (str(runs_),),
+    )
+    assert await swept(db) == [waits, runs_]
+    (waiting,) = await items_of(db, "fulltext", str(waits))
+    assert (waiting["state"], waiting["not_before"]) == ("pending", later)
+    (running,) = await items_of(db, "fulltext", str(runs_))
+    assert (running["state"], running["resubmitted"]) == ("running", False)
+
+
 async def swept(db: Session, *, deep: bool = False) -> list[int]:
     """The startup sweep as a Worker makes it: the open passes, then each in a unit of its own.
     Returns those submitted."""
@@ -1174,6 +1198,70 @@ async def test_a_nightly_beside_the_gate_takes_over_an_abandoned_pass_and_works_
 
         await until(all_ended, "the item ends with its pass done")
     assert await state_is(db, "done") and len(writer.asked) == 1  # one model call, not two
+
+
+async def test_serve_takes_over_a_pass_claimed_before_it_had_an_item_once_the_claim_lapses(
+    db: Session, monkeypatch
+):
+    await graded(db, "central")
+    (row,) = await passes(db)
+    async with gate_on(db) as gone, gone.write("claim and die") as unit:
+        (taken,) = await fulltext_store.claim(unit, timedelta(seconds=1), 1, pass_id=row["id"])
+    await db.execute("DELETE FROM work_items")  # claimed by the release before the gate
+    fake, writer = ready(FakeArchive()), Writer()
+    async with serve(db, monkeypatch, fake, writer):  # its sweep gives the pass an item
+        await until(lambda: item_ended(db, row["id"]), "the item ends")
+    assert await state_is(db, "done") and len(writer.asked) == 1
+    (item,) = await items_of(db, "fulltext", str(row["id"]))
+    # One try found it held and waited for its lease to end; the next took it over.
+    assert (item["outcome"], item["attempts"]) == ("done", 2)
+    assert item["not_before"] >= taken.lease_until
+    linked = await db.execute("SELECT work_id FROM runs WHERE kind = 'fulltext'")
+    assert [r["work_id"] for r in await linked.fetchall()] == [item["id"]]
+
+
+async def test_a_pass_finished_inline_as_its_item_decides_to_wait_leaves_it_no_wait(
+    db: Session, gate
+):
+    await graded(db, "central")
+    (row,) = await passes(db)
+    async with gate_on(db) as nightly_, nightly_.write("the nightly claims it") as unit:
+        (c,) = await fulltext_store.claim(unit, timedelta(hours=1), 1, pass_id=row["id"])
+    decided, finished = asyncio.Event(), asyncio.Event()
+    fake, writer = ready(FakeArchive()), Writer()
+    worker = workers(gate, fake, writer)["fulltext"]
+
+    class Blocked:
+        """The Worker, held once it decided to wait (its unit ended) until `finished`."""
+
+        async def __call__(self, item):
+            later = await worker(item)
+            if later is not None and not finished.is_set():
+                decided.set()
+                await finished.wait()
+            return later
+
+    async def held() -> bool:
+        return decided.is_set()
+
+    async with serving(WorkGate(gate), {"fulltext": Blocked()}):
+        await until(held, "the item finds the pass held for an hour")
+        # The nightly works it inline meanwhile: its write wants the running item again.
+        done = await fulltext.wave(
+            gate, CONFIG, archive(fake), [c], run=None, gateway=writer.gateway
+        )
+        assert done["briefs_written"] == 1
+        finished.set()  # the Worker says Later, at the claim's end, an hour away
+
+        async def all_ended() -> bool:
+            items = await items_of(db, "fulltext", str(row["id"]))
+            return all(i["state"] == "ended" for i in items)
+
+        await until(all_ended, "the item looks again at once, and finds the pass done")
+    assert await state_is(db, "done") and len(writer.asked) == 1
+    items = await items_of(db, "fulltext", str(row["id"]))
+    assert {i["outcome"] for i in items} == {"done"}
+    assert all(i["not_before"] < c.lease_until - timedelta(minutes=50) for i in items)
 
 
 # -- revisions -------------------------------------------------------------------------------------

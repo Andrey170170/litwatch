@@ -98,6 +98,7 @@ async def submit(
     admission: str | None = None,
     lasting: bool = False,
     priority: int = 0,
+    _ensure: bool = False,
 ) -> WorkItem:
     """Submit the work `key` of `kind`, to run no earlier than `not_before` (now when not
     given), admitted one at a time per `admission` (its kind when not given), in line among the
@@ -152,7 +153,7 @@ async def submit(
                 continue
             await _notify(unit, kind)
             return _item(inserted)
-        if row["state"] == "ended" or row["lasting"]:
+        if row["state"] == "ended" or row["lasting"] or _ensure:
             return _item(row)
         if row["state"] == "pending":
             sooner = await (
@@ -180,6 +181,38 @@ async def submit(
         ).fetchone()
         assert marked is not None  # locked above
         return _item(marked)
+
+
+async def ensure(
+    unit: WriteUnit,
+    kind: str,
+    key: str,
+    *,
+    not_before: datetime | None = None,
+    admission: str | None = None,
+    priority: int = 0,
+) -> WorkItem:
+    """Make sure the work `key` of `kind` has an open item: submit one when it has none, as
+    `submit` would, and otherwise return the open item as it stands, its time, its priority and
+    whether it was resubmitted all kept. What a process that starts serving a kind runs for the
+    work it finds open (a pass's item, `store.fulltext.submit_open`): finding an item is no
+    reason to run it sooner, nor again.
+
+    What it reconciles after a rollback to the image before the gate and an upgrade again
+    (docs/plans/a2-work-gate.md, "Rollback is a handoff of live work"): work the old image
+    queued has no item, and gets one here. An item it keeps needs nothing more: a running one,
+    its `serve` stopped, is taken back once its lease lapses (`take`); a pending one waits no
+    longer than the claim, the retry or the pause it was set to wait for, then decides afresh
+    (finding its pass done, say, if the old image worked it)."""
+    return await submit(
+        unit,
+        kind,
+        key,
+        not_before=not_before,
+        admission=admission,
+        priority=priority,
+        _ensure=True,
+    )
 
 
 async def forget_resubmission(unit: WriteUnit, item: WorkItem) -> None:

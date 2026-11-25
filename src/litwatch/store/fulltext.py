@@ -5,7 +5,8 @@ Each pass of the regular queue (not a re-run's, which its job works) has a work 
 the pass's id, of the kind its Worker runs (`work_kind`; docs/plans/a2-work-gate.md, P2): every
 write here that leaves such a pass where a claim can take it (ready, awaiting its text, or
 running with its claim let go) submits the item in its unit, for when it may be taken, at its
-pass's priority, and `submit_open` submits what is open when a process starts serving them.
+pass's priority, and `submit_open` makes sure each open one has an item when a process starts
+serving them.
 The item decides what to do with its pass under the pass's row lock, and claims it as every
 worker does (`decide`); a pass worked inline (the nightly) retires its item as it ends
 (`done`, `failed`). As in the queue before: due passes run in `claim`'s order of priorities,
@@ -64,19 +65,21 @@ def _admission(kind: PassKind, pass_id: int) -> str | None:
     return None if kind == PassKind.DEEP else f"{TEXT_WORK}:{pass_id % TEXT_WAVE}"
 
 
-async def submit(unit: WriteUnit, pass_id: int, at: datetime | None = None) -> None:
+async def submit(
+    unit: WriteUnit, pass_id: int, at: datetime | None = None, *, ensure: bool = False
+) -> None:
     """Submit the pass's work item, to run no earlier than `at` (now when not given), in line
     by the pass's priority, as `claim` takes passes: the owner's, then the automatic ones, then
     a re-run's: every submission of a pass's item, a Worker's retry after an error included,
-    comes through here, so its admission and priority come from one place. A pass gone
-    meanwhile has none."""
+    comes through here, so its admission and priority come from one place. With `ensure`, an
+    open item is left as it stands (`store.work.ensure`). A pass gone meanwhile has none."""
     row = await (
         await unit.execute("SELECT kind, priority FROM fulltext_passes WHERE id = %s", (pass_id,))
     ).fetchone()
     if row is None:
         return
     kind = PassKind(row["kind"])
-    await work.submit(
+    await (work.ensure if ensure else work.submit)(
         unit,
         work_kind(kind),
         str(pass_id),
@@ -155,9 +158,11 @@ async def open_ids(unit: ReadUnit, *, deep: bool = False) -> list[int]:
 
 
 async def submit_open(unit: WriteUnit, pass_id: int, *, deep: bool = False) -> bool:
-    """Submit the work item of a pass `open_ids` found, if it is still open: its row is locked
-    first and read again under the lock, so a pass worked inline meanwhile (its item retired)
-    is not given another, and the unit locks one item alone. Returns whether it submitted."""
+    """Make sure a pass `open_ids` found has a work item, if it is still open: its row is
+    locked first and read again under the lock, so a pass worked inline meanwhile (its item
+    retired) is not given another, and the unit locks one item alone. An item it has is kept as
+    it stands (`store.work.ensure`): a retry waiting out its time still waits, and a running one
+    is not wanted again. Returns whether the pass was open."""
     await unit.execute("SELECT 1 FROM fulltext_passes WHERE id = %s FOR UPDATE", (pass_id,))
     row = await (
         await unit.execute(
@@ -168,7 +173,7 @@ async def submit_open(unit: WriteUnit, pass_id: int, *, deep: bool = False) -> b
     ).fetchone()
     if row is None:
         return False
-    await submit(unit, pass_id)
+    await submit(unit, pass_id, ensure=True)
     return True
 
 

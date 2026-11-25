@@ -54,8 +54,9 @@ def _unclaimed(decision: Decision) -> Later | None:
 
 
 async def _sweep(db: DatabaseGate, *, deep: bool) -> None:
-    """Submit the item of each pass a claim can take, of Deep ones with `deep`: each in a unit
-    of its own, which locks the pass and looks at it again (`store.fulltext.submit_open`)."""
+    """Make sure each pass a claim can take, of Deep ones with `deep`, has an item, keeping
+    one it has as it stands: each in a unit of its own, which locks the pass and looks at it
+    again (`store.fulltext.submit_open`)."""
     kind = "deep" if deep else "text"
     async with db.read(f"{kind} passes: open") as unit:
         found = await store_.open_ids(unit, deep=deep)
@@ -91,7 +92,7 @@ class TextPassWorker:
         self.db, self.config, self.archive, self.gateway = db, config, archive, gateway
 
     async def sweep(self) -> None:
-        """Submit the item of each text pass a claim can take."""
+        """Make sure each text pass a claim can take has an item."""
         await _sweep(self.db, deep=False)
 
     async def __call__(self, item: WorkItem) -> Later | None:
@@ -124,7 +125,7 @@ class DeepPassWorker:
         self.db, self.config, self.archive, self.deep = db, config, archive, deep
 
     async def sweep(self) -> None:
-        """Submit the item of each Deep pass a claim can take."""
+        """Make sure each Deep pass a claim can take has an item."""
         await _sweep(self.db, deep=True)
 
     async def __call__(self, item: WorkItem) -> Later | None:

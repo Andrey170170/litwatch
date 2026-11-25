@@ -679,6 +679,30 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
     assert deep.client.http.is_closed and closed == ["recorder"]
 
 
+class Closing(Recorder):
+    """Records that it was closed."""
+
+    closed = False
+
+    async def aclose(self):
+        self.closed = True
+
+
+async def test_a_sweep_that_fails_as_the_app_starts_still_closes_every_integration(monkeypatch):
+    deep, recorder = Deep(DeepClient("http://deep.test")), Closing()
+
+    async def sweep(worker):
+        raise psycopg.OperationalError("the connection dropped")
+
+    monkeypatch.setattr(DeliveryWorker, "sweep", sweep)
+    app = create_app("postgresql://unused", "t", integrations=[deep, recorder])
+    app.state.db = contextlib.nullcontext()  # no database: the gate the lifespan opens
+    with pytest.raises(psycopg.OperationalError):
+        async with app.router.lifespan_context(app):
+            pass
+    assert deep.client.http.is_closed and recorder.closed
+
+
 class Garbled(Recorder):
     """Fails with what a remote end answered, a NUL in it, on every event or in its setup."""
 
@@ -799,3 +823,100 @@ async def test_the_owners_retry_during_a_failing_setup_runs_it_again_at_once(
         await until(twice, "the setup runs again")
     first, second = rec.set_up_at
     assert second - first < 2  # at once, not after `RETRY`
+
+
+class Conflicting(Recorder):
+    """Loses a serialization conflict once, where it is told to: in `handle`, `setup` or
+    `idle`."""
+
+    def __init__(self, where: str):
+        super().__init__("conflicting")
+        self.where, self.lost, self.idled = where, False, 0
+        if where == "setup":
+            self.setup = self._setup
+        if where == "idle":
+            self.idle = self._idle
+
+    def _lose(self, here: str) -> None:
+        if here == self.where and not self.lost:
+            self.lost = True
+            raise psycopg.errors.SerializationFailure("could not serialize access")
+
+    async def handle(self, db, event):
+        self._lose("handle")
+        await super().handle(db, event)
+
+    async def _setup(self, db):
+        self._lose("setup")
+
+    async def _idle(self, db):
+        self.idled += 1
+        self._lose("idle")
+
+
+@pytest.mark.parametrize("where", ["handle", "setup", "idle"])
+async def test_a_conflict_in_a_delivery_is_no_failure_and_its_turn_is_tried_again(
+    conn: Session, db, where
+):
+    rec = Conflicting(where)
+    await in_write(conn, outbox.cursor, rec.name)  # delivered to before: it has its cursor
+    gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()
+    ids = await emit(conn, events.PAPER_SAVED)
+
+    async def tried_again() -> bool:  # the conflict lost, and its turn run again to its end
+        found = await turns(conn, rec.name)
+        return rec.lost and any(t["attempts"] == 2 and t["state"] == "ended" for t in found)
+
+    async with served(gate, workers):
+        await until(tried_again, "the turn that lost the conflict is run again")
+        await until(lambda: _seen(rec, ids), "the event is delivered")
+    cursor = await in_write(conn, outbox.cursor, rec.name)
+    assert (cursor.failing, cursor.failures, cursor.last_error) == (None, 0, None)
+    assert (cursor.setup_failures, cursor.setup_error) == (0, None)
+    found = await turns(conn, rec.name)
+    assert {t["outcome"] for t in found if t["state"] == "ended"} == {"done"}
+
+
+class SetUpAndIdling(Recorder):
+    """Counts its setups and its `idle` calls."""
+
+    def __init__(self):
+        super().__init__("set-up-and-idling")
+        self.setups = self.idled = 0
+
+    async def setup(self, db):
+        self.setups += 1
+
+    async def idle(self, db):
+        self.idled += 1
+
+
+async def test_an_events_backoff_holds_back_neither_the_setup_nor_the_idle_hook_at_startup(
+    conn: Session, db
+):
+    rec = SetUpAndIdling()
+    await start(db, rec)
+    (failing,) = await emit(conn, events.PAPER_SAVED)
+    # A process gone: its event failed, and waits out an hour's backoff; no turn is left.
+    await conn.execute(
+        "UPDATE integration_cursors SET failing = %s, failures = 8, last_error = 'down', "
+        "failed_at = now(), retry_at = now() + interval '1 hour' WHERE name = %s",
+        (failing, rec.name),
+    )
+    await conn.execute("DELETE FROM work_items")
+    rec.setups = 0
+    gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()
+
+    async def ran() -> bool:
+        return rec.setups == 1 and rec.idled == 1 and await _waits(conn, rec.name)
+
+    async with served(gate, workers):
+        await until(ran, "the setup and the idle hook run at once")
+    assert rec.seen == []  # the event still waits out its backoff
+    cursor = await in_write(conn, outbox.cursor, rec.name)
+    found = await turns(conn, rec.name)
+    assert found[0]["state"] == "ended" and found[0]["outcome"] == "done"
+    (waiting,) = [t for t in found if t["state"] == "pending"]
+    assert cursor.retry_at is not None and waiting["not_before"] < cursor.retry_at  # the hook's

@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, LiteralString, NamedTuple
+from typing import Any, NamedTuple
 
 from psycopg.types.json import Jsonb
 
@@ -176,10 +176,22 @@ async def of_paper(unit: ReadUnit, paper_id: str, type: str) -> list[Event]:
     return [Event(**r) for r in rows]
 
 
-async def cursor(unit: WriteUnit, name: str, *, lock: bool = False) -> Cursor:
+async def locked(unit: WriteUnit, name: str) -> Cursor | None:
+    """The integration's cursor, its row locked for the unit before any item's (a turn
+    arranging the next), or None while it has none: made by its first turn (`cursor`), not
+    here, so this waits for no emitter."""
+    found = await (
+        await unit.execute(
+            f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s FOR NO KEY UPDATE",
+            (name,),
+        )
+    ).fetchone()
+    return _cursor(found) if found is not None else None
+
+
+async def cursor(unit: WriteUnit, name: str) -> Cursor:
     """The integration's cursor, made at the last settled event the first time it is asked
-    for: an integration enabled for the first time is not woken by what came before it. With
-    `lock`, its row is locked for the unit, before any item's (a turn arranging the next).
+    for: an integration enabled for the first time is not woken by what came before it.
 
     It is made under the outbox's SHARE lock, which waits for every unit that wrote an event to
     end, and makes each that writes one meanwhile wait for this unit: so every emitter either
@@ -187,11 +199,8 @@ async def cursor(unit: WriteUnit, name: str, *, lock: bool = False) -> Cursor:
     cursors to wake (`wake_all`) after it was made. Without it, an emitter that looked before
     and committed after the first turn would leave events no turn is arranged for. Taken once
     for an integration's lifetime; each emitting write waits for it meanwhile."""
-    locking: LiteralString = " FOR NO KEY UPDATE" if lock else ""
     found = await (
-        await unit.execute(
-            f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s{locking}", (name,)
-        )
+        await unit.execute(f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s", (name,))
     ).fetchone()
     if found is not None:
         return _cursor(found)
@@ -208,9 +217,7 @@ async def cursor(unit: WriteUnit, name: str, *, lock: bool = False) -> Cursor:
         (name,),
     )
     row = await (
-        await unit.execute(
-            f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s{locking}", (name,)
-        )
+        await unit.execute(f"SELECT {_FIELDS} FROM integration_cursors WHERE name = %s", (name,))
     ).fetchone()
     return _cursor(row)
 

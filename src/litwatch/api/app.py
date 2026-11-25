@@ -53,7 +53,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     wait for cutover), Deep passes when a card provider is loaded as well, and deliveries when
     any integration that reacts to events is loaded; each kind is swept for what waits before
     the gate starts. And the MCP server (its session manager and PDF executor) while `/mcp` is
-    served. Every integration is closed once all of them have stopped."""
+    served. Every integration is closed once all of them have stopped, or a sweep failed."""
     tasks = []
     workers: dict[str, TextPassWorker | DeepPassWorker | DeliveryWorker] = {}
     enabled = app.state.config.schedule.enabled
@@ -70,26 +70,30 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     if reacting := events.reacting(app.state.integrations):
         delivery = workers[outbox.DELIVERY] = DeliveryWorker(app.state.db, reacting)
         keys[outbox.DELIVERY] = delivery.keys  # another process's integrations are not ours
-    for each in workers.values():
-        await each.sweep()
-    if workers:
-        tasks.append(asyncio.create_task(WorkGate(app.state.db).run(workers, keys=keys)))
-    if enabled:
-        tasks.append(
-            asyncio.create_task(
-                scheduler.run_forever(
-                    app.state.db, app.state.config, app.state.gateway, app.state.publications
-                )
-            )
-        )
-        tasks.append(
-            asyncio.create_task(
-                worker.run_forever(
-                    app.state.db, app.state.config, app.state.gateway, app.state.jobs_wake, archive
-                )
-            )
-        )
     try:
+        for each in workers.values():
+            await each.sweep()
+        if workers:
+            tasks.append(asyncio.create_task(WorkGate(app.state.db).run(workers, keys=keys)))
+        if enabled:
+            tasks.append(
+                asyncio.create_task(
+                    scheduler.run_forever(
+                        app.state.db, app.state.config, app.state.gateway, app.state.publications
+                    )
+                )
+            )
+            tasks.append(
+                asyncio.create_task(
+                    worker.run_forever(
+                        app.state.db,
+                        app.state.config,
+                        app.state.gateway,
+                        app.state.jobs_wake,
+                        archive,
+                    )
+                )
+            )
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield
     finally:

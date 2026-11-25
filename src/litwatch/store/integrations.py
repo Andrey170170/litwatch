@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core.deepread import Figure
 from litwatch.gates.database import ReadUnit, WriteUnit
-from litwatch.store.text import stored
+from litwatch.store.text import stored, stored_json
 
 # -- zotero ----------------------------------------------------------------------------------------
 
@@ -104,7 +104,8 @@ async def put_card(
             text_source = EXCLUDED.text_source, pass_id = EXCLUDED.pass_id,
             notes_acknowledged_at = NULL
         """,
-        (paper_id, Jsonb(card), model, Jsonb(stats), revision, version, source, pass_id),
+        (paper_id, Jsonb(stored_json(card)), model, Jsonb(stored_json(stats)), revision, version,
+         source, pass_id),
     )  # fmt: skip
     await unit.execute("DELETE FROM deep_figures WHERE paper_id = %s", (paper_id,))
     for f in figures:
@@ -152,7 +153,7 @@ async def card_failed(
         """,
         {
             "p": paper_id,
-            "stats": Jsonb(stats) if stats is not None else None,
+            "stats": Jsonb(stored_json(stats)) if stats is not None else None,
             "error": stored(error),
         },
     )
@@ -201,7 +202,8 @@ async def attempt_ended(
     """The attempt's job ended, with a card or failed, and whose `failure` it was: its usage,
     or None when it is unknown (never zero for that), its trace, kept for good, or None when
     there is none (its job never ran, was lost or never ended), and its review rounds as the
-    service returned them, or None when no review ran."""
+    service returned them, or None when no review ran. What the service returned is stored as
+    JSONB takes it (`stored_json`), so the failure it reports is recorded whatever it holds."""
     await unit.execute(
         "UPDATE deep_attempts SET ended_at = now(), usage = %(usage)s, error = %(error)s, "
         "failure = %(failure)s, trace = %(trace)s, reviews = %(reviews)s, "
@@ -209,11 +211,11 @@ async def attempt_ended(
         "WHEN %(failure)s = 'service' THEN now() ELSE service_failed_at END "
         "WHERE id = %(id)s AND ended_at IS NULL",
         {
-            "usage": Jsonb(usage) if usage is not None else None,
+            "usage": Jsonb(stored_json(usage)) if usage is not None else None,
             "error": error and stored(error),
             "failure": failure,
-            "trace": Jsonb(trace) if trace is not None else None,
-            "reviews": Jsonb(reviews) if reviews is not None else None,
+            "trace": Jsonb(stored_json(trace)) if trace is not None else None,
+            "reviews": Jsonb(stored_json(reviews)) if reviews is not None else None,
             "id": attempt_id,
         },
     )
