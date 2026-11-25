@@ -30,7 +30,7 @@ from datetime import UTC, datetime, timedelta
 
 from litwatch.events import Reacting
 from litwatch.gates.database import DatabaseGate
-from litwatch.gates.work import conflicted, database_lost
+from litwatch.gates.work import conflicted, retryable
 from litwatch.store import outbox
 
 log = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ def _not_theirs(exc: BaseException) -> bool:
     """Whether `exc` is no failure of the integration's but the database's: it went away, or
     a statement lost a deadlock or a serialization conflict. It is raised, and the gate tries
     the turn again."""
-    return database_lost(exc) or conflicted(exc)
+    return retryable(exc)
 
 
 def _clock(now: datetime | None) -> Callable[[], datetime]:

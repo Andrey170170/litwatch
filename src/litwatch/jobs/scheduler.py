@@ -4,9 +4,10 @@ enabled = true`; nothing runs on a schedule before cutover (spec decision 22).
 
 The scheduler only submits. Its Worker (`ScheduleWorker`, the one item of kind `schedule`)
 submits each fire of each job that is due, then waits for the next fire. A fire is due from its
-time until `CATCH_UP` after it, unless a run of its kind started since (one the CLI ran, or the
-scheduler before the Work gate): a missed one is submitted late, one missed by longer is
-skipped. Its item's key is the fire's time, which holds for good (`store.work.submit`,
+time until `CATCH_UP` after it, unless a run of its kind that serves it started since
+(`store.runs.last_served`: one the CLI ran that closed without an error, or one of the image
+before the Work gate, which counted by starting): a missed one is submitted late, one missed by
+longer is skipped. Its item's key is the fire's time, which holds for good (`store.work.submit`,
 `lasting`), so a fire is submitted once, however many processes or restarts look at it.
 
 A fire's Worker (`NightlyWorker`, `PublicationsWorker`) runs its job, unless a run served it
@@ -35,7 +36,7 @@ from croniter import CroniterBadDateError, croniter
 from litwatch.config import Config
 from litwatch.core.work import WorkItem
 from litwatch.gates.database import BusyError, DatabaseGate, LeaseLostError, ReadUnit
-from litwatch.gates.work import Later, conflicted, database_lost
+from litwatch.gates.work import Later, retryable
 from litwatch.jobs import nightly, publications
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.publications import Dblp, PublicationSource
@@ -88,7 +89,7 @@ def _next(cron: str, now: datetime) -> datetime | None:
 
 def is_due(cron: str, now: datetime, last_run: datetime | None) -> bool:
     """Whether the latest fire at `now` is due: within `CATCH_UP` of it, and no run of its kind
-    started (`last_run`) since. One that never fired is not."""
+    that serves it started (`last_run`) since. One that never fired is not."""
     if (fired := _last(cron, now)) is None:
         return False
     if now.astimezone(UTC) - fired.astimezone(UTC) > CATCH_UP:
@@ -137,7 +138,7 @@ class ScheduleWorker:
         try:
             return await self.fires()
         except Exception as exc:
-            if database_lost(exc) or conflicted(exc) or isinstance(exc, LeaseLostError):
+            if retryable(exc) or isinstance(exc, LeaseLostError):
                 raise  # the gate tries the item again
             log.exception("scheduler: submitting the fires failed")
             return Later(datetime.now(UTC) + WAIT)
@@ -152,7 +153,7 @@ class ScheduleWorker:
             # Each fire in a unit of its own: its runs read, its item submitted, at once, under
             # the lock a chunk's admission takes (`unpublished`).
             async with self.db.write(f"schedule: {job.kind}", locks=["fire"]) as unit:
-                if is_due(job.cron, now, await runs.last_started(unit, job.kind)):
+                if is_due(job.cron, now, await runs.last_served(unit, job.kind)):
                     found = await work.submit(
                         unit, job.kind, fire_key(fired), not_before=fired, lasting=True
                     )
@@ -169,7 +170,7 @@ async def unpublished(unit: ReadUnit, config: Config) -> bool:
         return False
     now = datetime.now(config.schedule.zone)
     cron = config.schedule.nightly
-    if not is_due(cron, now, await runs.last_started(unit, "nightly")):
+    if not is_due(cron, now, await runs.last_served(unit, "nightly")):
         return False
     fired = _last(cron, now)
     assert fired is not None  # it is due
@@ -202,9 +203,28 @@ class NightlyWorker:
                 # Decided under the run lock, which every nightly run takes.
                 if not await _served(self.db, "nightly", item):
                     await nightly.locked(self.db, self.config, gateway=self.gateway)
+        except Exception as exc:
+            if not await self._unclosed(item, exc):
+                raise
+            # Its run never closed (the close failed, or the database went away): the fire is
+            # not served, and runs again, after a backoff. Its item stays running until then,
+            # so no chunk starts meanwhile (`store.jobs.nightly_waits`).
+            after = min(WAIT * 2 ** (item.attempts - 1), timedelta(hours=1))
+            log.warning("scheduler: the nightly did not close (%s); again in %s", exc, after)
+            return Later(datetime.now(UTC) + after)
         finally:
             await nightly.wake(self.db)  # the chunks it held back go, the run lock free
         return None
+
+    async def _unclosed(self, item: WorkItem, exc: Exception) -> bool:
+        """Whether the run this claim of `item` opened is still open after `exc`; False when it
+        cannot be read, so `exc` is raised as it was."""
+        try:
+            async with self.db.read("nightly: did its run close") as unit:
+                return await runs.unclosed(unit, item)
+        except Exception:
+            log.warning("scheduler: whether the nightly closed could not be read", exc_info=True)
+            return False
 
 
 class PublicationsWorker:

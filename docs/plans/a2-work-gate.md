@@ -126,9 +126,11 @@ Found in a survey of the code at 548857e3:
   image before counts it served, as a nightly whose process dies does today, and its work waits for the next night or
   a nightly run by hand.
 - **The scheduler's handoff.** A fire the old scheduler already served (a run started after it) stays served when P3
-  starts inside the catch-up window: the submitter checks the runs as today before using the key. Once submitted, a
-  fire's item runs its job unless a run of its kind started since the fire closed without an error (`store.runs.served`):
-  one by hand, or the item's own earlier attempt whose end was lost. An attempt cut off (the database lost, its
+  starts inside the catch-up window: the submitter checks the runs before using the key. A run of the image before
+  (`runs.work_id` unset) serves its fire by starting, as it did there; a run of this image only once it closed without
+  an error (`store.runs.last_served`, `served`), so a nightly run by hand that failed leaves the fire due. Once
+  submitted, a fire's item runs its job unless such a run started since the fire: one by hand, or the item's own
+  earlier attempt whose end was lost. An attempt cut off (the database lost, its
   close failed, its process or `serve` stopped) served nothing, so the retry runs the job again, whose steps take only
   what is still due. An expression that never fires again, or never fired (one bound to a year), is left out.
 - **Release links:**
@@ -325,15 +327,18 @@ Found while building, owned by the stage named.
   (`store.runs.ALIVE`): `runs.lease_token` is the lease token of the item it was opened in, or, for a job's run, of
   its latest chunk's, moved as each chunk links it (`store.work.link_run`, migration 0049). An item taken again gets
   a new token, so it revives no run of the claim before. `runs.work_id` and `work_items.run_id` stay as the
-  history of which item ran what. A run opened outside any item reads dead at once: today only the API's grade now
-  (`api/settings.py`, kind `grading`), whose liveness nothing reads. P5's request attribution can give it one, or
-  say why not.
+  history of which item ran what: each run records the item it ran under (`runs.start` sets `work_id`, a chunk's
+  run its chunk's), and an item its latest run (`work_items.run_id`), so a chunk taken back keeps the run before.
+  A run opened outside any item reads dead at once: today only the API's grade now (`api/settings.py`, kind
+  `grading`), whose liveness nothing reads. P5's request attribution can give it one, or say why not.
 - **P5 (from P3): the CLI's commands are items in their own process.** `gates.work.inline` submits a `command`
   item keyed `{name}:{uuid}`, admitted by its own key or by the kind whose work it does (`deep` for
-  `fulltext --deep`, `publications` for the lookup), and serves it on a Work gate of its own. It has one attempt, as
-  a command run by hand has: a lost database or a lost conflict, in its work or as it reads how its item ended, ends it
-  failed with a message to run it again (`CommandCutOffError`); it returns only once its item has ended done; and
-  stopped before its item ended (Ctrl-C, its end not recorded), it ends its item failed (`store.work.abandon`). Any
+  `fulltext --deep`, `publications` for the lookup), waits for its admission, and runs that one claim itself under
+  the gate's heartbeat (`WorkGate._admitted`, `_once`); no gate serves it. It has one attempt, as a command run by
+  hand has: a lost database or a lost conflict as it claims or works, a lost lease, or work that stops cancelled ends
+  it failed with a message to run it again (`CommandCutOffError`), and it is never given back; it returns once its
+  end is recorded done. Whatever stops it after the submit (Ctrl-C, an error of the gate's, its end not recorded),
+  its `finally` ends the item failed by its key (`store.work.abandon`), so none is left pending or running. Any
   `serve`'s take-back ends failed a `command` item whose lease lapsed, whatever its admission. P5 replaces this with
   submit and wait (spec, "The CLI"), where `serve`'s gate tries again. The callers to move:
   - [ ] `intake`, `intake --catalog-from`, `intake archive` (inline today)
@@ -343,20 +348,29 @@ Found while building, owned by the stage named.
   - [ ] `eval replay` (inline today)
   - [ ] `ping` (not inline)
   - [ ] the unjournaled evaluations: `eval classify`, `eval digests`, `eval briefs`, `eval ladders` (not inline)
-- **P5 (from P3): the nightly and the chunks.** No chunk starts while a `nightly` item is pending, or running under
-  a live lease without having closed the run that claim opened (opening it included), or a nightly run is open and
-  alive (the CLI's) (`store.jobs.nightly_waits`); a chunk reads that before the run lock and again under it, before
+- **P5 (from P3): the nightly and the chunks.** No chunk starts while a `nightly` item is pending, or running
+  without having closed the run that claim opened (opening it included; a lapsed lease too, until the item is taken
+  back), or a nightly run is open and alive (the CLI's) (`store.jobs.nightly_waits`). The item clauses count only
+  where this process's configuration runs fires (`fires=`, the schedule on): a fire left pending by a `serve` since
+  started with the schedule off holds back no job, re-run pass or `fulltext --deep`. A close that fails leaves the
+  run open and the fire's item running: it is tried again on the same fire after a backoff (`jobs.scheduler.WAIT`,
+  doubling, at most an hour), and the chunks wait until it closes; a chunk reads that before the run lock and again under it, before
   it claims its job, and a waiting one looks again after `jobs.worker.WAIT`. The nightly releases every runnable
   job's chunk in the unit that closes its run, failed or cut off too (`store.jobs.release`, `model_run(closing=)`),
-  so they go at once; With tonight's run and that release both take the `tonight` lock, so one of them sees the
+  so they go at once. Tonight's run and that release both take the `tonight` lock, so one of them sees the
   other, each stamped by the clock after taking it (`jobs.queued_at`, `runs.finished_at`: `clock_timestamp()`, not
   the transaction's start, which a unit waiting on its fence or the lock has long passed). `serve`'s sweep submits
   the fires due before its gate starts. A fire's publication and a chunk's claim are one decision: both take the
   `fire` lock, and the claim, under it and after its job's row, counts a nightly fire due but not published yet as a
   nightly that waits (`jobs.scheduler.unpublished`), so either the nightly goes first or it waits that one chunk.
-  Once a nightly lets go of the run lock, it brings forward the chunks it held back (`jobs.nightly.wake`).
-- **P5, P7 (from P3): every job write arranges its chunk.** A job's chunk is a `job` item keyed by its id; every
-  write to a job's row arranges its next chunk in its unit, after locking the row (`store.jobs.arrange`, `submit`):
+  Once a nightly that took the run lock lets go of it, it brings forward the chunks it held back
+  (`jobs.nightly.wake`); one that never took it wakes none. The release and the wake are one operation per job
+  (`store.jobs.submit`, `how=`), in the order of the jobs' ids, each the job's row and then its item's; the wake
+  moves only a pending item.
+- **P5, P7 (from P3): each job write that can change whether or when it runs arranges its chunk.** A job's chunk
+  is a `job` item keyed by its id; such a write (its creation or queueing, a claim, progress, a wait, a finish or
+  failure, a release) arranges its next chunk in its unit, from the job's row it locked (`store.jobs.arrange`,
+  `submit`); a run link or a digest settling changes neither, so arranges none:
   submitted if the job may run, and, written by the job's own chunk, after forgetting what was submitted while it
   ran, so the chunk's item ends with the decision of the job's last write. An error the chunk's handling did not
   record fails the job, which arranges none (`JobWorker._fail`); closing a run only records it. The lock order is

@@ -168,6 +168,27 @@ async def test_a_fire_a_run_served_already_is_neither_submitted_nor_run(
     assert await scheduler.NightlyWorker(db, config)(item) is None
 
 
+@pytest.mark.parametrize("ended", ["failed", "still open"])
+async def test_a_run_of_this_image_that_has_not_closed_cleanly_leaves_the_fire_due(
+    conn: Session, db, ended
+):
+    """A nightly by hand after the fire, in a command item of this image, failed or not closed
+    yet: it serves no fire yet, so the fire is submitted (and, the lookup's too), and a chunk
+    counts it as due meanwhile; the fire's item finds out under the run lock what that run
+    did."""
+    config = schedule(daily(timedelta(minutes=2)), daily(timedelta(minutes=2)))
+    fired = scheduler.last_fire(config.schedule.nightly, datetime.now(ZONE))
+    for kind in ("nightly", "publications"):
+        run = await started(conn, kind, alive=True)
+        if ended == "failed":
+            await in_write(conn, runs.finish, run, error="RuntimeError: it broke")
+    assert await in_read(conn, scheduler.unpublished, config)
+    await scheduler.ScheduleWorker(db, config)(ITEM)
+    for kind in ("nightly", "publications"):
+        (item,) = await items_of(conn, kind, scheduler.fire_key(fired))
+        assert item["state"] == "pending"
+
+
 async def test_a_run_started_before_a_fire_does_not_serve_it(conn: Session, db, monkeypatch):
     """A nightly run by hand before the fire's time: the fire is submitted, and its item runs
     the nightly. Only a run started at or after a fire serves it."""
@@ -282,12 +303,22 @@ async def test_a_nightly_brings_forward_the_chunks_it_held_back_as_it_lets_go(
     assert chunk["not_before"] <= datetime.now(UTC)
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        psycopg.OperationalError("the server closed the connection unexpectedly"),
+        RuntimeError("the release went wrong"),
+    ],
+    ids=["database lost", "another error"],
+)
 async def test_a_fire_whose_nightly_could_not_close_runs_it_again_and_releases_tonight(
-    conn: Session, db, monkeypatch
+    conn: Session, db, monkeypatch, error
 ):
-    """The database is lost as the fire's nightly closes its run (and releases tonight's jobs,
-    in the same unit): the fire's own attempt, cut off, served nothing, so the gate's retry runs
-    the nightly again, which closes, and the job on tonight's run goes in the queue."""
+    """The fire's nightly fails to close its run (and release tonight's jobs, in the same unit):
+    the database lost, or any other error. Its own attempt, cut off, served nothing, so the
+    same fire runs the nightly again, after a backoff, which closes, and the job on tonight's
+    run goes in the queue."""
+    monkeypatch.setattr(scheduler, "WAIT", timedelta(milliseconds=200))
     await settling.save_tree(conn, TREE)
     models = Scripted()
     monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False, with_digests=False))
@@ -300,7 +331,7 @@ async def test_a_fire_whose_nightly_could_not_close_runs_it_again_and_releases_t
     async def drops(unit):
         if not lost:
             lost.append(True)
-            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+            raise error
         await real(unit)
 
     monkeypatch.setattr(jobs_store, "release", drops)
@@ -325,6 +356,39 @@ async def test_a_fire_whose_nightly_could_not_close_runs_it_again_and_releases_t
     assert job in await in_read(conn, jobs_store.open_ids) and await stranded(conn) == []
 
 
+async def test_a_fire_whose_digests_lose_a_conflict_is_tried_again(conn: Session, db, monkeypatch):
+    """A digest's write loses a serialization conflict inside the topics' task group: the group
+    is made of retryable errors alone, so the gate tries the same fire again, which runs."""
+    from litwatch import digests  # noqa: PLC0415
+
+    await settling.save_tree(conn, TREE)
+    monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False))
+    tries = []
+
+    async def write(*_, **__) -> None:
+        tries.append(1)
+        if len(tries) == 1:
+            raise psycopg.errors.SerializationFailure("could not serialize access")
+
+    async def released(unit, today) -> bool:
+        return True  # the day's listing is out: each daily digest is written
+
+    monkeypatch.setattr(digests, "write", write)
+    monkeypatch.setattr(digests.store_, "released", released)
+    async with db.write("a fire's item") as unit:
+        item = await work.submit(unit, "nightly", scheduler.fire_key(DAY), lasting=True)
+
+    async def ended() -> bool:
+        (row,) = await items_of(conn, "nightly", item.key)
+        return row["state"] == "ended"
+
+    workers = {"nightly": scheduler.NightlyWorker(db, CONFIG, Scripted().gateway)}
+    async with serving(WorkGate(db, poll=0.1), workers):
+        await until(ended, "the fire's item to end")
+    (row,) = await items_of(conn, "nightly", item.key)
+    assert tries and (row["outcome"], row["attempts"]) == ("done", 2)
+
+
 # -- through `serve` -------------------------------------------------------------------------
 
 
@@ -341,15 +405,27 @@ async def test_serve_runs_the_due_nightly_then_the_job_it_held_back(conn: Sessio
     job = await in_write(conn, jobs_store.create, "process", {"papers": [a.id]}, 1, "queued")
 
     async def done() -> bool:
-        return (await job_of(conn, job))["state"] == "done"
+        ended = await (
+            await conn.execute(
+                "SELECT 1 FROM work_items WHERE kind IN ('nightly', 'job') AND state <> 'ended'"
+            )
+        ).fetchall()
+        return (await job_of(conn, job))["state"] == "done" and not ended
 
     async with served(db, config, gateway=models.gateway):
-        await until(done, "the job to be done")
+        await until(done, "the job to be done, its items ended")
     night, chunk = await (
         await conn.execute("SELECT * FROM runs WHERE kind IN ('nightly', 'job') ORDER BY id")
     ).fetchall()
     assert (night["kind"], chunk["kind"]) == ("nightly", "job")
     assert chunk["started_at"] >= night["finished_at"]  # the job waited for the nightly
+    # Each ended done on record, with the run it worked.
+    fired = scheduler.last_fire(config.schedule.nightly, datetime.now(ZONE))
+    (fire,) = await items_of(conn, "nightly", scheduler.fire_key(fired))
+    assert (fire["outcome"], night["work_id"]) == ("done", fire["id"])
+    chunks = await items_of(conn, jobs_store.WORK, str(job))
+    assert chunks and all(c["outcome"] == "done" for c in chunks)
+    assert {c["run_id"] for c in chunks} == {chunk["id"]}
     (schedule_item,) = await items_of(conn, scheduler.SCHEDULE, scheduler.SCHEDULE)
     assert schedule_item["state"] == "pending" and schedule_item["not_before"] > datetime.now(UTC)
 

@@ -84,11 +84,13 @@ async def work(
     *,
     rules: word.Rules,
     limit: int | None = None,
+    fires: bool = True,
 ) -> Counter[str]:
     """Work the Deep passes that are due, one at a time, up to `limit` claimed (`litwatch
     fulltext --deep`); their papers are settled by `rules`. A re-run's (background) passes
-    wait while a nightly run is running or due (pipeline.md, section 10). Returns how the tries
-    ended."""
+    wait while a nightly run is running or due (pipeline.md, section 10): a scheduled fire
+    counts with `fires`, the configured schedule on (`store.jobs.nightly_waits`). Returns how
+    the tries ended."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
     while limit is None or len(tried) < limit:
@@ -96,7 +98,7 @@ async def work(
             break
         async with db.write("claim a deep pass") as unit:
             # Asked at each claim: a nightly may have come due meanwhile.
-            background = not await jobs_store.nightly_waits(unit)
+            background = not await jobs_store.nightly_waits(unit, fires=fires)
             claimed = await store_.claim(
                 unit, deep.lease, 1, tried, deep=True, background=background
             )

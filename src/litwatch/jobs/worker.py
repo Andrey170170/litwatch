@@ -55,7 +55,7 @@ from litwatch.core import FAILED_RUNS
 from litwatch.core.work import WorkItem
 from litwatch.feedback import word
 from litwatch.gates.database import BusyError, DatabaseGate, LeaseLostError, ReadUnit
-from litwatch.gates.work import Later, conflicted, database_lost
+from litwatch.gates.work import Later, retryable
 from litwatch.jobs import digests as digest_jobs
 from litwatch.jobs import nightly, replays, reruns, scheduler
 from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
@@ -93,7 +93,7 @@ def _retried(exc: BaseException) -> bool:
     """Whether the gate tries the chunk's item again for `exc` rather than the job failing: the
     database went away under it, a statement lost a conflict, or its lease is lost (the item
     is no longer this task's)."""
-    return database_lost(exc) or conflicted(exc) or isinstance(exc, LeaseLostError)
+    return retryable(exc) or isinstance(exc, LeaseLostError)
 
 
 @dataclass
@@ -124,7 +124,7 @@ class JobWorker:
             found = await jobs_store.open_ids(unit)
         for job_id in found:
             async with self.db.write("jobs: sweep") as unit:
-                await jobs_store.submit(unit, job_id, ensure=True)
+                await jobs_store.submit(unit, job_id, how="ensure")
 
     async def __call__(self, item: WorkItem) -> Later | None:
         waited = Later(datetime.now(UTC) + WAIT)
@@ -159,9 +159,9 @@ class JobWorker:
     async def _nightly_first(self, unit: ReadUnit) -> bool:
         """Whether a nightly goes before any chunk now: one due or running
         (`store.jobs.nightly_waits`), or a fire due that the scheduler has yet to publish."""
-        return await jobs_store.nightly_waits(unit) or await scheduler.unpublished(
-            unit, self.config
-        )
+        return await jobs_store.nightly_waits(
+            unit, fires=self.config.schedule.enabled
+        ) or await scheduler.unpublished(unit, self.config)
 
     async def _claimed(self, item: WorkItem, waited: Later) -> Later | None:
         """Under the run lock: claim the item's job and work its chunk. The claim is decided

@@ -648,6 +648,20 @@ async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn: S
     ] == "running"  # its text pass still waits
 
 
+async def test_a_fire_no_process_here_runs_holds_no_rerun_pass_back(conn: Session, db, models):
+    """`serve` stopped with a fire's item pending, and the schedule is off now: `fulltext
+    --deep` (`fires` off) makes the re-run's card, rather than wait for a nightly nothing runs."""
+    await focus_rerun(conn, models, ceiling=1.0)
+    w = worker.JobWorker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
+    assert await step(w)  # graded; its passes queued
+    await nightly_due(conn)
+    service = FakeDeep(DONE)
+    done = await deep_passes.work(
+        db, archive(with_text(A)), make(service), rules=settling.RULES, fires=False
+    )
+    assert done == {"cards_written": 1} and len(service.requests) == 1
+
+
 async def test_a_nightly_digest_does_not_wait_for_a_reruns_passes(conn: Session, db, models):
     from litwatch.store import digests  # noqa: PLC0415
 

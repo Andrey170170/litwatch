@@ -212,9 +212,12 @@ async def run(
     night: tuple[datetime, datetime] | None | Literal["schedule"] = "schedule",
 ) -> int:
     """One run (`locked`) under the run lock, taken here: `BusyError` when another job holds
-    it. Returns the run id. Once it lets go of the lock, the chunks it held back go (`wake`)."""
+    it. Returns the run id. Once it lets go of the lock, the chunks it held back go (`wake`);
+    one that never took it held none back."""
+    held = False
     try:
         async with db.held("run"):
+            held = True
             return await locked(
                 db,
                 config,
@@ -227,7 +230,8 @@ async def run(
                 night=night,
             )
     finally:
-        await wake(db)
+        if held:
+            await wake(db)
 
 
 async def wake(db: DatabaseGate) -> None:

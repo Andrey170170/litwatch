@@ -1340,22 +1340,27 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
     db: Session, gate, monkeypatch
 ):
     """V3 (docs/plans/a2-work-gate.md): the same seeded nightly, its digests written and its
-    full-text passes worked inline, run directly on one schema and as the fire of a strict
-    `serve` on another: their run records' counts, cost and digests match."""
+    Brief written inline through the real pass (the archive and the models faked), run directly
+    on one schema and as the fire of a strict `serve` on another: their run records' counts,
+    cost and digests match, and the fire's item ended done with its run."""
     from functools import partial  # noqa: PLC0415
 
+    from litwatch.config import Models as Roles  # noqa: PLC0415
     from litwatch.llm import Gateway  # noqa: PLC0415
-    from tests import scripted  # noqa: PLC0415
+    from tests import briefs, scripted  # noqa: PLC0415
     from tests.fakes import ScriptedProvider  # noqa: PLC0415
+    from tests.fakes_http import FakeArchive  # noqa: PLC0415
     from tests.sessions import schema  # noqa: PLC0415
 
     class Models:
-        """The nightly steps scripted (`tests.scripted`), the digests' writer too."""
+        """The nightly steps scripted (`tests.scripted`), the Brief and the digests' writer."""
 
         def __init__(self) -> None:
-            self.steps, self.writer = scripted.Scripted(), Writer()
+            self.steps, self.brief, self.writer = scripted.Scripted(), briefs.Writer(), Writer()
 
         def respond(self, role, request):
+            if role.model == briefs.BRIEF_ROLE.model:
+                return self.brief.respond(role, request)
             by = self.steps if role.model in scripted.BY_MODEL else self.writer
             return by.respond(role, request)
 
@@ -1370,7 +1375,7 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
     now = datetime.now(UTC)
     fired = now - timedelta(minutes=2)
     config = scripted.CONFIG.model_copy(
-        update={"schedule": Schedule(
+        update={"models": Roles(**scripted.ROLES, brief=briefs.BRIEF_ROLE), "schedule": Schedule(
             enabled=True,
             timezone="UTC",
             nightly=f"{fired.minute} {fired.hour} * * *",
@@ -1386,17 +1391,9 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
         await conn.execute("UPDATE papers SET dismissed_at = now() WHERE id <> %s", (P.id,))
         await listed(conn, today, P)
 
-    async def passes(db: DatabaseGate, config, archive, run=None, limit=None, deadline=None):
-        async with db.write("the passes worked") as unit:
-            done = await unit.execute(
-                "UPDATE fulltext_passes SET state = 'done' WHERE state <> 'done'"
-            )
-        if run is not None and done.rowcount:
-            run.add("briefs_written", done.rowcount)  # as the passes' work counts on the run
-        return Counter(briefs_written=done.rowcount)
-
-    monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
-    monkeypatch.setattr(fulltext, "work", passes)
+    texts = FakeArchive()
+    texts.texts[P.id] = (P.version, briefs.BODY)
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: briefs.archive(texts))
     monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False))
 
     async def record(conn: Session) -> tuple:
@@ -1404,7 +1401,7 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
         digests = await (
             await conn.execute("SELECT topic, period, day, state FROM digests ORDER BY 1, 2, 3")
         ).fetchall()
-        return run["error"], run["counts"], run["cost"], digests
+        return run["error"], run["counts"], run["cost"], digests, run["work_id"]
 
     await seed(db)
     await nightly.run(gate, config, fetch=False, gateway=Models().gateway)
@@ -1419,21 +1416,22 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
             async def closed() -> bool:
                 found = await (
                     await other.execute(
-                        "SELECT 1 FROM runs WHERE kind = 'nightly' AND finished_at IS NOT NULL"
+                        "SELECT 1 FROM work_items WHERE kind = 'nightly' AND state = 'ended'"
                     )
                 ).fetchall()
                 return bool(found)
 
             async with served(theirs, config, gateway=Models().gateway):
-                await until(closed, "the fire's nightly to close")
+                await until(closed, "the fire's item to end")
         fire = await record(other)
         (item,) = await (
             await other.execute("SELECT * FROM work_items WHERE kind = 'nightly'")
         ).fetchall()
-    assert direct[0] is None and direct[1].get("briefs_written")  # its passes worked inline
-    assert any(d["state"] == "written" for d in direct[3])
-    assert fire == direct
+    assert direct[0] is None and direct[1].get("briefs_written") == 1  # its Brief, inline
+    assert any(d["state"] == "written" for d in direct[3]) and direct[4] is None
+    assert fire[:4] == direct[:4]
     assert item["key"] == scheduler.fire_key(scheduler.last_fire(config.schedule.nightly, now))
+    assert (item["outcome"], fire[4]) == ("done", item["id"])  # its end, and its run, on record
 
 
 async def test_a_nightly_run_without_digests_writes_none(db: Session, gate):

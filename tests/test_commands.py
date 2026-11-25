@@ -5,6 +5,7 @@ one that does what a kind of `serve`'s does takes that kind's admission, so the 
 time; and one whose process died is ended by any `serve`'s take-back. On real Postgres."""
 
 import asyncio
+from datetime import timedelta
 
 import psycopg
 import pytest
@@ -96,31 +97,121 @@ async def test_a_command_the_database_was_lost_under_fails_once_with_its_item_en
     assert (item["state"], item["outcome"], item["attempts"]) == ("ended", "failed", 1)
 
 
-async def test_a_command_that_loses_the_database_reading_its_item_fails_with_its_item_ended(
+async def test_a_command_that_loses_a_conflict_taking_its_claim_fails_without_working(
     conn: Session, db, monkeypatch
 ):
-    """The command's own read of whether its item ended loses the database: it is not read
-    again; the command fails, and its item is not left running with no one waiting on it."""
-    real, lost = queue.get, []
-    ran = asyncio.Event()
+    """Taking its one claim loses a conflict: not tried again, the work never runs, and the
+    item is ended failed."""
+    worked = []
 
-    async def get(unit, item_id):
-        if ran.is_set() and not lost:
-            lost.append(item_id)
-            raise psycopg.OperationalError("the server closed the connection unexpectedly")
-        return await real(unit, item_id)
+    async def take(*_, **__):
+        raise psycopg.errors.SerializationFailure("could not serialize access")
+
+    async def work() -> None:
+        worked.append(1)
+
+    monkeypatch.setattr(queue, "take", take)
+    with pytest.raises(CommandCutOffError, match="run it again"):
+        await asyncio.wait_for(inline(db, "intake", work), 10)
+    (item,) = await commands(conn)
+    assert worked == [] and (item["state"], item["outcome"]) == ("ended", "failed")
+
+
+async def test_a_command_waits_for_its_admission_then_runs_once(conn: Session, db):
+    """Its admission held by a running item (`serve`'s Deep pass), it waits, then runs."""
+    async with db.write("a Deep pass, running") as unit:
+        await queue.submit(unit, fulltext_store.DEEP_WORK, "1")
+    await conn.execute(
+        "UPDATE work_items SET state = 'running', lease_token = gen_random_uuid(), "
+        "lease_until = now() + interval '1 hour'"
+    )
+    ran = []
 
     async def work() -> str:
-        await asyncio.sleep(0.2)  # read at least once while it works
-        ran.set()
-        await asyncio.sleep(0.2)
+        ran.append(1)
         return "its result"
 
-    monkeypatch.setattr(queue, "get", get)
-    with pytest.raises(CommandCutOffError, match="run it again"):
+    task = asyncio.create_task(inline(db, "fulltext --deep", work, admission="deep"))
+    await asyncio.sleep(1.5)
+    assert ran == [] and not task.done()
+    await conn.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'done', lease_token = NULL, "
+        "lease_until = NULL, ended_at = now() WHERE kind <> 'command'"
+    )
+    assert await asyncio.wait_for(task, 10) == "its result"
+    (item,) = await commands(conn)
+    assert (item["outcome"], item["attempts"]) == ("done", 1)
+
+
+async def test_a_command_whose_work_stops_cancelled_runs_once_and_fails(conn: Session, db):
+    """Its work ends with `CancelledError` (not the command's): never run again, the item ended
+    failed after its one attempt."""
+    tries = []
+
+    async def work() -> None:
+        tries.append(1)
+        raise asyncio.CancelledError
+
+    with pytest.raises(CommandCutOffError, match="cancelled"):
         await inline(db, "intake", work)
     (item,) = await commands(conn)
-    assert lost == [item["id"]] and item["state"] == "ended"
+    assert tries == [1] and (item["state"], item["outcome"], item["attempts"]) == (
+        "ended",
+        "failed",
+        1,
+    )
+
+
+async def test_a_command_whose_heartbeat_fails_tells_its_waiter(conn: Session, db, monkeypatch):
+    """Its lease cannot be renewed: its work is stopped and the command fails, cut off, its
+    item ended."""
+    from litwatch.gates import work as work_gate  # noqa: PLC0415
+
+    monkeypatch.setattr(work_gate, "LEASE", timedelta(seconds=0.6))
+
+    async def lost(self, item) -> bool:
+        return False
+
+    monkeypatch.setattr(WorkGate, "renew", lost)
+
+    async def work() -> None:
+        await asyncio.sleep(30)
+
+    with pytest.raises(CommandCutOffError, match="lease was lost"):
+        await asyncio.wait_for(inline(db, "intake", work), 10)
+    (item,) = await commands(conn)
+    assert (item["state"], item["outcome"]) == ("ended", "failed")
+
+
+@pytest.mark.parametrize("stops", ["Ctrl-C", "an error of the gate's"])
+async def test_a_command_stopped_before_its_claim_leaves_no_item_pending(
+    conn: Session, db, monkeypatch, stops
+):
+    """Cancelled just after its submission commits, before its claim, or its claim raising:
+    its item, pending with no attempt, is ended failed all the same."""
+    taking = asyncio.Event()
+
+    async def take(*_, **__):
+        taking.set()
+        if stops == "Ctrl-C":
+            await asyncio.Event().wait()
+        raise RuntimeError("the gate broke")
+
+    async def work() -> None:
+        raise AssertionError("it never runs")
+
+    monkeypatch.setattr(queue, "take", take)
+    task = asyncio.create_task(inline(db, "intake", work))
+    await asyncio.wait_for(taking.wait(), 10)
+    if stops == "Ctrl-C":
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        with pytest.raises(RuntimeError, match="the gate broke"):
+            await task
+    (item,) = await commands(conn)
+    assert (item["state"], item["outcome"], item["attempts"]) == ("ended", "failed", 0)
 
 
 async def test_a_command_stopped_by_ctrl_c_ends_its_item(conn: Session, db):

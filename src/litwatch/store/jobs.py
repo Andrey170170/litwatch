@@ -74,41 +74,55 @@ async def create(
     return row["id"]
 
 
-async def submit(unit: WriteUnit, job_id: int, *, ensure: bool = False) -> None:
-    """Submit the job's next chunk as its work item if it may run (`_RUNNABLE`), its row locked
-    first: due when it was queued, so the oldest goes first, or at its `wake_at` when later;
-    those the owner waits on (`FIRST`) before the others. With `ensure`, an open item is left as
-    it stands (`store.work.ensure`), as the startup sweep has it. A write that makes a job
-    runnable from outside its chunk calls it in its unit; the chunk's own writes `arrange`."""
-    row = await (
+# How a job's chunk is scheduled (`submit`).
+How = Literal["submit", "ensure", "wake"]
+
+
+async def submit(unit: WriteUnit, job_id: int, *, how: How = "submit") -> None:
+    """Schedule the job's next chunk as its work item if it may run (`_RUNNABLE`), its row locked
+    first, then its item's: due when it was queued, so the oldest goes first, or at its
+    `wake_at` when later; those the owner waits on (`FIRST`) before the others. `ensure` leaves
+    an open item as it stands (`store.work.ensure`), as the startup sweep has it; `wake` only
+    brings a pending one forward to when it is due, as the nightly's end does. A write that
+    makes a job runnable from outside its chunk calls it in its unit; the chunk's own writes
+    `arrange`."""
+    await _schedule(unit, await _locked(unit, job_id), how)
+
+
+async def _locked(unit: WriteUnit, job_id: int) -> dict[str, Any] | None:
+    """The job's row locked, with what scheduling its chunk reads of it."""
+    return await (
         await unit.execute(
-            f"SELECT j.kind, {_RUNNABLE} AS runnable, "
+            f"SELECT j.id, j.kind, {_RUNNABLE} AS runnable, "
             "GREATEST(j.queued_at, j.wake_at) AS due FROM jobs j WHERE j.id = %s FOR UPDATE",
             (job_id,),
         )
     ).fetchone()
+
+
+async def _schedule(unit: WriteUnit, row: dict[str, Any] | None, how: How) -> None:
     if row is None or not row["runnable"]:
         return
-    await (work.ensure if ensure else work.submit)(
-        unit,
-        WORK,
-        str(job_id),
-        not_before=row["due"],
-        priority=0 if row["kind"] in FIRST else 1,
+    key = str(row["id"])
+    if how == "wake":
+        await work.bring_forward(unit, WORK, key, row["due"])
+        return
+    await (work.ensure if how == "ensure" else work.submit)(
+        unit, WORK, key, not_before=row["due"], priority=0 if row["kind"] in FIRST else 1
     )
 
 
 async def arrange(unit: WriteUnit, job_id: int) -> None:
-    """Arrange the job's next chunk as the last step of a write to its row: decided under the
-    row's lock from the row alone. In a unit of the job's own chunk, what was submitted while it
-    ran is forgotten first, since this read sees it, so the chunk's item ends with this decision
-    (`store.work.end`): the next chunk, or none. Elsewhere, the chunk is submitted if the job
-    may run."""
-    await get(unit, job_id, lock=True)
+    """Arrange the job's next chunk as the last step of a write to its row that can change
+    whether, or when, it runs: decided under the row's lock from the row alone. In a unit of
+    the job's own chunk, what was submitted while it ran is forgotten first, since this read
+    sees it, so the chunk's item ends with this decision (`store.work.end`): the next chunk, or
+    none. Elsewhere, the chunk is submitted if the job may run."""
+    row = await _locked(unit, job_id)
     running = current_work()
     if running is not None and running.item.kind == WORK and running.item.key == str(job_id):
         await work.forget_resubmission(unit, running.item)
-    await submit(unit, job_id)
+    await _schedule(unit, row, "submit")
 
 
 async def open_ids(unit: ReadUnit) -> list[int]:
@@ -120,45 +134,51 @@ async def open_ids(unit: ReadUnit) -> list[int]:
     return [r["id"] for r in rows]
 
 
-async def release(unit: WriteUnit) -> None:
-    """Submit the chunk of every job that may run, in id order, as a nightly closes its run, in
-    the unit that closes it (`jobs.nightly.locked`): one that waited for the nightly runs now, in
-    its place in line, and those on tonight's run go in the queue. Under the `tonight` lock, which
-    putting a job there holds too, each side stamped by the clock after taking it (`queued_at`,
-    the run's `finished_at`): one put there before this unit is released here, one put there
-    after it sees the run closed after it, and waits for the next nightly."""
-    _holds(unit, "tonight")
+async def _each(unit: WriteUnit, how: How) -> None:
+    """Schedule the chunk of every job that may run (`submit`), in id order: each job's row,
+    then its item's, so two such units, or one and a chunk's own write, take them in one order."""
     for job_id in await open_ids(unit):
-        await submit(unit, job_id)
+        await submit(unit, job_id, how=how)
+
+
+async def release(unit: WriteUnit) -> None:
+    """Submit the chunk of every job that may run, as a nightly closes its run, in the unit that
+    closes it (`jobs.nightly.locked`): one that waited for the nightly runs now, in its place in
+    line, and those on tonight's run go in the queue. Under the `tonight` lock, which putting a
+    job there holds too, each side stamped by the clock after taking it (`queued_at`, the
+    run's `finished_at`): one put there before this unit is released here, one put there after
+    it sees the run closed after it, and waits for the next nightly."""
+    _holds(unit, "tonight")
+    await _each(unit, "submit")
 
 
 async def wake(unit: WriteUnit) -> None:
     """Bring the waiting chunk of every job that may run forward to when it is due: one a
     nightly held back (looking again after `jobs.worker.WAIT`, or the run lock taken) goes once
-    the nightly let go of the run lock."""
-    rows = await (
-        await unit.execute(
-            f"SELECT j.id, GREATEST(j.queued_at, j.wake_at) AS due FROM jobs j WHERE {_RUNNABLE}"
-        )
-    ).fetchall()
-    await work.bring_forward(unit, WORK, {str(r["id"]): r["due"] for r in rows})
+    the nightly let go of the run lock. Pending items only: a running chunk is left as it is."""
+    await _each(unit, "wake")
 
 
-async def nightly_waits(unit: ReadUnit) -> bool:
-    """Whether a nightly run is due or running: a scheduled fire's work item waits to run (for
-    its time, or the run lock), or runs under a live lease and has not closed its run (opening it
-    included, before its run's row exists), or a nightly run is open and alive (the CLI's). No
-    job's chunk starts then, and no re-run's pass. A fire's item that has closed its run is
-    running no more: what the nightly held back goes as it closes (`release`)."""
+async def nightly_waits(unit: ReadUnit, *, fires: bool = True) -> bool:
+    """Whether a nightly run is due or running: a nightly run open and alive (the CLI's); and,
+    with `fires` (the reader's configuration has the schedule on, so its `serve` runs them), a
+    scheduled fire's work item that waits to run (for its time, or the run lock), or is running
+    and has not closed its run (opening it included, before its run's row exists; its lease
+    lapsed too, as a take-back makes it pending again). No job's chunk starts then, and no
+    re-run's pass. A fire's item that has closed its run is running no more: what the nightly
+    held back goes as it closes (`release`). Without `fires`, a fire no process here runs holds
+    nothing back."""
     row = await (
         await unit.execute(
-            "SELECT EXISTS (SELECT 1 FROM work_items WHERE kind = 'nightly' AND state = 'pending') "
+            "SELECT %(fires)s AND (EXISTS (SELECT 1 FROM work_items "
+            "WHERE kind = 'nightly' AND state = 'pending') "
             "OR EXISTS (SELECT 1 FROM work_items w WHERE w.kind = 'nightly' "
-            "AND w.state = 'running' AND w.lease_until > now() AND NOT EXISTS ("
+            "AND w.state = 'running' AND NOT EXISTS ("
             "SELECT 1 FROM runs r WHERE r.lease_token = w.lease_token "
-            "AND r.finished_at IS NOT NULL)) "
+            "AND r.finished_at IS NOT NULL))) "
             "OR EXISTS (SELECT 1 FROM runs r WHERE r.kind = 'nightly' AND r.finished_at IS NULL "
-            f"AND {ALIVE}) AS waits"
+            f"AND {ALIVE}) AS waits",
+            {"fires": fires},
         )
     ).fetchone()
     assert row is not None  # a SELECT of a value has its row
@@ -325,7 +345,8 @@ async def claim(unit: WriteUnit, job_id: int, *, afresh: bool) -> dict[str, Any]
     `may_run` true. `afresh`: no run of this process has the job open, so one found running
     was another's (its process gone, its item taken back, or this process restarted); a
     Process job then starts over from its paper, so a step the owner's action left due while it
-    ran is done too, though the mark of that action (`settle_process`) is lost here. The session
+    ran is done too, and the mark of that action (`settle_process`) is handled: its claim is
+    stamped by the clock after the row's lock, so `finish` does not ask the job again. The session
     writing it goes in the old liveness columns, which the image before the Work gate reads
     until P7. Its next chunk is arranged (`arrange`): one running goes on."""
     row = await (
@@ -335,7 +356,9 @@ async def claim(unit: WriteUnit, job_id: int, *, afresh: bool) -> dict[str, Any]
                    (backend_pid, backend_start) = (SELECT a.pid, a.backend_start FROM {SESSION}),
                    done = CASE WHEN %(afresh)s AND j.kind = 'process' AND j.state = 'running'
                                THEN 0 ELSE j.done END,
-                   changed_at = CASE WHEN j.state = 'running' THEN j.changed_at ELSE now() END
+                   changed_at = CASE WHEN j.state = 'running'
+                                          AND NOT (%(afresh)s AND j.kind = 'process')
+                                     THEN j.changed_at ELSE clock_timestamp() END
             WHERE j.id = %(id)s RETURNING j.*
             """,
             {"id": job_id, "afresh": afresh},

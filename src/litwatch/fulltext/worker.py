@@ -133,7 +133,9 @@ class DeepPassWorker:
             return Later(until)
         async with self.db.write("claim a deep pass") as unit:
             # A re-run's Deep pass waits while a nightly is due or running.
-            background = not await jobs_store.nightly_waits(unit)
+            background = not await jobs_store.nightly_waits(
+                unit, fires=self.config.schedule.enabled
+            )
             decision = await store_.decide(
                 unit, int(item.key), self.deep.lease, deep=True, background=background
             )

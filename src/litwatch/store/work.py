@@ -323,14 +323,14 @@ async def take_back(
     return [_item(r) for r in rows]
 
 
-async def abandon(unit: WriteUnit, item_id: int, error: str) -> None:
-    """End a CLI command's item failed with `error` unless it has ended: its one attempt is
-    over (cut off, or the command cancelled), and nothing runs a command's item again."""
+async def abandon(unit: WriteUnit, key: str, error: str) -> None:
+    """End the CLI command's item `key` failed with `error` unless it has ended: its one
+    attempt is over (cut off, or the command stopped), and nothing runs a command's item again."""
     await unit.execute(
         "UPDATE work_items SET state = 'ended', outcome = 'failed', error = %s, "
         "ended_at = now(), lease_token = NULL, lease_until = NULL, resubmitted = false "
-        "WHERE id = %s AND state <> 'ended'",
-        (_stored(error), item_id),
+        "WHERE kind = %s AND key = %s AND state <> 'ended'",
+        (_stored(error), COMMAND, key),
     )
     await _notify(unit, COMMAND)
 
@@ -512,21 +512,15 @@ async def submitted(unit: ReadUnit, kind: str, key: str) -> bool:
     return row is not None
 
 
-async def bring_forward(unit: WriteUnit, kind: str, due: Mapping[str, datetime]) -> None:
-    """Bring the pending items of `kind` keyed in `due` forward to their time there, where that
-    is sooner: work that waited on something now over (a lock let go of) goes when it is due."""
-    if not due:
-        return
-    rows = await (
-        await unit.execute(
-            "UPDATE work_items w SET not_before = d.at "
-            "FROM unnest(%s::text[], %s::timestamptz[]) AS d (key, at) "
-            "WHERE w.kind = %s AND w.key = d.key AND w.state = 'pending' AND w.not_before > d.at "
-            "RETURNING w.id",
-            (list(due), list(due.values()), kind),
-        )
-    ).fetchall()
-    if rows:
+async def bring_forward(unit: WriteUnit, kind: str, key: str, at: datetime) -> None:
+    """Bring the pending item of `kind` and `key` forward to `at`, where that is sooner: work
+    that waited on something now over (a lock let go of) goes when it is due."""
+    moved = await unit.execute(
+        "UPDATE work_items SET not_before = %s WHERE kind = %s AND key = %s "
+        "AND state = 'pending' AND not_before > %s",
+        (at, kind, key, at),
+    )
+    if moved.rowcount:
         await _notify(unit, kind)
 
 

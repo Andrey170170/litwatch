@@ -248,7 +248,8 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
             and not await papers_store.dropped(unit, paper_id)
         ):
             return s.CardRequested(pass_id=open_pass["id"])
-        held = await papers_store.get(unit, paper_id)
+        # Only a record fetched can revise the paper; with none, `keep` reads it as it stands.
+        held = await papers_store.get(unit, paper_id) if fetched is not None else None
         kept, _ = await misses.keep(unit, paper_id, fetched)
         rewritten = held is not None and held.revision != kept.revision
         pass_id = await deep_passes.request(unit, paper_id)

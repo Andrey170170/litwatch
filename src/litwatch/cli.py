@@ -1062,6 +1062,7 @@ def fulltext_queue(
                 maker,
                 rules=word.rules(cfg),
                 limit=None if limit is None else limit - worked,
+                fires=cfg.schedule.enabled,
             )
             console.print(dict(done))
             total.update(done)

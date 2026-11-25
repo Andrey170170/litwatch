@@ -8,6 +8,7 @@ from typing import Any
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from litwatch.core.work import WorkItem
 from litwatch.gates.context import current_work
 from litwatch.gates.database import ReadUnit, WriteUnit
 
@@ -38,14 +39,15 @@ async def start(
     job_id: int | None = None,
 ) -> int:
     """Open a run, alive by the claim of the work item it runs in (its `lease_token`, `ALIVE`).
-    A run of kind `job` names its job, and each chunk item that works it names the run and moves
-    its claim to that chunk's (`store.jobs.link`); a standalone one names the work item it runs
-    in (`work_id`, docs/specs/architecture/a2-work-gate.md, "Work records"). The old liveness
-    columns get the session writing it, which ends with the process: until P7 they are what the
-    image before the Work gate reads (docs/plans/a2-work-gate.md, "Rollback is a handoff of live
-    work")."""
+    It names the work item it was opened in (`work_id`, docs/specs/architecture/a2-work-gate.md,
+    "Work records"), which keeps which item ran it when that item later runs another (taken
+    back, it opens a run of its own); a run of kind `job` names its job too, and each chunk item
+    that works it names the run and moves its claim to that chunk's (`store.jobs.link`). The old
+    liveness columns get the session writing it, which ends with the process: until P7 they are
+    what the image before the Work gate reads (docs/plans/a2-work-gate.md, "Rollback is a
+    handoff of live work")."""
     work = current_work()
-    work_id = work.item.id if work is not None and job_id is None else None
+    work_id = work.item.id if work is not None else None
     token = work.item.lease_token if work is not None else None
     row = await (
         await unit.execute(
@@ -91,29 +93,55 @@ async def last_success(unit: ReadUnit, kind: str) -> dict[str, Any] | None:
     ).fetchone()
 
 
-async def last_started(unit: ReadUnit, kind: str) -> datetime | None:
-    """When the newest run of `kind` started."""
+# Whether run `r` served the fires of its kind it started after: one this image ran (in a work
+# item, `work_id`) once it closed without an error; one of the image before the Work gate (no
+# item) by starting, as that image counted it.
+_SERVES = "(r.work_id IS NULL OR (r.finished_at IS NOT NULL AND r.error IS NULL))"
+
+
+async def last_served(unit: ReadUnit, kind: str) -> datetime | None:
+    """When the newest run of `kind` that serves a fire started (`_SERVES`): a fire since is
+    due. A run of this image still open serves none yet: its fire is submitted, and its item
+    finds out under the run lock, or its kind's admission, whether that run served it
+    (`served`)."""
     row = await (
-        await unit.execute("SELECT max(started_at) AS at FROM runs WHERE kind = %s", (kind,))
+        await unit.execute(
+            f"SELECT max(r.started_at) AS at FROM runs r WHERE r.kind = %s AND {_SERVES}",
+            (kind,),
+        )
     ).fetchone()
     return row["at"]
 
 
 async def served(unit: ReadUnit, kind: str, fired: datetime) -> bool:
-    """Whether a run of `kind` served the fire at `fired`: one started at or after it that closed
-    without an error (by hand, or the fire's own earlier attempt, its item's end lost after it).
-    One cut off (the database lost, its process or the service stopping) served nothing. Read
-    where no other run of `kind` can be under way (under the run lock, or the kind's admission),
-    so a run not closed is a dead one."""
+    """Whether a run of `kind` served the fire at `fired`: one started at or after it that serves
+    (`_SERVES`): closed without an error (by hand, or the fire's own earlier attempt, its item's
+    end lost after it), or the image before's. One cut off (the database lost, its close failed,
+    its process or the service stopping) served nothing. Read where no other run of `kind` can
+    be under way (under the run lock, or the kind's admission), so a run not closed is a dead
+    one."""
     row = await (
         await unit.execute(
-            "SELECT EXISTS (SELECT 1 FROM runs WHERE kind = %s AND started_at >= %s "
-            "AND finished_at IS NOT NULL AND error IS NULL) AS served",
+            "SELECT EXISTS (SELECT 1 FROM runs r WHERE r.kind = %s AND r.started_at >= %s "
+            f"AND {_SERVES}) AS served",
             (kind, fired),
         )
     ).fetchone()
     assert row is not None  # a SELECT of a value has its row
     return row["served"]
+
+
+async def unclosed(unit: ReadUnit, item: WorkItem) -> bool:
+    """Whether a run opened under this claim of `item` (its lease token) has not closed."""
+    row = await (
+        await unit.execute(
+            "SELECT EXISTS (SELECT 1 FROM runs WHERE lease_token = %s AND finished_at IS NULL) "
+            "AS open",
+            (item.lease_token,),
+        )
+    ).fetchone()
+    assert row is not None  # a SELECT of a value has its row
+    return row["open"]
 
 
 async def first_since(unit: ReadUnit, kind: str, since: datetime) -> datetime | None:
