@@ -77,13 +77,17 @@ class DeliveryWorker:
         """Submit the integration's next turn, under its cursor's row lock: for `turn`, the
         one ending, after forgetting what was submitted for it while it ran. Its time is the
         sooner of when its setup may run, if it has not in this process (it holds back the
-        rest), or else when events may be delivered and when its `idle` is due. One with no
-        cursor yet has its first turn now, which makes it (`dispatch.start`)."""
+        rest), or else when events may be delivered and when its `idle` is due. A setup that
+        failed since in another process serving it, recorded on the cursor, undoes this one's:
+        it runs again here too, after the failure's backoff. One with no cursor yet has its
+        first turn now, which makes it (`dispatch.start`)."""
         cursor = await outbox.locked(unit, name)
         if turn is not None:
             await work.forget_resubmission(unit, turn)
         settled, waiting = await outbox.waiting(unit, name)
         now = datetime.now(UTC)
+        if cursor is not None and cursor.setup_failures:
+            self.set_up.discard(name)
         if cursor is None:
             times = [now]
         elif name not in self.set_up:  # after its backoff, or at once on the owner's Retry

@@ -2,9 +2,7 @@
 and that it writes nothing outside the evaluation tables. Models are scripted, as in
 test_steps."""
 
-import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -27,9 +25,10 @@ from litwatch.store.calls import CallJournal
 from tests import settling
 from tests.conftest import FAITH, TREE, AppClient, gate_on, paper, started
 from tests.fakes import BatchingProvider
-from tests.priced import COST, Costed, Priced, charged, work_out
+from tests.priced import COST, Costed, Priced, charged
 from tests.scripted import CONFIG, Scripted, decision, rows
 from tests.sessions import Bridge, Session, in_read, in_write
+from tests.working import QUIET, job_of, killed, served, step, until, work_out
 
 LABELS = Path(__file__).parent.parent / "evals" / "labels"
 TOPIC = FAITH.slug
@@ -415,7 +414,6 @@ async def test_quality_shows_recall_from_the_latest_replay_and_the_report_names_
 # -- a replay as a job (docs/plans/jobs.md, P3: V6) ---------------------------------------------
 
 SCHEDULED = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})  # the worker runs
-AFTERNOON = datetime(2026, 10, 22, 14, 0, tzinfo=SCHEDULED.schedule.zone)  # no nightly due
 FIT_HEAD = "paper_id,topic,fit,legacy,cohort,origin,labelled_at,note\n"
 
 
@@ -482,13 +480,13 @@ async def test_a_replay_job_from_overview_writes_only_to_the_evaluation_tables(
         assert (await run_replay(conn))["id"] == job["id"]
         assert (await http.get("/api/jobs/replays/offer")).json()["running"]["id"] == job["id"]
 
-    await work_out(worker.Worker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
     after = await contents(conn)
     changed = {t for t in before if before[t] != after[t]}
-    # Its job, run and call journal; nothing of the pipeline moves, verdicts and the outbox
-    # included, nor what the status document reads of the providers.
+    # Its job, its chunks' work items, run and call journal; nothing of the pipeline moves,
+    # verdicts and the outbox included, nor what the status document reads of the providers.
     evaluated = {"eval_runs", "eval_labels", "eval_results", "runs", "inference_calls"}
-    assert changed == evaluated | {"jobs"}
+    assert changed == evaluated | {"jobs", "work_items"}
     done = await in_read(conn, jobs_store.get, job["id"])
     assert (done["state"], done["done"], done["counts"]["graded"]) == ("done", 3, 3)
     shown = await in_read(conn, quality.replay_recall)
@@ -504,19 +502,13 @@ async def test_a_replay_job_taken_back_goes_on_without_redoing_what_it_concluded
 ):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await run_replay(conn)
-    dead = gate_on(conn)  # another process's
-    await dead.open()
-    gone = worker.Worker(dead, SCHEDULED, priced.gateway)
-    assert await gone.step(AFTERNOON)  # A's chunk, then its process dies
-    pid = (await in_read(conn, jobs_store.get, job["id"]))["backend_pid"]
-    await dead.close()
-    await gone.close(RuntimeError("killed"))
-    for _ in range(200):  # the server ends the session soon after its connection closes
-        if not await rows(conn, "SELECT 1 FROM pg_stat_activity WHERE pid = %s", pid):
-            break
-        await asyncio.sleep(0.05)
+    async with gate_on(conn) as dead:  # another process's
+        gone = worker.JobWorker(dead, SCHEDULED, priced.gateway)
+        assert await step(gone)  # A's chunk
+        await killed(gone, monkeypatch, "_replay")  # its process dies at the next
+        await gone.close(RuntimeError("killed"))
 
-    await work_out(worker.Worker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
     done = await in_read(conn, jobs_store.get, job["id"])
     assert (done["state"], done["done"]) == ("done", 3)
     assert sorted(priced.sent("classify")) == sorted([A.title, B.title, C.title])
@@ -532,7 +524,7 @@ async def test_a_replay_job_stops_at_its_ceiling_and_run_replay_goes_on_with_it(
     recorded as concluded, and the job waits under Not run saying where. Run replay goes on
     with it under a new ceiling, and concludes every paper."""
     job = await run_replay(conn, ceiling=1e-6)
-    await work_out(worker.Worker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
     stopped = await in_read(conn, jobs_store.get, job["id"])
     assert stopped["state"] == "stopped"
     assert stopped["error"] == "stopped at the ceiling after 0 of 3"
@@ -544,7 +536,7 @@ async def test_a_replay_job_stops_at_its_ceiling_and_run_replay_goes_on_with_it(
         offer = (await http.get("/api/jobs/replays/offer")).json()
     assert (offer["continues"], offer["papers"], offer["pairs"]) == (job["id"], 3, 3)
     assert (await run_replay(conn, ceiling=5.0))["id"] == job["id"]
-    await work_out(worker.Worker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
     done = await in_read(conn, jobs_store.get, job["id"])
     assert (done["state"], done["error"], float(done["ceiling"])) == ("done", None, 5.0)
     assert done["scope"]["eval_run"] == eval_run
@@ -554,11 +546,45 @@ async def test_a_replay_job_stops_at_its_ceiling_and_run_replay_goes_on_with_it(
     )  # 3 papers, 3 calls
 
 
+async def test_a_replay_jobs_ceiling_covers_all_its_chunks(conn: Session, db, priced, monkeypatch):
+    """A chunk a paper, under a ceiling one paper's calls fit in. The first chunk runs, then the
+    service stops; the next chunk, another process's on a run of its own, has what is left of
+    the ceiling after the first's spend, which no second paper fits in: the job stops."""
+    monkeypatch.setattr(worker, "CHUNK", 1)
+    job = await run_replay(conn, ceiling=7 * COST)
+    first = worker.JobWorker(db, SCHEDULED, priced.gateway)
+    assert await step(first)
+    await first.close(RuntimeError("the service stopped"))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    stopped = await job_of(conn, job["id"])
+    assert (stopped["state"], stopped["error"]) == (
+        "stopped",
+        "stopped at the ceiling after 1 of 3",
+    )
+    spent = await in_read(conn, jobs_store.spent, job["id"])
+    assert 3 * COST <= spent <= 7 * COST  # the second's calls fit what the first left
+    executions = await rows(conn, "SELECT id FROM runs WHERE job_id = %s", job["id"])
+    assert len(executions) == 2
+
+
+async def test_serve_runs_a_replay_as_a_worker(conn: Session, db, priced):
+    """Through `serve`'s own lifespan: Run replay's job is swept, run by the gate, and done."""
+    job = await run_replay(conn)
+
+    async def done() -> bool:
+        return (await job_of(conn, job["id"]))["state"] == "done"
+
+    quiet = SCHEDULED.model_copy(update={"schedule": QUIET})
+    async with served(db, quiet, gateway=priced.gateway):
+        await until(done, "the replay to be done")
+    assert sorted(priced.sent("judge")) == sorted([A.title, B.title, C.title])
+
+
 async def test_a_stopped_replay_that_no_longer_resumes_gives_way_to_a_new_one(
     conn: Session, db, priced
 ):
     job = await run_replay(conn, ceiling=1e-6)
-    await work_out(worker.Worker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
     stricter = SCHEDULED.model_copy(update={"classification": Classification(focus_threshold=0.6)})
     async with api(conn, stricter) as http:
         assert (await http.get("/api/jobs/replays/offer")).json()["continues"] is None
@@ -591,8 +617,8 @@ async def test_a_paper_revised_between_chunks_is_replayed_on_its_new_text(
 ):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await run_replay(conn)
-    w = worker.Worker(db, SCHEDULED, priced.gateway)
-    assert await w.step(AFTERNOON)  # A's chunk
+    w = worker.JobWorker(db, SCHEDULED, priced.gateway)
+    assert await step(w)  # A's chunk
     revised = A.model_copy(update={"abstract": "Sparse autoencoders on activations."})
     await in_write(conn, papers_store.upsert, [revised])
     await work_out(w)
@@ -621,7 +647,7 @@ async def test_a_replay_leaves_a_dead_nightlys_batch_alone(conn: Session, db, pr
     await in_write(conn, runs.finish, nightly, error="process died")
 
     await run_replay(conn)
-    await work_out(worker.Worker(db, SCHEDULED, gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, gateway))
     assert batching.cancelled == []
     (left,) = await rows(conn, "SELECT output FROM inference_calls WHERE id = %s", call)
     assert left["output"] is None

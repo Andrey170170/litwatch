@@ -187,6 +187,7 @@ async def settle_many(
     rules: Rules,
     claimed: int | None = None,
     job: int | None = None,
+    steps: bool = True,
 ) -> dict[str, Settled]:
     """Recompute and store each paper's effective Fits and grades, its rarity and its library
     state, with their events, its text pass, its Deep pass and its Process job's, each paper
@@ -195,7 +196,9 @@ async def settle_many(
     `claimed` is a pass the caller holds and has not worked yet: it is judged as one not
     started, so it may be dropped or relabelled. For a re-run's `job`, a pass it queues is
     background work: a text pass the job's to work, under its ceiling, a Deep pass after the
-    automatic ones (docs/plans/jobs.md).
+    automatic ones (docs/plans/jobs.md). Without `steps`, the owner's change leaves the papers'
+    steps as they were (a Deep request), so a running Process job of theirs is not asked again
+    (`store.jobs.settle_process`).
 
     The unit holds the papers' locks, or the taxonomy lock exclusively (a taxonomy edit, which
     no other settle runs beside): settles of one paper are serialized, so the last to run sees
@@ -218,7 +221,7 @@ async def settle_many(
         read = await _read(unit, chunk)
         for paper_id in chunk:
             settled[paper_id] = await _settle(
-                unit, paper_id, topics, tree, read, cause, rules, claimed, job
+                unit, paper_id, topics, tree, read, cause, rules, claimed, job, steps
             )
     return settled
 
@@ -233,6 +236,7 @@ async def _settle(
     rules: Rules,
     claimed: int | None,
     job: int | None,
+    steps: bool,
 ) -> Settled:
     """Settle one paper (`settle_many`) from what was read of it."""
     labels = {x.topic: x for x in read.labels.get(paper_id, [])}
@@ -310,7 +314,7 @@ async def _settle(
     # steps (the job, or a nightly run before it), its failed job put back first. A paper
     # without a Process job has none to settle.
     if paper_id in read.with_process:
-        await jobs_store.settle_process(unit, paper_id, owner=cause == Cause.OWNER)
+        await jobs_store.settle_process(unit, paper_id, owner=cause == Cause.OWNER and steps)
         if await jobs_store.processing(unit, paper_id):
             await fulltext_store.owners_first(unit, [paper_id])
     return result

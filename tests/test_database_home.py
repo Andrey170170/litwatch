@@ -98,11 +98,10 @@ def test_the_registry_has_todays_keys():
         ("replay", 7213917, "unit", None),
         ("retally", 7213912, "unit", "int"),
         ("run", 7213911, "session", None),
-        ("schedule", 7213913, "session", "text"),
         ("migration", 7213910, "startup", None),
     ]
 
 
 def test_the_locks_held_across_calls_only_shrink():
-    assert set(HELD_ACROSS_CALLS) <= {"run", "schedule"}
+    assert set(HELD_ACROSS_CALLS) <= {"run"}
     assert all(lock.scope != "session" or lock.name in HELD_ACROSS_CALLS for lock in REGISTRY)

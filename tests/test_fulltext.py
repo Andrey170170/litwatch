@@ -15,7 +15,7 @@ import pytest
 from litwatch import fulltext
 from litwatch.api import create_app
 from litwatch.archive import URGENT, PaperText, PdfText
-from litwatch.config import Config, Models, RoleConfig, Schedule
+from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import (
     FAILED_RUNS,
     Cause,
@@ -49,8 +49,7 @@ from litwatch.fulltext.worker import TextPassWorker
 from litwatch.gates.database import LOCKS
 from litwatch.gates.work import WorkGate
 from litwatch.intake import batch
-from litwatch.jobs import nightly, scheduler
-from litwatch.jobs import worker as jobs_worker
+from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
 from litwatch.llm import Gateway, ProviderError
 from litwatch.store import analyses as analyses_store
@@ -85,7 +84,7 @@ from tests.fakes import ScriptedProvider
 from tests.fakes_http import FakeArchive, FakeDeep
 from tests.scripted import refusal
 from tests.sessions import Bridge, Session, in_read, in_write
-from tests.working import WAIT, items_of, serving, until
+from tests.working import QUIET, WAIT, items_of, serving, until
 
 
 @pytest.fixture
@@ -858,14 +857,8 @@ async def test_a_claim_a_process_abandoned_is_taken_by_the_passs_item_once_it_la
 @contextlib.asynccontextmanager
 async def serve(db: Session, monkeypatch, fake: FakeArchive, writer: Writer, *integrations):
     """`litwatch serve`'s app, running for the block (its Work gate, the passes' Workers, swept
-    as it starts), with no nightly; yields an HTTP client on it, signed in."""
-
-    async def idle(*args):
-        await asyncio.sleep(3600)
-
-    monkeypatch.setattr(scheduler, "run_forever", idle)  # no nightly here
-    monkeypatch.setattr(jobs_worker, "run_forever", idle)
-    config = CONFIG.model_copy(update={"schedule": Schedule(enabled=True)})
+    as it starts), with no fire near now; yields an HTTP client on it, signed in."""
+    config = CONFIG.model_copy(update={"schedule": QUIET})
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     app = create_app(
         dsn, "t", config, writer.gateway, archive=archive(fake), integrations=list(integrations)

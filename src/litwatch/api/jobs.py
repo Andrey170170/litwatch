@@ -181,7 +181,6 @@ async def process(body: s.ProcessIn, request: Request, db: Db, rules: Rules) -> 
         await word.settle_many(unit, [paper_id], cause=Cause.OWNER, rules=rules)
     if job is None:
         return None
-    request.app.state.jobs_wake.set()
     return s.ProcessJob(id=job["id"], state=job["state"], error=job["error"])
 
 
@@ -320,8 +319,6 @@ async def rerun(body: s.RerunIn, request: Request, db: Db) -> s.Jobs:
                     status_code=409,
                     detail=f"the same re-run is {where} already, its ceiling ${kept:.2f}",
                 )
-    if body.run:
-        request.app.state.jobs_wake.set()
     return await _listing(db)
 
 
@@ -390,7 +387,6 @@ async def run_replay(body: s.ReplayIn, request: Request, db: Db) -> s.Jobs:
             if not o.replay.papers:
                 raise HTTPException(status_code=409, detail="no labelled paper in the database")
             await replays.make(c, config, o, body.ceiling)
-    request.app.state.jobs_wake.set()
     return await _listing(db)
 
 
@@ -448,6 +444,4 @@ async def act(
         await jobs_store.move(unit, job_id, sources, to, held)
         if to == "discarded":
             await fulltext_store.release_job(unit, job_id)
-    if to == "queued":
-        request.app.state.jobs_wake.set()
     return await _listing(db)

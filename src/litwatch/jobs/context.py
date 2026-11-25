@@ -63,12 +63,11 @@ async def run_record(
     window: tuple[datetime, datetime] | None = None,
     job_id: int | None = None,
 ) -> AsyncIterator[RunRecord]:
-    """Open a run, in the process's name (`DatabaseGate.identity`), and close it with what the
-    job recorded on it and the error that ended it, whatever happens inside, a cancelled job
-    included. Each is a unit of its own."""
-    me = await db.identity()
+    """Open a run, alive while the work item it runs in holds its lease (`store.runs.ALIVE`),
+    and close it with what the job recorded on it and the error that ended it, whatever happens
+    inside, a cancelled job included. Each is a unit of its own."""
     async with db.write(f"open {kind} run") as unit:
-        run_id = await runs.start(unit, kind, *(window or (None, None)), job_id=job_id, me=me)
+        run_id = await runs.start(unit, kind, *(window or (None, None)), job_id=job_id)
     record = RunRecord(run_id)
     failed = True
     try:

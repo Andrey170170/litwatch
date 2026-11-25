@@ -21,12 +21,14 @@ from litwatch.archive import ArchiveError
 from litwatch.core import Paper, Taxonomy
 from litwatch.feedback import word
 from litwatch.gates.database import BusyError, DatabaseGate, PoolTimeoutError, ReadUnit
+from litwatch.gates.work import inline
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
 from litwatch.publications import Dblp
+from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
@@ -70,17 +72,23 @@ def _run[T](
     *,
     migrate: bool = True,
     db: DatabaseGate | None = None,
+    item: str | None = None,
+    admission: str | None = None,
 ) -> T:
     """Run `work` with the command's Database gate, the process's one, on the configured
     database, migrated first: `db` when the command built it already (unopened), else a new
-    one. The gate is open for the run and closed at its end."""
+    one. The gate is open for the run and closed at its end. Named an `item`, a command that
+    does pipeline work runs it as a work item in this process (`gates.work.inline`, admitted by
+    `admission` when given), whose lease keeps its run alive, until P5 sends it to `serve`."""
     logs.setup()
 
     async def main() -> T:
         async with db or DatabaseGate(configuration.database_url()) as gate:
             if migrate:
                 await _migrate(gate)
-            return await work(gate)
+            if item is None:
+                return await work(gate)
+            return await inline(gate, item, lambda: work(gate), admission=admission)
 
     try:
         return asyncio.run(main())
@@ -128,7 +136,7 @@ def intake(
     async def work(db: DatabaseGate) -> Any:
         return await intake_job.run(db, cfg, days)
 
-    result = _run(work)
+    result = _run(work, item="intake")
     console.print(
         f"intake {result.details['status']}: {result.fetched} papers, "
         f"{result.inserted} new, {result.updated} updated, {result.unchanged} unchanged"
@@ -146,7 +154,7 @@ def _catalog_from(cfg: configuration.Config, since: date) -> None:
         return await intake_job.catalog_from(db, cfg, since, report)
 
     try:
-        done = _run(work)
+        done = _run(work, item="intake catalog")
     except (ValueError, IntegrationError) as exc:
         raise SystemExit(f"catalog pass: {exc}") from exc
     if not done["complete"]:
@@ -181,7 +189,7 @@ def intake_archive(
             await client.aclose()
 
     try:
-        result = _run(work)
+        result = _run(work, item="intake archive")
     except (ArchiveError, IntegrationError) as exc:
         raise SystemExit(f"archive: {exc}") from exc
     console.print(
@@ -217,7 +225,7 @@ def nightly(
         )
         return run_id, await _run_record(db, run_id)
 
-    run_id, run = _run(work)
+    run_id, run = _run(work, item="nightly")
     console.print(f"run {run_id}: cost ${run['cost']}")
     console.print_json(data=run["counts"])
 
@@ -243,7 +251,7 @@ def digests_write(since: Since, until: Until, config: ConfigPath = None) -> None
         run_id = await digests_job.window(db, cfg, since.date(), until.date())
         return run_id, await _run_record(db, run_id)
 
-    run_id, run = _run(work)
+    run_id, run = _run(work, item="digests write")
     console.print(f"run {run_id}: cost ${run['cost']}")
     console.print_json(data=run["counts"])
 
@@ -570,7 +578,7 @@ def eval_replay(
             console.print(f"replay {r.eval_run_id}")
         return await replay.run(db, cfg, r)
 
-    counts = _run(work)
+    counts = _run(work, item="eval replay")
     console.print_json(data=counts)
     console.print(f"report: litwatch eval report {r.eval_run_id}")
 
@@ -891,15 +899,19 @@ def publications(
     """Look up published versions on DBLP for the library papers that are due, as the
     scheduler does daily, or for one paper."""
 
-    async def work(db: DatabaseGate) -> Any:
-        if paper:
-            found = await lookups.look_up(db, Dblp(), paper)
-            return found.model_dump(mode="json") if found else None
-        # The scheduler's lock for the kind: a run here and a scheduled one never overlap.
-        async with db.held("schedule", "publications"):
-            return await lookups.run(db, Dblp(), limit)
+    async def one(db: DatabaseGate) -> Any:
+        assert paper is not None  # only with --paper
+        found = await lookups.look_up(db, Dblp(), paper)
+        return found.model_dump(mode="json") if found else None
 
-    console.print_json(data=_run(work))
+    async def due(db: DatabaseGate) -> Any:
+        return await lookups.run(db, Dblp(), limit)
+
+    if paper:
+        console.print_json(data=_run(one))
+        return
+    # Admitted as the scheduled lookups are: a run here and a scheduled one never overlap.
+    console.print_json(data=_run(due, item="publications", admission="publications"))
 
 
 @app.command()
@@ -1048,7 +1060,6 @@ def fulltext_queue(
                 maker,
                 rules=word.rules(cfg),
                 limit=None if limit is None else limit - worked,
-                config=cfg,
             )
             console.print(dict(done))
             total.update(done)
@@ -1069,7 +1080,9 @@ def fulltext_queue(
             if maker is not None:
                 await maker.aclose()
 
-    console.print_json(data=dict(_run(work)))
+    # Deep passes are admitted as `serve`'s are, so one Deep job runs at a time between them.
+    item, admission = ("fulltext --deep", fulltext_store.DEEP_WORK) if deep else ("fulltext", None)
+    console.print_json(data=dict(_run(work, item=item, admission=admission)))
 
 
 @app.command()

@@ -1,11 +1,10 @@
 """The Database gate (docs/plans/a1-database-gate.md, V1 and V2's gate part): units, the order
-of their locks, the nesting check, the session locks, the presence session, and the tests' own
-gate on one connection (`sessions.Bridge`). On real Postgres. Where a test needs a lock held
-elsewhere, it takes it at its key written out, as the code before the gate did: a process from
-before it and one after must exclude each other."""
+of their locks, the nesting check, the session locks, and the tests' own gate on one connection
+(`sessions.Bridge`). On real Postgres. Where a test needs a lock held elsewhere, it takes it at
+its key written out, as the code before the gate did: a process from before it and one after
+must exclude each other."""
 
 import asyncio
-import contextlib
 import json
 import logging
 from datetime import UTC, datetime, timedelta
@@ -29,7 +28,6 @@ from litwatch.gates.database import (
 )
 from litwatch.llm import Gateway, Request
 from litwatch.llm.types import DecisionRequest, Predicate
-from litwatch.store import runs
 from tests.fakes import BatchingProvider, ScriptedProvider
 from tests.sessions import Bridge, BridgeError, Session
 
@@ -464,18 +462,8 @@ async def holders(conn: Session, key: tuple[int, int, int]) -> list[int]:
     return [r["pid"] for r in await (await conn.execute(query, key)).fetchall()]
 
 
-async def test_a_keyed_session_lock_is_busy_only_for_its_key(db):
-    async with db.held("schedule", "nightly"), db.held("schedule", "publications"):
-        with pytest.raises(BusyError, match=r"the schedule \(nightly\) lock is held"):
-            async with db.held("schedule", "nightly"):
-                pass
-
-
 # Each session lock's key as the code before the gate took it, and its argument.
-SESSION = {
-    "run": ("7213911", None),
-    "schedule": ("7213913, hashtext(%s)", "publications"),
-}
+SESSION = {"run": ("7213911", None)}
 
 
 async def todays(conn: Session, name: str) -> bool:
@@ -492,13 +480,12 @@ async def let_go(conn: Session, name: str) -> None:
 
 @pytest.mark.parametrize("name", SESSION)
 async def test_the_session_locks_are_todays(db, conn: Session, name):
-    arg = SESSION[name][1]
     assert await todays(conn, name)
     with pytest.raises(BusyError):
-        async with db.held(name, arg):
+        async with db.held(name):
             pass
     await let_go(conn, name)
-    async with db.held(name, arg):
+    async with db.held(name):
         assert not await todays(conn, name)
     assert await todays(conn, name)
     await let_go(conn, name)
@@ -533,23 +520,15 @@ async def test_the_migrations_run_on_the_migration_locks_own_session(db, conn: S
         assert row == {"here": conn.test_schema}  # dict rows, on the gate's schema
 
 
-@contextlib.asynccontextmanager
-async def identity(db):
-    yield await db.identity()
-
-
 @pytest.mark.parametrize(
     "asking",
     [
         lambda db: db.held("run"),
         lambda db: db.startup("migration"),
-        identity,
     ],
-    ids=["held", "startup", "identity"],
+    ids=["held", "startup"],
 )
-async def test_a_session_lock_or_the_identity_asked_for_inside_a_unit_raises_when_strict(
-    db, asking
-):
+async def test_a_session_lock_asked_for_inside_a_unit_raises_when_strict(db, asking):
     async with db.read("the outer"):
         with pytest.raises(NestingError, match="while unit 'the outer' is open"):
             async with asking(db):
@@ -559,12 +538,12 @@ async def test_a_session_lock_or_the_identity_asked_for_inside_a_unit_raises_whe
 
 
 async def test_only_the_listed_session_locks_are_held_across_calls(db):
-    for name in ("replay", "migration", "paper", "nightly"):
+    for name in ("replay", "migration", "paper", "nightly", "schedule"):
         with pytest.raises(ValueError, match="not a session lock held across calls"):
             async with db.held(name):
                 pass
-    with pytest.raises(ValueError, match="not a session lock without an argument"):
-        await db.held_elsewhere("schedule")
+    with pytest.raises(ValueError, match="not a session lock held across calls"):
+        await db.held_elsewhere("migration")
 
 
 async def test_a_session_lock_lost_with_its_connection_is_logged(db, conn: Session, caplog):
@@ -643,59 +622,3 @@ async def test_a_slow_unit_is_logged_with_its_name_and_duration(db, monkeypatch,
     (record,) = logged(caplog)
     assert record.levelno == logging.WARNING
     assert record.getMessage().startswith("slow unit: 'slow' was open for 0.")
-
-
-# -- the presence session --------------------------------------------------------------------------
-
-
-async def alive(conn: Session, run_id: int) -> bool:
-    row = await (
-        await conn.execute(f"SELECT {runs.ALIVE} AS alive FROM runs r WHERE id = %s", (run_id,))
-    ).fetchone()
-    return row["alive"]
-
-
-async def ended(conn: Session, run_id: int, timeout: float = 5.0) -> bool:
-    """Whether the run stops counting as alive within `timeout`. A closed or terminated session's
-    backend leaves `pg_stat_activity` a moment after the client sees it gone."""
-    deadline = asyncio.get_running_loop().time() + timeout
-    while await alive(conn, run_id):
-        if asyncio.get_running_loop().time() > deadline:
-            return False
-        await asyncio.sleep(0.05)
-    return True
-
-
-async def test_a_run_stays_alive_while_its_pool_connections_are_replaced(conn: Session):
-    async with DatabaseGate(conn.test_dsn, conn.test_schema, max_size=2) as db:
-        me = await db.identity()
-        async with db.write("open a run") as unit:
-            assert await backend(unit) != me.pid  # the presence session is no pool connection
-            run_id = await runs.start(unit, "nightly", me=me)
-        await db._pool.drain()  # every pool connection closed and replaced
-        assert await alive(conn, run_id)
-        assert await db.identity() == me
-    # The gate closed, its presence with it: the run is over.
-    assert await ended(conn, run_id)
-
-
-async def test_a_presence_session_that_ended_is_opened_again_with_a_new_identity(
-    conn: Session, caplog
-):
-    async with DatabaseGate(conn.test_dsn, conn.test_schema) as db:
-        me = await db.identity()
-        async with db.write("open a run") as unit:
-            run_id = await runs.start(unit, "nightly", me=me)
-        await conn.execute("SELECT pg_terminate_backend(%s)", (me.pid,))
-        with caplog.at_level(logging.WARNING, logger=LOG):
-            again = await db.identity()
-        assert again != me
-        assert [r.getMessage() for r in logged(caplog)] == [
-            f"the presence session (backend {me.pid}) ended; opening another"
-        ]
-        assert await ended(conn, run_id)  # what was claimed in the old one's name is over
-
-
-async def test_a_bridged_gates_presence_is_its_connection(conn: Session):
-    me = await Bridge(conn).identity()
-    assert me.pid == conn.info.backend_pid

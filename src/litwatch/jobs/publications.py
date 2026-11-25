@@ -97,7 +97,8 @@ async def for_copy(
 async def run(db: DatabaseGate, source: PublicationSource, limit: int = LIMIT) -> dict[str, int]:
     """Look up the library papers that are due, as a `publications` run. Runs never overlap:
     each takes its due papers once, so one that died beside another would go unseen. The
-    caller holds the schedule lock for `publications`: the scheduler, or the CLI."""
+    caller runs it as a work item admitted as `publications`, one at a time: the scheduled
+    fire's (`jobs.scheduler`), or the CLI's."""
     async with run_record(db, "publications") as record:
         record.fields["cost"] = 0
         counts = record.counts

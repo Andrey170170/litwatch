@@ -41,7 +41,6 @@ import httpx
 
 from litwatch import events
 from litwatch.archive import ArchiveClient
-from litwatch.config import Config
 from litwatch.core import Cause
 from litwatch.core.fulltext import REQUESTED, TextRead
 from litwatch.feedback import word
@@ -50,6 +49,7 @@ from litwatch.gates.database import DatabaseGate, WriteUnit
 from litwatch.integrations.deep import Deep, RejectedError
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
+from litwatch.store import jobs as jobs_store
 from litwatch.store import outbox
 from litwatch.store.fulltext import Claimed
 
@@ -84,24 +84,19 @@ async def work(
     *,
     rules: word.Rules,
     limit: int | None = None,
-    config: Config | None = None,
 ) -> Counter[str]:
     """Work the Deep passes that are due, one at a time, up to `limit` claimed (`litwatch
-    fulltext --deep`); their papers are settled by `rules`. With the `config`'s schedule, a
-    re-run's (background) passes wait while a nightly run is running or due (pipeline.md,
-    section 10). Returns how the tries ended."""
-    from litwatch.jobs.worker import nightly_waits  # noqa: PLC0415 (the jobs import this module)
-
+    fulltext --deep`); their papers are settled by `rules`. A re-run's (background) passes
+    wait while a nightly run is running or due (pipeline.md, section 10). Returns how the tries
+    ended."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
     while limit is None or len(tried) < limit:
         if await paused(db):
             break
-        # Asked at each claim: a nightly may have come due meanwhile.
-        background = config is None or not await nightly_waits(
-            db, config, datetime.now(config.schedule.zone)
-        )
         async with db.write("claim a deep pass") as unit:
+            # Asked at each claim: a nightly may have come due meanwhile.
+            background = not await jobs_store.nightly_waits(unit)
             claimed = await store_.claim(
                 unit, deep.lease, 1, tried, deep=True, background=background
             )

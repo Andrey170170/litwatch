@@ -11,16 +11,18 @@ import pytest
 from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Hand, Publication
-from litwatch.gates.database import BusyError
+from litwatch.gates.work import WorkGate, inline
 from litwatch.jobs import publications as lookups
 from litwatch.jobs import scheduler
 from litwatch.publications import SourceError, dblp
 from litwatch.publications.bibtex import Cited, entries
 from litwatch.store import papers as papers_store
 from litwatch.store import publications as store
+from litwatch.store import work
 from tests import settling
 from tests.conftest import AppClient, gate_on, paper
 from tests.sessions import Session, in_read, in_write
+from tests.working import items_of, serving, until
 
 TOKEN = "s3cret"
 NIPS = Publication(
@@ -164,9 +166,10 @@ async def db(conn: Session):
 
 
 async def run(gate, source, limit: int = lookups.LIMIT) -> dict[str, int]:
-    """A publications run as the CLI starts one, holding the job's schedule lock."""
-    async with gate.held("schedule", "publications"):
-        return await lookups.run(gate, source, limit)
+    """A publications run as the CLI starts one: a work item admitted as `publications`."""
+    return await inline(
+        gate, "publications", lambda: lookups.run(gate, source, limit), admission="publications"
+    )
 
 
 async def events(conn: Session):
@@ -198,18 +201,34 @@ async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db
 
 
 async def test_runs_never_overlap(db: Session, gate):
-    # Each run takes its due papers once: one beside another could die unseen (monitoring).
-    source = Source()
-    (job,) = [j for j in scheduler.jobs(Config(), source=source) if j.kind == "publications"]
-    now = scheduler.last_fire(job.cron, datetime.now(UTC)) + timedelta(minutes=1)  # it is due
-    async with gate_on(db) as other, other.held("schedule", "publications"):  # the CLI's run
-        with pytest.raises(BusyError):
-            await run(gate, source)
-        assert await scheduler.tick(gate, [job], now) == []  # left to the run in progress
-    assert source.asked == []
-    # The scheduler runs it under the lock it decided under, which the run takes no more.
-    assert await scheduler.tick(gate, [job], now) == ["publications"]
-    assert len(source.asked) == 2
+    """Each run takes its due papers once: one beside another could die unseen (monitoring).
+    The CLI's run holds the `publications` admission, so the scheduled fire's item waits for it,
+    then finds its fire served by that run, and looks nothing up again."""
+    source, going, hold = Source(), asyncio.Event(), asyncio.Event()
+
+    async def by_hand():
+        going.set()
+        await hold.wait()
+        return await lookups.run(gate, source)
+
+    cli = asyncio.create_task(inline(gate, "publications", by_hand, admission="publications"))
+    await asyncio.wait_for(going.wait(), 10)
+    fired = datetime.now(UTC) - timedelta(minutes=1)
+    async with gate.write("a fire") as unit:
+        fire = await work.submit(unit, "publications", scheduler.fire_key(fired), lasting=True)
+    workers = {"publications": scheduler.PublicationsWorker(gate, source)}
+
+    async def ended() -> bool:
+        (row,) = await items_of(db, "publications", fire.key)
+        return row["state"] == "ended"
+
+    async with serving(WorkGate(gate, poll=0.1), workers):
+        assert not await ended() and source.asked == []  # it waits for the CLI's run
+        hold.set()
+        await cli
+        assert len(source.asked) == 2
+        await until(ended, "the fire's item to end")
+    assert len(source.asked) == 2  # served by the CLI's run
 
 
 async def test_a_run_stops_when_dblp_keeps_failing(db: Session, gate, monkeypatch):

@@ -18,7 +18,7 @@ import pytest
 from litwatch.core import Depth, Paper, Taxonomy, TaxonomyClass, Topic
 from litwatch.events import dispatch
 from litwatch.feedback import word
-from litwatch.gates.database import STRICT_ENV, DatabaseGate, identity_of
+from litwatch.gates.database import STRICT_ENV, DatabaseGate
 from litwatch.store import runs
 from litwatch.store.calls import CallJournal
 from tests import sessions
@@ -159,14 +159,33 @@ async def gate(conn: Session):
 
 
 def gate_on(conn: Session) -> DatabaseGate:
-    """A Database gate of its own on `conn`'s schema, with its own presence session: as another
+    """A Database gate of its own on `conn`'s schema, with a pool of its own: as another
     process's. Opened and closed with `async with`."""
     return DatabaseGate(conn.test_dsn, conn.test_schema)
 
 
-async def started(conn: Session, kind: str, *args: Any, **kwargs: Any) -> int:
-    """`store.runs.start` in the name of `conn`'s own session, alive while `conn` is open."""
-    return await in_write(conn, runs.start, kind, *args, me=await identity_of(conn), **kwargs)
+async def started(conn: Session, kind: str, *args: Any, alive: bool = False, **kwargs: Any) -> int:
+    """`store.runs.start`: an open run, which no work item runs, so not alive; with `alive`,
+    one a work item of its own runs under an hour's lease (`lease_lapses` ends it)."""
+    run_id = await in_write(conn, runs.start, kind, *args, **kwargs)
+    if alive:
+        await conn.execute(
+            "WITH i AS (INSERT INTO work_items (kind, key, admission, state, lease_token, "
+            "lease_until) VALUES ('command', %(key)s, %(key)s, 'running', gen_random_uuid(), "
+            "now() + interval '1 hour') RETURNING id) "
+            "UPDATE runs SET work_id = (SELECT id FROM i) WHERE id = %(run)s",
+            {"key": f"run {run_id}", "run": run_id},
+        )
+    return run_id
+
+
+async def lease_lapses(conn: Session, run_id: int) -> None:
+    """The lease of the work item that runs the run lapses, as when its process dies."""
+    await conn.execute(
+        "UPDATE work_items SET lease_until = now() - interval '1 second' "
+        "WHERE id = (SELECT work_id FROM runs WHERE id = %s)",
+        (run_id,),
+    )
 
 
 class AppClient(httpx.AsyncClient):

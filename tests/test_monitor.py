@@ -19,8 +19,8 @@ from litwatch.store import failures, reading, runs
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
 from litwatch.store.calls import CallJournal
-from tests import sessions, settling
-from tests.conftest import FAITH, INTERP, TREE, AppClient, paper, started
+from tests import settling
+from tests.conftest import FAITH, INTERP, TREE, AppClient, lease_lapses, paper, started
 from tests.fakes import ScriptedProvider
 from tests.sessions import Session, in_read, in_write
 
@@ -88,14 +88,14 @@ async def test_a_finished_nightly_is_measured_from_its_record(conn: Session, mon
 
 
 async def test_a_nightly_whose_process_died_reads_failed_not_running(conn: Session, monitor):
-    # A process that opens its run and is killed: its session ends, the record stays open.
-    other = await sessions.sibling(conn)
-    await started(other, "nightly")
+    # A process that opens its run and is killed: its work item's lease lapses, the record
+    # stays open.
+    run_id = await started(conn, "nightly", alive=True)
     text = (await monitor.get("/metrics")).text
     assert sample(text, "homelab_job_running") == 1
     assert component((await monitor.get("/status")).json(), "nightly")["status"] == "healthy"
 
-    await other.close()
+    await lease_lapses(conn, run_id)
     text = (await monitor.get("/metrics")).text
     assert sample(text, "homelab_job_running") == 0
     assert sample(text, "homelab_job_last_run_timestamp_seconds") is not None

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from litwatch.config import Config
-from litwatch.gates.database import DatabaseGate, Identity, ReadUnit, WriteUnit
+from litwatch.gates.database import DatabaseGate, ReadUnit, WriteUnit
 from litwatch.jobs import reruns
 from litwatch.jobs.context import ModelRun
 from litwatch.quality import replay
@@ -102,7 +102,7 @@ async def make(unit: WriteUnit, config: Config, o: Offer, ceiling: float) -> dic
 @dataclass
 class Chunk:
     """How one chunk of a replay ended: `more` to do, `stopped` by its ceiling (`where`),
-    `done`, or `gone` (no longer this session's)."""
+    `done`, or `gone` (no longer running)."""
 
     outcome: Literal["more", "stopped", "done", "gone"]
     where: str | None = None
@@ -115,15 +115,13 @@ async def work(
     job: dict[str, Any],
     tried: set[str],
     size: int,
-    *,
-    me: Identity,
 ) -> Chunk:
     """The replay's next chunk: the next `size` papers with a stage left that this run has not
     `tried` (the worker keeps it with the run; one whose text changed since counts as not
     tried), through classification and grading, as
     `--resume` goes on (a configuration or taxonomy changed since raises `ValueError`). Its
-    progress is the papers concluded, recorded for the session `me` runs it in the name of;
-    done once this run has tried every paper left, the evaluation run then finished."""
+    progress is the papers concluded; done once this run has tried every paper left, the
+    evaluation run then finished."""
     eval_run = job["scope"]["eval_run"]
     async with db.read("replay: resume") as unit:
         r = await replay.resume(unit, config, eval_run)
@@ -137,7 +135,7 @@ async def work(
     counts = Counter(job["counts"]) + (run.tally() - before)
     concluded = len(r.papers) - len(r.left)
     async with db.write("replay: progress") as unit:
-        after = await jobs_store.progress(unit, job["id"], concluded, dict(counts), me=me)
+        after = await jobs_store.progress(unit, job["id"], concluded, dict(counts))
     if after is None:
         return Chunk("gone")
     if cut:

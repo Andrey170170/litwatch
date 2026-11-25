@@ -34,7 +34,11 @@ fallback poll that covers a dropped listener: a drop delays work and loses none.
 
 Everything the gate does for itself (claims, leases, settling, the listener, its reads) is
 attributed to the gate (`SYSTEM`) and runs outside any item's work context, so it is never
-fenced."""
+fenced.
+
+`inline` runs a CLI command's work as an item of its own process, until P5 sends it to `serve`
+(docs/plans/a2-work-gate.md, "Until P5, the CLI's inline commands run as items in their own
+process")."""
 
 from __future__ import annotations
 
@@ -43,6 +47,7 @@ import contextlib
 import logging
 import os
 import socket
+import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -51,7 +56,7 @@ from decimal import Decimal
 
 import psycopg
 
-from litwatch.core.work import Outcome, WorkItem
+from litwatch.core.work import ItemState, Outcome, WorkItem
 from litwatch.gates.context import Attribution, Work, attributed, working
 from litwatch.gates.database import DatabaseGate, LeaseLostError, PoolTimeoutError, WriteUnit
 from litwatch.store import work as queue
@@ -158,6 +163,7 @@ class WorkGate:
         # Renewals cut off at their lease's end, kept until they have unwound.
         self._unwinding: set[asyncio.Task[bool]] = set()
         self._keys: Mapping[str, Collection[str]] | None = None  # as `run` was given them
+        self.settled = asyncio.Event()  # set as each change to a claim (`_change`) is made
 
     @property
     def idle(self) -> bool:
@@ -354,6 +360,7 @@ class WorkGate:
                 log.warning("work: could not %s the item, taken back later: %s", what, exc)
 
         await _finished(asyncio.create_task(changing()))
+        self.settled.set()
 
     async def _heartbeat(
         self, item: WorkItem, handler: asyncio.Task, lost: asyncio.Event, since: float
@@ -445,6 +452,48 @@ class WorkGate:
             finally:
                 self.listening.clear()
             await asyncio.sleep(self.poll)
+
+
+async def inline[T](
+    db: DatabaseGate, name: str, work: Callable[[], Awaitable[T]], *, admission: str | None = None
+) -> T:
+    """Run `work` as a work item of kind `command` in this process, through a Work gate of its
+    own that serves that item alone, and return what its last try returned or raise what it
+    raised: the CLI command `name`'s work, whose runs are alive while the item's lease is
+    (`store.runs.ALIVE`). Its `admission` is its own unless given: a command that does what a
+    kind of `serve`'s does takes that kind's (`deep`), so it waits while that kind runs, and
+    the kind waits for it. A try the database was lost under is made again, as the gate makes
+    any item's."""
+    key = f"{name}:{uuid.uuid4()}"
+    async with db.write(f"{name}: submit") as unit:
+        item = await queue.submit(unit, queue.COMMAND, key, admission=admission or key)
+    tries: list[asyncio.Task[T]] = []
+
+    async def worker(_: WorkItem) -> None:
+        tries.append(asyncio.ensure_future(work()))
+        await tries[-1]
+
+    gate = WorkGate(db)
+    serving = asyncio.create_task(gate.run({queue.COMMAND: worker}, keys={queue.COMMAND: [key]}))
+    try:
+        while True:
+            gate.settled.clear()
+            async with db.read(f"{name}: has it ended") as unit:
+                found = await queue.get(unit, item.id)
+            assert found is not None  # items are never deleted
+            if found.state == ItemState.ENDED:
+                break
+            if serving.done():  # the gate stopped: its error says why
+                serving.result()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(gate.settled.wait(), gate.poll)
+    finally:
+        serving.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await serving
+    if not tries or tries[-1].cancelled():  # never run, or cut off as its lease was lost
+        raise RuntimeError(f"{name}: {found.error or 'its work item ended without its work'}")
+    return tries[-1].result()
 
 
 def _name(item: WorkItem) -> tuple[str, str, int]:

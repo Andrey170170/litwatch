@@ -28,6 +28,9 @@ from litwatch.store.text import stored
 # The channel a submission, and an item's settling, notify the Work gates on; the payload is the
 # item's kind.
 CHANNEL = "litwatch_work"
+# The kind of a CLI command's work run in its own process (`gates.work.inline`), which no
+# `serve` serves.
+COMMAND = "command"
 
 _COLUMNS = (
     "id, kind, key, admission, state, not_before, attempts, scope, lease_token, lease_until, "
@@ -293,7 +296,22 @@ async def take_back(
     expired back to pending, to be taken again at once in the place in line they had (a
     resubmission's later wish included): their worker died or lost the database. One whose row
     a unit holds (one fenced on it, or a settling) is left for a later call. Returns those taken
-    back."""
+    back.
+
+    A CLI command's item (`gates.work.inline`) whose lease expired while it holds an admission
+    one of these kinds is admitted by (the `deep` one) ends failed: its process is gone, and no
+    other serves it."""
+    params = _serving(kinds, keys)
+    await unit.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
+        "error = 'its process stopped', lease_token = NULL, lease_until = NULL, "
+        "resubmitted = false "
+        "WHERE id IN (SELECT id FROM work_items c WHERE c.kind = %(command)s "
+        "AND c.state = 'running' AND c.lease_until < now() AND c.admission IN "
+        f"(SELECT w.admission FROM work_items w WHERE {_served('w')}) "
+        "FOR UPDATE SKIP LOCKED)",
+        params | {"command": COMMAND},
+    )
     rows = await (
         await unit.execute(
             "UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
@@ -301,7 +319,7 @@ async def take_back(
             f"WHERE id IN (SELECT id FROM work_items w WHERE {_served('w')} "
             "AND state = 'running' AND lease_until < now() FOR UPDATE SKIP LOCKED) "
             f"RETURNING {_COLUMNS}",
-            _serving(kinds, keys),
+            params,
         )
     ).fetchall()
     return [_item(r) for r in rows]
@@ -463,6 +481,12 @@ async def wait_seconds(
     ).fetchone()
     assert row is not None  # an aggregate has its row
     return row["seconds"]
+
+
+async def link_run(unit: WriteUnit, item: WorkItem, run_id: int) -> None:
+    """Record that the running item works the run `run_id` (a job's chunk, on the job's run):
+    the run is alive while the item's lease is (`store.runs.ALIVE`). In the item's own unit."""
+    await unit.execute("UPDATE work_items SET run_id = %s WHERE id = %s", (run_id, item.id))
 
 
 async def get(unit: ReadUnit, item_id: int) -> WorkItem | None:

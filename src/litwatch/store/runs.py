@@ -9,10 +9,23 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from litwatch.gates.context import current_work
-from litwatch.gates.database import Identity, ReadUnit, WriteUnit
+from litwatch.gates.database import ReadUnit, WriteUnit
 
 _JSON = {"counts", "intake"}
 _FIELDS = {"fetched", "inserted", "updated", "cost", "error", *_JSON}
+
+
+# The row of the session a statement runs in, as `pg_stat_activity` shows it (`a`): what the old
+# liveness columns (`backend_pid`, `backend_start`) are written from.
+SESSION = "pg_stat_activity a WHERE a.pid = pg_backend_pid()"
+
+# Whether run `r` is alive: a work item that runs it, the one it was opened in or a chunk of
+# its job, holds an unexpired lease. A process that dies without closing its run (killed, out
+# of memory) stops renewing the lease, so its run is over once that lapses: open, not alive.
+ALIVE = (
+    "EXISTS (SELECT 1 FROM work_items w WHERE (w.id = r.work_id OR w.run_id = r.id) "
+    "AND w.state = 'running' AND w.lease_until > now())"
+)
 
 
 async def start(
@@ -21,31 +34,24 @@ async def start(
     window_from: datetime | None = None,
     window_to: datetime | None = None,
     job_id: int | None = None,
-    *,
-    me: Identity,
 ) -> int:
-    """Open a run in the name of `me`, the session that stands for its process
-    (`DatabaseGate.identity`): the run is alive while that session lasts (`ALIVE`). A run of
-    kind `job` names its job; a standalone one opened by a work item (a pass's) names that item
-    (`work_id`, docs/specs/architecture/a2-work-gate.md, "Work records")."""
+    """Open a run. A run of kind `job` names its job, and each chunk item that works it names
+    the run (`store.work.link_run`); a standalone one names the work item it runs in
+    (`work_id`, docs/specs/architecture/a2-work-gate.md, "Work records"), whose lease says
+    whether it is alive (`ALIVE`). The old liveness columns get the session writing it, which
+    ends with the process: until P7 they are what the image before the Work gate reads
+    (docs/plans/a2-work-gate.md, "Rollback is a handoff of live work")."""
     work = current_work()
     work_id = work.item.id if work is not None and job_id is None else None
     row = await (
         await unit.execute(
             "INSERT INTO runs (kind, window_from, window_to, job_id, work_id, backend_pid, "
-            "backend_start) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (kind, window_from, window_to, job_id, work_id, me.pid, me.started),
+            "backend_start) SELECT %s, %s, %s, %s, %s, a.pid, a.backend_start "
+            f"FROM {SESSION} RETURNING id",
+            (kind, window_from, window_to, job_id, work_id),
         )
     ).fetchone()
     return row["id"]
-
-
-# Whether run `r`'s process still has its session. A process that dies without closing its run
-# (killed, out of memory) loses its session with it, so its run is over: open, not alive.
-ALIVE = (
-    "EXISTS (SELECT 1 FROM pg_stat_activity a "
-    "WHERE a.pid = r.backend_pid AND a.backend_start = r.backend_start)"
-)
 
 
 async def latest(unit: ReadUnit, kind: str) -> dict[str, Any] | None:

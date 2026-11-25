@@ -33,7 +33,7 @@ from litwatch.store import digests as store_
 from litwatch.store import papers as papers_store
 from litwatch.store import reading, runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
-from tests import settling
+from tests import settling, working
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, gate_on, paper, started
 from tests.digesting import (
     MON,
@@ -56,6 +56,7 @@ from tests.digesting import (
 from tests.feeds import entry, feed
 from tests.seed import analyse, classify, grade
 from tests.sessions import Bridge, Session, in_read, in_write
+from tests.working import QUIET, served, step, until
 
 TOKEN = "t"
 
@@ -1597,7 +1598,6 @@ async def test_the_tab_steps_only_through_the_digests_it_shows(db: Session, gate
 
 
 SCHEDULED = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
-AFTERNOON = datetime(2026, 10, 7, 14, 0, tzinfo=SCHEDULED.schedule.zone)  # no nightly due
 
 
 async def failed_day(db: Session, w: Writer) -> int:
@@ -1611,11 +1611,12 @@ async def failed_day(db: Session, w: Writer) -> int:
 
 
 async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_written(
-    db: Session, gate
+    db: Session, gate, monkeypatch
 ):
     """Write again queues a job instead of answering 409 while another job holds the run lock;
     the worker writes the digest once the lock is free, and its Needs you item and its job
     settle together."""
+    monkeypatch.setattr(worker, "WAIT", timedelta(0))  # the chunk the lock held looks again at once
     w = Writer()
     digest_id = await failed_day(db, w)
     async with client(db, w, SCHEDULED) as http:
@@ -1630,13 +1631,13 @@ async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_w
             again = (await http.post(f"/api/digests/{digest_id}/write")).json()
             assert again["job"]["id"] == body["job"]["id"]
             # The lock is held: no chunk starts, and the job waits in the queue.
-            assert not await worker.Worker(gate, SCHEDULED, w.gateway).step(AFTERNOON)
+            assert not await step(worker.JobWorker(gate, SCHEDULED, w.gateway))
             jobs = (await http.get("/api/jobs")).json()
             [row] = jobs["running"]
             assert (row["kind"], row["state"]) == ("digest", "queued")
             assert row["digest"]["id"] == digest_id
             assert (row["topic"]["slug"], row["digest"]["period"]) == (FAITH.slug, "day")
-        assert await worker.Worker(gate, SCHEDULED, w.gateway).step(AFTERNOON)
+        assert await step(worker.JobWorker(gate, SCHEDULED, w.gateway))
         written = (await http.get(f"/api/digests/{digest_id}")).json()
         assert (written["state"], written["job"]["state"]) == ("written", "done")
         assert [p["id"] for p in written["papers"]] == [P.id]
@@ -1650,6 +1651,26 @@ async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_w
     assert [r["kind"] for r in job_runs] == ["job"]  # its cost reaches the month's spend
 
 
+async def test_serve_writes_a_failed_digest_again_as_a_worker(db: Session, gate):
+    """Through `serve`'s own lifespan: Write again queues its job, which the gate runs at once."""
+    w = Writer()
+    digest_id = await failed_day(db, w)
+    quiet = SCHEDULED.model_copy(update={"schedule": QUIET})
+
+    async def written() -> bool:
+        found = await in_read(db, store_.get, digest_id)
+        return found is not None and found["state"] == "written"
+
+    async with served(gate, quiet, gateway=w.gateway) as app:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://t",
+            headers={"Authorization": f"Bearer {working.TOKEN}"},
+        ) as http:
+            assert (await http.post(f"/api/digests/{digest_id}/write")).status_code == 202
+        await until(written, "the digest to be written")
+
+
 async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_run_writes_it(
     db: Session, gate
 ):
@@ -1658,7 +1679,7 @@ async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_ru
     async with client(db, w, SCHEDULED) as http:
         w.failures = [ProviderError("still down")] * 4  # every writer of the list
         assert (await http.post(f"/api/digests/{digest_id}/write")).status_code == 202
-        assert await worker.Worker(gate, SCHEDULED, w.gateway).step(AFTERNOON)
+        assert await step(worker.JobWorker(gate, SCHEDULED, w.gateway))
         failed = (await http.get(f"/api/digests/{digest_id}")).json()
         assert (failed["state"], failed["job"]["state"]) == ("failed", "failed")
         assert failed["job"]["error"].startswith("the writer failed again")

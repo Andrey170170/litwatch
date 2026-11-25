@@ -257,5 +257,4 @@ async def write_again(digest_id: int, request: Request, db: Db) -> s.Digest:
         ):
             raise HTTPException(status_code=409, detail="the digest is not one to write again")
         await jobs_store.write_digest(c, digest_id)
-    request.app.state.jobs_wake.set()
     return await _with_job(db, digest_id)

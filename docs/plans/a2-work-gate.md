@@ -237,14 +237,15 @@ with one parser, the deep update, the re-trigger fix, leases and fencing.
 
 Found while building, owned by the stage named.
 
-- **P2, P3 (from P1): the gate's interface.** `store.work.submit(unit, kind, key, scope=, not_before=,
+- **P2, P3, P5 (from P1): the gate's interface.** `store.work.submit(unit, kind, key, scope=, not_before=,
   admission=, lasting=)` in the caller's unit; `WorkGate(db).run({kind: worker})` serves until cancelled, and a
   cancelled gate gives back each claim it still owns once its Worker has stopped. A Worker returns `Done(cost)`
   (or None) or `Later(at)`, which puts the item back to pending until `at` (a pass claimed by another owner, the
   run lock taken, text awaited). Raising fails the item; only a lost database (a dropped connection, a server
-  shutting down or ending the session, an empty pool) gives it back to try again. Settling needs a live lease.
+  shutting down or ending the session, an empty pool) or a lost deadlock or serialization conflict
+  (`gates.work.conflicted`) gives it back to try again. Settling needs a live lease.
   `LeaseLostError` from a write unit means the item is no longer the task's.
-- **P2, P3: keys.** A key is unique within its kind while open. A submission that finds its key pending brings
+- **P2, P3, P5: keys.** A key is unique within its kind while open. A submission that finds its key pending brings
   it forward to the sooner `not_before`, which is the owner's "run it now". One that finds it running marks it
   resubmitted: when that item ends (done or failed), it keeps its own record, and a fresh pending item with its
   kind, key, scope and admission takes the key, at the sooner of the asked `not_before`s, so an owner's retry
@@ -263,83 +264,13 @@ Found while building, owned by the stage named.
   it as a delivery failure with its backoff. Ported to a Worker, it lets a lost database (`gates.work._lost`)
   propagate and keeps the backoff for the integration's own errors. Done in P2, with `_lost` made public as
   `gates.work.database_lost`.
-- **P3: a lost database reaches the gate from a job chunk.** `jobs/worker.py`'s `_next` catches every error of
-  `_chunk` and ends the job failed. Ported to a Worker, it lets a lost database propagate, so the chunk's item is
-  tried again, and fails the job only on the chunk's own errors.
 - **P2 (hindsight from P1's review): one task fewer per claim.** Done in P2: the run loop owns each claim through
   its commit and starts the item's supervisor with it. One shielded task per take is left, so a claim committing
   as the gate stops is still given back.
-- **P3 (from P2): the CLI's Deep passes run beside `serve`'s.** The Deep session lock is gone, so
-  `litwatch fulltext --deep` can work a Deep pass while `serve` serves its item. The pass claim keeps them off
-  one pass, but no longer one at a time; P3's CLI-as-items closes it. Its check: with a Deep item running, a second
-  Deep job (the CLI's, as an item) waits for the `deep` admission.
-- **P3 (from P2): a shared setup failure decides no turn where setup is cached.** With two processes serving one
-  integration, A having run its setup and B's failing (a retry recorded in `setup_failures`), a turn A takes skips
-  setup and arranges the next (`events/worker.py`, `_arrange`) without reading `setup_failures`: with an empty
-  outbox and no `idle` hook, no turn stays open, and the failure waits for the owner's Retry. Production runs one
-  `serve`. The fix for later: the shared setup failure takes part in the turn's decision when setup is cached
-  too.
-- **P3 (from P2): events wake deliveries at commit.** `outbox.emit` registers `WriteUnit.at_commit`, which runs the
-  submit as the unit's last statement, once per unit for every integration with a cursor. Submitting at emit time
-  would hold the delivery item's row lock until commit and queue every other emitter behind it. A P3 path that
-  submits from a long unit should do the same. A first cursor is made under `LOCK TABLE outbox IN SHARE MODE`, so no
-  emitter looks up the cursors before it exists and commits after its first turn.
-- **P3 (from P2): the cursor's row serializes a delivery's schedule.** Every write that schedules a turn locks the
-  integration's cursor row first and its item's row after, and reads the backoff under the cursor's lock: an event's
-  wake (`outbox.wake`, cursors in name order, so two emitters lock them alike), the owner's retry and skip (which
-  update the cursor first), and a turn arranging the next (`outbox.locked` before
-  `work.forget_resubmission`). A backoff is recorded and cleared on that row, so no turn is scheduled by a backoff
-  read before it changed. An event's wake asks for the time the events may be delivered (now, or the backoff's
-  end): it brings forward a turn that waits for the `idle` hook, never one past its backoff. A turn asks for the
-  sooner of that time and, for an integration with an `idle` hook, when the hook is due, so the hook still runs
-  during a long backoff. A P3 Worker that schedules itself from state another write changes (job chunks) can take
-  the same order: the state's row, then the item's.
-- **P3 (from P2): a turn decides its next run alone.** A delivery turn calls `store.work.forget_resubmission` in its
-  last unit, then reads the cursor and the outbox and submits its own key for when it wants to run again; what was
-  submitted while it ran is forgotten, since that read sees it. A P3 Worker that arranges its own next run (the
-  scheduler's fires, job chunks) can do the same only when that last locked read accounts for every reason to run
-  again: a reason its read does not see (a request kept nowhere but in the resubmission) would be lost.
-- **P3, P7 (from P2): deliveries are served by name.** `WorkGate.run(workers, keys=)` serves a kind for some keys alone;
+- **P7 (from P2): deliveries are served by name.** `WorkGate.run(workers, keys=)` serves a kind for some keys alone;
   `serve` gives it the integrations it loads, so a process takes, takes back and waits on only its own deliveries.
   An item no process serves keeps its state: one pending is never taken, and one `running` whose lease expired is
   never taken back. One dropped from the configuration leaves it for good, which P7's cleanup could end.
-- **P3 (from P2): pass order and width.** A work item carries a `priority` apart from its `not_before`
-  (migration 0048): `take` runs the due item of the lowest priority first, then the one due longest, and a
-  submission keeps the more urgent of two priorities, as it keeps the sooner of two times. A pass's item carries its
-  pass's priority, so due passes run as `claim`'s priority order did (the owner's, then the automatic ones, then a
-  re-run's), after a wait too: Deep items that waited out one pause, all due at its end, resume in that order. Only a
-  write that moves a pass (`owners_first` changing its priority or job) submits it, so a settle does not cut a try's
-  wait short. Text-pass admission is spread over `TEXT_WAVE` slots (`fulltext:{id % 4}`), so up to four run at once
-  as a wave did; two passes in one slot wait for each other. Deep stays one per kind. Each text item opens its own
-  `fulltext` run and gateway, so four at once are four gateways until P4. `store.work.again` with no time keeps the
-  item's place in line (`LEAST(not_before, now())`). Other kinds leave the priority 0.
-- **P3 (from P2): a pass item decides under the pass's lock.** Both pass Workers decide with
-  `store.fulltext.decide`: it locks the pass's row (waiting for a settle that holds it), reads it in a statement of
-  its own, and claims it under that lock when a claim may take it, so a runnable pass never ends untried; else the
-  item waits for another owner's claim (`held_until`), looks again later (`held_back`), or ends; the claim and the
-  look are two statements, so one that finds the pass runnable after a claim that took nothing (its paper changed
-  between them) claims again. The startup sweep lists the open passes, then takes one unit per pass, which locks it,
-  looks again under the lock (`submit_open`, the claim's static predicates, `_eligible`) and submits its item, so it
-  never locks two items at once nor gives a pass worked inline meanwhile a new one. Every submission of a pass's item
-  goes through `store.fulltext.submit` (a Worker's retry after an error included), so its admission and priority come
-  from the pass. A Deep service failure stores the pause's start, and the pass that failed and every other wait for
-  the one deadline read from it (`paused_until`), so they resume in priority order. A pass worked inline (the nightly, the CLI) retires its item as it
-  ends (`done`, `failed` call `store.work.done_elsewhere`): a pending one ends, and a running one other than the
-  caller's is wanted again at once, so one that was about to wait looks again first, and finds the pass done; in
-  that race the look again is one more short item. A pass's writes submit its item by the pass's job as it stands
-  (`RETURNING job_id`), not the claim's, as the owner's Process may take a pass from a re-run meanwhile.
-- **P3 (from P2): a conflict is tried again, and a failure is always recorded.** The gate gives an item back to
-  be tried again when its Worker raises a lost deadlock or serialization conflict (`gates.work.conflicted`), as for
-  a lost database, so no pass or delivery is left with no item after one. Failure text from outside (a remote
-  answer in an error) is stored through `store.text.stored`, which replaces what PostgreSQL refuses (a NUL, a lone
-  surrogate), so the write that records a failure, and its backoff and Retry, cannot fail on it. P2 uses it for the
-  outbox's and the passes' errors; `runs`, `jobs`, `inference_calls`, `digests` and `failures` errors still cut
-  text alone, for the stages that move them.
-- **P3 (from P2): `fulltext.worker` imports `jobs.worker.nightly_waits`.** That is on the `(fulltext, jobs)` pair
-  of `CYCLES_BEFORE_THE_RULE`; when P3 moves the nightly gating into items, the import can go with it.
-- **P3 (from P2): job-owned text passes stay off the gate.** A text pass with a `job_id` is the re-run's, worked
-  inline by its chunk; only regular-queue text passes are submitted. A re-run's Deep passes are regular-queue
-  passes, submitted at background priority. `owners_first` and `release_job` submit the passes a job lets go.
 - **P4: work context.** `gates.context.current_work()` gives the item, with `ceiling` and `deadline` left
   `None` for P4 to fill.
 - **P4: a batch's outcome is settled in pieces, not once.** T2's review found five edge cases, each rare:
@@ -364,6 +295,41 @@ Found while building, owned by the stage named.
 - **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the
   request one and the check. The `workers` rows are written and beat, but no one reads them yet: P5 adds the
   CLI's reader, which counts a row whose `heartbeat_at` is within a lease as alive.
+- **P4 (from P2): four text gateways.** Text-pass admission is spread over `TEXT_WAVE` slots, and each text item
+  opens its own `fulltext` run and gateway, so four at once are four gateways until P4's one Model gate.
+- **P4, P7 (from P2): failure text.** Errors from outside go through `store.text.stored` before a text column takes
+  them. The outbox's, the passes' and, since P3, the jobs' do; `runs`, `inference_calls`, `digests` and `failures`
+  still cut text alone, for the stages that move them.
+- **P4 (from P3): a job's ceiling across its chunks.** A chunk's run is opened at the job's first chunk in a
+  process and kept across its chunks there (`JobWorker.open`); its ceiling is set once, when the run opens, to the
+  job's ceiling less what all its runs spent (`reruns.ceiling`, `jobs_store.spent`). A chunk on another process, or
+  after a restart, opens a run of its own and starts from that spend. P4's ceiling from the work context keeps this
+  reading: the item is the chunk, the ceiling is the job's.
+- **P4, P5 (from P3): runs and their items.** A run is alive while a work item that runs it holds a live lease
+  (`store.runs.ALIVE`): the item it was opened in (`runs.work_id`), or, for a job's run, each chunk's item, linked
+  as the chunk starts (`work_items.run_id`, `store.work.link_run`). A run opened outside any item reads dead at
+  once: today only the API's grade now (`api/settings.py`, kind `grading`), whose liveness nothing reads. P5's
+  request attribution can give it one, or say why not.
+- **P5 (from P3): the CLI's commands are items in their own process.** `gates.work.inline` submits a `command`
+  item keyed `{name}:{uuid}`, admitted by its own key or by the kind whose work it does (`deep` for
+  `fulltext --deep`, `publications` for the lookup), and serves it on a Work gate of its own, so a lost database
+  tries it again. `serve`'s take-back ends failed a `command` item whose lease lapsed while it holds an admission
+  `serve` serves; others are left. P5 replaces this with submit and wait; `inline`'s callers in `cli.py` are the list
+  to move.
+- **P5 (from P3): the nightly and the chunks.** No chunk starts while a `nightly` item is pending or a nightly run
+  is open and alive (`store.jobs.nightly_waits`); a waiting chunk looks again after `jobs.worker.WAIT`, and the
+  nightly's end submits every runnable job's chunk (`store.jobs.release`), so it goes at once. `serve`'s sweep
+  submits the fires due before its gate starts. Between a fire's time and its scheduler item's run (milliseconds) a
+  chunk may start: the nightly then waits that chunk, as the plan allows.
+- **P5, P7 (from P3): every job write submits its chunk.** A job's chunk is a `job` item keyed by its id; every
+  write that makes a job runnable submits it in its unit, after locking the job's row (`store.jobs.submit`), and a
+  chunk's last unit decides the next under that lock (`next_chunk`): the lock order is the job's row, then its
+  item's, a settle's paper locks before either. A chunk item that fails outside its kind's handler (a bug in the
+  claim) leaves its job running with no item until the next `serve`'s sweep submits it.
+- **P7 (from P3): the old liveness columns.** `runs.start` and `jobs.claim` still write `backend_pid` and
+  `backend_start` (`store.runs.SESSION`) and `jobs.finish` clears them, for the image before the Work gate; jobs keep
+  their states. Nothing in this image reads them. P7 drops them with `SESSION`. The held-across-calls list is down
+  to the run lock already (the `schedule` lock went in P3, with `held`'s key argument).
 
 ## Evidence
 

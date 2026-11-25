@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
@@ -25,11 +25,13 @@ from litwatch.events import Integration
 from litwatch.events.worker import DeliveryWorker
 from litwatch.fulltext.worker import DeepPassWorker, TextPassWorker
 from litwatch.gates.database import DatabaseGate
-from litwatch.gates.work import WorkGate
-from litwatch.jobs import scheduler, worker
+from litwatch.gates.work import Worker, WorkGate
+from litwatch.jobs import scheduler
 from litwatch.jobs.context import GatewayFactory, default_gateway
+from litwatch.jobs.worker import JobWorker
 from litwatch.publications import Dblp, PublicationSource
 from litwatch.store import fulltext as fulltext_store
+from litwatch.store import jobs as jobs_store
 from litwatch.store import outbox
 
 # The built web app (`web/`, `pnpm build`), shipped inside the package.
@@ -47,61 +49,59 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 @asynccontextmanager
 async def _running(app: FastAPI) -> AsyncIterator[None]:
-    """Start the scheduler and the jobs worker with the service when the configuration enables
-    them, and one Work gate for the Workers it runs: full-text passes when an archive is
-    configured too (they call models and have the archive fetch, so, like the schedule, they
-    wait for cutover), Deep passes when a card provider is loaded as well, and deliveries when
-    any integration that reacts to events is loaded; each kind is swept for what waits before
-    the gate starts. And the MCP server (its session manager and PDF executor) while `/mcp` is
-    served. Every integration is closed once all of them have stopped, or a sweep failed."""
-    tasks = []
-    workers: dict[str, TextPassWorker | DeepPassWorker | DeliveryWorker] = {}
-    enabled = app.state.config.schedule.enabled
+    """One Work gate for the Workers the configuration enables: with the schedule on, the
+    scheduler, its fires (the nightly, the publication lookup) and the jobs; full-text passes
+    when an archive is configured too (they call models and have the archive fetch, so, like
+    the schedule, they wait for cutover), Deep passes when a card provider is loaded as well;
+    and deliveries when any integration that reacts to events is loaded. Each kind is swept for
+    what waits before the gate starts. And the MCP server (its session manager and PDF executor)
+    while `/mcp` is served. Once the gate has stopped, the jobs' open runs are closed, then
+    every integration, also when a sweep failed."""
+    db, config = app.state.db, app.state.config
+    workers: dict[str, Worker] = {}
+    swept: list[Callable[[], Awaitable[None]]] = []
+    enabled = config.schedule.enabled
     archive = app.state.archive if enabled else None
+    job_worker = None
+    if enabled:
+        schedule = scheduler.ScheduleWorker(db, config)
+        job_worker = JobWorker(db, config, app.state.gateway, archive)
+        workers |= {
+            scheduler.SCHEDULE: schedule,
+            "nightly": scheduler.NightlyWorker(db, config, app.state.gateway),
+            "publications": scheduler.PublicationsWorker(db, app.state.publications),
+            jobs_store.WORK: job_worker,
+        }
+        swept += [schedule.sweep, job_worker.sweep]
     if archive is not None:
-        workers[fulltext_store.TEXT_WORK] = TextPassWorker(
-            app.state.db, app.state.config, archive, app.state.gateway
+        text = workers[fulltext_store.TEXT_WORK] = TextPassWorker(
+            db, config, archive, app.state.gateway
         )
+        swept.append(text.sweep)
         if maker := integrations_api.card_maker(app.state.integrations):
-            workers[fulltext_store.DEEP_WORK] = DeepPassWorker(
-                app.state.db, app.state.config, archive, maker
-            )
+            deep = workers[fulltext_store.DEEP_WORK] = DeepPassWorker(db, config, archive, maker)
+            swept.append(deep.sweep)
     keys: dict[str, list[str]] = {}
     if reacting := events.reacting(app.state.integrations):
-        delivery = workers[outbox.DELIVERY] = DeliveryWorker(app.state.db, reacting)
+        delivery = workers[outbox.DELIVERY] = DeliveryWorker(db, reacting)
         keys[outbox.DELIVERY] = delivery.keys  # another process's integrations are not ours
+        swept.append(delivery.sweep)
+    gate = None
     try:
-        for each in workers.values():
-            await each.sweep()
+        for sweep in swept:
+            await sweep()
         if workers:
-            tasks.append(asyncio.create_task(WorkGate(app.state.db).run(workers, keys=keys)))
-        if enabled:
-            tasks.append(
-                asyncio.create_task(
-                    scheduler.run_forever(
-                        app.state.db, app.state.config, app.state.gateway, app.state.publications
-                    )
-                )
-            )
-            tasks.append(
-                asyncio.create_task(
-                    worker.run_forever(
-                        app.state.db,
-                        app.state.config,
-                        app.state.gateway,
-                        app.state.jobs_wake,
-                        archive,
-                    )
-                )
-            )
+            gate = asyncio.create_task(WorkGate(db).run(workers, keys=keys))
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield
     finally:
-        for task in tasks:
-            # Wait for the job in progress to record how it ended.
-            task.cancel()
+        if gate is not None:
+            # Each item running is stopped and given back once it has recorded how it ended.
+            gate.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await task
+                await gate
+        if job_worker is not None:
+            await job_worker.close(RuntimeError("the service stopped"))
         app.state.search_pool.shutdown(wait=False, cancel_futures=True)
         for integration in app.state.integrations:
             if close := getattr(integration, "aclose", None):
@@ -148,7 +148,6 @@ def create_app(
     app.state.search_timeout = SEARCH_TIMEOUT_SECONDS
     app.state.search_pool = integrations_api.search_pool()
     app.state.search_stats = {}
-    app.state.jobs_wake = asyncio.Event()  # set to have the jobs worker look now
     # Each router but the sign-in asks for the token (`deps.protected`).
     app.include_router(reading.router)
     app.include_router(digests.router)

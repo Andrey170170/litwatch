@@ -24,6 +24,7 @@ from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
 from litwatch.store import digests as digests_store
 from litwatch.store import fulltext as fulltext_store
+from litwatch.store import jobs as jobs_store
 from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
@@ -210,7 +211,35 @@ async def run(
     with_digests: bool = True,
     night: tuple[datetime, datetime] | None | Literal["schedule"] = "schedule",
 ) -> int:
-    """One run under the run lock. Returns the run id.
+    """One run (`locked`) under the run lock, taken here: `BusyError` when another job holds
+    it. Returns the run id."""
+    async with db.held("run"):
+        return await locked(
+            db,
+            config,
+            fetch=fetch,
+            days=days,
+            limit=limit,
+            gateway=gateway,
+            today=today,
+            with_digests=with_digests,
+            night=night,
+        )
+
+
+async def locked(
+    db: DatabaseGate,
+    config: Config,
+    *,
+    fetch: bool = True,
+    days: int | None = None,
+    limit: int | None = None,
+    gateway: GatewayFactory = default_gateway,
+    today: date | None = None,
+    with_digests: bool = True,
+    night: tuple[datetime, datetime] | None | Literal["schedule"] = "schedule",
+) -> int:
+    """One run, under the run lock its caller holds. Returns the run id.
 
     A run started between the schedule's nightly time and its deadline (`night`: its start
     and deadline, by default `Schedule.night` of now) sends its calls on a provider that
@@ -224,16 +253,14 @@ async def run(
     takes all. The digests are those of `today`, by default the day the run started on in the
     schedule's zone, however long it runs. Without `with_digests` the run neither waits for
     the passes nor writes digests: a window's are written by `jobs.digests.window` (the
-    restart), which today's would otherwise take the papers of.
+    restart), which today's would otherwise take the papers of. Once the run is closed, the
+    jobs it held back go, those on tonight's run included (`store.jobs.release`).
     """
     until = datetime.now(UTC)
     since = until - timedelta(days=days or config.intake.window_days)
     batch_night = config.schedule.night(until) if night == "schedule" else night
     today = today or until.astimezone(config.schedule.zone).date()
-    async with (
-        db.held("run"),
-        model_run(db, config, "nightly", window=(since, until), gateway=gateway) as run,
-    ):
+    async with model_run(db, config, "nightly", window=(since, until), gateway=gateway) as run:
         if fetch:
             result = await intake.collect(
                 db,
@@ -258,7 +285,9 @@ async def run(
             await run.gateway.settle()  # the batches a dead run left are accounted for too
         finally:
             await run.gateway.close()
-        return run.run_id
+    async with db.write("nightly: release the jobs") as unit:
+        await jobs_store.release(unit)
+    return run.run_id
 
 
 async def _steps(

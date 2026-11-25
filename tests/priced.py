@@ -1,12 +1,9 @@
 """Models with known costs: every call priced at `COST`, a billed call in the journal
-(`charged`), and a worker worked out on an afternoon of a scheduled configuration, when no
-nightly is due."""
+(`charged`), in a scheduled configuration."""
 
 import json
-from datetime import datetime
 
 from litwatch.config import Config, Models, RoleConfig, Schedule
-from litwatch.jobs import worker
 from litwatch.llm import Gateway, Reply, Request
 from litwatch.store import runs
 from tests.briefs import ANSWER
@@ -18,7 +15,6 @@ from tests.sessions import Session, in_write
 BRIEF = RoleConfig(provider="anthropic", model="test-brief")
 CONFIG = Config(models=Models(**ROLES, brief=BRIEF), schedule=Schedule(enabled=True))
 ZONE = CONFIG.schedule.zone
-AFTERNOON = datetime(2026, 10, 22, 14, 0, tzinfo=ZONE)  # the nightly (02:00) neither due nor run
 COST = 0.01  # what every call costs
 
 
@@ -86,10 +82,3 @@ async def charged(
         (run_id, json.dumps(usage)),
     )
     await in_write(conn, runs.finish, run_id)
-
-
-async def work_out(w: worker.Worker, now: datetime = AFTERNOON, most: int = 20) -> int:
-    for n in range(most):
-        if not await w.step(now):
-            return n
-    raise AssertionError("the worker never ran out of work")

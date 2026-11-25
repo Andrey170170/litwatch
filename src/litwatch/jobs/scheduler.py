@@ -1,43 +1,51 @@
-"""The in-process scheduler: the nightly run and the publication lookup at their cron times,
-in the configured timezone. Off unless `[schedule] enabled = true`; nothing runs on a
-schedule before cutover (spec decision 22).
+"""The schedule (docs/plans/a2-work-gate.md, P3): the nightly run and the publication lookup at
+their cron times, in the configured timezone, each fire a work item. Off unless `[schedule]
+enabled = true`; nothing runs on a schedule before cutover (spec decision 22).
 
-It keeps no state of its own. A job is due when its cron expression fired after the job's
-latest run on record, so a restart neither repeats a run nor forgets one. A fire missed by
-more than `CATCH_UP` is skipped rather than run late. A job that finds the run lock taken
-(another job is still going) stays due and is tried again on the next tick.
-"""
+The scheduler only submits. Its Worker (`ScheduleWorker`, the one item of kind `schedule`)
+submits each fire of each job that is due, then waits for the next fire. A fire is due from its
+time until `CATCH_UP` after it, unless a run of its kind started since (one the CLI ran, or the
+scheduler before the Work gate): a missed one is submitted late, one missed by longer is
+skipped. Its item's key is the fire's time, which holds for good (`store.work.submit`,
+`lasting`), so a fire is submitted once, however many processes or restarts look at it.
+
+A fire's Worker (`NightlyWorker`, `PublicationsWorker`) runs its job, unless a run of its kind
+started after the fire meanwhile, which served it: a nightly run by hand while the fire waited,
+or the fire's own first try, cut off as its process died. A nightly takes the run lock, and one
+that finds it taken waits `WAIT` and tries again, so it stays pending meanwhile, and no job's
+chunk starts while it waits (`store.jobs.nightly_waits`)."""
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
-from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from croniter import croniter
 
 from litwatch.config import Config
+from litwatch.core.work import WorkItem
 from litwatch.gates.database import BusyError, DatabaseGate
+from litwatch.gates.work import Later
 from litwatch.jobs import nightly, publications
 from litwatch.jobs.context import GatewayFactory, default_gateway
 from litwatch.publications import Dblp, PublicationSource
-from litwatch.store import runs
+from litwatch.store import runs, work
 
 log = logging.getLogger(__name__)
 
 CATCH_UP = timedelta(hours=6)
-TICK_SECONDS = 30
+# How long a nightly that finds the run lock taken waits before it tries again.
+WAIT = timedelta(seconds=30)
+# The scheduler's own work item: one, which waits for the next fire.
+SCHEDULE = "schedule"
 
 
 @dataclass(frozen=True)
 class Job:
-    kind: str  # the run kind it records, which is also how its last run is found
+    kind: str  # its fires' work kind, and the run kind its runs record
     cron: str
-    # Run under the kind's schedule lock, which the scheduler holds.
-    run: Callable[[DatabaseGate], Awaitable[object]]
 
 
 def last_fire(cron: str, now: datetime) -> datetime:
@@ -57,77 +65,102 @@ def next_fire(cron: str, now: datetime) -> datetime:
 
 
 def is_due(cron: str, now: datetime, last_run: datetime | None) -> bool:
+    """Whether the latest fire at `now` is due: within `CATCH_UP` of it, and no run of its kind
+    started (`last_run`) since."""
     fired = last_fire(cron, now).astimezone(UTC)
     if now.astimezone(UTC) - fired > CATCH_UP:
         return False
     return last_run is None or last_run.astimezone(UTC) < fired
 
 
-def jobs(
-    config: Config,
-    gateway: GatewayFactory = default_gateway,
-    source: PublicationSource | None = None,
-) -> list[Job]:
-    async def run_nightly(db: DatabaseGate) -> object:
-        return await nightly.run(db, config, gateway=gateway)
-
-    async def run_publications(db: DatabaseGate) -> object:
-        # No model calls and no run lock: it only reads DBLP and writes publications.
-        return await publications.run(db, source or Dblp())
-
+def jobs(config: Config) -> list[Job]:
     return [
-        Job("nightly", config.schedule.nightly, run_nightly),
-        Job("publications", config.schedule.publications, run_publications),
+        Job("nightly", config.schedule.nightly),
+        Job("publications", config.schedule.publications),
     ]
 
 
-async def _due(db: DatabaseGate, job: Job, now: datetime) -> bool:
-    async with db.read(f"schedule: is {job.kind} due") as unit:
-        return is_due(job.cron, now, await runs.last_started(unit, job.kind))
+def fire_key(fired: datetime) -> str:
+    """A fire's work item key: its time, in UTC."""
+    return fired.astimezone(UTC).isoformat()
 
 
-async def tick(db: DatabaseGate, todo: list[Job], now: datetime) -> list[str]:
-    """Run every job that is due at `now`, in order, each under its kind's schedule lock.
-    Returns the kinds that ran."""
-    ran = []
-    for job in todo:
-        if not await _due(db, job, now):
-            continue  # asked again under the lock, which only a job that is due takes
-        held = contextlib.AsyncExitStack()
+async def submit(db: DatabaseGate) -> None:
+    """Have the scheduler look at the schedule now (as `serve` starts): its item, brought
+    forward."""
+    async with db.write("schedule: look now") as unit:
+        await work.submit(unit, SCHEDULE, SCHEDULE)
+
+
+class ScheduleWorker:
+    """Submits the fires of `config`'s schedule as they come."""
+
+    def __init__(self, db: DatabaseGate, config: Config) -> None:
+        self.db, self.todo = db, jobs(config)
+        self.zone = config.schedule.zone
+
+    async def sweep(self) -> None:
+        """As `serve` starts: the fires due submitted before any other item can start, so no
+        job's chunk goes ahead of a nightly due; then the scheduler's item, to look again."""
+        await self.fires()
+        await submit(self.db)
+
+    async def __call__(self, item: WorkItem) -> Later:
+        return await self.fires()
+
+    async def fires(self) -> Later:
+        """Submit each job's fire that is due; returns when the next one is."""
+        now = datetime.now(self.zone)
+        for job in self.todo:
+            fired = last_fire(job.cron, now)
+            # Each fire in a unit of its own: its runs read, its item submitted, at once.
+            async with self.db.write(f"schedule: {job.kind}") as unit:
+                if is_due(job.cron, now, await runs.last_started(unit, job.kind)):
+                    found = await work.submit(
+                        unit, job.kind, fire_key(fired), not_before=fired, lasting=True
+                    )
+                    log.info("scheduler: %s of %s submitted (item %s)", job.kind, fired, found.id)
+        return Later(min(next_fire(job.cron, now) for job in self.todo).astimezone(UTC))
+
+
+async def _served(db: DatabaseGate, kind: str, item: WorkItem) -> bool:
+    """Whether a run of `kind` started at or after the fire `item` is, which served it."""
+    async with db.read(f"{kind}: served already") as unit:
+        last = await runs.last_started(unit, kind)
+    return last is not None and last >= datetime.fromisoformat(item.key)
+
+
+class NightlyWorker:
+    """Runs the nightly of each fire, under the run lock, through `gateway`'s models."""
+
+    def __init__(
+        self, db: DatabaseGate, config: Config, gateway: GatewayFactory = default_gateway
+    ) -> None:
+        self.db, self.config, self.gateway = db, config, gateway
+
+    async def __call__(self, item: WorkItem) -> Later | None:
+        held = AsyncExitStack()
         try:
-            await held.enter_async_context(db.held("schedule", job.kind))
+            await held.enter_async_context(self.db.held("run"))
         except BusyError:
-            continue  # another scheduler is deciding or running it
+            log.info("scheduler: the nightly waits, another job holds the run lock")
+            return Later(datetime.now(UTC) + WAIT)
         async with held:
-            if not await _due(db, job, now):
-                continue
-            log.info("scheduler: %s is due", job.kind)
-            try:
-                await job.run(db)
-            except BusyError:
-                log.info("scheduler: %s waits, another job holds the run lock", job.kind)
-                continue
-            except Exception:
-                # The run record keeps the error; the status line shows it.
-                log.exception("scheduler: %s failed", job.kind)
-            ran.append(job.kind)
-    return ran
+            # Decided under the run lock, which every nightly run takes.
+            if await _served(self.db, "nightly", item):
+                return None
+            await nightly.locked(self.db, self.config, gateway=self.gateway)
+        return None
 
 
-async def run_forever(
-    db: DatabaseGate,
-    config: Config,
-    gateway: GatewayFactory = default_gateway,
-    source: PublicationSource | None = None,
-) -> None:
-    """Tick until cancelled. A tick that fails (a lost database) is retried on the next."""
-    todo = jobs(config, gateway, source)
-    log.info("scheduler on: %s", ", ".join(f"{j.kind} {j.cron!r}" for j in todo))
-    while True:
-        try:
-            await tick(db, todo, datetime.now(config.schedule.zone))
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.exception("scheduler tick failed")
-        await asyncio.sleep(TICK_SECONDS)
+class PublicationsWorker:
+    """Looks up the library's publications on `source` (DBLP), for each fire. It calls no model
+    and takes no run lock; one item of its kind runs at a time, the CLI's too."""
+
+    def __init__(self, db: DatabaseGate, source: PublicationSource | None = None) -> None:
+        self.db = db
+        self.source: PublicationSource = source or Dblp()
+
+    async def __call__(self, item: WorkItem) -> None:
+        if not await _served(self.db, "publications", item):
+            await publications.run(self.db, self.source)
