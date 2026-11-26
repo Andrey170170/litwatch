@@ -65,6 +65,11 @@ Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.m
 
 Shape, blueprint, drive.
 
+- **Background Deep work beside a due nightly.** Since A2's P3, background Deep work (an automatic pass, a re-run's)
+  waits for the nightly once its fire is an item, but not in the moment between the fire falling due and the
+  scheduler submitting it (a retried submission widens it). A Deep pass started then holds the one `deep` admission,
+  up to an hour, beside that nightly and delays its Deep reads. Deep reads are off in production. Lanes give the
+  nightly its own share (found in A2 P3's review, and by Codex on #188).
 - **The taxonomy write API:** edit a class's name, description and threshold in place, with Save and the re-run
   offer (DESIGN.md, "Taxonomy"); Import YAML from Settings (only the CLI imports now); move a followed topic to
   another class (the topic save endpoint binds it to the URL's class). Re-runs after a class edit (classification,
