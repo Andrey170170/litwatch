@@ -140,6 +140,11 @@ Found in a survey of the code at 548857e3:
   pending Deep pass. Chosen over a row shape the image before does not count (the shared admission in a column of
   its own): kept race-free between a command and `serve`, the admission index must cover that column, and then it
   fails the image before's claim on the same stale row.
+- **Rolling back from P5: the commands' items, ended by hand.** P5's command items are of kinds
+  `command:<name>`, which the image before neither serves nor takes back; one left running holds its admission
+  (`deep`, `publications`) there for good, and one pending never runs. So the switch is made with no command
+  waiting, and the step above ends them with `WHERE kind LIKE 'command%' AND state <> 'ended'` in place of
+  `kind = 'command'`. Their `work_results` rows (migration 0051) the image before ignores.
 - **Rolling back from P4: a reservation the image before does not count.** P4 counts a call's unknown charge at its
   reservation (`inference_calls.reserved`, migration 0050) against its job's ceiling; the image before counts it as
   nothing. So after a rollback, a job whose runs have an unknown charge can spend past its ceiling by that charge's
@@ -309,61 +314,10 @@ Found while building, owned by the stage named.
   `serve` gives it the integrations it loads, so a process takes, takes back and waits on only its own deliveries.
   An item no process serves keeps its state: one pending is never taken, and one `running` whose lease expired is
   never taken back. One dropped from the configuration leaves it for good, which P7's cleanup could end.
-- **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the
-  request one and the check. The `workers` rows are written and beat, but no one reads them yet: P5 adds the
-  CLI's reader, which counts a row whose `heartbeat_at` is within a lease as alive.
 - **P7 (from P2): failure text.** Errors from outside go through `store.text.stored` before a text column
   takes them. The outbox's, the passes', the jobs' and, since P4, `runs`' and `inference_calls`' do; `digests`
   and `failures` still cut text alone.
-- **P5 (from P3): runs and their items.** A run is alive while the claim it runs under holds a live lease
-  (`store.runs.ALIVE`): `runs.lease_token` is the lease token of the item it was opened in, or, for a job's run, of
-  its latest chunk's, moved as each chunk links it (`store.work.link_run`, migration 0049). An item taken again gets
-  a new token, so it revives no run of the claim before. `runs.work_id` and `work_items.run_id` stay as the
-  history of which item ran what: each run records the item it ran under (`runs.start` sets `work_id`, a chunk's
-  run its chunk's), and an item its latest run (`work_items.run_id`), so a chunk taken back keeps the run before.
-  A run opened outside any item reads dead at once: today only the API's grade now (`api/settings.py`, kind
-  `grading`), whose liveness nothing reads. P5's request attribution can give it one, or say why not.
-- **P5 (from P3): the CLI's commands are items in their own process.** `gates.work.inline` runs a `command` item
-  keyed `{name}:{uuid}`, admitted by its own key or by the kind whose work it does (`deep` for `fulltext --deep`,
-  `publications` for the lookup). Once that admission is free, it inserts its item already claimed, in one unit
-  (`store.work.admit`), so a command waiting leaves no row; then runs that claim under the supervision `serve`'s
-  claims have, its heartbeat included (`WorkGate._run`, `once`); no gate serves it. It has one attempt, as a
-  command run by hand has: a lost database or a lost conflict as it claims or works, a lost lease, or work that
-  stops cancelled ends it failed with a message to run it again (`CommandCutOffError`), and it is never given back;
-  it returns once its end is recorded done. Whatever stops it after its claim (Ctrl-C, an error of the gate's, its
-  end not recorded), its `finally` ends the item failed by its key (`store.work.abandon`). One whose process died
-  is ended failed once its lease lapses, by the next command for its admission (`admit`, so it recovers with no
-  `serve`) or by any `serve`'s take-back, whatever its admission. P5 replaces this with
-  submit and wait (spec, "The CLI"), where `serve`'s gate tries again. The callers to move:
-  - [ ] `intake`, `intake --catalog-from`, `intake archive` (inline today)
-  - [ ] `nightly`, `digests write` (inline today)
-  - [ ] `fulltext`, `fulltext --deep` (inline today, the latter under the `deep` admission)
-  - [ ] `publications` (inline today, under the `publications` admission) and `publications --paper` (not inline)
-  - [ ] `eval replay` (inline today)
-  - [ ] `ping` (not inline)
-  - [ ] the unjournaled evaluations: `eval classify`, `eval digests`, `eval briefs`, `eval ladders` (not inline)
-- **P5 (from P3): the nightly and the chunks.** No chunk starts while a `nightly` item is pending, or running
-  without having closed the run that claim opened without an error (opening it included; a lapsed lease too, until
-  the item is taken back; a failed run too, which the gate may try again), or a nightly run is open and alive (the
-  CLI's) (`store.jobs.nightly_waits`). The item clauses count only
-  where this process's configuration runs fires (`fires=`, the schedule on): a fire left pending by a `serve` since
-  started with the schedule off holds back no job, re-run pass or `fulltext --deep`. A close that fails leaves the
-  run open: the run context says so (`jobs.context.UnclosedError`, raised for a run whose close carries a write),
-  and the fire is tried again after a backoff (`jobs.scheduler.close_backoff`: `WAIT`, doubling, at most an hour),
-  its item waiting meanwhile, so the chunks wait until it closes; a chunk reads that before the run lock and again under it, before
-  it claims its job, and a waiting one looks again after `jobs.worker.WAIT`. The nightly releases every runnable
-  job's chunk in the unit that closes its run, failed or cut off too (`store.jobs.release`, `model_run(closing=)`),
-  so they go at once. Tonight's run and that release both take the `tonight` lock, so one of them sees the
-  other, each stamped by the clock after taking it (`jobs.queued_at`, `runs.finished_at`: `clock_timestamp()`, not
-  the transaction's start, which a unit waiting on its fence or the lock has long passed). `serve`'s sweep submits
-  the fires due before its gate starts. A fire's publication and a chunk's claim are one decision: both take the
-  `fire` lock, and the claim, under it and after its job's row, counts a nightly fire due but not published yet as a
-  nightly that waits (`jobs.scheduler.unpublished`), so either the nightly goes first or it waits that one chunk.
-  Once a nightly that took the run lock lets go of it, it brings forward the chunks it held back
-  (`jobs.nightly.wake`); one that never took it wakes none. The release and the wake are one operation per job
-  (`store.jobs.submit`, `how=`), in the order of the jobs' ids, each the job's row and then its item's; the wake
-  moves only a pending item.
-- **P5, P7 (from P3): each job write that can change whether or when it runs arranges its chunk.** A job's chunk
+- **P7 (from P3): each job write that can change whether or when it runs arranges its chunk.** A job's chunk
   is a `job` item keyed by its id; such a write (its creation or queueing, a claim, progress, a wait, a finish or
   failure, a release) arranges its next chunk in its unit, from the job's row it locked (`store.jobs.arrange`,
   `submit`); a run link or a digest settling changes neither, so arranges none:
@@ -376,19 +330,30 @@ Found while building, owned by the stage named.
   Work gate; jobs keep their states. Nothing in this image reads them. Migration 0049's columns
   (`runs.lease_token`, `jobs.run_id`) are additive: the image before ignores them. P7 drops them with `SESSION`. The held-across-calls list is down
   to the run lock already (the `schedule` lock went in P3, with `held`'s key argument).
-- **P5 (from P4): the Model gate's own attribution.** The gate's journal units run under
-  `gates.context.bookkeeping("model gate")`: the system attribution, outside any item, so unfenced, and a call's
-  charge stands after its item's lease is lost. Its batchers' tasks serve every item with their deadline and run in
-  an empty context (`contextvars.Context()`); `serve`'s recovery runs under `bookkeeping("model gate: recover")`.
-  A call's ceiling and deadline are `llm.context.spending`, set by the Worker in its item's task, not fields of
-  `Work`, which the gates cannot type. V5's check counts these as the gates' bookkeeping.
-- **P5 (from P4): a CLI command's Model gate.** Each command builds its own (`jobs.context.model_gate`) and closes
-  it as it ends; only `serve` recovers the batches left open (`ModelGate.recover`, as it starts, and a batch a live
-  claim held then, once that claim's lease lapses unrenewed). A batch a command killed while `serve` runs waits for
-  the next `serve` start, or for a later call asking the same thing, which attaches to it. Submit and wait moves the
-  commands' calls into `serve`'s gate, which must close what a second gate opens, and P5's review checks it:
-  `owner()` sees only its own process, so a CLI's gate can attach to a batch `serve` is recovering (cancelling it
-  before its deadline and paying again, for a CLI nightly past its deadline), and two gates can follow one batch.
+- **P7 (from P3, settled in P5): runs and their items.** A run is alive while the claim it runs under holds a live
+  lease (`store.runs.ALIVE`, `runs.lease_token`, moved as each chunk links its job's run, migration 0049);
+  `runs.work_id` and `work_items.run_id` stay as the history of which item ran what. A run opened outside any item
+  reads dead at once: only the API's grade now (`api/settings.py`, kind `grading`), which P5 attributes as its
+  request and leaves outside an item, as nothing reads its liveness.
+- **P6, P7 (from P5): the CLI's commands.** A command `serve` runs is an item of kind `command:<name>` with a
+  fresh uuid key, its inputs in the scope (`jobs.commands`), admitted by its key or by the kind whose work it does
+  (`deep`, `publications`); every `serve` serves them whatever its schedule (one without an archive or a deep
+  service not those that need it), under its own configuration, so the commands lost `--config` but for the
+  evaluations, which build their requests here. The command refuses when no `workers` row lists its kind and beat
+  within a lease, follows the item read-only (its row, `work_results` after the last id it showed, on `NOTIFY`
+  of both channels or every 2 s), and holds no claim. A cancel (`store.work.cancel`) ends the item and takes its
+  lease away; its Worker stops at its next fenced write or its next renewal, within a third of the lease, so a
+  cancelled admission's next holder can start before it stops. `work_results` rows are kept with their item; P7's
+  cleanup may prune an ended item's. `intake archive --here` runs its item on a Work gate of the command's own
+  (`keys=`), for a database no `serve` works from (the sandbox's build). No CLI builds a Model gate any more:
+  P4's findings on a second gate meeting `serve`'s batches (`owner()` sees only its process) need no fix while
+  that holds, and `jobs.context.model_gate` serves `serve` alone.
+- **P7 (from P5): the P3 `command` kind.** `store.work._retire_commands` still ends an expired P3-image `command`
+  item at every take-back; P7 drops it with the rollback steps.
+- **P7 (from P5): the nightly and the chunks.** No chunk starts while a nightly waits (`store.jobs.nightly_waits`,
+  P3's rules): a CLI's `command:nightly` item counts always, a scheduled fire's only where this process's
+  configuration runs fires (`fires=`).
+
 
 ## Evidence
 

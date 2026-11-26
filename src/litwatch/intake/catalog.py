@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -46,7 +46,7 @@ async def run(
     client: XmlClient,
     *,
     source: PaperSource = oai,
-    report: Callable[[dict[str, Any]], None] | None = None,
+    report: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Harvest from the checkpoint (from `since` the first time) to today, window by window,
     and return what was done; never raises but for a cancellation, as a failed pass must not
@@ -109,7 +109,7 @@ async def run(
             info["registered"] += len(outside)
             info["through"] = through.isoformat()
             if report:
-                report(info)
+                await report(info)
             if until is None:
                 info["complete"] = True
                 return info

@@ -33,7 +33,7 @@ from pydantic import BaseModel, ValidationError
 from litwatch.config import Models, RoleConfig, secret
 from litwatch.core.budget import CallStart
 from litwatch.gates.context import current_work
-from litwatch.gates.database import outside_unit
+from litwatch.gates.database import attributed_call, outside_unit
 from litwatch.gates.work import retryable
 from litwatch.llm import ceiling as ceilings
 from litwatch.llm import context
@@ -394,6 +394,7 @@ class Gateway:
         `ask` is. `send` replaces the chat call (a Decisions endpoint). Under a `ceiling`, each
         attempt first reserves the most it can cost (`llm.ceiling`)."""
         outside_unit(f"a model call for role {role_name!r}")
+        attributed_call(f"a model call for role {role_name!r}")
         return await self._complete(role_name, role, request, send)
 
     async def _complete(
@@ -526,6 +527,7 @@ class Gateway:
         # Before the journal is read: `decide`, a reused answer and a batched call come through
         # here too, and none of them runs inside a Database-gate unit.
         outside_unit(f"a model call for role {role_name!r}")
+        attributed_call(f"a model call for role {role_name!r}")
         models = self.models.role(role_name).models
         for model in models:  # a model without credentials can have answered nothing
             if model.provider in self.providers and (answer := await self._reused(model, request)):
@@ -553,6 +555,7 @@ class Gateway:
         and the list are unchanged. A model without credentials now has not: asked, it is a
         call with no answer."""
         outside_unit(f"the model journal read for role {role_name!r}")
+        attributed_call(f"the model journal read for role {role_name!r}")
         if not self.journal:
             return False
         for model in self.models.role(role_name).models:

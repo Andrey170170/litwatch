@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from litwatch import events
 from litwatch.api import digests, jobs, mcp, reading, settings, summary
 from litwatch.api import integrations as integrations_api
+from litwatch.api.deps import Attributed
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import (
@@ -26,10 +27,10 @@ from litwatch.core import (
 from litwatch.events import Integration
 from litwatch.events.worker import DeliveryWorker
 from litwatch.fulltext.worker import DeepPassWorker, TextPassWorker
-from litwatch.gates.context import bookkeeping
+from litwatch.gates.context import Attribution, attributed, bookkeeping
 from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Worker, WorkGate
-from litwatch.jobs import scheduler
+from litwatch.jobs import commands, scheduler
 from litwatch.jobs.context import model_gate
 from litwatch.jobs.worker import JobWorker
 from litwatch.llm import ModelGate
@@ -40,6 +41,8 @@ from litwatch.store import outbox
 
 log = logging.getLogger(__name__)
 
+# What `serve` itself does as it starts and stops: its sweeps, closing its jobs' runs.
+SERVE = Attribution.system("serve")
 # The built web app (`web/`, `pnpm build`), shipped inside the package.
 WEB = Path(str(resources.files("litwatch.api").joinpath("web")))
 
@@ -67,7 +70,11 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     Every model call of the process goes through one Model gate (`app.state.models`): the one
     given to `create_app`, else one built here on the app's Database gate and closed once
     everything has stopped. Before any work starts, it takes over the batches left open that no
-    live claim will read (`ModelGate.recover`), once for the process's life."""
+    live claim will read (`ModelGate.recover`), once for the process's life.
+
+    The gate also runs the CLI's commands (`jobs.commands`), whatever the schedule: each is the
+    owner's own request, which the command submits and follows. Startup and the stop run under
+    the system attribution `serve`."""
     db, config = app.state.db, app.state.config
     owned = app.state.models is None
     models: ModelGate = app.state.models or model_gate(db, config)
@@ -93,6 +100,15 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         if maker := integrations_api.card_maker(app.state.integrations):
             deep = workers[fulltext_store.DEEP_WORK] = DeepPassWorker(db, config, archive, maker)
             swept.append(deep.sweep)
+    serving = commands.Serving(
+        db,
+        config,
+        models,
+        app.state.archive,
+        integrations_api.card_maker(app.state.integrations),
+        app.state.publications,
+    )
+    workers |= commands.CommandWorker(serving).kinds()
     keys: dict[str, list[str]] = {}
     if reacting := events.reacting(app.state.integrations):
         delivery = workers[outbox.DELIVERY] = DeliveryWorker(db, reacting)
@@ -100,10 +116,10 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         swept.append(delivery.sweep)
     gate = None
     try:
-        await _recover(models, config)
-        for sweep in swept:
-            await sweep()
-        if workers:
+        with attributed(SERVE):
+            await _recover(models, config)
+            for sweep in swept:
+                await sweep()
             gate = asyncio.create_task(WorkGate(db).run(workers, keys=keys))
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield
@@ -117,7 +133,8 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
                     await gate
         finally:
             if job_worker is not None:
-                await job_worker.close(RuntimeError("the service stopped"))
+                with attributed(SERVE):
+                    await job_worker.close(RuntimeError("the service stopped"))
             if owned:
                 await models.close()
                 app.state.models = None
@@ -180,6 +197,7 @@ def create_app(
     app.state.search_timeout = SEARCH_TIMEOUT_SECONDS
     app.state.search_pool = integrations_api.search_pool()
     app.state.search_stats = {}
+    app.add_middleware(Attributed, prefix="api")
     # Each router but the sign-in asks for the token (`deps.protected`).
     app.include_router(reading.router)
     app.include_router(digests.router)

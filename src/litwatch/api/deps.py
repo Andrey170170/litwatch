@@ -1,6 +1,6 @@
-"""What every route needs: the app's Database gate, and the shared token (or the read token);
-what a route that changes papers settles them by; and the month's spend against budget, which
-the status line and Quality both show."""
+"""What every route needs: its request's attribution (`Attributed`), the app's Database gate, and
+the shared token (or the read token); what a route that changes papers settles them by; and the
+month's spend against budget, which the status line and Quality both show."""
 
 from __future__ import annotations
 
@@ -9,10 +9,12 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from litwatch.config import Budget
 from litwatch.core.budget import Spend, month_start, spend
 from litwatch.feedback import word
+from litwatch.gates.context import Attribution, attributed
 from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.store import calls
 
@@ -21,6 +23,22 @@ COOKIE = "litwatch_token"
 # What the read token may do: search and read papers and fetch a paper's PDF, as the deep
 # service's agent does (its figures for a PDF-only paper are cut from the PDF's pages).
 READABLE = {"/api/papers", "/api/papers/{paper_id:path}", "/api/papers/{paper_id:path}/pdf"}
+
+
+class Attributed:
+    """Every gate call an HTTP request makes attributed to it, as `{prefix} {method} {path}`
+    (`gates.context`): its handler, dependencies and background tasks run inside."""
+
+    def __init__(self, app: ASGIApp, prefix: str) -> None:
+        self.app, self.prefix = app, prefix
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        who = Attribution.request(f"{self.prefix} {scope['method']} {scope['path']}")
+        with attributed(who):
+            await self.app(scope, receive, send)
 
 
 def _same(given: str | None, token: str | None) -> bool:

@@ -1529,20 +1529,3 @@ def test_a_pass_sends_latex_without_its_bibliography_and_pdf_text_as_read():
 def test_a_text_without_a_bibliography_is_sent_as_read():
     for source in ("latex", "pdf"):
         assert trim.without_references(BODY, source) == BODY
-
-
-def test_the_fulltext_command_finds_an_archive_kept_in_dotenv(tmp_path, monkeypatch):
-    from typer.testing import CliRunner  # noqa: PLC0415
-
-    from litwatch import cli  # noqa: PLC0415
-
-    for name in ("LITWATCH_ARCHIVE_URL", "LITWATCH_ARCHIVE_TOKEN", "LITWATCH_CONFIG"):
-        monkeypatch.setenv(name, "")  # recorded, so the undo removes what .env sets
-        monkeypatch.delenv(name)
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".env").write_text(
-        "LITWATCH_ARCHIVE_URL=http://127.0.0.1:9\nLITWATCH_ARCHIVE_TOKEN=t\n"
-    )
-    monkeypatch.setattr(cli, "_run", lambda work, **_: {})  # no database: only the archive matters
-    result = CliRunner().invoke(cli.app, ["fulltext"])
-    assert result.exit_code == 0, result.output

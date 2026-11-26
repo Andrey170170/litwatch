@@ -32,6 +32,10 @@ from litwatch.store.text import stored
 
 RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and accounted for
 EVAL = "eval"  # an evaluation run's kind: its calls say nothing to the status document
+# A call not of an evaluation run (one of no run included): production's reuse and its price
+# estimates read only these (docs/plans/a2-work-gate.md); an evaluation's journal reads all.
+_NOT_EVAL = f"NOT EXISTS (SELECT 1 FROM runs e WHERE e.id = run_id AND e.kind = '{EVAL}')"
+_READ = f"(%(any)s OR {_NOT_EVAL})"
 GATE = "model gate"  # the system attribution the journal's units run under
 
 # The live claims that sent batch `{batch}`'s calls (`w`): each call's run is alive by the claim
@@ -107,12 +111,20 @@ class CallJournal:
     settles the calls of every run's batches. Each read and write is a short unit of its own on
     `db`: calls finish while the job works, and no model call runs inside a unit. Without
     `observes` (an evaluation run, which writes its own tables only) it keeps no provider
-    observations, and its calls neither batch nor wait on a batch."""
+    observations, and its calls neither batch nor wait on a batch. A run that observes reuses no
+    evaluation run's answer, nor counts its refusals (`cached`, `refused`); without `reuses` (a
+    harness that measures each candidate afresh: `eval classify`, `briefs`, `ladders`), a journal
+    reuses nothing at all."""
 
     def __init__(
-        self, db: DatabaseGate, run_id: int | None = None, *, observes: bool = True
+        self,
+        db: DatabaseGate,
+        run_id: int | None = None,
+        *,
+        observes: bool = True,
+        reuses: bool = True,
     ) -> None:
-        self.db, self.run_id, self.observes = db, run_id, observes
+        self.db, self.run_id, self.observes, self.reuses = db, run_id, observes, reuses
 
     async def _one(self, name: str, query: Query, params: Any = None) -> dict[str, Any] | None:
         """The first row of a read, in a read unit of its own."""
@@ -138,12 +150,14 @@ class CallJournal:
             return await cur.fetchall() if cur.description else []
 
     async def cached(self, key: str) -> dict[str, Any] | None:
+        if not self.reuses:
+            return None
         return await self._one(
             "cached",
             "SELECT id, output, usage FROM inference_calls "
-            "WHERE request_key = %s AND output IS NOT NULL AND invalidated_at IS NULL "
-            "ORDER BY id LIMIT 1",
-            (key,),
+            "WHERE request_key = %(key)s AND output IS NOT NULL AND invalidated_at IS NULL "
+            f"AND {_READ} ORDER BY id LIMIT 1",
+            {"key": key, "any": not self.observes},
         )
 
     async def start(self, call: CallStart) -> int:
@@ -414,12 +428,15 @@ class CallJournal:
         )
 
     async def refused(self, key: str, paper_id: str | None) -> bool:
-        """Whether a call of this identical request about the paper was refused, in any run."""
+        """Whether a call of this identical request about the paper was refused, in any run
+        this journal reads (`cached`)."""
+        if not self.reuses:
+            return False
         row = await self._one(
             "refused",
-            "SELECT 1 FROM inference_calls WHERE paper_id IS NOT DISTINCT FROM %s "
-            "AND request_key = %s AND error LIKE 'refused%%' LIMIT 1",
-            (paper_id, key),
+            "SELECT 1 FROM inference_calls WHERE paper_id IS NOT DISTINCT FROM %(paper)s "
+            f"AND request_key = %(key)s AND error LIKE 'refused%%' AND {_READ} LIMIT 1",
+            {"paper": paper_id, "key": key, "any": not self.observes},
         )
         return row is not None
 
@@ -470,12 +487,15 @@ async def mean_cost(
     model: str,
     effort: str | None,
     last: int = 200,
+    *,
+    evaluations: bool = False,
 ) -> float | None:
     """What a call of `role` on `provider`, `model` and `effort` alike cost on average over
     its latest `last` billed calls (reused replies and requests rejected unbilled, free and of no
     tokens, left out), or None when it has none: what an estimate goes by. Calls under another
     provider or effort, or answered in a batch, are left out, as they cost differently (an
-    estimate is of normal calls)."""
+    estimate is of normal calls), and so are an evaluation run's, but for an evaluation's own
+    estimate (`evaluations`)."""
     row = await (
         await unit.execute(
             "SELECT avg(cost) AS cost FROM (SELECT (usage->>'cost')::float AS cost "
@@ -483,10 +503,11 @@ async def mean_cost(
             "AND usage->>'via' = %s AND usage->>'effort' IS NOT DISTINCT FROM %s "
             "AND usage->>'cost' IS NOT NULL AND NOT coalesce((usage->>'reused')::boolean, false) "
             "AND usage->>'service_tier' IS DISTINCT FROM 'batch' "
+            f"AND (%s OR {_NOT_EVAL}) "
             "AND NOT ((usage->>'cost')::float = 0 "
             "AND coalesce((usage->>'prompt_tokens')::int, 0) = 0) "
             "ORDER BY id DESC LIMIT %s) recent",
-            (role, model, provider, effort, last),
+            (role, model, provider, effort, evaluations, last),
         )
     ).fetchone()
     return row["cost"]
@@ -500,10 +521,10 @@ async def charged_prices(
     each price it paid (charge / input tokens bounds the input price, charge / output tokens
     the output price), the tightest such bound per serving provider holds for it, and the
     highest across the serving providers holds for the model. A call with cached input left out
-    of the input price, as caching discounts it."""
+    of the input price, as caching discounts it, and an evaluation run's calls left out."""
     row = await (
         await unit.execute(
-            """
+            f"""
             WITH recent AS (
                 SELECT (usage->>'cost')::float AS cost,
                        (usage->>'prompt_tokens')::float AS tokens_in,
@@ -515,6 +536,7 @@ async def charged_prices(
                   AND usage->>'cost' IS NOT NULL
                   AND NOT coalesce((usage->>'reused')::boolean, false)
                   AND usage->>'service_tier' IS DISTINCT FROM 'batch'
+                  AND {_NOT_EVAL}
                 ORDER BY id DESC LIMIT %s
             ), per AS (
                 SELECT min(cost / tokens_in) FILTER (WHERE tokens_in > 0 AND cached = 0) AS p_in,

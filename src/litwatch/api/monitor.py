@@ -2,7 +2,7 @@
 `/metrics` in Prometheus' text format and `/status` as a `homelab.status/v1` document, following
 the owner's homelab telemetry convention (docs/plans/v1-deploy.md). Neither asks for a token,
 so the port is never routed through a public proxy. Both read the database when asked, so a
-job run by another process (`litwatch nightly` in a terminal) shows as well as the scheduler's;
+run the CLI asked for (`litwatch nightly` in a terminal) shows as well as the scheduler's;
 the MCP server's calls are counted in this process, where it runs."""
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
 from litwatch import events
-from litwatch.api.deps import budget_lines
+from litwatch.api.deps import Attributed, budget_lines
 from litwatch.archive import ArchiveClient
 from litwatch.config import ROLES, Config, secret
 from litwatch.core import FAILED_RUNS
@@ -542,6 +542,7 @@ def create_monitor(app: FastAPI) -> FastAPI:
     the app's lifespan opens: the monitor runs without one of its own), configuration,
     integrations and archive."""
     monitor = FastAPI(title="litwatch monitoring", docs_url=None, redoc_url=None, openapi_url=None)
+    monitor.add_middleware(Attributed, prefix="monitor")
 
     async def read() -> Facts:
         st = app.state

@@ -7,8 +7,9 @@
   and when its batched calls must be answered by are the Model gate's (`llm.context`): the
   gates cannot name its ceiling.
 - The attribution: a work item, a request, or a named system attribution. The Work gate sets
-  it for an item's task and for its own bookkeeping; Entries set theirs in P5, which also turns
-  on the check (`attribution()` read by the gates).
+  it for an item's task and for its own bookkeeping, each Entry for what it serves (the API,
+  MCP and the monitor per request, the CLI per command, `serve` for its startup), and the gates
+  check it (`gates.database.attributed_call`).
 
 A task started inside either inherits it, as context variables go. A gate's own bookkeeping
 for many items (`bookkeeping`) runs outside both."""
@@ -43,6 +44,10 @@ class Attribution:
     @classmethod
     def work(cls, item_id: int) -> Attribution:
         return cls("work", str(item_id))
+
+    @classmethod
+    def request(cls, name: str) -> Attribution:
+        return cls("request", name)
 
     @classmethod
     def system(cls, name: str) -> Attribution:

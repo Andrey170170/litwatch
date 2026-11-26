@@ -39,9 +39,27 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
   env -u ANTHROPIC_BASE_URL LITWATCH_STRICT_GATES=1 uv run litwatch serve --port 8766
   ```
 
-  With it, a Database-gate unit opened while another is open on the task, or the model gateway called inside
-  one, raises (`src/litwatch/gates/database.py`). Without it, as in production, the violation is logged as an
-  error starting `gate nesting:` and work carries on.
+  With it, a Database-gate unit opened while another is open on the task, the model gateway called inside
+  one, or a Database or Model gate call with no attribution (whom it serves: a work item, a request, or the
+  system), raises (`src/litwatch/gates/database.py`). Without it, as in production, the violation is logged as an
+  error starting `gate nesting:` or `gate attribution:` and work carries on.
+- Commands against a dev `serve`: the commands that call models or run the pipeline (`nightly`, `intake`,
+  `digests write`, `fulltext`, `publications`, `ping`, `eval replay`, `eval classify`, `eval briefs`,
+  `eval ladders`) write a work item to the database and wait while `serve` runs it, under `serve`'s own
+  configuration and models. Start a `serve` on that database first, on a port of your own, with the same
+  environment the command gets (`LITWATCH_DATABASE_URL`, `LITWATCH_CONFIG`):
+
+  ```sh
+  env -u ANTHROPIC_BASE_URL LITWATCH_STRICT_GATES=1 LITWATCH_API_TOKEN=dev uv run litwatch serve --port 8767 &
+  env -u ANTHROPIC_BASE_URL uv run litwatch nightly --no-fetch --limit 5
+  ```
+
+  With no `serve` on the database, the command refuses and writes nothing; a `serve` that stops while it waits
+  gives the item back, and the next one to start runs it again while the command keeps waiting. Ctrl-C asks
+  whether to cancel the item or leave it running; `litwatch work follow ID` picks one left running back up, its
+  output shown from the start and an evaluation's lines written once each. An evaluation's out paths are read
+  on this host, by the command, not by `serve`. `intake archive --here` alone runs in the command, for a database
+  no `serve` works from (a fresh sandbox's); it calls no model.
 - The sandbox: `scripts/refresh-sandbox.sh` rebuilds `sandbox` and replaces the old one only once the new one is
   complete. Its two sources:
   - `--production`: a copy of production's database (one read-only `pg_dump` in `litwatch-db`, a few seconds),

@@ -20,7 +20,7 @@ import contextlib
 import logging
 import time
 from collections import Counter
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -375,7 +375,7 @@ async def work_waiting(
     limit: int | None = None,
     wait: float = 0,
     models: ModelGate,
-    report: Callable[[Counter[str]], None] | None = None,
+    report: Callable[[Counter[str]], Awaitable[None]] | None = None,
 ) -> Counter[str]:
     """`work`, and again every `TICK_SECONDS` for at most `wait` seconds while some passes await
     their text (`litwatch fulltext --wait`), reporting each round. `limit` caps the passes
@@ -389,7 +389,7 @@ async def work_waiting(
         done = await work(db, config, archive, models=models, limit=allowance)
         total.update(done)
         if report:
-            report(done)
+            await report(done)
         left = deadline - asyncio.get_running_loop().time()
         if not done["awaiting_text"] or left <= 0:
             return total

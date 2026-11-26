@@ -1,6 +1,6 @@
-"""Classifiers against the labels (milestone N1). `run` sorts the evaluation papers with one
-candidate and keeps every answer, one JSON line per paper, so a run can be resumed and scored
-again at any threshold without new calls. `report` scores the answers per cohort.
+"""Classifiers against the labels (milestone N1). `ask` sorts the evaluation papers with one
+candidate, and every answer is kept, one JSON line per paper, so a run can be resumed (`left`)
+and scored again at any threshold without new calls. `report` scores the answers per cohort.
 
 The papers: every paper of `fit.csv`, `regression.csv` and the silver sample, and a draw of
 0.14's screened papers (seed 20261014), on which candidate volume and 0.14's memberships are
@@ -16,13 +16,14 @@ import hashlib
 import random
 import statistics
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import BaseModel
 
 from litwatch import classification
+from litwatch.config import Models
 from litwatch.core import Paper
 from litwatch.core.classification import (
     Classified,
@@ -125,31 +126,36 @@ def results(path: Path) -> dict[str, Result]:
     return {r.paper_id: r for r in (Result.model_validate_json(x) for x in lines if x)}
 
 
-def fingerprint(gateway: Gateway, tree: Taxonomy) -> str:
+def fingerprint(models: Models, tree: Taxonomy) -> str:
     """The role's configuration, the questions and the Focus keyword patterns, hashed."""
-    role = gateway.models.role(classification.ROLE).model_dump_json()
+    role = models.role(classification.ROLE).model_dump_json()
     patterns = {t.slug: t.keywords for t in tree.topics if t.depth == Depth.FOCUS}
     asked = repr((classification.questions(tree), patterns))
     return hashlib.sha256(f"{role}\n{asked}".encode()).hexdigest()[:12]
 
 
-async def run(
-    gateway: Gateway,
-    tree: Taxonomy,
-    papers: list[Paper],
-    out: Path,
-    *,
-    concurrency: int = 8,
-    progress: Callable[[Result], None] | None = None,
-) -> list[Result]:
-    """Sort every paper not yet in `out`, appending each answer as it arrives. Refuses to resume
-    a run made with another model, configuration or tree."""
-    asked = fingerprint(gateway, tree)
+def left(out: Path, asked: str, ids: list[str]) -> list[str]:
+    """The papers of `ids` not yet answered in `out`, to resume a run. Refuses to resume a run
+    made with another model, configuration or tree (another `fingerprint`, `asked`)."""
     done = results(out)
     if other := {r.request for r in done.values()} - {asked}:
         raise ValueError(
             f"{out} holds answers to another request ({sorted(other)}); use a new file"
         )
+    return [i for i in ids if i not in done]
+
+
+async def ask(
+    gateway: Gateway,
+    tree: Taxonomy,
+    papers: list[Paper],
+    keep: Callable[[Result], Awaitable[None]],
+    *,
+    concurrency: int = 8,
+) -> list[Result]:
+    """Sort every paper with the gateway's `classify` role, `concurrency` at a time, each
+    answer kept (`keep`) as it arrives. One that fails to be kept stops the rest."""
+    asked = fingerprint(gateway.models, tree)
     gate = asyncio.Semaphore(concurrency)
     found: list[Result] = []
 
@@ -179,14 +185,12 @@ async def run(
                     request=asked,
                 )
             result.seconds = round(time.monotonic() - started, 2)
-        with out.open("a", encoding="utf-8") as f:
-            f.write(result.model_dump_json() + "\n")
+        await keep(result)
         found.append(result)
-        if progress:
-            progress(result)
 
-    out.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.gather(*(one(p) for p in papers if p.id not in done))
+    async with asyncio.TaskGroup() as group:
+        for p in papers:
+            group.create_task(one(p))
     return found
 
 

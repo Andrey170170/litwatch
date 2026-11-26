@@ -25,7 +25,8 @@ Closing = tuple[Callable[[WriteUnit], Awaitable[None]], Sequence[Named]]
 
 def model_gate(db: DatabaseGate, config: Config) -> llm.ModelGate:
     """The process's Model gate, over the providers with credentials, its own journal on `db`:
-    built once by the process's owner (`serve`, a CLI command), which closes it (`async with`)."""
+    built once by `serve`, which closes it (`async with`); a CLI command has `serve` run its
+    work."""
     return llm.build(config.models, CallJournal(db), debug=config.debug)
 
 

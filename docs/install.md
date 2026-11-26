@@ -231,9 +231,9 @@ docker compose exec litwatch litwatch ping check
 docker compose exec litwatch litwatch ping judge
 ```
 
-`ping <role>` sends one small request through a role's model as a chat completion: `analyse`, `judge`, `check`,
-`field_grade`, `brief` or `writer`. Ping at least one role per provider; with the defaults `check` is on OpenRouter
-and `judge` on Anthropic. Don't ping `classify` or `area_check`: they ask OpenRouter for decisions, which `ping` does
+`ping <role>` has the running `serve` send one small request through a role's model as a chat completion:
+`analyse`, `judge`, `check`, `field_grade`, `brief` or `writer`. Ping at least one role per provider; with the
+defaults `check` is on OpenRouter and `judge` on Anthropic. Don't ping `classify` or `area_check`: they ask OpenRouter for decisions, which `ping` does
 not, so it can fail with good keys.
 
 Check: each prints the model, `-> 42` and the tokens and cost. `CallError: provider: no credentials for …` means

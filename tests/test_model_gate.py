@@ -17,7 +17,6 @@ from litwatch.api import app as app_module
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import FAILED_RUNS, Cause, Fit, Verdict
 from litwatch.gates import work as work_gate
-from litwatch.gates.work import CommandCutOffError, inline
 from litwatch.jobs.context import model_run
 from litwatch.llm import ModelGate, Request
 from litwatch.llm import ceiling as ceilings
@@ -39,7 +38,7 @@ from tests.fakes import (
 )
 from tests.fakes_http import FakeArchive
 from tests.sessions import Session, in_read, in_write
-from tests.working import QUIET, TOKEN, served, until
+from tests.working import QUIET, TOKEN, StoppedError, in_an_item, served, until
 
 BRIEF = RoleConfig(provider="anthropic", model="test-brief")
 HAIKU = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")  # listed
@@ -87,7 +86,7 @@ async def run_cost(conn: Session, run_id: int) -> float:
 
 
 def asked_in_an_item(db, gate: ModelGate, name: str, n: int, deadline: datetime | None):
-    """A command item `name` (`gates.work.inline`) whose run asks `brief` about paper `n`
+    """A work item `name` (`in_an_item`) whose run asks `brief` about paper `n`
     through `gate`, under `deadline`: its task."""
 
     async def work():
@@ -95,7 +94,7 @@ def asked_in_an_item(db, gate: ModelGate, name: str, n: int, deadline: datetime 
             with spending(deadline=deadline):
                 return await run.gateway.ask("brief", ask(n))
 
-    return asyncio.create_task(inline(db, name, work))
+    return asyncio.create_task(in_an_item(db, name, work))
 
 
 async def rows(conn: Session, query: str, *params) -> list[dict]:
@@ -289,10 +288,8 @@ async def test_items_with_one_deadline_share_a_batch_whose_calls_settle_after_a_
     second = asked_in_an_item(db, gate, "second", 2, deadline)
     await until(batched(conn, 2), "both calls in a batch")
     assert [len(keys) for keys in anthropic.submitted] == [2]  # one batch, the two items'
-    await conn.execute(
-        "UPDATE work_items SET lease_token = gen_random_uuid() WHERE key LIKE 'first:%%'"
-    )
-    with pytest.raises(CommandCutOffError, match="its lease was lost"):
+    await conn.execute("UPDATE work_items SET lease_token = gen_random_uuid() WHERE key = 'first'")
+    with pytest.raises(StoppedError):
         await asyncio.wait_for(first, 5)  # its Worker stopped, its call no longer waiting
     assert not second.done()
     anthropic.end("msgbatch_1")
@@ -526,7 +523,7 @@ async def test_openais_normal_and_batched_charges_are_journalled_on_the_items_ow
             client.end("batch_1")
             return run.run_id, normal, await waiting
 
-    run_id, normal, batch = await inline(db, "openai", work)
+    run_id, normal, batch = await in_an_item(db, "openai", work)
     assert (normal.usage.service_tier, batch.usage.service_tier) == ("default", "batch")
     found = await journalled(conn)
     assert [c["cost"] for c in found] == [
@@ -535,7 +532,7 @@ async def test_openais_normal_and_batched_charges_are_journalled_on_the_items_ow
     ]
     assert batch.usage.cost and normal.usage.cost == pytest.approx(2 * batch.usage.cost)
     assert {c["run_id"] for c in found} == {run_id}
-    assert {c["key"].split(":")[0] for c in found} == {"openai"}  # the command's item
+    assert {c["key"].split(":")[0] for c in found} == {"openai"}  # the item's key
     total = normal.usage.cost + batch.usage.cost
     assert await run_cost(conn, run_id) == pytest.approx(total, abs=5e-5)  # kept to 4 places
     await gate.close()

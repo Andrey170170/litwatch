@@ -119,7 +119,8 @@ UPDATE integration_cursors SET position_xid = '3', position = (SELECT coalesce(m
     failing = NULL, failures = 0, retry_at = NULL, last_error = NULL, failed_at = NULL, skipped = 0;
 SQL
 else
-  LITWATCH_DATABASE_URL=$next_dsn uv run litwatch intake archive "${window[@]}"
+  # No `serve` works from the new database: the window is read in this process (`--here`).
+  LITWATCH_DATABASE_URL=$next_dsn uv run litwatch intake archive --here "${window[@]}"
 fi
 
 # Swap the two in one transaction, so `$db` is always either the old sandbox or the new one.

@@ -942,7 +942,7 @@ async def test_an_item_runs_under_its_lease_and_attribution(conn: Session, db):
     assert [(i, a) for i, _, a in seen] == [(submitted.id, Attribution.work(submitted.id))] * 2
     assert seen[0][1] != seen[1][1]  # a lease of its own each time
     assert (await (await conn.execute("SELECT count(*) AS n FROM workers")).fetchone())["n"] == 0
-    assert current_work() is None and attribution() is None
+    assert current_work() is None and attribution() == Attribution.system("test")  # the test's
 
 
 async def test_a_worker_that_waits_runs_again_no_sooner_than_it_asked(conn: Session, db):

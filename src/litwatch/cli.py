@@ -5,34 +5,30 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import math
+import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterator
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
+import click
 import typer
 import yaml
 from rich.console import Console
 
 from litwatch import config as configuration
 from litwatch import logs, seeds, store
-from litwatch.archive import ArchiveError
 from litwatch.core import Paper, Taxonomy
+from litwatch.core.work import ItemState, Outcome, WorkItem
 from litwatch.feedback import word
+from litwatch.gates.context import Attribution, attributed
 from litwatch.gates.database import BusyError, DatabaseGate, PoolTimeoutError, ReadUnit
-from litwatch.gates.work import CommandCutOffError, inline
-from litwatch.integrations import IntegrationError
-from litwatch.integrations import archive as archive_integration
-from litwatch.jobs import intake as intake_job
-from litwatch.jobs import nightly as nightly_job
-from litwatch.jobs import publications as lookups
-from litwatch.jobs.context import UnclosedError, model_gate
-from litwatch.publications import Dblp
-from litwatch.store import fulltext as fulltext_store
+from litwatch.gates.work import LEASE, WorkGate
+from litwatch.jobs import commands
 from litwatch.store import papers as papers_store
-from litwatch.store import runs
 from litwatch.store import taxonomy as taxonomy_store
+from litwatch.store import work as queue
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="litwatch")
 db_app = typer.Typer(no_args_is_help=True, help="Database migrations.")
@@ -44,6 +40,7 @@ digests_app = typer.Typer(no_args_is_help=True, help="Daily and weekly digests."
 deep_app = typer.Typer(
     no_args_is_help=True, help="What Deep did: attempts, traces and process notes. Read-only."
 )
+work_app = typer.Typer(no_args_is_help=True, help="The work items commands leave to `serve`.")
 app.add_typer(db_app, name="db")
 app.add_typer(eval_app, name="eval")
 app.add_typer(library_app, name="library")
@@ -51,6 +48,7 @@ app.add_typer(taxonomy_app, name="taxonomy")
 app.add_typer(intake_app, name="intake")
 app.add_typer(digests_app, name="digests")
 app.add_typer(deep_app, name="deep")
+app.add_typer(work_app, name="work")
 console = Console()
 
 
@@ -73,42 +71,254 @@ def _run[T](
     *,
     migrate: bool = True,
     db: DatabaseGate | None = None,
-    item: str | None = None,
-    admission: str | None = None,
-    close: Callable[[], Awaitable[None]] | None = None,
+    attribute: bool = True,
 ) -> T:
     """Run `work` with the command's Database gate, the process's one, on the configured
     database, migrated first: `db` when the command built it already (unopened), else a new
-    one. The gate is open for the run and closed at its end. Named an `item`, a command that
-    does pipeline work runs it as a work item in this process (`gates.work.inline`, admitted by
-    `admission` when given), whose lease keeps its run alive, until P5 sends it to `serve`. It
-    has one attempt: the database lost under it fails it (`CommandCutOffError`), and the owner runs
-    it again. `close` closes what the command opened for `work`, however it ends: its admission
-    waited for or lost included."""
+    one. The gate is open for the run and closed at its end. Its gate calls are the command's
+    request (`attribute`): `serve` alone attributes its own, per request and item."""
     logs.setup()
 
     async def main() -> T:
-        try:
-            async with db or DatabaseGate(configuration.database_url()) as gate:
-                if migrate:
-                    await _migrate(gate)
-                if item is None:
-                    return await work(gate)
-                return await inline(gate, item, lambda: work(gate), admission=admission)
-        finally:
-            if close is not None:
-                await close()
+        async with db or DatabaseGate(configuration.database_url()) as gate:
+            if migrate:
+                await _migrate(gate)
+            return await work(gate)
 
     try:
-        return asyncio.run(main())
-    except (store.LegacyDatabaseError, BusyError, PoolTimeoutError, CommandCutOffError) as exc:
+        with attributed(_request()) if attribute else contextlib.nullcontext():
+            return asyncio.run(main())
+    except (store.LegacyDatabaseError, BusyError, PoolTimeoutError) as exc:
         raise SystemExit(str(exc)) from exc
+
+
+def _request() -> Attribution:
+    """The running command as a request: `cli litwatch eval report`, say."""
+    ctx = click.get_current_context(silent=True)
+    return Attribution.request(f"cli {ctx.command_path if ctx else 'litwatch'}")
+
+
+# -- commands `serve` runs: submitted, then followed --------------------------------------------
+
+# How often a command following its item looks at it when no notification comes.
+FOLLOW_SECONDS = 2.0
+
+
+def _submit(
+    name: str,
+    scope: dict[str, Any],
+    *,
+    admission: str | None = None,
+    migrate: bool = False,
+    here: Callable[[DatabaseGate], commands.Serving] | None = None,
+) -> None:
+    """Submit the command `name`'s work item (`jobs.commands`) with `scope`, admitted by
+    `admission` (by default its own key), and follow it to its end (`_follow`): the database is
+    the one `serve` works from, and `serve` runs it. Refuses when no `serve` runs its kind (a
+    live `workers` row): it never runs the work itself, but with `here` (what to run it with, on
+    the command's gate), on a Work gate of its own that serves this item alone, for a database
+    no `serve` works from. Ctrl-C asks whether to cancel the item or leave it to run
+    (`_interrupted`); with `here` it is cancelled. A failed item fails the command with its
+    error."""
+    logs.setup()
+    work_kind, key = commands.kind(name), str(uuid.uuid4())
+
+    async def main() -> WorkItem:
+        async with DatabaseGate(configuration.database_url()) as db:
+            if migrate:
+                await _migrate(db)
+            if here is None:
+                async with db.read("is it served") as unit:
+                    served = await queue.serving(unit, work_kind, LEASE)
+                if not served:
+                    raise SystemExit(
+                        f"no `litwatch serve` runs {work_kind} on this database: start one "
+                        "(docs/agents/dev-host.md); a command never runs its work itself"
+                    )
+            async with db.write(f"{name}: submit") as unit:
+                item = await queue.submit(
+                    unit, work_kind, key, scope=scope, admission=admission or key
+                )
+            console.print(f"item {item.id}: {work_kind} (Ctrl-C to cancel it or leave it running)")
+            if here is None:
+                return await _follow(db, item.id)
+            alone = {work_kind: commands.CommandWorker(here(db))}
+            running = asyncio.create_task(WorkGate(db).run(alone, keys={work_kind: [key]}))
+            try:
+                return await _follow(db, item.id)
+            finally:
+                running.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await running
+
+    try:
+        with attributed(_request()):
+            ended = asyncio.run(main())
+    except KeyboardInterrupt:
+        _interrupted(work_kind, key, cancel=here is not None)
+    except (store.LegacyDatabaseError, PoolTimeoutError) as exc:
+        raise SystemExit(str(exc)) from exc
+    _ended(ended)
+
+
+def _ended(item: WorkItem) -> None:
+    if item.outcome == Outcome.FAILED:
+        raise SystemExit(f"item {item.id} failed: {item.error}")
+
+
+async def _follow(db: DatabaseGate, item_id: int) -> WorkItem:
+    """Follow the item `item_id` to its end, showing its results as they arrive (`_Shown`):
+    woken by a notification (its results', or any item's settling) and else every
+    `FOLLOW_SECONDS`. It only reads: the item is `serve`'s, which may stop and start again
+    meanwhile (the item goes back to pending and runs again). It says so when no `serve` runs
+    the item's kind while the item waits. Returns the item, ended."""
+    shown, wake = _Shown(), asyncio.Event()
+    listening = asyncio.create_task(_woken(db, wake))
+    last, unserved = 0, False
+    was: ItemState | None = None
+    try:
+        while True:
+            wake.clear()
+            async with db.read("follow") as unit:
+                item = await queue.get(unit, item_id)
+                if item is None:
+                    raise SystemExit(f"no work item {item_id}")
+                found = await queue.results(unit, item_id, last)
+                served = await queue.serving(unit, item.kind, LEASE)
+            for last, body in found:  # noqa: B007
+                shown.show(body)
+            if item.state == ItemState.ENDED:
+                return item
+            if item.state != was:
+                if item.state == ItemState.RUNNING and item.attempts > 1:
+                    console.print(f"item {item_id} runs again (attempt {item.attempts})")
+                elif item.state == ItemState.PENDING and was == ItemState.RUNNING:
+                    console.print(f"item {item_id} waits to run again")
+                was = item.state
+            if not served and not unserved:
+                console.print(f"no `litwatch serve` runs {item.kind} now: item {item_id} waits")
+            unserved = not served
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(wake.wait(), FOLLOW_SECONDS)
+    finally:
+        listening.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await listening
+
+
+async def _woken(db: DatabaseGate, wake: asyncio.Event) -> None:
+    """Set `wake` on each notification of the Work gates' channels, listening again after a
+    drop; the follower's own reads cover what a drop misses."""
+    while True:
+        try:
+            async with db.listen(queue.CHANNEL, queue.RESULTS) as notes:
+                async for _ in notes:
+                    wake.set()
+        except Exception:
+            await asyncio.sleep(FOLLOW_SECONDS)
+
+
+class _Shown:
+    """An item's results as the command shows them (`jobs.commands`): text and data printed,
+    lines appended to their files once each, whoever followed the item before (a line the file
+    holds is not written again). A record cut off at a file's end, by a kill mid-write, is cut
+    before the first line is added."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, set[str]] = {}
+
+    def show(self, body: dict[str, Any]) -> None:
+        if "say" in body:
+            console.print(body["say"], markup=False)
+        elif "data" in body:
+            console.print_json(data=body["data"])
+        elif "to" in body:
+            self.line(Path(body["to"]), body["line"])
+
+    def line(self, path: Path, line: str) -> None:
+        held = self.files.get(str(path))
+        if held is None:
+            text = path.read_text(encoding="utf-8") if path.exists() else ""
+            if text and not text.endswith("\n"):
+                text = text[: text.rfind("\n") + 1]
+                path.write_text(text, encoding="utf-8")
+            held = self.files[str(path)] = set(text.splitlines())
+        if line in held:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        held.add(line)
+
+
+def _interrupted(work_kind: str, key: str, *, cancel: bool = False) -> NoReturn:
+    """Ctrl-C while a command follows its item: ask whether to cancel the item (`cancel`: do,
+    without asking) or leave it to run, which `litwatch work follow` picks back up. Its
+    submission may or may not have committed: the item is found by its key."""
+
+    async def find(db: DatabaseGate) -> WorkItem | None:
+        async with db.read("interrupted: the item") as unit:
+            return await queue.find(unit, work_kind, key)
+
+    item = _run(find, migrate=False)
+    if item is None:
+        raise SystemExit("stopped before its work item was submitted")
+    _stop(item, cancel=cancel)
+
+
+def _stop(item: WorkItem, *, cancel: bool) -> NoReturn:
+    if item.state != ItemState.ENDED and not cancel:
+        try:
+            cancel = typer.confirm(
+                f"\nCancel item {item.id}? Otherwise it goes on, and "
+                f"`litwatch work follow {item.id}` picks it back up",
+                default=False,
+            )
+        except click.Abort:
+            cancel = False
+    if item.state != ItemState.ENDED and cancel:
+
+        async def cancelled(db: DatabaseGate) -> WorkItem | None:
+            async with db.write("cancel the item") as unit:
+                return await queue.cancel(unit, item.id, "cancelled by the owner (Ctrl-C)")
+
+        item = _run(cancelled, migrate=False) or item
+    if item.state == ItemState.ENDED:
+        raise SystemExit(f"item {item.id} ended {item.outcome}: {item.error or 'done'}")
+    console.print(f"item {item.id} goes on: `litwatch work follow {item.id}` picks it back up")
+    raise typer.Exit(130)
+
+
+@work_app.command("follow")
+def work_follow(item_id: Annotated[int, typer.Argument(help="The work item's id.")]) -> None:
+    """Follow a command's work item to its end, as the command did before Ctrl-C left it to
+    run: its output from the start, its files' lines written once each."""
+    logs.setup()
+
+    async def main() -> WorkItem:
+        async with DatabaseGate(configuration.database_url()) as db:
+            return await _follow(db, item_id)
+
+    try:
+        with attributed(_request()):
+            ended = asyncio.run(main())
+    except KeyboardInterrupt:
+
+        async def found(db: DatabaseGate) -> WorkItem | None:
+            async with db.read("interrupted: the item") as unit:
+                return await queue.get(unit, item_id)
+
+        item = _run(found, migrate=False)
+        assert item is not None  # followed until now
+        _stop(item, cancel=False)
+    _ended(ended)
 
 
 async def _migrate(db: DatabaseGate) -> list[str]:
     # On the migration lock's own session, so the migrations cannot outlive the lock.
-    async with db.startup("migration") as conn:
-        return await store.migrate(conn)
+    with attributed(Attribution.system("startup: migrations")):
+        async with db.startup("migration") as conn:
+            return await store.migrate(conn)
 
 
 @db_app.command("migrate")
@@ -130,45 +340,16 @@ def intake(
             "archive, from this day.",
         ),
     ] = None,
-    config: ConfigPath = None,
 ) -> None:
-    """Fetch new and revised papers for the configured categories from arXiv."""
+    """Fetch new and revised papers for the configured categories from arXiv. `serve` runs it."""
     if ctx.invoked_subcommand is not None:
         return
-    cfg = configuration.load(config)
     if catalog_from is not None:
         if days is not None:
             raise typer.BadParameter("--days and --catalog-from do not go together")
-        _catalog_from(cfg, catalog_from.date())
+        _submit("intake", {"catalog_from": catalog_from.date().isoformat()})
         return
-
-    async def work(db: DatabaseGate) -> Any:
-        return await intake_job.run(db, cfg, days)
-
-    result = _run(work, item="intake")
-    console.print(
-        f"intake {result.details['status']}: {result.fetched} papers, "
-        f"{result.inserted} new, {result.updated} updated, {result.unchanged} unchanged"
-    )
-
-
-def _catalog_from(cfg: configuration.Config, since: date) -> None:
-    def report(done: dict[str, Any]) -> None:
-        console.print(
-            f"catalog through {done['through']}: {done['records']} records, "
-            f"{done['registered']} registered"
-        )
-
-    async def work(db: DatabaseGate) -> Any:
-        return await intake_job.catalog_from(db, cfg, since, report)
-
-    try:
-        done = _run(work, item="intake catalog")
-    except (ValueError, IntegrationError) as exc:
-        raise SystemExit(f"catalog pass: {exc}") from exc
-    if not done["complete"]:
-        raise SystemExit(f"catalog pass stopped: {done['error']}")
-    console.print(f"catalog pass complete through {done['through']}")
+    _submit("intake", {"days": days})
 
 
 @intake_app.command("archive")
@@ -178,34 +359,42 @@ def intake_archive(
         datetime | None, typer.Option(formats=["%Y-%m-%d"], help="Last day; default today (UTC).")
     ] = None,
     days: Annotated[int | None, typer.Option(help="Instead of --since: this many days.")] = None,
-    config: ConfigPath = None,
+    here: Annotated[
+        bool,
+        typer.Option(
+            "--here",
+            help="Run it in this process, for a database no `serve` works from (a fresh "
+            "sandbox's): it calls no model.",
+        ),
+    ] = False,
+    config: Annotated[
+        Path | None, typer.Option("--config", help="With --here: litwatch.toml.")
+    ] = None,
 ) -> None:
     """Read the papers first submitted in a window, in the configured categories, from the
-    archive ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration)."""
+    archive ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration).
+    `serve` runs it, under its configuration; with --here, this process does."""
     if (since is None) == (days is None) or (days is not None and days < 1):
         raise typer.BadParameter("give --since or a positive --days")
-    cfg = configuration.load(config)
+    if config is not None and not here:
+        raise typer.BadParameter("--config goes with --here: `serve` runs it under its own")
     last = until.date() if until else datetime.now(UTC).date()
     first = since.date() if since else last - timedelta(days=days - 1)
     if first > last:
         raise typer.BadParameter("--since must not follow --until")
+    scope = {"first": first.isoformat(), "last": last.isoformat()}
+    if not here:
+        _submit("intake", scope)
+        return
+    from litwatch.llm import ModelGate  # noqa: PLC0415
 
-    async def work(db: DatabaseGate) -> Any:
-        client = archive_integration.source(cfg)
-        try:
-            return await intake_job.from_archive(db, cfg, client, first, last)
-        finally:
-            await client.aclose()
+    cfg = configuration.load(config)
 
-    try:
-        result = _run(work, item="intake archive")
-    except (ArchiveError, IntegrationError) as exc:
-        raise SystemExit(f"archive: {exc}") from exc
-    console.print(
-        f"intake from the archive, {first} to {last}: {result.fetched} papers, "
-        f"{result.inserted} new, {result.updated} updated"
-        + (f", {len(result.details['skipped'])} without text" if result.details["skipped"] else "")
-    )
+    def serving(db: DatabaseGate) -> commands.Serving:
+        # No model is called: a Model gate of no providers refuses any call.
+        return commands.Serving(db, cfg, ModelGate(configuration.Models(), {}))
+
+    _submit("intake", scope, migrate=True, here=serving)
 
 
 @app.command()
@@ -222,53 +411,21 @@ def nightly(
             "--no-digests and writes its window's with `digests write`."
         ),
     ] = True,
-    config: ConfigPath = None,
 ) -> None:
     """The nightly run as the scheduler runs it: intake, classification, analysis, grading,
-    the full-text passes and the digests."""
-    cfg = configuration.load(config)
-
-    async def work(db: DatabaseGate) -> tuple[int, Any]:
-        try:
-            async with model_gate(db, cfg) as models:
-                run_id = await nightly_job.run(
-                    db, cfg, models=models, fetch=fetch, days=days, limit=limit,
-                    with_digests=digests,
-                )  # fmt: skip
-        except UnclosedError as exc:  # its jobs wait for a nightly that closes: this one again
-            raise CommandCutOffError(str(exc)) from exc
-        return run_id, await _run_record(db, run_id)
-
-    run_id, run = _run(work, item="nightly")
-    console.print(f"run {run_id}: cost ${run['cost']}")
-    console.print_json(data=run["counts"])
-
-
-async def _run_record(db: DatabaseGate, run_id: int) -> Any:
-    async with db.read("run record") as unit:
-        return await runs.get(unit, run_id)
+    the full-text passes and the digests. `serve` runs it, under its configuration."""
+    _submit("nightly", {"fetch": fetch, "days": days, "limit": limit, "digests": digests})
 
 
 # -- digests --------------------------------------------------------------------------------------
 
 
 @digests_app.command("write")
-def digests_write(since: Since, until: Until, config: ConfigPath = None) -> None:
+def digests_write(since: Since, until: Until) -> None:
     """Write the digests of every day from --since to --until, and the weekly digests of the
     weeks inside it, as the nightly run would have on those days, over the papers due now
-    (the restart, a missed night). Published digests stay as they are."""
-    from litwatch.jobs import digests as digests_job  # noqa: PLC0415
-
-    cfg = configuration.load(config)
-
-    async def work(db: DatabaseGate) -> tuple[int, Any]:
-        async with model_gate(db, cfg) as models:
-            run_id = await digests_job.window(db, cfg, since.date(), until.date(), models=models)
-        return run_id, await _run_record(db, run_id)
-
-    run_id, run = _run(work, item="digests write")
-    console.print(f"run {run_id}: cost ${run['cost']}")
-    console.print_json(data=run["counts"])
+    (the restart, a missed night). Published digests stay as they are. `serve` runs it."""
+    _submit("digests", {"since": since.date().isoformat(), "until": until.date().isoformat()})
 
 
 # -- deep ------------------------------------------------------------------------------------------
@@ -460,41 +617,35 @@ def eval_classify(
     concurrency: int = 8,
 ) -> None:
     """Sort the evaluation papers with each candidate as the `classify` role. A dry run: it reads
-    titles and abstracts from the configured database and writes only to `out`; a run resumes
-    where it stopped."""
+    titles and abstracts from the configured database and writes only to `out`, as `serve`
+    answers; a run resumes where it stopped, asking only what `out` does not hold."""
     import tomllib  # noqa: PLC0415
 
     from litwatch.config import Models, RoleConfig  # noqa: PLC0415
-    from litwatch.llm import build  # noqa: PLC0415
     from litwatch.quality import classify  # noqa: PLC0415
 
     roles = tomllib.loads(candidates.read_text())
+    if unknown := set(candidate) - set(roles):
+        raise typer.BadParameter(f"no candidate {', '.join(sorted(unknown))} in {candidates}")
     tree, evaluation = seeds.taxonomy(), classify.load(labels)
     ids = evaluation.papers[:limit]
-    found = _run(lambda db: _papers(db, ids), migrate=False)
+    found = {p.id for p in _run(lambda db: _papers(db, ids), migrate=False)}
     if missing := len(ids) - len(found):
         console.print(f"[yellow]{missing} papers are not in the database and are left out[/yellow]")
-
-    async def main() -> None:
-        # One Model gate for the process, each candidate served through a door of its own.
-        async with build(Models()) as gate:
-            for name in candidate:
-                gateway = gate.on(models=Models(classify=RoleConfig.model_validate(roles[name])))
-
-                def progress(r: classify.Result, name: str = name, done: list[int] = [0]) -> None:  # noqa: B006
-                    done[0] += 1
-                    if r.error or done[0] % 100 == 0:
-                        console.print(f"{name}: {done[0]} {r.paper_id} {r.error or ''}")
-
-                new = await classify.run(
-                    gateway, tree, found, out / f"{name}.jsonl",
-                    concurrency=concurrency, progress=progress,
-                )  # fmt: skip
-                cost = sum(r.cost or 0 for r in new)
-                failed = sum(r.error is not None for r in new)
-                console.print(f"{name}: {len(new)} sorted, {failed} failed, ${cost:.2f}")
-
-    asyncio.run(main())
+    chosen = []
+    for name in candidate:
+        role = RoleConfig.model_validate(roles[name])
+        path = (out / f"{name}.jsonl").resolve()
+        asked = classify.fingerprint(Models(classify=role), tree)
+        try:
+            todo = classify.left(path, asked, [i for i in ids if i in found])
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        chosen.append(
+            {"name": name, "role": role.model_dump(mode="json"), "papers": todo, "out": str(path)}
+        )
+    scope = {"tree": tree.model_dump(mode="json"), "concurrency": concurrency}
+    _submit("classify", scope | {"candidates": chosen})
 
 
 @eval_app.command("classify-report")
@@ -544,7 +695,8 @@ def eval_replay(
 ) -> None:
     """Run the labelled and missed papers through the current classification, keyword check
     and grading (feedback.md, evaluation). A dry run: it writes to the evaluation tables only.
-    Shows what it would cost and asks first; a run cut short goes on with --resume."""
+    Shows what it would cost and asks first; `serve` runs it, under its configuration, which
+    must be the one estimated with (--config); a run cut short goes on with --resume."""
     from litwatch.quality import replay  # noqa: PLC0415
 
     cfg = configuration.load(config)
@@ -589,18 +741,15 @@ def eval_replay(
     if not yes and not typer.confirm("Spend it?"):
         raise typer.Exit(1)
 
-    async def work(db: DatabaseGate) -> dict[str, Any]:
-        if r.eval_run_id is None:
-            params = {"cohorts": cohort, "negatives": sample, "seed": replay.SEED, "limit": limit}
-            async with db.write("replay: start") as unit:
-                r.eval_run_id = await replay.start(unit, cfg, r, params, note)
-            console.print(f"replay {r.eval_run_id}")
-        async with model_gate(db, cfg) as models:
-            return await replay.run(db, cfg, r, models=models)
+    async def start(db: DatabaseGate) -> int:
+        params = {"cohorts": cohort, "negatives": sample, "seed": replay.SEED, "limit": limit}
+        async with db.write("replay: start") as unit:
+            return await replay.start(unit, cfg, r, params, note)
 
-    counts = _run(work, item="eval replay")
-    console.print_json(data=counts)
-    console.print(f"report: litwatch eval report {r.eval_run_id}")
+    if r.eval_run_id is None:
+        r.eval_run_id = _run(start, migrate=False)
+        console.print(f"replay {r.eval_run_id}")
+    _submit("replay", {"eval_run_id": r.eval_run_id})
 
 
 @eval_app.command("report")
@@ -690,17 +839,13 @@ def eval_briefs(
         ),
     ] = "pass",
 ) -> None:
-    """Write the Brief of each paper of the preference set with the configured `brief` role,
-    reading its text from the archive as a full-text pass does. A dry run: it reads the papers
-    from the configured database and writes only to `out`; a run resumes where it stopped."""
-    from litwatch.fulltext import archive_for  # noqa: PLC0415
-    from litwatch.llm import build  # noqa: PLC0415
+    """Write the Brief of each paper of the preference set with the configured `brief` role
+    (--config's), reading its text from `serve`'s archive as a full-text pass does. A dry run:
+    it reads the papers from the configured database and writes only to `out`, as `serve`
+    answers; a run resumes where it stopped."""
     from litwatch.quality import briefs  # noqa: PLC0415
 
-    cfg = configuration.load(config)
-    archive = archive_for(cfg)
-    if archive is None:
-        raise SystemExit("no archive: configure one, or set $LITWATCH_ARCHIVE_URL")
+    role = configuration.load(config).models.role(briefs.brief.ROLE)
     if text not in briefs.TEXTS:
         raise SystemExit(f"--text is one of {', '.join(briefs.TEXTS)}")
     entries = briefs.load(preferences)
@@ -708,25 +853,27 @@ def eval_briefs(
     by_id = {p.id: p for p in found}
     if missing := [e.id for e in entries if e.id not in by_id]:
         console.print(f"[yellow]not in the database, left out: {', '.join(missing)}[/yellow]")
-
-    def progress(r: briefs.Result) -> None:
-        console.print(f"{r.paper_id}: {r.error or 'answered'} {briefs.dollars([r.cost])}")
-
-    async def main() -> list[briefs.Result]:
-        try:
-            async with build(cfg.models) as gate:
-                return await briefs.run(
-                    gate, seeds.taxonomy(),
-                    [(by_id[e.id], e) for e in entries if e.id in by_id], archive, out,
-                    concurrency=concurrency, text=text, wait_seconds=wait_minutes * 60,
-                    progress=progress,
-                )  # fmt: skip
-        finally:
-            await archive.aclose()
-
-    new = asyncio.run(main())
-    cost = briefs.dollars([r.cost for r in new])
-    console.print(f"{sum(r.output is not None for r in new)} of {len(new)} answered, {cost}")
+    path = out.resolve()
+    try:
+        todo = briefs.left(
+            path,
+            briefs.fingerprint(role, text),
+            [(by_id[e.id], e) for e in entries if e.id in by_id],
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    _submit(
+        "briefs",
+        {
+            "out": str(path),
+            "entries": [e.model_dump(mode="json") for _, e in todo],
+            "role": role.model_dump(mode="json"),
+            "tree": seeds.taxonomy().model_dump(mode="json"),
+            "concurrency": concurrency,
+            "text": text,
+            "wait_seconds": wait_minutes * 60,
+        },
+    )
 
 
 @eval_app.command("briefs-report")
@@ -782,12 +929,11 @@ def eval_ladders(
     """Ask each case's request, as the pipeline builds it, of every candidate on its role's
     ladder (docs/plans/failure-handling.md, P1). A dry run: it reads papers, the taxonomy and
     digests from the configured database and texts the archive already holds, and writes only to
-    `out`; a run resumes where it stopped. Shows what it would cost and asks first, and stops
-    at the ceiling."""
+    `out`, as `serve` answers; a run resumes where it stopped. Shows what it would cost and asks
+    first, and stops at the ceiling. `serve` builds the requests again with its archive."""
     if not (math.isfinite(ceiling) and ceiling > 0):
         raise typer.BadParameter("--ceiling is a positive amount")
     from litwatch.fulltext import archive_for  # noqa: PLC0415
-    from litwatch.llm import build  # noqa: PLC0415
     from litwatch.quality import ladders  # noqa: PLC0415
 
     cfg = configuration.load(config)
@@ -819,41 +965,36 @@ def eval_ladders(
     for key, why in built.items():
         if isinstance(why, str):
             console.print(f"[yellow]left out: {key}: {why}[/yellow]")
-    done = ladders.rows(out)
-    work = ladders.todo(chosen, found, built, done, only)
-    by = Counter((t.case.role, t.candidate.name) for t in work)
-    for (r, name), n in sorted(by.items()):
-        cost = sum(ladders.estimate(t.ladder, t.candidate, t.request) for t in work
-                   if (t.case.role, t.candidate.name) == (r, name))  # fmt: skip
-        console.print(f"{r} {name}: {n} calls, estimated ${cost:.2f}")
-    expected = sum(ladders.estimate(t.ladder, t.candidate, t.request) for t in work)
-    console.print(
-        f"{len(work)} calls, estimated ${expected:.2f}; spent so far "
-        f"${ladders.spent(done, ladders.reservations(out)):.2f} of the ${ceiling:.2f} ceiling"
-    )
-    if not work or (not yes and not typer.confirm("Spend it?")):
-        return
-
-    def progress(r: ladders.Row) -> None:
-        if r.outcome != "answered":
-            console.print(f"{r.case} {r.candidate}: {r.outcome} {r.detail or ''}")
-
-    async def main() -> ladders.Ran:
-        async with build(cfg.models) as gate:
-            return await ladders.run(
-                work, gate, out, ceiling, concurrency=concurrency, progress=progress
-            )
-
+    path = out.resolve()
     try:
-        ran = asyncio.run(main())
+        # Held while `serve` makes the calls and this command writes their records.
+        with ladders.held(path) as done:
+            work = ladders.todo(chosen, found, built, done, only)
+            by = Counter((t.case.role, t.candidate.name) for t in work)
+            for (r, name), n in sorted(by.items()):
+                cost = sum(ladders.estimate(t.ladder, t.candidate, t.request) for t in work
+                           if (t.case.role, t.candidate.name) == (r, name))  # fmt: skip
+                console.print(f"{r} {name}: {n} calls, estimated ${cost:.2f}")
+            expected = sum(ladders.estimate(t.ladder, t.candidate, t.request) for t in work)
+            spent = ladders.spent(done, ladders.reservations(path))
+            console.print(
+                f"{len(work)} calls, estimated ${expected:.2f}; spent so far "
+                f"${spent:.2f} of the ${ceiling:.2f} ceiling"
+            )
+            if not work or (not yes and not typer.confirm("Spend it?")):
+                return
+            scope = {
+                "out": str(path),
+                "cases": [c.model_dump(mode="json") for c in chosen],
+                "ladders": {r: x.model_dump(mode="json") for r, x in found.items()},
+                "todo": [(t.case.key, t.candidate.name) for t in work],
+                "ceiling": ceiling,
+                "spent": spent,
+                "concurrency": concurrency,
+            }
+            _submit("ladders", scope)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
-    kinds = Counter(r.outcome for r in ran.rows)
-    console.print(f"{len(ran.rows)} calls: {dict(kinds)}; ${ladders.spent(ran.rows):.2f}")
-    if ran.why is not None:
-        t = ran.stopped_at
-        first = f", first not run: {t.case.key} {t.candidate.name}" if t else ""
-        console.print(f"[red]stopped: {ran.why}{first} (recorded in {out / ladders.BUDGET})[/red]")
 
 
 @eval_app.command("ladders-report")
@@ -921,21 +1062,12 @@ def publications(
     limit: Annotated[int, typer.Option(help="At most this many library papers.")] = 200,
 ) -> None:
     """Look up published versions on DBLP for the library papers that are due, as the
-    scheduler does daily, or for one paper."""
-
-    async def one(db: DatabaseGate) -> Any:
-        assert paper is not None  # only with --paper
-        found = await lookups.look_up(db, Dblp(), paper)
-        return found.model_dump(mode="json") if found else None
-
-    async def due(db: DatabaseGate) -> Any:
-        return await lookups.run(db, Dblp(), limit)
-
+    scheduler does daily, or for one paper. `serve` runs it."""
     if paper:
-        console.print_json(data=_run(one))
+        _submit("publications", {"paper": paper})
         return
     # Admitted as the scheduled lookups are: a run here and a scheduled one never overlap.
-    console.print_json(data=_run(due, item="publications", admission="publications"))
+    _submit("publications", {"limit": limit}, admission=commands.ADMISSIONS["publications"])
 
 
 @app.command()
@@ -1048,106 +1180,25 @@ def fulltext_queue(
     deep: Annotated[
         bool, typer.Option(help="Work the Deep card passes instead, with the deep integration.")
     ] = False,
-    config: ConfigPath = None,
 ) -> None:
     """Work the full-text queue as the service's workers do: try every pass that is due once,
-    and with --wait again every half minute while some still await their text from the archive
-    ($LITWATCH_ARCHIVE_URL and $LITWATCH_ARCHIVE_TOKEN, or the archive integration). Text passes
-    by default; Deep card passes with --deep, one at a time, each a paid job on the deep service."""
-    from litwatch import fulltext  # noqa: PLC0415
-    from litwatch.fulltext import deep as deep_passes  # noqa: PLC0415
-    from litwatch.integrations import deep as deep_integration  # noqa: PLC0415
-    from litwatch.integrations import enabled_using  # noqa: PLC0415
-
-    cfg = configuration.load(config)
-    archive = fulltext.archive_for(cfg)
-    if archive is None:
-        raise SystemExit("no archive configured")
-    maker = None
+    and with --wait again every half minute while some still await their text from the archive.
+    Text passes by default; Deep card passes with --deep, one at a time, each a paid job on the
+    deep service. `serve` runs it, with its archive and deep integration."""
+    scope = {"limit": limit, "wait": wait}
     if deep:
-        options = enabled_using(cfg, "deep")
-        if options is None:
-            raise SystemExit("no deep integration configured")
-        options = {k: v for k, v in options.items() if k not in ("use", "enabled")}
-        maker = deep_integration.load("deep", options, cfg)
-
-    async def work_deep(db: DatabaseGate) -> Counter[str]:
-        total: Counter[str] = Counter()
-        deadline = asyncio.get_running_loop().time() + wait
-        while True:
-            worked = total["cards_written"] + total["card_failed"]
-            if limit is not None and worked >= limit:
-                return total
-            done = await deep_passes.work(
-                db,
-                archive,
-                maker,
-                rules=word.rules(cfg),
-                limit=None if limit is None else limit - worked,
-                fires=cfg.schedule.enabled,
-            )
-            console.print(dict(done))
-            total.update(done)
-            left = deadline - asyncio.get_running_loop().time()
-            if not done["awaiting_text"] or left <= 0:
-                return total
-            await asyncio.sleep(min(fulltext.TICK_SECONDS, left))
-
-    async def work(db: DatabaseGate) -> Counter[str]:
-        if maker is not None:
-            return await work_deep(db)
-        async with model_gate(db, cfg) as models:
-            return await fulltext.work_waiting(
-                db,
-                cfg,
-                archive,
-                limit=limit,
-                wait=wait,
-                models=models,
-                report=lambda d: console.print(dict(d)),
-            )
-
-    async def close() -> None:
-        await archive.aclose()
-        if maker is not None:
-            await maker.aclose()
-
-    # Deep passes are admitted as `serve`'s are, so one Deep job runs at a time between them.
-    item, admission = ("fulltext --deep", fulltext_store.DEEP_WORK) if deep else ("fulltext", None)
-    console.print_json(data=dict(_run(work, item=item, admission=admission, close=close)))
+        # Admitted as `serve`'s Deep passes are, so one Deep job runs at a time between them.
+        _submit("deep", scope, admission=commands.ADMISSIONS["deep"])
+        return
+    _submit("fulltext", scope)
 
 
 @app.command()
-def ping(
-    role: Annotated[str, typer.Argument(help=", ".join(configuration.ROLES))],
-    config: ConfigPath = None,
-) -> None:
-    """Send one small request through a role, to check its key, model and price."""
-    from pydantic import BaseModel  # noqa: PLC0415
-
-    from litwatch import llm  # noqa: PLC0415
-
-    class Sum(BaseModel):
-        total: int
-
-    cfg = configuration.load(config)
-    request = llm.Request(
-        system="You answer arithmetic questions with the structured output only.",
-        user="What is 17 + 25?",
-        output=Sum,
-    )
-
-    async def ask() -> llm.Answer[Sum]:
-        async with llm.build(cfg.models) as gate:
-            return await gate.on().ask(role, request)
-
-    answer = asyncio.run(ask())
-    usage = answer.usage
-    console.print(
-        f"{answer.model} -> {answer.value.total}  "
-        f"({usage.prompt_tokens} in, {usage.completion_tokens} out, cost {usage.cost}, "
-        f"served by {usage.provider})"
-    )
+def ping(role: Annotated[str, typer.Argument(help=", ".join(configuration.ROLES))]) -> None:
+    """Send one small request through a role of `serve`'s, to check its key, model and price."""
+    if role not in configuration.ROLES:
+        raise typer.BadParameter(f"no role {role}; the roles: {', '.join(configuration.ROLES)}")
+    _submit("ping", {"role": role})
 
 
 if __name__ == "__main__":

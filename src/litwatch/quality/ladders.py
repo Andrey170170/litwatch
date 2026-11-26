@@ -43,7 +43,8 @@ import time
 import tomllib
 import uuid
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,6 +62,7 @@ from litwatch.fulltext import brief
 from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.llm import CallError, Gateway, ModelGate, Request
 from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
+from litwatch.llm.gateway import Journal
 from litwatch.store import digests as digests_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -453,11 +455,25 @@ def todo(
     return found
 
 
-def gateway(role: str, candidate: Candidate, models: ModelGate) -> Gateway:
+def left(work: list[Todo], done: list[Row]) -> list[Todo]:
+    """The calls of `work` that the calls `done` have not settled (`todo`): a run tried again
+    makes only those."""
+    last = latest(done)
+    return [
+        t
+        for t in work
+        if not _settled(last.get((t.case.key, t.candidate.name)), t.candidate, t.request)
+    ]
+
+
+def gateway(
+    role: str, candidate: Candidate, models: ModelGate, journal: Journal | None = None
+) -> Gateway:
     """A door to the process's Model gate that serves `role` with the candidate alone, once a
-    call (each attempt is a call here, reserved and recorded)."""
+    call (each attempt is a call here, reserved and recorded), its calls in `journal` (an
+    evaluation run's, which nothing reuses) when given."""
     served = Models().model_copy(update={role: candidate.role})
-    return models.on(models=served, retry_delays=())
+    return models.on(journal, models=served, retry_delays=())
 
 
 @dataclass
@@ -469,30 +485,18 @@ class Ran:
     why: str | None = None
 
 
-async def run(
-    work: list[Todo],
-    models: ModelGate,
-    out: Path,
-    ceiling: float,
-    *,
-    concurrency: int = 8,
-    progress: Callable[[Row], None] | None = None,
-) -> Ran:
-    """Make the calls in `work` not already made through `models`, in order, appending each to
-    `out/<role>.jsonl` as it ends, while the budget allows (see the module's docstring).
-    Refuses, before any call, a ceiling or concurrency that can't bound a run, work on a
-    provider without credentials (a call never sent would count against the ceiling), a
-    directory another run holds, and one whose calls the ceiling can't count."""
-    if not (math.isfinite(ceiling) and ceiling > 0) or concurrency < 1:
-        raise ValueError("the ceiling is a positive amount, and the concurrency at least 1")
-    if missing := {t.candidate.role.provider for t in work} - set(models.providers):
-        raise ValueError(f"no credentials for {', '.join(sorted(missing))}")
+@contextmanager
+def held(out: Path) -> Generator[list[Row]]:
+    """`out` held for one run, and the calls recorded in it (see the module's docstring): made
+    if need be, locked against another run, a record a kill cut off mended, and refused when
+    its calls are ones the ceiling can't count."""
     out.mkdir(parents=True, exist_ok=True)
-    with (out / LOCK).open("w") as held:
+    with (out / LOCK).open("w") as lock:
         try:
-            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError(f"another run is using {out}") from None
+        _mend(out)
         # The rows are the evidence: each is written as its call ends, before any record of why
         # a run stopped, and a reservation recorded before `attempt` existed is no bound.
         found = rows(out)
@@ -507,26 +511,30 @@ async def run(
                 f"{OVERRUN} in an earlier run into {out}: correct its price_max and max_output, "
                 "then start a new directory"
             )
-        return await _run(work, models, out, ceiling, concurrency, progress)
+        yield found
 
 
-async def _run(
+async def ask(
     work: list[Todo],
     models: ModelGate,
-    out: Path,
     ceiling: float,
-    concurrency: int,
-    progress: Callable[[Row], None] | None,
+    spent_so_far: float,
+    keep: Callable[[str, str], Awaitable[None]],
+    *,
+    journal: Journal | None = None,
+    concurrency: int = 8,
 ) -> Ran:
-    _mend(out)
-    done = rows(out)
-    last = latest(done)
-    work = [
-        t
-        for t in work
-        if not _settled(last.get((t.case.key, t.candidate.name)), t.candidate, t.request)
-    ]
-    budget = Budget(ceiling, spent(done, reservations(out)))
+    """Make the calls in `work` through `models`, in order, while the budget allows: `ceiling`,
+    of which `spent_so_far` is spent (`spent`). Each call's reservation, then its row, and why
+    the run stopped are kept (`keep(file, line)`, the file in the run's directory) as they come,
+    each before the next step: see the module's docstring. Refuses, before any call, a ceiling
+    or concurrency that can't bound a run, and work on a provider without credentials (a call
+    never sent would count against the ceiling). A call that raises cancels the rest."""
+    if not (math.isfinite(ceiling) and ceiling > 0) or concurrency < 1:
+        raise ValueError("the ceiling is a positive amount, and the concurrency at least 1")
+    if missing := {t.candidate.role.provider for t in work} - set(models.providers):
+        raise ValueError(f"no credentials for {', '.join(sorted(missing))}")
+    budget = Budget(ceiling, spent_so_far)
     gate, room = asyncio.Semaphore(concurrency), asyncio.Condition()
     ran = Ran()
 
@@ -542,22 +550,17 @@ async def _run(
                 return
             attempt = uuid.uuid4().hex
             held = {"attempt": attempt, "case": t.case.key, "candidate": t.candidate.name}
-            with (out / PENDING).open("a", encoding="utf-8") as f:
-                f.write(json.dumps(held | {"reserved": hold}) + "\n")
+            await keep(PENDING, json.dumps(held | {"reserved": hold}))
             started = time.monotonic()
-            row = await _ask(t, models)
+            row = await _ask(t, models, journal)
             row.reserved, row.attempt = hold, attempt
             row.seconds = round(time.monotonic() - started, 2)
             async with room:
                 budget.settle(hold, row.cost)
                 room.notify_all()
-            with (out / f"{t.case.role}.jsonl").open("a", encoding="utf-8") as f:
-                f.write(row.model_dump_json() + "\n")
+            await keep(f"{t.case.role}.jsonl", row.model_dump_json())
             ran.rows.append(row)
-            if progress:
-                progress(row)
 
-    # A call that raises cancels the rest, and all have ended before the lock is let go.
     async with asyncio.TaskGroup() as group:
         for t in work:
             group.create_task(one(t))
@@ -572,12 +575,11 @@ async def _run(
             "first_not_run": t and {"case": t.case.key, "candidate": t.candidate.name},
             "not_run": len(work) - len(ran.rows),
         }
-        with (out / BUDGET).open("a", encoding="utf-8") as f:
-            f.write(json.dumps(stop) + "\n")
+        await keep(BUDGET, json.dumps(stop))
     return ran
 
 
-async def _ask(t: Todo, models: ModelGate) -> Row:
+async def _ask(t: Todo, models: ModelGate, journal: Journal | None) -> Row:
     def row(outcome: str, usage: Any, **rest: Any) -> Row:
         return Row(
             set=t.case.set,
@@ -593,7 +595,7 @@ async def _ask(t: Todo, models: ModelGate) -> Row:
         )
 
     try:
-        answer = await gateway(t.case.role, t.candidate, models).ask(
+        answer = await gateway(t.case.role, t.candidate, models, journal).ask(
             t.case.role, t.request, paper_id=t.case.paper
         )
     except CallError as exc:

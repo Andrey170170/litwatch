@@ -45,6 +45,7 @@ from litwatch.api.monitor import McpCalls
 from litwatch.archive import ArchiveError, PaperText, pages
 from litwatch.core import Grade, Hand, Paper, ReactionValue, Taxonomy, Weight, deepread
 from litwatch.core.digests import DigestPeriod, DigestRole, week_of
+from litwatch.gates.context import Attribution, attributed
 from litwatch.intake.search import id_from_url
 from litwatch.publications.bibtex import Cited
 from litwatch.store import fulltext as fulltext_store
@@ -206,15 +207,18 @@ Answer = str | list[str | Image]
 
 
 def _counted(calls: McpCalls, tool: Callable[..., Awaitable[Answer]]) -> Callable[..., Any]:
-    """`tool`, counted and logged per call; a `NotFoundError` or a `FetchingError` is its answer,
-    a `Partial` one is counted apart. A call cancelled (the client went away) is not counted,
-    nor are arguments refused, by the SDK before calling it or by the tool (`ArgumentError`)."""
+    """`tool`, attributed to its call, counted and logged per call; a `NotFoundError` or a
+    `FetchingError` is its answer, a `Partial` one is counted apart. A call cancelled (the
+    client went away) is not counted, nor are arguments refused, by the SDK before calling it or
+    by the tool (`ArgumentError`)."""
 
     @functools.wraps(tool)
     async def call(*args: Any, **kwargs: Any) -> Answer:
         started = time.monotonic()
         try:
-            answer = await tool(*args, **kwargs)
+            # The SDK runs a tool in its own tasks, outside the HTTP request's.
+            with attributed(Attribution.request(f"mcp {call.__name__}")):  # the tool's, wrapped
+                answer = await tool(*args, **kwargs)
         except NotFoundError as exc:
             _count(calls, tool.__name__, "not_found", started)
             return str(exc)

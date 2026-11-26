@@ -28,9 +28,12 @@ from litwatch.store.text import stored
 # The channel a submission, and an item's settling, notify the Work gates on; the payload is the
 # item's kind.
 CHANNEL = "litwatch_work"
-# The kind of a CLI command's work run in its own process (`gates.work.inline`), which no
-# `serve` serves.
+# The kind of a CLI command's work as the P3 image ran it, in the command's own process: none is
+# made any more, and one left running is ended once its lease lapses (`_retire_commands`).
 COMMAND = "command"
+# The channel a command's results are notified on (`put_result`), its payload the item's id:
+# the command following the item listens on it, the Work gates do not.
+RESULTS = "litwatch_work_results"
 
 _COLUMNS = (
     "id, kind, key, admission, state, not_before, attempts, scope, lease_token, lease_until, "
@@ -298,8 +301,8 @@ async def take_back(
     a unit holds (one fenced on it, or a settling) is left for a later call. Returns those taken
     back.
 
-    A CLI command's item (`gates.work.inline`) whose lease expired ends failed, whatever
-    admission it holds (`_retire_commands`)."""
+    An item of the P3 image's CLI commands whose lease expired ends failed, whatever admission
+    it holds (`_retire_commands`)."""
     params = _serving(kinds, keys)
     await _retire_commands(unit)
     rows = await (
@@ -316,55 +319,21 @@ async def take_back(
     return [_item(r) for r in rows]
 
 
-async def abandon(unit: WriteUnit, key: str, error: str) -> None:
-    """End the CLI command's item `key` failed with `error` unless it has ended: its one
-    attempt is over (cut off, or the command stopped), and nothing runs a command's item again."""
-    await unit.execute(
-        "UPDATE work_items SET state = 'ended', outcome = 'failed', error = %s, "
-        "ended_at = now(), lease_token = NULL, lease_until = NULL, resubmitted = false "
-        "WHERE kind = %s AND key = %s AND state <> 'ended'",
-        (_stored(error), COMMAND, key),
-    )
-    await _notify(unit, COMMAND)
-
-
-async def _retire_commands(unit: WriteUnit, admission: str | None = None) -> None:
-    """End failed the CLI commands' items (of `admission`, or all) whose lease expired: a
-    command has one attempt, its process is gone, and no other runs it."""
+async def _retire_commands(unit: WriteUnit) -> None:
+    """End failed the P3 image's CLI commands' items (kind `command`, which ran in the command's
+    own process) whose lease expired: one left by a command killed as this image took over holds
+    its admission (`deep`, `publications`) until then, and no process runs it again. P7 removes
+    this with the old liveness columns."""
     retired = await unit.execute(
         "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
         "error = 'its process stopped', lease_token = NULL, lease_until = NULL, "
         "resubmitted = false "
         "WHERE id IN (SELECT id FROM work_items c WHERE c.kind = %(command)s "
-        "AND (%(admission)s::text IS NULL OR c.admission = %(admission)s) "
         "AND c.state = 'running' AND c.lease_until < now() FOR UPDATE SKIP LOCKED)",
-        {"command": COMMAND, "admission": admission},
+        {"command": COMMAND},
     )
     if retired.rowcount:
         await _notify(unit, COMMAND)  # their admissions are free
-
-
-async def admit(unit: WriteUnit, key: str, admission: str, lease: timedelta) -> WorkItem | None:
-    """Make and claim a CLI command's item `key` (`gates.work.inline`) at once, once its
-    `admission` is free: inserted running, its one attempt, its lease `lease` from the clock
-    now. None while another item runs for that admission. A command's item there whose lease
-    expired is ended failed first (`_retire_commands`), so a command after one killed takes its
-    admission back with no `serve` running. Two claiming for one admission at once: the later
-    waits for the earlier's commit, then fails on `work_items_admitted`."""
-    await _retire_commands(unit, admission)
-    row = await (
-        await unit.execute(
-            "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until, "
-            "started_at, attempts) "
-            "SELECT %(kind)s, %(key)s, %(admission)s, 'running', gen_random_uuid(), "
-            "c.at + %(lease)s, c.at, 1 FROM (SELECT clock_timestamp() AS at) c "
-            "WHERE NOT EXISTS (SELECT 1 FROM work_items r "
-            "WHERE r.admission = %(admission)s AND r.state = 'running') "
-            f"RETURNING {_COLUMNS}",
-            {"kind": COMMAND, "key": key, "admission": admission, "lease": lease},
-        )
-    ).fetchone()
-    return _item(row) if row else None
 
 
 async def take(
@@ -563,6 +532,60 @@ async def get(unit: ReadUnit, item_id: int) -> WorkItem | None:
     return _item(row) if row else None
 
 
+async def find(unit: ReadUnit, kind: str, key: str) -> WorkItem | None:
+    """The latest item of `kind` and `key`, if any: a command's, found by the key it chose
+    before it knew whether its submission committed."""
+    row = await (
+        await unit.execute(
+            f"SELECT {_COLUMNS} FROM work_items WHERE kind = %s AND key = %s "
+            "ORDER BY id DESC LIMIT 1",
+            (kind, key),
+        )
+    ).fetchone()
+    return _item(row) if row else None
+
+
+async def cancel(unit: WriteUnit, item_id: int, error: str) -> WorkItem | None:
+    """End the item failed with `error` unless it has ended: its owner cancelled it (a CLI
+    command's, at Ctrl-C). A running one loses its lease with it, as when it is taken back: its
+    row is locked `FOR UPDATE` first, so a unit fenced on it ends before, and every one after
+    fails (`LeaseLostError`); its Worker stops at its next fenced write, or its next renewal at
+    the latest. Returns the item as it stands after."""
+    await unit.execute("SELECT 1 FROM work_items WHERE id = %s FOR UPDATE", (item_id,))
+    row = await (
+        await unit.execute(
+            "UPDATE work_items SET state = 'ended', outcome = 'failed', error = %s, "
+            "ended_at = now(), lease_token = NULL, lease_until = NULL, resubmitted = false "
+            f"WHERE id = %s AND state <> 'ended' RETURNING {_COLUMNS}",
+            (_stored(error), item_id),
+        )
+    ).fetchone()
+    if row is not None:
+        await _notify(unit, row["kind"])  # its admission is free
+        return _item(row)
+    return await get(unit, item_id)
+
+
+async def put_result(unit: WriteUnit, item: WorkItem, body: dict[str, Any]) -> None:
+    """Add `body` to the item's results, in the item's own unit (fenced on its lease, so a
+    result of a lost lease never commits), notifying its follower on `RESULTS`."""
+    await unit.execute(
+        "INSERT INTO work_results (work_id, body) VALUES (%s, %s)", (item.id, Jsonb(body))
+    )
+    await unit.execute("SELECT pg_notify(%s, %s)", (RESULTS, str(item.id)))
+
+
+async def results(unit: ReadUnit, item_id: int, after: int = 0) -> list[tuple[int, dict[str, Any]]]:
+    """The item's results after the one of id `after`, in order, with their ids."""
+    rows = await (
+        await unit.execute(
+            "SELECT id, body FROM work_results WHERE work_id = %s AND id > %s ORDER BY id",
+            (item_id, after),
+        )
+    ).fetchall()
+    return [(r["id"], r["body"]) for r in rows]
+
+
 # -- the processes that serve work items -----------------------------------------------------------
 
 
@@ -583,3 +606,17 @@ async def beat(unit: WriteUnit, worker_id: int) -> None:
 
 async def retire(unit: WriteUnit, worker_id: int) -> None:
     await unit.execute("DELETE FROM workers WHERE id = %s", (worker_id,))
+
+
+async def serving(unit: ReadUnit, kind: str, within: timedelta) -> bool:
+    """Whether a process serves `kind`: its `workers` row lists it and beat within `within`
+    (a lease: a row older than that is a process that died without retiring it)."""
+    row = await (
+        await unit.execute(
+            "SELECT EXISTS (SELECT 1 FROM workers WHERE %s = ANY(kinds) "
+            "AND heartbeat_at > now() - %s) AS serving",
+            (kind, within),
+        )
+    ).fetchone()
+    assert row is not None  # a SELECT of a value has its row
+    return row["serving"]

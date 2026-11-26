@@ -590,23 +590,30 @@ async def test_a_remembered_refusal_with_its_provider_gone_waits_without_countin
     assert await verdicts(conn, B.id) == []  # no grade from one lab on a side not asked
 
 
+@pytest.mark.parametrize("kind", ["grading", "eval"])
 async def test_a_remembered_refusal_gives_way_to_an_answer_journalled_since(
-    conn: Session, db, models
+    conn: Session, db, models, kind
 ):
+    """Another run asks judge the identical question, and Sonnet answers it this time: the
+    night reuses that answer (a grade now, `grading`), but never an evaluation's (`eval`), whose
+    answers production does not take."""
     refused_by(models, JUDGES, B.title)
     models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models, LISTED)
-    # An evaluation asks judge the identical question, and Sonnet answers it this time.
     models.said[(JUDGES[1], B.title)] = fit("central")
     tree = await in_read(conn, taxonomy_store.load)
     paper = await in_read(conn, papers_store.get, B.id)
     asked = grading.request(paper, tree.topic(FAITH.slug), tree.get(FAITH.slug).name)
-    async with model_run(db, "eval", models=models.gate(LISTED)) as run:
+    async with model_run(db, kind, models=models.gate(LISTED)) as run:
         await run.gateway.ask("judge", asked, paper_id=B.id)
+    models.said.pop((JUDGES[1], B.title))  # asked again, it refuses as before
     models.fits[("check", B.title)] = fit("adjacent")
-    assert (await night(conn, models, LISTED))["graded"] == 1
-    (v,) = await verdicts(conn, B.id)
-    assert (v["fit"], v["split"], v["one_lab"]) == ("central", True, False)  # reused, not skipped
+    await night(conn, models, LISTED)
+    found = [(v["fit"], v["split"], v["one_lab"]) for v in await verdicts(conn, B.id)]
+    if kind == "grading":
+        assert found == [("central", True, False)]  # reused, not skipped
+    else:
+        assert ("central", True, False) not in found
 
 
 async def test_both_sides_refused_throughout_is_ungraded_at_once(conn: Session, models):

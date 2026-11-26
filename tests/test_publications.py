@@ -12,7 +12,6 @@ import pytest
 from litwatch.api import create_app
 from litwatch.config import Config
 from litwatch.core import Hand, Publication
-from litwatch.gates.work import inline
 from litwatch.jobs import publications as lookups
 from litwatch.jobs import scheduler
 from litwatch.publications import SourceError, dblp
@@ -24,7 +23,7 @@ from tests import settling
 from tests.conftest import AppClient, gate_on, paper
 from tests.scripted import CONFIG
 from tests.sessions import Session, in_read, in_write
-from tests.working import QUIET, items_of, served, until
+from tests.working import QUIET, in_an_item, items_of, served, until
 
 TOKEN = "s3cret"
 NIPS = Publication(
@@ -168,8 +167,9 @@ async def db(conn: Session):
 
 
 async def run(gate, source, limit: int = lookups.LIMIT) -> dict[str, int]:
-    """A publications run as the CLI starts one: a work item admitted as `publications`."""
-    return await inline(
+    """A publications run as `litwatch publications` has `serve` run one: in a work item
+    admitted as `publications`."""
+    return await in_an_item(
         gate, "publications", lambda: lookups.run(gate, source, limit), admission="publications"
     )
 
@@ -204,10 +204,9 @@ async def test_saved_papers_are_looked_up_once_then_monthly_while_unpublished(db
 
 async def test_runs_never_overlap(db: Session, gate, tmp_path, monkeypatch):
     """Each run takes its due papers once: one beside another could die unseen (monitoring).
-    `litwatch publications`, through its real command, holds the `publications` admission; a
-    fire after it started, which it does not serve, waits in `serve` for it to end, then runs a
-    lookup of its own, after it."""
-    from litwatch import cli  # noqa: PLC0415
+    `litwatch publications`, through its real command, has `serve` run it under the
+    `publications` admission; a fire after it started waits for it to end, then runs a lookup
+    of its own, after it."""
     from tests.working import command  # noqa: PLC0415
 
     class Held(Source):
@@ -225,8 +224,6 @@ async def test_runs_never_overlap(db: Session, gate, tmp_path, monkeypatch):
             return await super().find(paper_id, title, doi)
 
     source = Held()
-    monkeypatch.setattr(cli, "Dblp", lambda: source)
-    ran = asyncio.create_task(command(db, tmp_path, monkeypatch, "publications", config=None))
 
     async def going() -> bool:
         return source.going.is_set()
@@ -235,27 +232,31 @@ async def test_runs_never_overlap(db: Session, gate, tmp_path, monkeypatch):
         (row,) = await items_of(db, "publications", fire.key)
         return row["state"] == "ended"
 
-    try:
-        await until(going, "the command's run to start")
-        async with gate.write("a fire") as unit:
-            fired = datetime.now(UTC)
-            fire = await work.submit(unit, "publications", scheduler.fire_key(fired), lasting=True)
-        quiet = CONFIG.model_copy(update={"schedule": QUIET})
-        async with served(gate, quiet, publications=source):
+    quiet = CONFIG.model_copy(update={"schedule": QUIET})
+    async with served(gate, quiet, publications=source):
+        ran = asyncio.create_task(command(db, tmp_path, monkeypatch, "publications", config=None))
+        try:
+            await until(going, "the command's run to start")
+            async with gate.write("a fire") as unit:
+                fired = datetime.now(UTC)
+                fire = await work.submit(
+                    unit, "publications", scheduler.fire_key(fired), lasting=True
+                )
             await asyncio.sleep(0.3)
             assert not await ended()  # it waits for the command's run
             source.hold.set()
             result = await asyncio.wait_for(ran, 20)
             await until(ended, "the fire's item to end")
-    finally:  # a failure above lets the command's thread go, rather than hang
-        source.hold.set()
-        await asyncio.wait({ran}, timeout=20)
+        finally:  # a failure above lets the command's thread go, rather than hang
+            source.hold.set()
+            await asyncio.wait({ran}, timeout=20)
     assert result.exit_code == 0, result.output
     first, second = await (
         await db.execute("SELECT * FROM runs WHERE kind = 'publications' ORDER BY id")
     ).fetchall()
     assert second["started_at"] >= first["finished_at"]
-    (item,) = await (await db.execute("SELECT * FROM work_items WHERE kind = 'command'")).fetchall()
+    query = "SELECT * FROM work_items WHERE kind = 'command:publications'"
+    (item,) = await (await db.execute(query)).fetchall()
     assert (item["admission"], item["outcome"]) == ("publications", "done")
 
 

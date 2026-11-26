@@ -58,7 +58,14 @@ litwatch taxonomy check [PATH]       # validate a taxonomy file (default: the se
 litwatch taxonomy import | export    # the taxonomy in the database, as YAML in and out
 litwatch library sync                # settle effective grades, rarity and the library again
 litwatch publications                # look up published versions
+litwatch work follow 12              # follow item 12 again, after Ctrl-C left it running
 ```
+
+The commands that call models or run the pipeline (`nightly`, `intake`, `digests write`, `fulltext`,
+`publications`, `ping`, `eval replay`, `eval classify`, `eval briefs`, `eval ladders`) write a work
+item to the database and wait while `serve` runs it, under `serve`'s configuration; with no `serve`
+on that database they refuse (`docs/agents/dev-host.md`). Ctrl-C asks whether to cancel the item or
+leave it running.
 
 `LITWATCH_READ_TOKEN`, when set, is a second token that may only search and read papers and fetch
 a paper's PDF (`GET /api/papers`, `/api/papers/{id}` and `/api/papers/{id}/pdf`); the deep service

@@ -435,12 +435,6 @@
         "startColumn": 9,
         "endColumn": 34,
         "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 16,
-        "endColumn": 21,
-        "lineCount": 1
       }
     ],
     "src/litwatch/concurrency.py": [
@@ -3538,12 +3532,6 @@
       }
     ],
     "tests/test_quality_briefs.py": [
-      {
-        "rule": "missing-union-attribute",
-        "startColumn": 42,
-        "endColumn": 64,
-        "lineCount": 1
-      },
       {
         "rule": "no-matching-overload",
         "startColumn": 11,
