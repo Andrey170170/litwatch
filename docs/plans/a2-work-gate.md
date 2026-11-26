@@ -301,50 +301,13 @@ Found while building, owned by the stage named.
   `serve` gives it the integrations it loads, so a process takes, takes back and waits on only its own deliveries.
   An item no process serves keeps its state: one pending is never taken, and one `running` whose lease expired is
   never taken back. One dropped from the configuration leaves it for good, which P7's cleanup could end.
-- **P4: work context.** `gates.context.current_work()` gives the item, with `ceiling` and `deadline` left
-  `None` for P4 to fill.
-- **P4: a batch's outcome is settled in pieces, not once.** T2's review found five edge cases, each rare:
-  a batch can still be created after the deadline, since `staged()` checks the clock before its row writes, not
-  after (`llm/batches.py:292`);
-  the window for finding a batch whose creation may have failed can start late, behind the poller
-  (`llm/batches.py:314`, `:433`);
-  a definite batch rejection (a 400, or a connection that never opened) keeps a null charge, not 0, and so does a
-  per-request error (`llm/batches.py:335`, `store/calls.py:160`, `llm/openai.py:228`);
-  with its waiter cancelled, or in a recovery nobody attaches to, a batch refusal's stop and category are never
-  persisted (`llm/batches.py:490`, `llm/gateway.py:457`);
-  with the original waiter cancelled, a surviving shared waiter cannot save its validated output on
-  `source_call_id` (`llm/gateway.py:496`, `:542`).
-  The reviewer's shape, for the gate: one journal settlement operation that takes usage, a failure or a stop, and an
-  explicit reply flag. The batcher persists that outcome and gives waiters the source row's ID, and the gateway
-  validates and saves the output on that row.
-  The PR's bot review added two more for the same operation: a journal failure partway through `staged()` leaves
-  the rows it already opened without a batch ID or a settlement (`llm/batches.py:298`); and an unknown charge
-  keeps its ceiling reservation only in the run that made it, so a resumed re-run, which starts from the job's
-  known spend (`jobs_store.spent`), no longer counts it (`llm/gateway.py:276`). It belongs with the ceiling
-  across a job's chunks (V4): count an unknown charge at its reservation until it is known.
-- **P4: a recovered batch can be left unsettled.** After `gw.recover()`, `gw.settle()` sometimes returns before
-  the dead run's batch has been read, so none of its calls is journalled. Two tests flake on it, on main as well
-  (about 1 run in 6): `test_an_account_error_a_dead_runs_batch_gave_is_journalled_as_one` (CI on #188) and
-  `test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_again`. It is not a tight margin. V4's
-  recovered-batch claim rests on it; start from `Batcher.watch`, `_start_polling` and `settle`
-  (`llm/batches.py`).
 - **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the
   request one and the check. The `workers` rows are written and beat, but no one reads them yet: P5 adds the
   CLI's reader, which counts a row whose `heartbeat_at` is within a lease as alive.
-- **P4 (from P2): four text gateways.** Text-pass admission is spread over `TEXT_WAVE` slots, and each text item
-  opens its own `fulltext` run and gateway, so four at once are four gateways until P4's one Model gate.
-- **P4, P7 (from P2): failure text.** Errors from outside go through `store.text.stored` before a text column takes
-  them. The outbox's, the passes' and, since P3, the jobs' do; `runs`, `inference_calls`, `digests` and `failures`
-  still cut text alone, for the stages that move them.
-- **P4 (from P3): a job's ceiling across its chunks.** A chunk's run is opened at the job's first chunk in a
-  process and kept across its chunks there (`JobWorker.open`); its ceiling is set once, when the run opens, to the
-  job's ceiling less what all its runs spent (`reruns.ceiling`, `jobs_store.spent`). A chunk on another process, or
-  after a restart, opens a run of its own and starts from that spend. A process reuses the run it kept only while it
-  is still the job's latest (`jobs.run_id`, written as each chunk links its run): once another process's chunk ran
-  the job, the kept run is closed and the next chunk here opens one from the spend, so chunks going back and forth
-  between processes never spend past the ceiling, and a run kept for a job that moved on holds none of `OPEN_MOST`.
-  P4's ceiling from the work context keeps this reading: the item is the chunk, the ceiling is the job's.
-- **P4, P5 (from P3): runs and their items.** A run is alive while the claim it runs under holds a live lease
+- **P7 (from P2): failure text.** Errors from outside go through `store.text.stored` before a text column
+  takes them. The outbox's, the passes', the jobs' and, since P4, `runs`' and `inference_calls`' do; `digests`
+  and `failures` still cut text alone.
+- **P5 (from P3): runs and their items.** A run is alive while the claim it runs under holds a live lease
   (`store.runs.ALIVE`): `runs.lease_token` is the lease token of the item it was opened in, or, for a job's run, of
   its latest chunk's, moved as each chunk links it (`store.work.link_run`, migration 0049). An item taken again gets
   a new token, so it revives no run of the claim before. `runs.work_id` and `work_items.run_id` stay as the
@@ -405,6 +368,20 @@ Found while building, owned by the stage named.
   Work gate; jobs keep their states. Nothing in this image reads them. Migration 0049's columns
   (`runs.lease_token`, `jobs.run_id`) are additive: the image before ignores them. P7 drops them with `SESSION`. The held-across-calls list is down
   to the run lock already (the `schedule` lock went in P3, with `held`'s key argument).
+- **P5 (from P4): the Model gate's own attribution.** The gate's journal units run under
+  `gates.context.bookkeeping("model gate")`: the system attribution, outside any item, so unfenced, and a call's
+  charge stands after its item's lease is lost. Its batchers' tasks serve every item with their deadline and run in
+  an empty context (`contextvars.Context()`); `serve`'s recovery runs under `bookkeeping("model gate: recover")`.
+  A call's ceiling and deadline are `llm.context.spending`, set by the Worker in its item's task, not fields of
+  `Work`, which the gates cannot type. V5's check counts these as the gates' bookkeeping.
+- **P5 (from P4): a CLI command's Model gate.** Each command builds its own (`jobs.context.model_gate`) and closes
+  it as it ends; only `serve` recovers the batches left open (`ModelGate.recover`, once as it starts). A batch a
+  killed command left waits for the next `serve` start, or for a later call asking the same thing, which attaches
+  to it. Submit and wait moves the commands' calls into `serve`'s gate.
+- **P5 (from P4): a call with no deadline attaches with one look.** A key found in a batch that nobody in the
+  process polls is attached through the gate's `LOOKED_AT` batcher (its deadline long past, no drain): one look,
+  the batch cancelled at once if still open, then a normal call. A batch whose calls a live item of another process
+  waits on is neither attached to nor recovered here (`store.calls._LIVE`).
 
 ## Evidence
 

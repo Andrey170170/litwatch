@@ -127,10 +127,11 @@ service's workers, the CLI's other commands and a nightly started outside that w
   batches, up to the provider's 24 hours.
 - **A run started again.** The run lock means no other nightly runs, so a nightly that takes it takes back the leases
   of the automatic full-text passes a dead run held (pipeline.md, section 6), asks their calls again (which attach to
-  the open batches), and waits, before the digests, for the passes queued since the night's first run started. A
-  nightly started outside the window (after the deadline, say) sends no batches but settles those a dead run left
-  open as at a deadline: it cancels them at once, waits for them to end (at most 30 minutes), keeps their answers,
-  and sends the rest as normal calls.
+  the open batches), and waits, before the digests, for the passes queued since the night's first run started. The
+  batches a dead process left open are taken over once, as `serve` starts (the process's one Model gate,
+  architecture.md): inside the night's window they are waited for until its deadline, so a nightly run
+  again that night shares them; outside it they are settled as at a deadline, cancelled at once and waited for
+  (at most 30 minutes), their answers kept, and what is asked again is sent as normal calls.
 - **The owner's actions during a nightly.** While a nightly holds the run lock, the service's full-text worker leaves
   automatic passes to it and works only the passes the owner asked for ("run it now", "Use the PDF"), with its gateway
   without batching; the nightly does not claim those. A pass the owner's word queues meanwhile (a label that makes a
