@@ -434,16 +434,19 @@ async def test_a_command_whose_process_died_is_ended_by_any_take_back(conn: Sess
 async def test_the_cli_nightly_runs_as_a_command_item(conn: Session, tmp_path, monkeypatch):
     """`litwatch nightly` through its real command: its run is the command item's, alive by its
     lease, and the item ends done."""
+    from litwatch import cli  # noqa: PLC0415
     from litwatch.jobs import nightly  # noqa: PLC0415
     from tests.scripted import Scripted  # noqa: PLC0415
 
     real, seen = nightly.run, {}
 
-    async def scripted(db, cfg, **kwargs):  # the real run, on scripted models
+    async def watched(db, cfg, **kwargs):
         seen["work"] = current_work()
-        return await real(db, cfg, gateway=Scripted().gateway, **kwargs)
+        return await real(db, cfg, **kwargs)
 
-    monkeypatch.setattr(nightly, "run", scripted)
+    monkeypatch.setattr(nightly, "run", watched)
+    # The command's own Model gate, over scripted models.
+    monkeypatch.setattr(cli, "model_gate", lambda db, cfg: Scripted().gate(cfg))
     result = await command(conn, tmp_path, monkeypatch, "nightly", "--no-fetch", "--no-digests")
     assert result.exit_code == 0, result.output
     (item,) = await commands(conn)
@@ -458,19 +461,14 @@ async def test_a_cli_nightly_whose_close_fails_says_to_run_it_again(
 ):
     """`litwatch nightly` whose close (with its jobs' release) fails ends its item failed and
     tells the owner to run it again, rather than ending on an unhandled `UnclosedError`."""
-    from litwatch.jobs import nightly  # noqa: PLC0415
+    from litwatch import cli  # noqa: PLC0415
     from litwatch.store import jobs as jobs_store  # noqa: PLC0415
     from tests.scripted import Scripted  # noqa: PLC0415
-
-    real = nightly.run
-
-    async def scripted(db, cfg, **kwargs):
-        return await real(db, cfg, gateway=Scripted().gateway, **kwargs)
 
     async def lost(unit):
         raise psycopg.OperationalError("the server closed the connection unexpectedly")
 
-    monkeypatch.setattr(nightly, "run", scripted)
+    monkeypatch.setattr(cli, "model_gate", lambda db, cfg: Scripted().gate(cfg))
     monkeypatch.setattr(jobs_store, "release", lost)
     result = await command(conn, tmp_path, monkeypatch, "nightly", "--no-fetch", "--no-digests")
     assert result.exit_code != 0 and "run it again" in result.output, result.output

@@ -10,9 +10,9 @@ import pytest
 
 from litwatch import analysis, grading
 from litwatch.archive import ArchiveClient
-from litwatch.config import RoleConfig
+from litwatch.config import Models, RoleConfig
 from litwatch.fulltext import brief
-from litwatch.llm import ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm import ModelGate, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
 from litwatch.quality import ladders
 from litwatch.store import papers as papers_store
@@ -145,7 +145,7 @@ async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want
         "anthropic": ScriptedProvider("anthropic", own),
         "openrouter": ScriptedProvider("openrouter", other),
     }
-    ran = await ladders.run(todo(found, chosen), providers, out, ceiling=5.0)
+    ran = await ladders.run(todo(found, chosen), ModelGate(Models(), providers), out, ceiling=5.0)
     assert len(providers["openrouter"].calls) == 2  # once a case: no retries inside a call
     # Each call goes out as the pipeline's does: no cap of its own.
     assert {q.max_output_tokens for p in providers.values() for _, q in p.calls} == {None}
@@ -165,13 +165,15 @@ async def test_a_run_asks_every_candidate_alone_and_resumes_what_failed_for_want
     down["other"] = False
     left = todo(found, chosen, ladders.rows(out))
     assert [(t.case.paper, t.candidate.name) for t in left] == [(P.id, "other"), (Q.id, "other")]
-    await ladders.run(left, providers, out, ceiling=5.0)
+    await ladders.run(left, ModelGate(Models(), providers), out, ceiling=5.0)
     assert todo(found, chosen, ladders.rows(out)) == []
     last = ladders.latest(ladders.rows(out))
     assert last[(f"judge/{Q.id}/{FAITH.slug}", "other")].output == FIT.model_dump(mode="json")
     # A provider without credentials stops the run before any call.
     with pytest.raises(ValueError, match="no credentials for openrouter"):
-        await ladders.run(left, {"anthropic": providers["anthropic"]}, tmp_path / "none", 5.0)
+        await ladders.run(
+            left, ModelGate(Models(), {"anthropic": providers["anthropic"]}), tmp_path / "none", 5.0
+        )
     assert not (tmp_path / "none").exists()
     # Another request, or another configuration of a candidate, is asked afresh.
     moved = [c.model_copy(update={"subject": INTERP.slug}) for c in chosen]
@@ -198,12 +200,16 @@ async def test_the_ceiling_holds_across_runs_and_records_where_it_stopped(tmp_pa
     assert hold == pytest.approx((tokens + DEFAULT_MAX_TOKENS) * 10 / 1e6)
     other = ladders.reservation(work[1].candidate, request)
     assert other == pytest.approx((tokens + 1000) * 2 / 1e6)
-    ran = await ladders.run(work[:1], providers, out, ceiling=hold * 1.5, concurrency=1)
+    ran = await ladders.run(
+        work[:1], ModelGate(Models(), providers), out, ceiling=hold * 1.5, concurrency=1
+    )
     (first,) = ran.rows
     assert first.outcome == "invalid" and first.cost is None and first.reserved == hold
     # The unknown charge counts at its reservation, in the next run too: the cheaper candidate's
     # call still fits, the next own call does not, and after it nothing starts, however cheap.
-    ran = await ladders.run(work[1:], providers, out, ceiling=hold * 1.5, concurrency=1)
+    ran = await ladders.run(
+        work[1:], ModelGate(Models(), providers), out, ceiling=hold * 1.5, concurrency=1
+    )
     assert [(r.paper, r.candidate) for r in ran.rows] == [(P.id, "other")]
     assert ran.stopped_at is work[2]
     (stop,) = [json.loads(line) for line in (out / ladders.BUDGET).read_text().splitlines()]
@@ -229,23 +235,28 @@ async def test_a_call_cut_off_by_a_kill_still_counts_and_one_run_at_a_time_uses_
     }
     hold = ladders.reservation(work[0].candidate, work[0].request)
     with pytest.raises(ExceptionGroup):
-        await ladders.run(work[:1], providers, out, ceiling=hold * 1.5, concurrency=1)
+        await ladders.run(
+            work[:1], ModelGate(Models(), providers), out, ceiling=hold * 1.5, concurrency=1
+        )
     assert ladders.rows(out) == [] and list(ladders.reservations(out).values()) == [hold]
     assert ladders.spent([], ladders.reservations(out)) == pytest.approx(hold)
     # The next run counts the call that never ended: another own call no longer fits.
     providers["anthropic"] = ScriptedProvider("anthropic", lambda r, q: FIT.model_dump_json())
-    ran = await ladders.run(work[2:3], providers, out, ceiling=hold * 1.5, concurrency=1)
+    ran = await ladders.run(
+        work[2:3], ModelGate(Models(), providers), out, ceiling=hold * 1.5, concurrency=1
+    )
     assert ran.rows == [] and ran.why == "the ceiling"
     # A directory another run holds is refused before any call.
     with (out / ladders.LOCK).open("w") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with pytest.raises(ValueError, match="another run is using"):
-            await ladders.run(work[1:2], providers, out, ceiling=5.0)
+            await ladders.run(work[1:2], ModelGate(Models(), providers), out, ceiling=5.0)
     assert providers["openrouter"].calls == []
     # Neither can a ceiling or a concurrency that bounds nothing.
-    for bad in ({"ceiling": float("nan")}, {"ceiling": 5.0, "concurrency": 0}):
+    for ceiling, concurrency in ((float("nan"), 8), (5.0, 0)):
         with pytest.raises(ValueError, match="positive amount"):
-            await ladders.run(work[1:2], providers, out, **{"ceiling": 5.0, **bad})
+            gate = ModelGate(Models(), providers)
+            await ladders.run(work[1:2], gate, out, ceiling, concurrency=concurrency)
 
 
 async def test_a_call_that_costs_more_than_its_reservation_stops_the_run(tmp_path):
@@ -253,7 +264,7 @@ async def test_a_call_that_costs_more_than_its_reservation_stops_the_run(tmp_pat
     work = [t for t in todo(found, judged(P, Q), []) if t.candidate.name == "other"]
     dear = Reply(FIT.model_dump_json(), Stop.COMPLETE, Usage(model="lab-b/other", cost=1.0))
     providers = {"openrouter": ScriptedProvider("openrouter", lambda role, request: dear)}
-    ran = await ladders.run(work, providers, out, ceiling=5.0, concurrency=1)
+    ran = await ladders.run(work, ModelGate(Models(), providers), out, ceiling=5.0, concurrency=1)
     assert len(ran.rows) == 1 and ran.why == ladders.OVERRUN
     (stop,) = [json.loads(line) for line in (out / ladders.BUDGET).read_text().splitlines()]
     assert stop["why"] == ran.why and stop["first_not_run"]["case"] == work[1].case.key
@@ -261,7 +272,7 @@ async def test_a_call_that_costs_more_than_its_reservation_stops_the_run(tmp_pat
     # evidence even without the record of why the run stopped.
     (out / ladders.BUDGET).unlink()
     with pytest.raises(ValueError, match="start a new directory"):
-        await ladders.run(work[1:], providers, out, ceiling=5.0)
+        await ladders.run(work[1:], ModelGate(Models(), providers), out, ceiling=5.0)
     assert len(providers["openrouter"].calls) == 1
 
 
@@ -273,7 +284,7 @@ async def test_a_directory_with_a_call_of_unknown_cost_and_no_reservation_is_not
         raise ProviderError("APIConnectionError", transient=True, unanswered=True)  # charge unknown
 
     providers = {"openrouter": ScriptedProvider("openrouter", down)}
-    await ladders.run(work[:1], providers, out, ceiling=5.0)
+    await ladders.run(work[:1], ModelGate(Models(), providers), out, ceiling=5.0)
     # As recorded before reservations were bounds: no attempt, and an estimate where the
     # reservation is, which the ceiling would count instead of the call's most cost.
     (row,) = ladders.rows(out)
@@ -281,7 +292,7 @@ async def test_a_directory_with_a_call_of_unknown_cost_and_no_reservation_is_not
     (out / "judge.jsonl").write_text(json.dumps(legacy) + "\n")
     (out / ladders.PENDING).unlink()
     with pytest.raises(ValueError, match="no known cost and no reservation"):
-        await ladders.run(work[1:], providers, out, ceiling=5.0)
+        await ladders.run(work[1:], ModelGate(Models(), providers), out, ceiling=5.0)
     assert len(providers["openrouter"].calls) == 1
 
 
@@ -289,7 +300,10 @@ class AsyncProvider:
     """A provider whose `complete` is the coroutine function given."""
 
     def __init__(self, name: str, complete) -> None:
-        self.name, self.complete = name, complete
+        self.name, self._complete = name, complete
+
+    async def complete(self, role, request, **limits):
+        return await self._complete(role, request)
 
     def routing(self, role):
         return role.routing
@@ -322,7 +336,9 @@ async def test_a_failing_run_ends_every_call_before_letting_go_and_a_cut_off_rec
         "openrouter": AsyncProvider("openrouter", hangs),
     }
     with pytest.raises(ExceptionGroup):
-        await ladders.run(work[:2], providers, out, 5.0, concurrency=2, progress=broken)
+        await ladders.run(
+            work[:2], ModelGate(Models(), providers), out, 5.0, concurrency=2, progress=broken
+        )
     assert len(cancelled) == 1  # the call still out was ended, not left running
     with (out / ladders.LOCK).open("w") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)  # and the directory let go after
@@ -333,7 +349,7 @@ async def test_a_failing_run_ends_every_call_before_letting_go_and_a_cut_off_rec
         f.write('{"set": "qua')
     assert len(ladders.rows(out)) == 1
     providers["openrouter"] = ScriptedProvider("openrouter", lambda r, q: FIT.model_dump_json())
-    await ladders.run(work[1:2], providers, out, 5.0)
+    await ladders.run(work[1:2], ModelGate(Models(), providers), out, 5.0)
     assert [r.candidate for r in ladders.rows(out)] == ["own", "other"]
 
 

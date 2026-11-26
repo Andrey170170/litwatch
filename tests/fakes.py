@@ -12,9 +12,9 @@ import anthropic
 import httpx2
 import openai
 
-from litwatch.config import RoleConfig
+from litwatch.config import Config, RoleConfig
 from litwatch.intake.http import SourceError
-from litwatch.llm import ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm import Gateway, ModelGate, ProviderError, Reply, Request, Stop, Usage
 
 
 def anthropic_message(
@@ -311,6 +311,21 @@ class ScriptedProvider:
             return answer
         usage = Usage(model=role.model, via=self.name, effort=role.effort, cost=0.001)
         return Reply(answer, Stop.COMPLETE, usage)
+
+
+def door(models, providers, journal=None, **options: Any) -> Gateway:
+    """A door to a Model gate of its own over `providers` (`options`: `ModelGate`'s), its
+    calls journalled on `journal`: one run's calls, tested alone."""
+    return ModelGate(models, providers, **options).on(journal)
+
+
+def scripted_gate(
+    respond, config: Config, names: tuple[str, ...] = ("anthropic", "openrouter")
+) -> ModelGate:
+    """A Model gate over providers `names` scripted by `respond` (`ScriptedProvider`), serving
+    `config`'s models, a failed call tried again at once."""
+    providers = {n: ScriptedProvider(n, respond) for n in names}
+    return ModelGate(config.models, providers, retry_delays=(0.0,))
 
 
 class BatchingProvider(ScriptedProvider):

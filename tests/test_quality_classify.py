@@ -7,6 +7,7 @@ import pytest
 
 from litwatch import seeds
 from litwatch.quality import classify
+from tests.fakes import door
 
 LABELS = Path(__file__).parent.parent / "evals" / "labels"
 TREE = seeds.taxonomy()
@@ -52,12 +53,11 @@ def test_a_failed_paper_reaches_a_focus_class_by_keyword_alone():
 
 async def test_a_run_refuses_to_resume_answers_to_another_request(tmp_path):
     from litwatch.config import Models, RoleConfig
-    from litwatch.llm import Gateway
 
     out = tmp_path / "jev.jsonl"
     out.write_text(classify.Result(paper_id="1", request="older").model_dump_json() + "\n")
     role = RoleConfig(provider="openrouter", model="typesafe/jev-1.13", decisions=True)
-    gateway = Gateway(Models(classify=role), {})
+    gateway = door(Models(classify=role), {})
     with pytest.raises(ValueError, match="another request"):
         await classify.run(gateway, TREE, [], out)
     # The keyword check is part of the request: new patterns are another request.

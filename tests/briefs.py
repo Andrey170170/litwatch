@@ -18,13 +18,13 @@ from litwatch.core import (
     Verdict,
     Weight,
 )
-from litwatch.llm import Gateway
+from litwatch.llm import ModelGate
 from litwatch.store import analyses as analyses_store
 from litwatch.store import papers as papers_store
 from litwatch.store import verdicts
 from tests import settling
 from tests.conftest import FAITH, AppClient, gate_on, paper
-from tests.fakes import ScriptedProvider
+from tests.fakes import scripted_gate
 from tests.fakes_http import FakeArchive, mock
 from tests.sessions import Session, in_read, in_write
 
@@ -78,9 +78,8 @@ class Writer:
             raise answer
         return answer if isinstance(answer, str) else json.dumps(answer)
 
-    def gateway(self, config: Config, journal) -> Gateway:
-        providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+    def gate(self, config: Config) -> ModelGate:
+        return scripted_gate(self.respond, config)
 
 
 def archive(fake: FakeArchive) -> ArchiveClient:
@@ -121,7 +120,7 @@ async def passes(conn: Session) -> list[dict]:
 
 async def work(conn: Session, fake: FakeArchive, writer: Writer, **kwargs):
     async with gate_on(conn) as db:
-        return await fulltext.work(db, CONFIG, archive(fake), gateway=writer.gateway, **kwargs)
+        return await fulltext.work(db, CONFIG, archive(fake), models=writer.gate(CONFIG), **kwargs)
 
 
 def ready(fake: FakeArchive, version: int = 1) -> FakeArchive:

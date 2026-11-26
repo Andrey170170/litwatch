@@ -17,6 +17,7 @@ from tests.fakes import (
     SdkClient,
     anthropic_message,
     decisions_reply,
+    door,
     status_error,
 )
 from tests.sessions import Session
@@ -42,7 +43,7 @@ CHAT = {
 
 def gateway(role: RoleConfig, client: SdkClient, record=None) -> Gateway:
     provider = AnthropicProvider if role.provider == "anthropic" else OpenRouterProvider
-    return Gateway(
+    return door(
         Models(classify=role),
         {role.provider: provider(client=client)},
         record,

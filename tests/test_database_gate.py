@@ -27,8 +27,9 @@ from litwatch.gates.database import (
     outside_unit,
 )
 from litwatch.llm import Gateway, Request
+from litwatch.llm.context import spending
 from litwatch.llm.types import DecisionRequest, Predicate
-from tests.fakes import BatchingProvider, ScriptedProvider
+from tests.fakes import BatchingProvider, ScriptedProvider, door
 from tests.sessions import Bridge, BridgeError, Session
 
 LOG = "litwatch.gates.database"
@@ -258,7 +259,7 @@ DECISION = DecisionRequest("Title: a paper", (Predicate("circuits", "Is it about
 
 def model_gateway(provider) -> Gateway:
     models = Models(writer=HAIKU, classify=HAIKU)
-    return Gateway(models, {"anthropic": provider}, retry_delays=(0.0,))
+    return door(models, {"anthropic": provider}, retry_delays=(0.0,))
 
 
 CALLS = {
@@ -283,14 +284,14 @@ async def test_the_model_gateway_called_inside_a_unit_raises_when_strict(db, cal
 async def test_a_batched_model_call_inside_a_unit_raises_when_strict(db):
     provider = BatchingProvider("anthropic", lambda role, request: json.dumps({"yes": True}))
     gw = model_gateway(provider)
-    gw.batch_until(datetime.now(UTC) + timedelta(hours=1))
     try:
-        async with db.read("the reader"):
-            with pytest.raises(NestingError):
-                await gw.ask("writer", REQUEST)
+        with spending(deadline=datetime.now(UTC) + timedelta(hours=1)):
+            async with db.read("the reader"):
+                with pytest.raises(NestingError):
+                    await gw.ask("writer", REQUEST)
         assert provider.batches == {} and provider.calls == []  # nothing waits to be sent
     finally:
-        await gw.close()
+        await gw.gate.close()
 
 
 async def test_the_model_gateway_inside_a_unit_is_logged_when_lenient(db, monkeypatch, caplog):

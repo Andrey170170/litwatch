@@ -19,7 +19,7 @@ from litwatch.intake import atom, oai
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
-from litwatch.llm import Gateway, ProviderError
+from litwatch.llm import ProviderError
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
@@ -27,7 +27,7 @@ from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts as verdicts_store
 from tests import sessions, settling
 from tests.conftest import FAITH, INTERP, TREE, AppClient, started
-from tests.fakes import ScriptedProvider, unavailable
+from tests.fakes import scripted_gate, unavailable
 from tests.fakes_http import FakeArchive, mock
 from tests.scripted import (
     ANALYSIS,
@@ -236,7 +236,7 @@ async def test_a_grader_that_did_not_answer_is_retried_without_counting(
 @asynccontextmanager
 async def api(conn: Session, models, config=CONFIG):
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, TOKEN, config, gateway=models.gateway)
+    app = create_app(dsn, TOKEN, config, models=models.gate(config))
     headers = {"authorization": f"Bearer {TOKEN}"}
     async with AppClient(app, base_url="http://t", headers=headers) as c:
         yield c
@@ -388,7 +388,7 @@ async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(
     paper = await in_read(conn, papers_store.get, B.id)
     due = grading.Due(paper, FAITH, "Chain-of-thought faithfulness")
     async with (
-        model_run(db, CONFIG, "grading", gateway=models.gateway) as run,
+        model_run(db, CONFIG, "grading", models=models.gate(CONFIG)) as run,
         grading.grade([due], run.gateway) as results,
     ):
         (graded,) = [g async for g in results]
@@ -579,12 +579,11 @@ async def test_a_remembered_refusal_with_its_provider_gone_waits_without_countin
     models.fits[("check", B.title)] = ProviderError("APITimeoutError", timeout=True)
     await night(conn, models, LISTED)
 
-    def openrouter_only(config, journal) -> Gateway:  # judge's lab lost its credentials
-        providers = {"openrouter": ScriptedProvider("openrouter", models.respond)}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+    # judge's lab lost its credentials
+    openrouter_only = scripted_gate(models.respond, LISTED, ("openrouter",))
 
     models.fits[("check", B.title)] = fit("related")
-    run_id = await nightly.run(db, LISTED, fetch=False, gateway=openrouter_only)
+    run_id = await nightly.run(db, LISTED, fetch=False, models=openrouter_only)
     assert (await in_read(conn, runs.get, run_id))["counts"]["grading_failed"] == 1
     (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE step = 'grading'")
     assert failure["failed_runs"] == 0 and "no credentials" in failure["last_error"]
@@ -602,7 +601,7 @@ async def test_a_remembered_refusal_gives_way_to_an_answer_journalled_since(
     tree = await in_read(conn, taxonomy_store.load)
     paper = await in_read(conn, papers_store.get, B.id)
     asked = grading.request(paper, tree.topic(FAITH.slug), tree.get(FAITH.slug).name)
-    async with model_run(db, LISTED, "eval", gateway=models.gateway) as run:
+    async with model_run(db, LISTED, "eval", models=models.gate(LISTED)) as run:
         await run.gateway.ask("judge", asked, paper_id=B.id)
     models.fits[("check", B.title)] = fit("adjacent")
     assert (await night(conn, models, LISTED))["graded"] == 1

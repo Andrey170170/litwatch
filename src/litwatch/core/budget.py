@@ -31,6 +31,32 @@ class Usage(BaseModel):
     source_call_id: int | None = None
 
 
+class CallStart(BaseModel):
+    """A call about to be sent, as its journal row opens: its run and work item, its role
+    (`operation`), configured model, effort and provider (`via`), its request key and paper, and
+    what it reserved against a ceiling (USD), if it runs under one."""
+
+    run_id: int
+    work_id: int | None
+    operation: str
+    model: str
+    key: str
+    paper_id: str | None = None
+    via: str | None = None
+    effort: str | None = None
+    reserved: float | None = None
+
+
+class CallOutcome(BaseModel):
+    """How a call's row is settled by what answered it: its charge (`usage`, None when unknown),
+    its failure (`refused: …`, `truncated`, `provider: …`, `account: …`; None for a reply its
+    caller validates), and whether its provider replied (`replied`), which is observed."""
+
+    usage: Usage | None = None
+    error: str | None = None
+    replied: bool = False
+
+
 # A projection from the first hours of a month says little; spend is spread over at least a day.
 MIN_ELAPSED = timedelta(days=1)
 

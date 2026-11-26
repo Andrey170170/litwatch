@@ -21,8 +21,9 @@ from litwatch.core.fulltext import BACKGROUND_PRIORITY, TEXT_REQUEST_PRIORITY
 from litwatch.fulltext import deep as deep_passes
 from litwatch.gates.database import LeaseLostError
 from litwatch.jobs import reruns, worker
-from litwatch.llm import CallError, Gateway, Request, Usage, prices
+from litwatch.llm import CallError, ProviderError, Request, Usage, prices
 from litwatch.llm import ceiling as ceilings
+from litwatch.llm.context import spending
 from litwatch.llm.openai import OpenAIProvider
 from litwatch.llm.openrouter import OpenRouterProvider
 from litwatch.store import fulltext as fulltext_store
@@ -35,7 +36,7 @@ from tests import settling
 from tests.briefs import BODY, analysed
 from tests.conftest import AGENTS, FAITH, TREE, AppClient, paper, started
 from tests.deep_service import DONE, make
-from tests.fakes import SdkClient, openai_response, openrouter_completion
+from tests.fakes import SdkClient, door, openai_response, openrouter_completion
 from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.priced import CONFIG, COST, Priced, charged
 from tests.scripted import LISTS, ROLES, refusal
@@ -146,7 +147,7 @@ async def test_a_rerun_grades_its_scope_under_the_topics_new_version_and_no_othe
     models.scripted.fits[("check", A.title)] = {"reason": "On the subject.", "fit": "central"}
     job = await rerun(conn, FAITH.slug, [A.id], ceiling=1.0)
 
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
 
     found = await rows(conn, "SELECT paper_id, topic_version, fit FROM verdicts ORDER BY id")
     assert [(r["paper_id"], r["topic_version"]) for r in found] == [
@@ -175,7 +176,7 @@ async def test_a_paper_dismissed_before_its_rerun_is_not_counted_as_graded(
 ):
     job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
     await conn.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (B.id,))
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     done = await in_read(conn, jobs_store.get, job)
     assert (done["state"], done["counts"]["graded"]) == ("done", 1)
 
@@ -186,7 +187,7 @@ async def test_a_paper_graded_under_the_current_version_is_not_graded_again(
     """Taken back, or continued, a re-run grades only what has no verdict under the version."""
     await graded_before(conn, A, AGENTS.slug, AGENTS.version)
     job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     assert models.sent("field_grade") == [B.title]
     assert (await in_read(conn, jobs_store.get, job))["state"] == "done"
 
@@ -228,7 +229,7 @@ async def test_a_rerun_is_adopted_only_for_the_version_it_grades_under(conn: Ses
 async def test_a_rerun_whose_topic_was_paused_fails_and_says_why(conn: Session, db, models):
     job = await rerun(conn, AGENTS.slug, [A.id], ceiling=1.0)
     await edited(conn, AGENTS, status=Status.PAUSED)
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     stopped = await in_read(conn, jobs_store.get, job)
     assert stopped["state"] == "failed" and "no longer followed and active" in stopped["error"]
     assert models.sent("field_grade") == []
@@ -239,7 +240,7 @@ async def test_a_grading_that_fails_fails_the_rerun_and_try_again_does_what_is_l
 ):
     models.scripted.fits[("field_grade", B.title)] = {"fit": "nowhere"}
     job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     failed = await in_read(conn, jobs_store.get, job)
     assert (failed["state"], failed["error"]) == ("failed", "grading failed on 1")
     # Recorded on the job, not as the paper's failure: no nightly takes it up.
@@ -247,7 +248,7 @@ async def test_a_grading_that_fails_fails_the_rerun_and_try_again_does_what_is_l
 
     del models.scripted.fits[("field_grade", B.title)]
     await in_write(conn, jobs_store.move, job, ("failed",), "queued")
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     done = await in_read(conn, jobs_store.get, job)
     # Both count as graded, A by the first try: the count is of the verdicts themselves.
     assert (done["state"], done["counts"]["graded"]) == ("done", 2)
@@ -267,10 +268,10 @@ async def test_try_again_starts_a_grading_one_model_further_down_after_an_unusab
     first, second = (m.model for m in LISTS["field_grade"].models[:2])
     models.scripted.said[(first, B.title)] = {"fit": "nowhere"}  # unusable
     job = await rerun(conn, AGENTS.slug, [B.id], ceiling=1.0)
-    await work_out(worker.JobWorker(db, listed, models.gateway))
+    await work_out(worker.JobWorker(db, listed, models.gate(listed)))
     assert (await in_read(conn, jobs_store.get, job))["state"] == "failed"
     await in_write(conn, jobs_store.move, job, ("failed",), "queued")
-    await work_out(worker.JobWorker(db, listed, models.gateway))
+    await work_out(worker.JobWorker(db, listed, models.gate(listed)))
     assert (await in_read(conn, jobs_store.get, job))["state"] == "done"
     assert [m for m, t in models.scripted.models_asked if t == B.title] == [first, second]
 
@@ -286,11 +287,11 @@ async def test_new_text_starts_a_reruns_grading_at_the_top_of_its_list(
     first = LISTS["field_grade"].models[0].model
     models.scripted.said[(first, B.title)] = {"fit": "nowhere"}  # unusable on this text
     job = await rerun(conn, AGENTS.slug, [B.id], ceiling=1.0)
-    await work_out(worker.JobWorker(db, listed, models.gateway))
+    await work_out(worker.JobWorker(db, listed, models.gate(listed)))
     await conn.execute("UPDATE papers SET revision = revision + 1 WHERE id = %s", (B.id,))
     del models.scripted.said[(first, B.title)]
     await in_write(conn, jobs_store.move, job, ("failed",), "queued")
-    await work_out(worker.JobWorker(db, listed, models.gateway))
+    await work_out(worker.JobWorker(db, listed, models.gate(listed)))
     assert (await in_read(conn, jobs_store.get, job))["state"] == "done"
     assert [m for m, t in models.scripted.models_asked if t == B.title] == [first, first]
 
@@ -299,10 +300,10 @@ async def test_try_again_after_both_focus_sides_refused_asks_both_again(conn: Se
     for role in ("judge", "check"):
         models.scripted.said[(ROLES[role].model, A.title)] = refusal(ROLES[role].model)
     job = await rerun(conn, FAITH.slug, [A.id], ceiling=1.0)
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     assert (await in_read(conn, jobs_store.get, job))["error"] == "grading failed on 1"
     await in_write(conn, jobs_store.move, job, ("failed",), "queued")
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     again = await in_read(conn, jobs_store.get, job)
     assert (again["state"], again["error"]) == ("failed", "grading failed on 1")
 
@@ -319,13 +320,13 @@ async def test_a_grading_its_papers_text_change_left_unrecorded_fails_the_rerun(
 
     monkeypatch.setattr(papers_store, "still_current", changed)
     job = await rerun(conn, AGENTS.slug, [A.id, B.id], ceiling=1.0)
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     failed = await in_read(conn, jobs_store.get, job)
     assert (failed["state"], failed["error"]) == ("failed", "grading failed on 1")
 
     monkeypatch.setattr(papers_store, "still_current", current)
     await in_write(conn, jobs_store.move, job, ("failed",), "queued")
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     assert (await in_read(conn, jobs_store.get, job))["state"] == "done"
     assert (
         await in_read(conn, verdicts_store.ungraded_under, AGENTS.slug, AGENTS.version, [B.id])
@@ -349,7 +350,7 @@ async def test_a_topic_edited_before_its_rerun_has_graded_all_fails_it(
             )
         assert (await http.post("/api/jobs/reruns", json=body)).status_code == 201
     (job,) = await rows(conn, "SELECT id FROM jobs")
-    w = worker.JobWorker(db, CONFIG, models.gateway)
+    w = worker.JobWorker(db, CONFIG, models.gate(CONFIG))
     assert await step(w)
     await edited(conn, AGENTS, depth=Depth.AREA)
     await work_out(w)
@@ -377,7 +378,7 @@ async def test_the_ceiling_is_never_passed_and_a_call_that_does_not_fit_is_not_s
     limit = worst + 1.5 * COST
     job = await rerun(conn, AGENTS.slug, [A.id, B.id, C.id], ceiling=limit)
 
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
 
     stopped = await in_read(conn, jobs_store.get, job)
     assert stopped["state"] == "stopped"
@@ -394,11 +395,38 @@ async def test_the_ceiling_is_never_passed_and_a_call_that_does_not_fit_is_not_s
         low = await http.post(f"/api/jobs/{job}/run", json={"ceiling": 0.01})
         assert low.status_code == 409 and "above what it spent" in low.json()["detail"]
         assert (await http.post(f"/api/jobs/{job}/run", json={"ceiling": 1.0})).status_code == 200
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     done = await in_read(conn, jobs_store.get, job)
     assert (done["state"], done["error"], float(done["ceiling"])) == ("done", None, 1.0)
     assert sorted(models.sent("field_grade")) == sorted([A.title, B.title, C.title])
     assert await in_read(conn, jobs_store.spent, job) == pytest.approx(3 * COST)
+
+
+async def test_an_unknown_charge_counts_at_its_reservation_across_the_jobs_runs(
+    conn: Session, db, models
+):
+    """V4: a send whose reply was lost (a 5xx) may have been billed, so it keeps its
+    reservation, in its run and on its row; the job's next run, on another process, starts from
+    what the job spent with it counted, and the call that no longer fits is not sent."""
+    from litwatch import grading  # noqa: PLC0415
+
+    hold = most(grading.request(A, AGENTS, TREE.get(AGENTS.slug).name))
+    lost = ProviderError("InternalServerError", transient=True, unanswered=True)
+    models.scripted.said[(ROLES["field_grade"].model, A.title)] = lost
+    job = await rerun(conn, AGENTS.slug, [A.id], ceiling=1.5 * hold)
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
+    # The retry did not fit beside the kept reservation; the job's spend counts it.
+    assert (await job_of(conn, job))["state"] == "stopped"
+    assert len(models.sent("field_grade")) == 1
+    assert await in_read(conn, jobs_store.spent, job) == pytest.approx(hold)
+
+    del models.scripted.said[(ROLES["field_grade"].model, A.title)]  # it would answer now
+    async with api(conn) as http:  # room for one call, were the unknown charge not counted
+        again = await http.post(f"/api/jobs/{job}/run", json={"ceiling": 1.75 * hold})
+        assert again.status_code == 200
+    await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
+    assert (await job_of(conn, job))["state"] == "stopped"
+    assert len(models.sent("field_grade")) == 1  # not sent: a quarter of a call's room left
 
 
 async def test_a_call_waits_for_room_and_the_ceiling_counts_retries():
@@ -426,20 +454,20 @@ async def test_a_call_waits_for_room_and_the_ceiling_counts_retries():
 async def test_an_openrouter_call_under_a_ceiling_carries_its_max_price_and_a_cap():
     sdk = SdkClient(openrouter_completion(text=json.dumps({"reason": "r", "fit": "related"})))
     role = RoleConfig(provider="openrouter", model="meta/muse")
-    gateway = Gateway(Models(check=role), {"openrouter": OpenRouterProvider(client=sdk)})
+    gateway = door(Models(check=role), {"openrouter": OpenRouterProvider(client=sdk)})
     bound = ceilings.Bound(1e-7, 2e-7, 16000, {"prompt": 0.1, "completion": 0.2})
-    gateway.ceiling = ceilings.Ceiling(1.0, {"openrouter:meta/muse": bound})
+    ceiling = ceilings.Ceiling(1.0, {"openrouter:meta/muse": bound})
     from litwatch.grading import Output  # noqa: PLC0415
 
-    await gateway.ask("check", Request(system="s", user="u", output=Output))
+    with spending(ceiling=ceiling):
+        await gateway.ask("check", Request(system="s", user="u", output=Output))
     (sent,) = sdk.sent
     assert sent["extra_body"]["provider"]["max_price"] == {"prompt": 0.1, "completion": 0.2}
     assert sent["max_completion_tokens"] == 16000  # the role sets no cap: the bound's
-    assert gateway.ceiling.spent == pytest.approx(0.0021)  # the reply's charge
+    assert ceiling.spent == pytest.approx(0.0021)  # the reply's charge
 
     # A route with no bound is not sent under a ceiling.
-    gateway.ceiling = ceilings.Ceiling(1.0, {})
-    with pytest.raises(CallError) as refused:
+    with spending(ceiling=ceilings.Ceiling(1.0, {})), pytest.raises(CallError) as refused:
         await gateway.ask("check", Request(system="s", user="v", output=Output))
     assert refused.value.kind == "unpriced" and len(sdk.sent) == 1
 
@@ -449,8 +477,8 @@ async def test_an_openai_call_under_a_ceiling_reserves_its_listed_bound_and_is_c
 
     sdk = SdkClient(openai_response(json.dumps({"reason": "r", "fit": "related"})))
     role = RoleConfig(provider="openai", model="gpt-6.2-sol")
-    gateway = Gateway(Models(writer=role), {"openai": OpenAIProvider(client=sdk)})
-    gateway.ceiling = ceilings.Ceiling(1.0, {})  # no charged history needed: its prices are listed
+    gateway = door(Models(writer=role), {"openai": OpenAIProvider(client=sdk)})
+    ceiling = ceilings.Ceiling(1.0, {})  # no charged history needed: its prices are listed
     request = Request(system="s", user="u", output=Output)
     tokens_in = ceilings.input_tokens(request)
     # Every input token at the cache-write price ($2.50), the cap's output at $10.
@@ -458,10 +486,11 @@ async def test_an_openai_call_under_a_ceiling_reserves_its_listed_bound_and_is_c
     assert bound == ceilings.Bound(2.5e-6, 1e-5, 16000)
     dated = role.model_copy(update={"model": "gpt-6.2-sol-2026-11-01"})
     assert ceilings.listed_bound(dated, tokens_in) == bound  # a snapshot, priced as its alias
-    answer = await gateway.ask("writer", request)
+    with spending(ceiling=ceiling):
+        answer = await gateway.ask("writer", request)
     (sent,) = sdk.sent
     assert sent["max_output_tokens"] == 16000  # the role sets no cap: the bound's
-    assert gateway.ceiling.spent == pytest.approx(answer.usage.cost)
+    assert ceiling.spent == pytest.approx(answer.usage.cost)
     unlisted = RoleConfig(provider="openai", model="gpt-next")
     assert ceilings.listed_bound(unlisted, tokens_in) is None  # not sent under a ceiling
 
@@ -475,16 +504,17 @@ async def test_a_charge_an_error_reports_counts_against_the_ceiling():
         empty, openrouter_completion(text=json.dumps({"reason": "r", "fit": "related"}))
     )
     role = RoleConfig(provider="openrouter", model="meta/muse")
-    gateway = Gateway(
+    gateway = door(
         Models(check=role), {"openrouter": OpenRouterProvider(client=sdk)}, retry_delays=(0.0,)
     )
     bound = ceilings.Bound(1e-7, 2e-7, 16000, {"prompt": 0.1, "completion": 0.2})
-    gateway.ceiling = ceilings.Ceiling(1.0, {"openrouter:meta/muse": bound})
+    ceiling = ceilings.Ceiling(1.0, {"openrouter:meta/muse": bound})
     from litwatch.grading import Output  # noqa: PLC0415
 
-    await gateway.ask("check", Request(system="s", user="u", output=Output))
+    with spending(ceiling=ceiling):
+        await gateway.ask("check", Request(system="s", user="u", output=Output))
     assert len(sdk.sent) == 2
-    assert gateway.ceiling.spent == pytest.approx(0.25 + 0.0021)
+    assert ceiling.spent == pytest.approx(0.25 + 0.0021)
 
 
 async def test_an_openrouter_route_is_bound_by_what_its_calls_were_charged(conn: Session):
@@ -534,7 +564,7 @@ async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_
     Brief finds it a landmark, and that settle is the job's too."""
     await analysed(conn, "incremental", A.id)
     job = await focus_rerun(conn, models, ceiling=1.0)
-    w = worker.JobWorker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
+    w = worker.JobWorker(db, CONFIG, models.gate(CONFIG), archive=archive(with_text(A)))
     assert await step(w)  # the grading
     queued = await text_pass(conn)
     assert (queued["job_id"], queued["priority"]) == (job, BACKGROUND_PRIORITY)
@@ -542,7 +572,7 @@ async def test_a_reruns_text_pass_runs_in_the_job_under_its_ceiling_and_nowhere_
     assert await rows(conn, "SELECT * FROM fulltext_passes WHERE kind = 'deep'") == []
 
     # The full-text worker, and a nightly's, leave it to the job.
-    assert await fulltext.work(db, CONFIG, archive(with_text(A)), gateway=models.gateway) == {}
+    assert await fulltext.work(db, CONFIG, archive(with_text(A)), models=models.gate(CONFIG)) == {}
     assert (await text_pass(conn))["state"] == "awaiting_text"
 
     await work_out(w)
@@ -566,7 +596,7 @@ async def test_a_reruns_brief_committed_before_its_progress_was_lost_is_counted_
 
     await analysed(conn, "incremental", A.id)
     job = await focus_rerun(conn, models, ceiling=1.0)
-    w = worker.JobWorker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
+    w = worker.JobWorker(db, CONFIG, models.gate(CONFIG), archive=archive(with_text(A)))
     assert await step(w)  # the grading
     real, lost = jobs_store.progress, []
 
@@ -598,7 +628,7 @@ async def test_a_text_pass_that_does_not_fit_stops_the_rerun_and_waits_for_run_n
     # The judge and the check ($0.01) are sent concurrently, in either order: with the check
     # first, `judge + 0.01 - 0.01` can round below the judge's reservation, hence the margin.
     job = await focus_rerun(conn, models, ceiling=judge + 0.01 + 1e-6)
-    w = worker.JobWorker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
+    w = worker.JobWorker(db, CONFIG, models.gate(CONFIG), archive=archive(with_text(A)))
     await work_out(w)
     stopped = await in_read(conn, jobs_store.get, job)
     assert stopped["state"] == "stopped"
@@ -617,7 +647,7 @@ async def test_the_owners_run_it_now_takes_a_stopped_reruns_pass_to_the_regular_
     conn: Session, db, models
 ):
     job = await focus_rerun(conn, models, ceiling=1.0)
-    assert await step(worker.JobWorker(db, CONFIG, models.gateway))  # no archive
+    assert await step(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))  # no archive
     await in_write(conn, jobs_store.finish, job, "stopped", "stopped at the ceiling")
     pass_ = await text_pass(conn)
     await conn.execute(
@@ -625,7 +655,7 @@ async def test_the_owners_run_it_now_takes_a_stopped_reruns_pass_to_the_regular_
     )
     assert await in_write(conn, fulltext_store.run_now, pass_["id"], 3)
     assert (await text_pass(conn))["job_id"] is None
-    assert await fulltext.work(db, CONFIG, archive(with_text(A)), gateway=models.gateway) == {
+    assert await fulltext.work(db, CONFIG, archive(with_text(A)), models=models.gate(CONFIG)) == {
         "briefs_written": 1
     }
 
@@ -639,18 +669,18 @@ async def test_a_pass_the_rerun_queues_for_a_paper_being_processed_is_the_owners
     async with Bridge(conn).write("with tonight's run", locks=["tonight"]) as unit:
         await jobs_store.create(unit, "process", {"papers": [A.id]}, 1, "tonight")
     job = await focus_rerun(conn, models, ceiling=1.0)
-    assert await step(worker.JobWorker(db, CONFIG, models.gateway))  # the grading
+    assert await step(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))  # the grading
     await in_write(conn, jobs_store.finish, job, "stopped", "stopped at the ceiling")
     queued = await text_pass(conn)
     assert (queued["job_id"], queued["priority"]) == (None, TEXT_REQUEST_PRIORITY)
-    assert await fulltext.work(db, CONFIG, archive(with_text(A)), gateway=models.gateway) == {
+    assert await fulltext.work(db, CONFIG, archive(with_text(A)), models=models.gate(CONFIG)) == {
         "briefs_written": 1
     }
 
 
 async def test_no_pass_of_a_rerun_runs_while_a_nightly_is_due_or_running(conn: Session, db, models):
     job = await focus_rerun(conn, models, ceiling=1.0)
-    w = worker.JobWorker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
+    w = worker.JobWorker(db, CONFIG, models.gate(CONFIG), archive=archive(with_text(A)))
     assert await step(w)  # graded; its passes queued
     await nightly_due(conn)
     assert not await step(w)  # a nightly is due: no chunk, so no pass
@@ -679,7 +709,7 @@ async def test_a_fire_no_process_here_runs_holds_no_rerun_pass_back(conn: Sessio
     """`serve` stopped with a fire's item pending, and the schedule is off now: `fulltext
     --deep` (`fires` off) makes the re-run's card, rather than wait for a nightly nothing runs."""
     await focus_rerun(conn, models, ceiling=1.0)
-    w = worker.JobWorker(db, CONFIG, models.gateway, archive=archive(with_text(A)))
+    w = worker.JobWorker(db, CONFIG, models.gate(CONFIG), archive=archive(with_text(A)))
     assert await step(w)  # graded; its passes queued
     await nightly_due(conn)
     service = FakeDeep(DONE)
@@ -694,7 +724,7 @@ async def test_a_nightly_digest_does_not_wait_for_a_reruns_passes(conn: Session,
 
     since = datetime.now(UTC)
     await focus_rerun(conn, models, ceiling=1.0)
-    assert await step(worker.JobWorker(db, CONFIG, models.gateway))
+    assert await step(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     assert (await text_pass(conn))["reason"] == "focus"
     assert await in_read(conn, digests.waiting_passes, since) == 0
 
@@ -703,7 +733,9 @@ async def test_a_rerun_with_no_archive_stops_keeping_its_passes_and_a_discarded_
     conn: Session, db, models
 ):
     job = await focus_rerun(conn, models, ceiling=1.0)
-    await work_out(worker.JobWorker(db, CONFIG, models.gateway))  # no archive: nothing reads text
+    await work_out(
+        worker.JobWorker(db, CONFIG, models.gate(CONFIG))
+    )  # no archive: nothing reads text
     stopped = await in_read(conn, jobs_store.get, job)
     assert (stopped["state"], stopped["error"]) == (
         "stopped",
@@ -722,7 +754,7 @@ async def test_a_rerun_taken_back_before_its_owner_ends_it_keeps_its_passes(
     unit is fenced on its item's lease), and its passes with it: let go, the ordinary queue
     would work them outside its ceiling."""
     job = await focus_rerun(conn, models, ceiling=1.0)
-    w = worker.JobWorker(db, CONFIG, models.gateway)
+    w = worker.JobWorker(db, CONFIG, models.gate(CONFIG))
     assert await step(w)  # graded: its passes queued, the job's
     assert (await text_pass(conn))["job_id"] == job
 
@@ -749,7 +781,11 @@ async def test_serve_runs_a_rerun_as_a_worker(conn: Session, db, models):
     async def stopped() -> bool:
         return (await job_of(conn, job))["state"] == "stopped"
 
-    async with served(db, CONFIG.model_copy(update={"schedule": QUIET}), gateway=models.gateway):
+    async with served(
+        db,
+        CONFIG.model_copy(update={"schedule": QUIET}),
+        models=models.gate(CONFIG.model_copy(update={"schedule": QUIET})),
+    ):
         await until(stopped, "the re-run to stop")
     assert (await text_pass(conn))["job_id"] == job
 
@@ -761,7 +797,7 @@ async def test_a_worker_holding_its_most_runs_open_starts_only_process_jobs(
     past `OPEN_MOST` such runs no other re-run starts, but a Process job does."""
     monkeypatch.setattr(worker, "OPEN_MOST", 1)
     first = await focus_rerun(conn, models, ceiling=1.0)
-    w = worker.JobWorker(db, CONFIG, models.gateway, archive=archive(FakeArchive()))
+    w = worker.JobWorker(db, CONFIG, models.gate(CONFIG), archive=archive(FakeArchive()))
     assert await step(w)  # the grading
     assert first in w.open
     await conn.execute(

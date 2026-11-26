@@ -1,5 +1,17 @@
-"""Roles to providers, with retries, a timeout, the call journal and reuse, and in a batching
-job the providers' batches (`llm.batches`)."""
+"""The Model gate (docs/specs/architecture/a2-work-gate.md, "The Model gate"): one per process,
+built by its owner (`serve`, a CLI command, a test), holding the providers, each provider's limit
+on normal calls, and the batchers, kept per provider and deadline (`llm.batches`), so the calls
+of every item the process runs share them. Roles go to providers with retries, a timeout, reuse
+and the call journal.
+
+A run reaches the gate through its own door (`ModelGate.on`, a `Gateway`), which journals its
+calls on the run and on the work item each serves (`gates.context.current_work`). The ceiling a
+call reserves against and the deadline its batch must be answered by come from the context the
+Worker sets for its item (`llm.context`), not from the call site. A call whose request a batch
+not yet settled holds waits on that batch, a dead run's included, unless a live work item other
+than its own sent it (`store.calls.CallJournal.in_batch`). `recover`, once as the process starts,
+watches the batches no live item will read, so each is accounted for on its calls' own rows,
+their run and item kept."""
 
 from __future__ import annotations
 
@@ -7,17 +19,20 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Protocol, cast
+from datetime import UTC, datetime, timedelta
+from typing import Any, Protocol, Self, cast
 
 from pydantic import BaseModel, ValidationError
 
 from litwatch.config import Models, RoleConfig, secret
+from litwatch.core.budget import CallStart
+from litwatch.gates.context import current_work
 from litwatch.gates.database import outside_unit
-from litwatch.llm import ceiling
-from litwatch.llm.batches import MAX_REQUESTS, Answered, Batcher, BatchProvider
+from litwatch.llm import ceiling as ceilings
+from litwatch.llm import context
+from litwatch.llm.batches import MAX_REQUESTS, Answered, Batcher, BatchJournal, BatchProvider
 from litwatch.llm.decisions import Decision, chat_request, decision_of
 from litwatch.llm.types import (
     DEFAULT_MAX_TOKENS,
@@ -38,6 +53,10 @@ RETRY_DELAYS = (1.0, 5.0, 20.0)
 # Bump when validation changes what counts as an acceptable reply.
 VALIDATION_VERSION = 1
 NORMAL_CALLS = 16  # normal calls in flight per provider, whatever the steps' own limits
+# The deadline of the batcher that only reads the batches calls without one wait on: long past,
+# so it sends none, cancels what it reads at once and gives up on it after one look, as a call
+# outside the nightly never waits on a batch.
+LOOKED_AT = datetime.min.replace(tzinfo=UTC)
 
 
 def _without_nul(value: Any) -> Any:
@@ -81,18 +100,14 @@ class CallError(Exception):
 
 
 class Journal(Protocol):
-    """Where calls are recorded and found again. `store.calls.CallJournal` implements it."""
+    """Where a run's calls are recorded and found again (`store.calls.CallJournal`). Without
+    `observes` (an evaluation's), its calls neither batch nor wait on a batch."""
+
+    run_id: int | None
+    observes: bool
 
     async def cached(self, key: str) -> dict[str, Any] | None: ...
-    async def start(
-        self,
-        role: str,
-        model: str,
-        key: str,
-        paper_id: str | None,
-        via: str | None = None,
-        effort: str | None = None,
-    ) -> int: ...
+    async def start(self, call: CallStart) -> int: ...
     async def record(self, call_id: int, usage: Usage) -> None: ...
     async def accept(self, call_id: int, output: dict[str, Any]) -> None: ...
     async def reject(
@@ -105,17 +120,13 @@ class Journal(Protocol):
         usage: Usage | None = None,
     ) -> None: ...
     async def refused(self, key: str, paper_id: str | None) -> bool: ...
-    async def in_batch(self, key: str) -> dict[str, Any] | None: ...
+    async def in_batch(self, key: str, work_id: int | None) -> dict[str, Any] | None: ...
+
+
+class GateJournal(BatchJournal, Protocol):
+    """The gate's own journal: its batches' calls, and the batches left open."""
+
     async def open_batches(self) -> list[dict[str, Any]]: ...
-    async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None: ...
-    async def answered(
-        self, batch_id: str, key: str, usage: Usage | None, error: str | None = None
-    ) -> None: ...
-    async def gone(self, batch_id: str, error: str = ...) -> None: ...
-    async def adopted(self, reference: str, batch_id: str) -> None: ...
-    async def ended(self, batch_id: str, keys: list[str]) -> None: ...
-    async def unsent(self, call_ids: list[int], error: str) -> None: ...
-    async def account_error(self, provider: str, error: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -136,17 +147,18 @@ class DecisionProvider(Provider, Protocol):
     ) -> Reply: ...
 
 
-class Gateway:
-    """`ask(role, request)` and `decide(role, request)` are the whole interface the pipeline
-    uses. An invalid reply's error carries what the validator said; in `debug` mode a reply
-    that could not be used is also journalled with the call. After `batch_until`, the calls on a
-    provider that batches go in its batches; the caller does not know."""
+class ModelGate:
+    """The process's one Model gate over `providers`, serving `models` unless a door names its
+    own (`on`). `journal` is the gate's own (`store.calls.CallJournal` of no run): its batches'
+    calls are opened and settled on it, whichever run they are of. Closing it stops its
+    batchers: calls still waiting on a batch go as normal calls, and a batch still open is left
+    on its rows for the next process to account for."""
 
     def __init__(
         self,
         models: Models,
-        providers: dict[str, Provider],
-        journal: Journal | None = None,
+        providers: Mapping[str, Provider],
+        journal: GateJournal | None = None,
         *,
         retry_delays: tuple[float, ...] = RETRY_DELAYS,
         debug: bool = False,
@@ -156,39 +168,122 @@ class Gateway:
         self.models, self.providers, self.journal = models, providers, journal
         self.retry_delays, self.debug = retry_delays, debug
         self.batch_options = batch_options or {}  # the `Batcher`'s timings and clock (tests)
-        self.batchers: dict[str, Batcher] = {}
-        # A job's ceiling (`llm.ceiling`): set, every attempt reserves its most against it.
-        self.ceiling: ceiling.Ceiling | None = None
-        self._gates = {name: asyncio.Semaphore(normal_calls) for name in providers}
+        self.now: Callable[[], datetime] = self.batch_options.get("now", lambda: datetime.now(UTC))
+        self.limits = {name: asyncio.Semaphore(normal_calls) for name in providers}
+        self._batchers: dict[tuple[str, datetime], Batcher] = {}
 
-    def batch_until(self, deadline: datetime, *, drain: timedelta | None = None) -> None:
-        """Send each call on a provider that batches in its batches until `deadline` (aware),
-        and as a normal call after it; batches open then are waited on for `drain` (by default
-        the batcher's)."""
-        options: dict[str, Any] = self.batch_options | ({} if drain is None else {"drain": drain})
-        self.batchers = {
-            name: Batcher(provider, self.journal, deadline, **options)
-            for name, provider in self.providers.items()
-            if isinstance(provider, BatchProvider)
-        }
+    async def __aenter__(self) -> Self:
+        return self
 
-    async def recover(self) -> None:
-        """Watch the batches a dead run left open, so each is accounted for in full whether or
-        not its calls are asked again (past the deadline, cancelled first)."""
-        if not self.journal or not self.batchers:
-            return
+    async def __aexit__(self, *_: object) -> None:
+        await self.close()
+
+    def on(
+        self,
+        journal: Journal | None = None,
+        *,
+        models: Models | None = None,
+        retry_delays: tuple[float, ...] | None = None,
+        debug: bool | None = None,
+    ) -> Gateway:
+        """A door to the gate for one run's calls, journalled on `journal` (none: not at all),
+        serving `models` (by default the gate's), with `retry_delays` and `debug` its own when
+        given (an evaluation's)."""
+        return Gateway(
+            self,
+            journal,
+            models or self.models,
+            self.retry_delays if retry_delays is None else retry_delays,
+            self.debug if debug is None else debug,
+        )
+
+    def batcher(self, provider: str, deadline: datetime) -> Batcher | None:
+        """The batcher of `provider`'s calls with `deadline` (`LOOKED_AT`: of the calls without
+        one), made at its first call; None for a provider that does not batch. One whose drain
+        is over and that holds nothing is let go as another is made."""
+        found = self.providers.get(provider)
+        if not isinstance(found, BatchProvider):
+            return None
+        if (provider, deadline) not in self._batchers:
+            self._batchers = {k: b for k, b in self._batchers.items() if not b.idle()}
+            options: dict[str, Any] = self.batch_options | (
+                {"drain": timedelta(0)} if deadline == LOOKED_AT else {}
+            )
+            self._batchers[(provider, deadline)] = Batcher(found, self.journal, deadline, **options)
+        return self._batchers[(provider, deadline)]
+
+    def owner(self, batch_id: str) -> Batcher | None:
+        """The batcher that polls batch `batch_id`, if any: each batch has one in a process."""
+        return next((b for b in self._batchers.values() if b.holds(batch_id)), None)
+
+    async def recover(self, deadline: datetime) -> int:
+        """Watch the batches left open that no live work item will read (a dead process's, or
+        one given up on), each until it ends or `deadline`'s drain is over (cancelled at the
+        deadline), so each is accounted for in full, on its calls' rows, whether or not its
+        calls are asked again: once, as the process starts. Returns how many it watches."""
+        if self.journal is None:
+            return 0
+        watched = 0
         for row in await self.journal.open_batches():
-            batcher = self.batchers.get(row["provider"])  # the batch's, whatever roles use now
-            if batcher is not None:
+            # The batch's provider, whatever roles use now; one without credentials now is left.
+            batcher = self.batcher(row["provider"], deadline)
+            if batcher is not None and self.owner(row["batch_id"]) is None:
                 batcher.watch(row["batch_id"])
+                watched += 1
+        return watched
+
+    async def settle(self, deadline: datetime) -> None:
+        """Wait until the batches of calls with `deadline` are read or given up on."""
+        for (_, until), batcher in list(self._batchers.items()):
+            if until == deadline:
+                await batcher.settle()
+
+    async def close(self) -> None:
+        """Stop batching; calls still waiting on a batch go as normal calls."""
+        for batcher in list(self._batchers.values()):
+            await batcher.close()
+        self._batchers = {}
+
+
+class Gateway:
+    """One run's door to the Model gate. `ask(role, request)` and `decide(role, request)` are
+    the whole interface the pipeline uses. An invalid reply's error carries what the validator
+    said; in `debug` mode a reply that could not be used is also journalled with the call. While
+    the work context has a deadline ahead (`llm.context`), the calls on a provider that batches
+    go in the gate's batches for that deadline; the caller does not know."""
+
+    def __init__(
+        self,
+        gate: ModelGate,
+        journal: Journal | None,
+        models: Models,
+        retry_delays: tuple[float, ...],
+        debug: bool,
+    ) -> None:
+        self.gate, self.journal, self.models = gate, journal, models
+        self.retry_delays, self.debug = retry_delays, debug
+
+    @property
+    def providers(self) -> Mapping[str, Provider]:
+        return self.gate.providers
+
+    @property
+    def ceiling(self) -> ceilings.Ceiling | None:
+        """The ceiling this task's calls reserve against (`llm.context`), if any."""
+        return context.current().ceiling
+
+    def batching_until(self) -> datetime | None:
+        """The deadline this task's calls batch until, while it is ahead and some provider
+        batches, else None. An evaluation's calls never batch."""
+        deadline = context.current().deadline
+        if deadline is None or self.journal is None or not self.journal.observes:
+            return None
+        batches = any(isinstance(p, BatchProvider) for p in self.providers.values())
+        return deadline if batches and self.gate.now() < deadline else None
 
     @property
     def batching(self) -> bool:
-        return any(b.open() for b in self.batchers.values())
-
-    def batching_until(self) -> datetime | None:
-        """The deadline while batching, else None."""
-        return next((b.deadline for b in self.batchers.values() if b.open()), None)
+        return self.batching_until() is not None
 
     def width(self, limit: int) -> int:
         """A step's calls in flight: all of them while batching, so a step is one batch (normal
@@ -196,14 +291,10 @@ class Gateway:
         return MAX_REQUESTS if self.batching else limit
 
     async def settle(self) -> None:
-        """Wait until the open batches, a dead run's included, are read or given up on."""
-        for batcher in self.batchers.values():
-            await batcher.settle()
-
-    async def close(self) -> None:
-        """Stop batching; calls still waiting on a batch go as normal calls."""
-        for batcher in self.batchers.values():
-            await batcher.close()
+        """Wait until the batches of this task's deadline, a dead run's it took over included,
+        are read or given up on."""
+        if (deadline := context.current().deadline) is not None:
+            await self.gate.settle(deadline)
 
     def _provider(self, role: RoleConfig) -> Provider:
         if role.provider not in self.providers:
@@ -245,22 +336,24 @@ class Gateway:
         role: RoleConfig,
         request: Request,
         send: Callable[..., Awaitable[Reply]] | None = None,
-        opened: Callable[[], Awaitable[None]] | None = None,
+        opened: Callable[[float | None], Awaitable[None]] | None = None,
         failed: Callable[[ProviderError, Usage | None], Awaitable[None]] | None = None,
     ) -> Reply:
         """`complete`, for a caller that checked the nesting itself (`ask`), which keeps a
         journal row per send: `opened` before each attempt is sent, once the ceiling admits
-        it, and `failed` told of each attempt that failed and is tried again, with what it was
-        charged (`_failure_usage`), as the last one's `CallError` carries it."""
+        it, with what it reserved, and `failed` told of each attempt that failed and is tried
+        again, with what it was charged (`_failure_usage`), as the last one's `CallError`
+        carries it."""
         provider = self._provider(role)
-        role, limits = self._limits(role, request)
+        bound = self.ceiling  # the work context's, for every attempt of this call
+        role, limits = self._limits(bound, role, request)
         for delay in (*self.retry_delays, None):
-            reserved = await self._reserve(role, request, limits)
+            reserved = await self._reserve(bound, role, request)
             cost: float | None = None  # what the attempt was charged, when known
             try:
-                async with self._gates[role.provider]:
+                async with self.gate.limits[role.provider]:
                     if opened is not None:
-                        await opened()
+                        await opened(reserved)
                     async with asyncio.timeout(role.timeout_seconds):
                         if send:
                             reply = await send(provider, role, **limits)
@@ -284,36 +377,42 @@ class Gateway:
                     await failed(exc, usage)
                 log.warning("role=%s %s, trying again in %ss", role_name, exc, delay)
             finally:
-                if reserved is not None and self.ceiling is not None:
-                    await self.ceiling.settle(reserved, cost)
+                if reserved is not None and bound is not None:
+                    await bound.settle(reserved, cost)
             await asyncio.sleep(delay)
         raise AssertionError("unreachable")
 
-    def _limits(self, role: RoleConfig, request: Request) -> tuple[RoleConfig, dict[str, Any]]:
+    @staticmethod
+    def _limits(
+        under: ceilings.Ceiling | None, role: RoleConfig, request: Request
+    ) -> tuple[RoleConfig, dict[str, Any]]:
         """Under a ceiling, the role with the output cap its route's bound sets when it has none,
         and the prices sent with the call (`max_price`); else as it is."""
-        if self.ceiling is None:
+        if under is None:
             return role, {}
-        bound = self.ceiling.bound(role, ceiling.input_tokens(request))
+        bound = under.bound(role, ceilings.input_tokens(request))
         if bound is None:
             return role, {}
         if bound.max_output and not (request.max_output_tokens or role.max_output_tokens):
             role = role.model_copy(update={"max_output_tokens": bound.max_output})
         return role, {"max_price": bound.max_price} if bound.max_price else {}
 
-    async def _reserve(self, role: RoleConfig, request: Request, limits: dict) -> float | None:
+    @staticmethod
+    async def _reserve(
+        under: ceilings.Ceiling | None, role: RoleConfig, request: Request
+    ) -> float | None:
         """Reserve the attempt's most against the ceiling, if there is one; raises `CallError`
         `unpriced` for a route without a price bound, `ceiling` when it does not fit."""
-        if self.ceiling is None:
+        if under is None:
             return None
-        tokens_in = ceiling.input_tokens(request)
-        bound = self.ceiling.bound(role, tokens_in)
+        tokens_in = ceilings.input_tokens(request)
+        bound = under.bound(role, tokens_in)
         if bound is None:
             raise CallError("unpriced", f"{role.label} has no price bound to run under a ceiling")
-        most = self.ceiling.most(bound, tokens_in, _max_output(role, request))
+        most = under.most(bound, tokens_in, _max_output(role, request))
         try:
-            await self.ceiling.reserve(most)
-        except ceiling.CeilingReachedError as exc:
+            await under.reserve(most)
+        except ceilings.CeilingReachedError as exc:
             raise CallError("ceiling", f"${most:.4f} does not fit in what is left") from exc
         return most
 
@@ -423,14 +522,15 @@ class Gateway:
         """One model of the role's list, asked and journalled under the role's name."""
         key = self.request_key(role, request)
         journal = self.journal
+        # A batch's reply comes on its row, settled by its batcher but for the output.
         call_id, reply = await self._batched(role_name, role, key, request, paper_id, send)
-        batched = isinstance(reply, Reply)  # its row settled by the batcher, if it has one
+        batched = isinstance(reply, Reply)
         charged: Usage | None = None  # what a send that failed was charged, settled with it
 
-        async def opened() -> None:
-            """Each normal send on a row of its own."""
+        async def opened(reserved: float | None) -> None:
+            """Each normal send on a row of its own, with what it reserved."""
             nonlocal call_id
-            call_id = await self._start(role_name, role, key, paper_id)
+            call_id = await self._start(role_name, role, key, paper_id, reserved)
 
         async def failed(exc: ProviderError, usage: Usage | None) -> None:
             """A send that failed and is tried again, settled with its charge where known, and
@@ -449,7 +549,7 @@ class Gateway:
                 except CallError as exc:
                     charged = exc.usage  # the last attempt's charge; a failure, not a reply
                     raise
-            if call_id is not None:  # else shared: the usage names the row it was answered on
+            if call_id is not None:
                 reply.usage.source_call_id = call_id
             if journal and call_id is not None and not batched:
                 await journal.record(call_id, reply.usage)
@@ -479,8 +579,10 @@ class Gateway:
             exc.model = role.label
             # No cost is invented for transport failures. A refusal keeps its category, so
             # `error LIKE 'refused%'` finds them all. A call never sent (the ceiling did not
-            # admit it) or one its batch answered with an error has no row of its own to settle.
-            if journal and call_id is not None:
+            # admit it) or one its batch answered with an error has no row of its own to settle,
+            # and a batch's refusal or truncation is settled on its row by its batcher.
+            settled = batched and exc.kind in ("refused", "truncated")
+            if journal and call_id is not None and not settled:
                 answered = self.debug and isinstance(reply, Reply)
                 kept = _without_nul(reply.raw or reply.text) if answered else None
                 # A normal call's account error is observed with it; a batch's by its batcher.
@@ -497,15 +599,41 @@ class Gateway:
             await journal.accept(call_id, value.model_dump(mode="json"))
         return Answer(value, reply.usage, role.label)
 
+    def _call(
+        self,
+        role_name: str,
+        role: RoleConfig,
+        key: str,
+        paper_id: str | None,
+        reserved: float | None = None,
+    ) -> CallStart:
+        """A send's journal row, with its run and work item, configured model and effort."""
+        assert self.journal is not None and self.journal.run_id is not None, "a run's journal"
+        work = current_work()
+        return CallStart(
+            run_id=self.journal.run_id,
+            work_id=work.item.id if work else None,
+            operation=role_name,
+            model=role.model,
+            key=key,
+            paper_id=paper_id,
+            via=role.provider,
+            effort=role.effort,
+            reserved=reserved,
+        )
+
     async def _start(
-        self, role_name: str, role: RoleConfig, key: str, paper_id: str | None
+        self,
+        role_name: str,
+        role: RoleConfig,
+        key: str,
+        paper_id: str | None,
+        reserved: float | None,
     ) -> int | None:
-        """A send's journal row, with its configured model and effort, before any reply."""
+        """A send's journal row, before any reply."""
         if not self.journal:
             return None
-        return await self.journal.start(
-            role_name, role.model, key, paper_id, role.provider, role.effort
-        )
+        return await self.journal.start(self._call(role_name, role, key, paper_id, reserved))
 
     async def _batched(
         self,
@@ -516,32 +644,33 @@ class Gateway:
         paper_id: str | None,
         send: Callable[..., Awaitable[Reply]] | None,
     ) -> tuple[int | None, Answered]:
-        """A batch's reply and the journal row it was answered on, its charge settled by the
-        batcher (None for a reply shared with an identical call, journalled on that call's row
-        alone, as a reused answer is), or the account error a batch gave the call; (None, None)
-        to send it as a normal call, on rows of its own. A key a dead run left in an open batch
-        waits on that batch, on its row, past the deadline too (the batch is cancelled then). A
-        fallback is batched as the role's model is."""
-        batcher = self.batchers.get(role.provider) if send is None else None
-        if batcher is None:
+        """A batch's reply and the journal row it was answered on (its batcher settled the
+        row's charge, and its refusal or truncation), or the account error a batch gave the
+        call; (None, None) to send it as a normal call, on rows of its own. A key in a batch not
+        yet settled that no other live item sent waits on that batch, on its row, through the
+        gate's batcher that polls it, else this deadline's (`LOOKED_AT` without one: one look,
+        and cancelled). Under a deadline ahead the call goes in that deadline's batches. A
+        fallback is batched as the role's model is; an evaluation's call never is."""
+        journal = self.journal
+        if send is not None or journal is None or not journal.observes:
             return None, None
-        call_id: int | None = None
-        if self.journal and (row := await self.journal.in_batch(key)):
-            call_id = row["id"]
+        deadline = self.batching_until()
+        work = current_work()
+        if row := await journal.in_batch(key, work.item.id if work else None):
+            batcher = self.gate.owner(row["batch_id"]) or self.gate.batcher(
+                role.provider, deadline or LOOKED_AT
+            )
+            if batcher is None:
+                return None, None
             reply = await batcher.attach(row["batch_id"], key, row["id"])
-        elif batcher.open():
-
-            async def opened() -> int | None:
-                nonlocal call_id
-                call_id = await self._start(role_name, role, key, paper_id)
-                return call_id
-
-            reply = await batcher.ask(key, role, request, opened)
+        elif deadline and (batcher := self.gate.batcher(role.provider, deadline)):
+            start = self._call(role_name, role, key, paper_id)
+            reply = await batcher.ask(key, role, request, start)
         else:
             return None, None
         if not isinstance(reply, Reply):
             return None, reply
-        return None if reply.usage.reused else call_id, _of_role(reply, role)
+        return reply.usage.source_call_id, _of_role(reply, role)
 
 
 def _max_output(role: RoleConfig, request: Request) -> int:
@@ -575,8 +704,8 @@ KEYS = {
 }
 
 
-def build(models: Models, journal: Journal | None = None, *, debug: bool = False) -> Gateway:
-    """A gateway over the providers that have credentials in the environment."""
+def build(models: Models, journal: GateJournal | None = None, *, debug: bool = False) -> ModelGate:
+    """A Model gate over the providers that have credentials in the environment."""
     from litwatch.llm.anthropic import AnthropicProvider  # noqa: PLC0415
     from litwatch.llm.openai import OpenAIProvider  # noqa: PLC0415
     from litwatch.llm.openrouter import OpenRouterProvider  # noqa: PLC0415
@@ -589,4 +718,4 @@ def build(models: Models, journal: Journal | None = None, *, debug: bool = False
     providers: dict[str, Provider] = {
         name: kinds[name](key) for name, variable in KEYS.items() if (key := secret(variable))
     }
-    return Gateway(models, providers, journal, debug=debug)
+    return ModelGate(models, providers, journal, debug=debug)

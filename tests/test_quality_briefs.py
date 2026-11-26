@@ -8,7 +8,7 @@ import pytest
 from litwatch import seeds
 from litwatch.archive import ArchiveClient
 from litwatch.config import Models, RoleConfig
-from litwatch.llm import Gateway, Reply, Stop, Usage
+from litwatch.llm import ModelGate, Reply, Stop, Usage
 from litwatch.quality import briefs
 from tests.conftest import paper
 from tests.fakes import ProviderError, ScriptedProvider
@@ -36,12 +36,12 @@ GIST_IN_VOICE = (
 )
 
 
-def gateway(asked: list[str]) -> Gateway:
+def gateway(asked: list[str]) -> ModelGate:
     def respond(role, request):
         asked.append(request.user)
         return json.dumps(ANSWER)
 
-    return Gateway(Models(brief=ROLE), {"anthropic": ScriptedProvider("anthropic", respond)})
+    return ModelGate(Models(brief=ROLE), {"anthropic": ScriptedProvider("anthropic", respond)})
 
 
 def entries() -> list[briefs.Entry]:
@@ -81,7 +81,7 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     assert sum(briefs.spent(out)) == pytest.approx(0.203 + third[0].cost)
     assert briefs.results(out)[P.id].output is not None
 
-    other = Gateway(Models(brief=ROLE.model_copy(update={"model": "another"})), {})
+    other = ModelGate(Models(brief=ROLE.model_copy(update={"model": "another"})), {})
     with pytest.raises(ValueError, match="another request"):
         await briefs.run(other, seeds.taxonomy(), pairs, archive, out)
 
@@ -106,12 +106,12 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
     }
     out = tmp_path / "brief.jsonl"
     pair = [(P, entries()[0])]
-    (result,) = await briefs.run(Gateway(models, providers), seeds.taxonomy(), pair, archive, out)
+    (result,) = await briefs.run(ModelGate(models, providers), seeds.taxonomy(), pair, archive, out)
     assert result.output is not None and result.cost == pytest.approx(0.07)
     # A charge the provider did not report leaves the paper's cost unknown, not a subtotal.
     charge[0] = None
     (unknown,) = await briefs.run(
-        Gateway(models, providers), seeds.taxonomy(), pair, archive, tmp_path / "unknown.jsonl"
+        ModelGate(models, providers), seeds.taxonomy(), pair, archive, tmp_path / "unknown.jsonl"
     )
     assert unknown.output is not None and unknown.cost is None
     # So does a fallback that timed out, after a refusal that was charged.
@@ -120,14 +120,14 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
         raise ProviderError("APIConnectionError", transient=True, unanswered=True)  # charge unknown
 
     providers["openrouter"] = ScriptedProvider("openrouter", down)
-    gw = Gateway(models, providers, retry_delays=())
+    gw = ModelGate(models, providers, retry_delays=())
     (failed,) = await briefs.run(gw, seeds.taxonomy(), pair, archive, tmp_path / "down.jsonl")
     assert failed.error and failed.cost is None
     # Another fallback is another configuration: the run is not resumed into the same file.
     another = OTHER.model_copy(update={"model": "lab/another"})
     other = Models(brief=models.brief.model_copy(update={"fallbacks": (another,)}))
     with pytest.raises(ValueError, match="another request"):
-        await briefs.run(Gateway(other, providers), seeds.taxonomy(), pair, archive, out)
+        await briefs.run(ModelGate(other, providers), seeds.taxonomy(), pair, archive, out)
 
 
 def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():

@@ -27,7 +27,7 @@ from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
-from litwatch.jobs.context import UnclosedError
+from litwatch.jobs.context import UnclosedError, model_gate
 from litwatch.publications import Dblp
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import papers as papers_store
@@ -230,9 +230,11 @@ def nightly(
 
     async def work(db: DatabaseGate) -> tuple[int, Any]:
         try:
-            run_id = await nightly_job.run(
-                db, cfg, fetch=fetch, days=days, limit=limit, with_digests=digests
-            )
+            async with model_gate(db, cfg) as models:
+                run_id = await nightly_job.run(
+                    db, cfg, models=models, fetch=fetch, days=days, limit=limit,
+                    with_digests=digests,
+                )  # fmt: skip
         except UnclosedError as exc:  # its jobs wait for a nightly that closes: this one again
             raise CommandCutOffError(str(exc)) from exc
         return run_id, await _run_record(db, run_id)
@@ -260,7 +262,8 @@ def digests_write(since: Since, until: Until, config: ConfigPath = None) -> None
     cfg = configuration.load(config)
 
     async def work(db: DatabaseGate) -> tuple[int, Any]:
-        run_id = await digests_job.window(db, cfg, since.date(), until.date())
+        async with model_gate(db, cfg) as models:
+            run_id = await digests_job.window(db, cfg, since.date(), until.date(), models=models)
         return run_id, await _run_record(db, run_id)
 
     run_id, run = _run(work, item="digests write")
@@ -462,7 +465,7 @@ def eval_classify(
     import tomllib  # noqa: PLC0415
 
     from litwatch.config import Models, RoleConfig  # noqa: PLC0415
-    from litwatch.llm.gateway import build  # noqa: PLC0415
+    from litwatch.llm import build  # noqa: PLC0415
     from litwatch.quality import classify  # noqa: PLC0415
 
     roles = tomllib.loads(candidates.read_text())
@@ -471,23 +474,27 @@ def eval_classify(
     found = _run(lambda db: _papers(db, ids), migrate=False)
     if missing := len(ids) - len(found):
         console.print(f"[yellow]{missing} papers are not in the database and are left out[/yellow]")
-    for name in candidate:
-        gateway = build(Models(classify=RoleConfig.model_validate(roles[name])))
 
-        def progress(r: classify.Result, name: str = name, done: list[int] = [0]) -> None:  # noqa: B006
-            done[0] += 1
-            if r.error or done[0] % 100 == 0:
-                console.print(f"{name}: {done[0]} {r.paper_id} {r.error or ''}")
+    async def main() -> None:
+        # One Model gate for the process, each candidate served through a door of its own.
+        async with build(Models()) as gate:
+            for name in candidate:
+                gateway = gate.on(models=Models(classify=RoleConfig.model_validate(roles[name])))
 
-        new = asyncio.run(
-            classify.run(
-                gateway, tree, found, out / f"{name}.jsonl",
-                concurrency=concurrency, progress=progress,
-            )
-        )  # fmt: skip
-        cost = sum(r.cost or 0 for r in new)
-        failed = sum(r.error is not None for r in new)
-        console.print(f"{name}: {len(new)} sorted, {failed} failed, ${cost:.2f}")
+                def progress(r: classify.Result, name: str = name, done: list[int] = [0]) -> None:  # noqa: B006
+                    done[0] += 1
+                    if r.error or done[0] % 100 == 0:
+                        console.print(f"{name}: {done[0]} {r.paper_id} {r.error or ''}")
+
+                new = await classify.run(
+                    gateway, tree, found, out / f"{name}.jsonl",
+                    concurrency=concurrency, progress=progress,
+                )  # fmt: skip
+                cost = sum(r.cost or 0 for r in new)
+                failed = sum(r.error is not None for r in new)
+                console.print(f"{name}: {len(new)} sorted, {failed} failed, ${cost:.2f}")
+
+    asyncio.run(main())
 
 
 @eval_app.command("classify-report")
@@ -588,7 +595,8 @@ def eval_replay(
             async with db.write("replay: start") as unit:
                 r.eval_run_id = await replay.start(unit, cfg, r, params, note)
             console.print(f"replay {r.eval_run_id}")
-        return await replay.run(db, cfg, r)
+        async with model_gate(db, cfg) as models:
+            return await replay.run(db, cfg, r, models=models)
 
     counts = _run(work, item="eval replay")
     console.print_json(data=counts)
@@ -686,7 +694,7 @@ def eval_briefs(
     reading its text from the archive as a full-text pass does. A dry run: it reads the papers
     from the configured database and writes only to `out`; a run resumes where it stopped."""
     from litwatch.fulltext import archive_for  # noqa: PLC0415
-    from litwatch.llm.gateway import build  # noqa: PLC0415
+    from litwatch.llm import build  # noqa: PLC0415
     from litwatch.quality import briefs  # noqa: PLC0415
 
     cfg = configuration.load(config)
@@ -706,12 +714,13 @@ def eval_briefs(
 
     async def main() -> list[briefs.Result]:
         try:
-            return await briefs.run(
-                build(cfg.models), seeds.taxonomy(),
-                [(by_id[e.id], e) for e in entries if e.id in by_id], archive, out,
-                concurrency=concurrency, text=text, wait_seconds=wait_minutes * 60,
-                progress=progress,
-            )  # fmt: skip
+            async with build(cfg.models) as gate:
+                return await briefs.run(
+                    gate, seeds.taxonomy(),
+                    [(by_id[e.id], e) for e in entries if e.id in by_id], archive, out,
+                    concurrency=concurrency, text=text, wait_seconds=wait_minutes * 60,
+                    progress=progress,
+                )  # fmt: skip
         finally:
             await archive.aclose()
 
@@ -778,7 +787,7 @@ def eval_ladders(
     if not (math.isfinite(ceiling) and ceiling > 0):
         raise typer.BadParameter("--ceiling is a positive amount")
     from litwatch.fulltext import archive_for  # noqa: PLC0415
-    from litwatch.llm.gateway import build  # noqa: PLC0415
+    from litwatch.llm import build  # noqa: PLC0415
     from litwatch.quality import ladders  # noqa: PLC0415
 
     cfg = configuration.load(config)
@@ -824,16 +833,19 @@ def eval_ladders(
     )
     if not work or (not yes and not typer.confirm("Spend it?")):
         return
-    providers = build(cfg.models).providers
 
     def progress(r: ladders.Row) -> None:
         if r.outcome != "answered":
             console.print(f"{r.case} {r.candidate}: {r.outcome} {r.detail or ''}")
 
+    async def main() -> ladders.Ran:
+        async with build(cfg.models) as gate:
+            return await ladders.run(
+                work, gate, out, ceiling, concurrency=concurrency, progress=progress
+            )
+
     try:
-        ran = asyncio.run(
-            ladders.run(work, providers, out, ceiling, concurrency=concurrency, progress=progress)
-        )
+        ran = asyncio.run(main())
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     kinds = Counter(r.outcome for r in ran.rows)
@@ -1084,9 +1096,16 @@ def fulltext_queue(
     async def work(db: DatabaseGate) -> Counter[str]:
         if maker is not None:
             return await work_deep(db)
-        return await fulltext.work_waiting(
-            db, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
-        )
+        async with model_gate(db, cfg) as models:
+            return await fulltext.work_waiting(
+                db,
+                cfg,
+                archive,
+                limit=limit,
+                wait=wait,
+                models=models,
+                report=lambda d: console.print(dict(d)),
+            )
 
     async def close() -> None:
         await archive.aclose()
@@ -1117,7 +1136,12 @@ def ping(
         user="What is 17 + 25?",
         output=Sum,
     )
-    answer = asyncio.run(llm.build(cfg.models).ask(role, request))
+
+    async def ask() -> llm.Answer[Sum]:
+        async with llm.build(cfg.models) as gate:
+            return await gate.on().ask(role, request)
+
+    answer = asyncio.run(ask())
     usage = answer.usage
     console.print(
         f"{answer.model} -> {answer.value.total}  "

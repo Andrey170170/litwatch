@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
 
@@ -24,15 +26,19 @@ from litwatch.core import (
 from litwatch.events import Integration
 from litwatch.events.worker import DeliveryWorker
 from litwatch.fulltext.worker import DeepPassWorker, TextPassWorker
+from litwatch.gates.context import bookkeeping
 from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Worker, WorkGate
 from litwatch.jobs import scheduler
-from litwatch.jobs.context import GatewayFactory, default_gateway
+from litwatch.jobs.context import model_gate
 from litwatch.jobs.worker import JobWorker
+from litwatch.llm import ModelGate
 from litwatch.publications import Dblp, PublicationSource
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
 from litwatch.store import outbox
+
+log = logging.getLogger(__name__)
 
 # The built web app (`web/`, `pnpm build`), shipped inside the package.
 WEB = Path(str(resources.files("litwatch.api").joinpath("web")))
@@ -56,8 +62,16 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     and deliveries when any integration that reacts to events is loaded. Each kind is swept for
     what waits before the gate starts. And the MCP server (its session manager and PDF executor)
     while `/mcp` is served. Once the gate has stopped, the jobs' open runs are closed, then
-    every integration, also when a sweep failed."""
+    every integration, also when a sweep failed.
+
+    Every model call of the process goes through one Model gate (`app.state.models`): the one
+    given to `create_app`, else one built here on the app's Database gate and closed once
+    everything has stopped. Before any work starts, it takes over the batches left open that no
+    live work item will read (`ModelGate.recover`), once for the process's life."""
     db, config = app.state.db, app.state.config
+    owned = app.state.models is None
+    models: ModelGate = app.state.models or model_gate(db, config)
+    app.state.models = models
     workers: dict[str, Worker] = {}
     swept: list[Callable[[], Awaitable[None]]] = []
     enabled = config.schedule.enabled
@@ -65,18 +79,16 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     job_worker = None
     if enabled:
         schedule = scheduler.ScheduleWorker(db, config)
-        job_worker = JobWorker(db, config, app.state.gateway, archive)
+        job_worker = JobWorker(db, config, models, archive)
         workers |= {
             scheduler.SCHEDULE: schedule,
-            "nightly": scheduler.NightlyWorker(db, config, app.state.gateway),
+            "nightly": scheduler.NightlyWorker(db, config, models),
             "publications": scheduler.PublicationsWorker(db, app.state.publications),
             jobs_store.WORK: job_worker,
         }
         swept += [schedule.sweep, job_worker.sweep]
     if archive is not None:
-        text = workers[fulltext_store.TEXT_WORK] = TextPassWorker(
-            db, config, archive, app.state.gateway
-        )
+        text = workers[fulltext_store.TEXT_WORK] = TextPassWorker(db, config, archive, models)
         swept.append(text.sweep)
         if maker := integrations_api.card_maker(app.state.integrations):
             deep = workers[fulltext_store.DEEP_WORK] = DeepPassWorker(db, config, archive, maker)
@@ -88,6 +100,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         swept.append(delivery.sweep)
     gate = None
     try:
+        await _recover(models, config)
         for sweep in swept:
             await sweep()
         if workers:
@@ -102,6 +115,9 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
                 await gate
         if job_worker is not None:
             await job_worker.close(RuntimeError("the service stopped"))
+        if owned:
+            await models.close()
+            app.state.models = None
         app.state.search_pool.shutdown(wait=False, cancel_futures=True)
         for integration in app.state.integrations:
             if close := getattr(integration, "aclose", None):
@@ -111,11 +127,22 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
             await app.state.archive.aclose()
 
 
+async def _recover(models: ModelGate, config: Config) -> None:
+    """The batches left open, taken over as the service starts, under the Model gate's own
+    attribution: waited for until tonight's deadline when it starts inside the night's window,
+    so a nightly run again tonight shares them, else cancelled at once and read as they end."""
+    now = datetime.now(UTC)
+    night = config.schedule.night(now)
+    with bookkeeping("model gate: recover"):
+        if found := await models.recover(night[1] if night else now):
+            log.info("model gate: %d batches left open are read as they end", found)
+
+
 def create_app(
     dsn: str,
     token: str,
     config: Config | None = None,
-    gateway: GatewayFactory = default_gateway,
+    models: ModelGate | None = None,
     publications: PublicationSource | None = None,
     integrations: list[Integration] | None = None,
     read_token: str | None = None,
@@ -125,7 +152,9 @@ def create_app(
 ) -> FastAPI:
     """The app over one database, through one Database gate (`app.state.db`): `db`, open
     while the app serves, or else one of its own on `dsn`, which its lifespan opens and
-    closes (`serve` gives the process's one). Every request but the health check and signing
+    closes (`serve` gives the process's one); `models`, the process's Model gate when the
+    caller built it (a test), else the app builds its own as it starts. Every request but the
+    health check and signing
     in needs the shared token, as a bearer header or the cookie set by `/api/session`; `read_token`,
     when given, may only read papers (`deps.READABLE`). `integrations` are the loaded ones:
     the Work gate delivers to those that react to events, search asks those that are search
@@ -141,7 +170,7 @@ def create_app(
     app.state.token, app.state.read_token = token, read_token
     # The routes, MCP, the monitor and the loops all use the one gate.
     app.state.db, app.state.owns_db = db or DatabaseGate(dsn), db is None
-    app.state.config, app.state.gateway = config or Config(), gateway
+    app.state.config, app.state.models = config or Config(), models
     app.state.publications = publications or Dblp()
     app.state.integrations = integrations or []
     app.state.archive = archive

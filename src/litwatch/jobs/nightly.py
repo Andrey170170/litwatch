@@ -19,7 +19,9 @@ from litwatch.core.fulltext import LEASE, RECONCILE_LOOKBACK
 from litwatch.feedback import word
 from litwatch.gates.database import DatabaseGate
 from litwatch.integrations import archive as archive_integration
-from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
+from litwatch.jobs.context import ModelRun, model_run
+from litwatch.llm import ModelGate
+from litwatch.llm.context import spending
 from litwatch.store import analyses as analyses_store
 from litwatch.store import classifications as classifications_store
 from litwatch.store import digests as digests_store
@@ -203,10 +205,10 @@ async def run(
     db: DatabaseGate,
     config: Config,
     *,
+    models: ModelGate,
     fetch: bool = True,
     days: int | None = None,
     limit: int | None = None,
-    gateway: GatewayFactory = default_gateway,
     today: date | None = None,
     with_digests: bool = True,
     night: tuple[datetime, datetime] | None | Literal["schedule"] = "schedule",
@@ -224,7 +226,7 @@ async def run(
                 fetch=fetch,
                 days=days,
                 limit=limit,
-                gateway=gateway,
+                models=models,
                 today=today,
                 with_digests=with_digests,
                 night=night,
@@ -248,21 +250,23 @@ async def locked(
     db: DatabaseGate,
     config: Config,
     *,
+    models: ModelGate,
     fetch: bool = True,
     days: int | None = None,
     limit: int | None = None,
-    gateway: GatewayFactory = default_gateway,
     today: date | None = None,
     with_digests: bool = True,
     night: tuple[datetime, datetime] | None | Literal["schedule"] = "schedule",
 ) -> int:
-    """One run, under the run lock its caller holds. Returns the run id.
+    """One run, under the run lock its caller holds, its calls through `models`, the process's
+    Model gate. Returns the run id.
 
     A run started between the schedule's nightly time and its deadline (`night`: its start
-    and deadline, by default `Schedule.night` of now) sends its calls on a provider that
-    batches in batches until the deadline. Then its digests wait for the passes until the
-    deadline, those queued since the night's first run started included (docs/specs/v1/
-    models.md, batches).
+    and deadline, by default `Schedule.night` of now) runs its steps under that deadline
+    (`llm.context`), so its calls on a provider that batches go in the gate's batches for it
+    until the deadline, and it waits for those batches before it ends. Then its digests wait
+    for the passes until the deadline, those queued since the night's first run started
+    included (docs/specs/v1/models.md, batches). Outside the night's window it sends no batch.
 
     An incomplete harvest does not stop the rest: what arrived is classified, analysed and
     graded, and the gap stays open for the next run. `limit` caps the papers each step that
@@ -280,7 +284,7 @@ async def locked(
     today = today or until.astimezone(config.schedule.zone).date()
     release = (jobs_store.release, ["tonight"])
     async with model_run(
-        db, config, "nightly", window=(since, until), gateway=gateway, closing=release
+        db, config, "nightly", window=(since, until), models=models, closing=release
     ) as run:
         if fetch:
             result = await intake.collect(
@@ -301,11 +305,9 @@ async def locked(
                     intake=result.details,
                 )
             run.counts["rewritten"] = len(result.rewritten)
-        try:
+        with spending(deadline=batch_night[1] if batch_night else None):
             await _steps(db, config, run, until, today, limit, with_digests, batch_night)
-            await run.gateway.settle()  # the batches a dead run left are accounted for too
-        finally:
-            await run.gateway.close()
+            await run.gateway.settle()  # its batches, a dead run's it took over included
     return run.run_id
 
 
@@ -323,10 +325,6 @@ async def _steps(
     if night:  # a run started in the night's window waits for the passes since its first run
         async with db.read("nightly: first run tonight") as unit:
             since = await runs.first_since(unit, "nightly", night[0]) or until
-    # Outside the night's window the deadline is now: no batch is sent, and those a dead run
-    # left open are cancelled and settled as at a deadline.
-    run.gateway.batch_until(night[1] if night else datetime.now(UTC))
-    await run.gateway.recover()
     batching = run.gateway.batching
     await classify(db, config, run, limit)
     await analyse(db, config, run, limit)

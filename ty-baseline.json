@@ -391,20 +391,6 @@
         "lineCount": 1
       }
     ],
-    "src/litwatch/archive/text.py": [
-      {
-        "rule": "import-not-found",
-        "startColumn": 15,
-        "endColumn": 22,
-        "lineCount": 1
-      },
-      {
-        "rule": "import-not-found",
-        "startColumn": 15,
-        "endColumn": 26,
-        "lineCount": 1
-      }
-    ],
     "src/litwatch/cli.py": [
       {
         "rule": "unsupported-operator",
@@ -937,14 +923,6 @@
         "lineCount": 4
       }
     ],
-    "src/litwatch/llm/batches.py": [
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 63,
-        "endColumn": 84,
-        "lineCount": 1
-      }
-    ],
     "src/litwatch/llm/decisions.py": [
       {
         "rule": "invalid-type-form",
@@ -972,12 +950,6 @@
         "rule": "no-matching-overload",
         "startColumn": 44,
         "endColumn": 56,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-assignment",
-        "startColumn": 8,
-        "endColumn": 23,
         "lineCount": 1
       }
     ],
@@ -1479,12 +1451,6 @@
         "startColumn": 45,
         "endColumn": 52,
         "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 38,
-        "endColumn": 47,
-        "lineCount": 1
       }
     ],
     "tests/conftest.py": [
@@ -1600,12 +1566,6 @@
       },
       {
         "rule": "invalid-argument-type",
-        "startColumn": 38,
-        "endColumn": 47,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
         "startColumn": 58,
         "endColumn": 62,
         "lineCount": 1
@@ -1679,21 +1639,7 @@
         "lineCount": 1
       }
     ],
-    "tests/priced.py": [
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 38,
-        "endColumn": 52,
-        "lineCount": 1
-      }
-    ],
     "tests/scripted.py": [
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 38,
-        "endColumn": 47,
-        "lineCount": 1
-      },
       {
         "rule": "not-subscriptable",
         "startColumn": 11,
@@ -1915,12 +1861,6 @@
         "lineCount": 1
       },
       {
-        "rule": "invalid-argument-type",
-        "startColumn": 24,
-        "endColumn": 33,
-        "lineCount": 1
-      },
-      {
         "rule": "not-subscriptable",
         "startColumn": 12,
         "endColumn": 64,
@@ -1930,30 +1870,6 @@
         "rule": "not-subscriptable",
         "startColumn": 13,
         "endColumn": 62,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 47,
-        "endColumn": 51,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 52,
-        "endColumn": 56,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 49,
-        "endColumn": 53,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 20,
-        "endColumn": 24,
         "lineCount": 1
       },
       {
@@ -2366,18 +2282,6 @@
         "rule": "not-subscriptable",
         "startColumn": 11,
         "endColumn": 72,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 38,
-        "endColumn": 47,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 38,
-        "endColumn": 47,
         "lineCount": 1
       },
       {
@@ -2877,12 +2781,6 @@
         "lineCount": 3
       },
       {
-        "rule": "invalid-argument-type",
-        "startColumn": 38,
-        "endColumn": 47,
-        "lineCount": 1
-      },
-      {
         "rule": "not-subscriptable",
         "startColumn": 11,
         "endColumn": 62,
@@ -3077,30 +2975,6 @@
         "lineCount": 1
       },
       {
-        "rule": "invalid-argument-type",
-        "startColumn": 57,
-        "endColumn": 82,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 57,
-        "endColumn": 82,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 36,
-        "endColumn": 45,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 33,
-        "endColumn": 42,
-        "lineCount": 1
-      },
-      {
         "rule": "missing-union-attribute",
         "startColumn": 11,
         "endColumn": 30,
@@ -3116,104 +2990,6 @@
         "rule": "missing-union-attribute",
         "startColumn": 51,
         "endColumn": 70,
-        "lineCount": 1
-      }
-    ],
-    "tests/test_llm.py": [
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 27,
-        "endColumn": 36,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 45,
-        "endColumn": 54,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 42,
-        "endColumn": 51,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 25,
-        "endColumn": 45,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 32,
-        "endColumn": 38,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 25,
-        "endColumn": 45,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 32,
-        "endColumn": 38,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 25,
-        "endColumn": 45,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 32,
-        "endColumn": 38,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 25,
-        "endColumn": 59,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 25,
-        "endColumn": 41,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 20,
-        "endColumn": 68,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 46,
-        "endColumn": 52,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 29,
-        "endColumn": 43,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 47,
-        "endColumn": 51,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 48,
-        "endColumn": 52,
         "lineCount": 1
       }
     ],
@@ -3290,12 +3066,6 @@
         "rule": "invalid-argument-type",
         "startColumn": 49,
         "endColumn": 53,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 27,
-        "endColumn": 36,
         "lineCount": 1
       }
     ],
@@ -3770,30 +3540,6 @@
         "rule": "unsupported-operator",
         "startColumn": 51,
         "endColumn": 72,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 49,
-        "endColumn": 58,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 24,
-        "endColumn": 33,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 25,
-        "endColumn": 34,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 40,
-        "endColumn": 49,
         "lineCount": 1
       }
     ],
@@ -4518,18 +4264,6 @@
         "rule": "invalid-argument-type",
         "startColumn": 44,
         "endColumn": 48,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 38,
-        "endColumn": 47,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 52,
-        "endColumn": 88,
         "lineCount": 1
       },
       {

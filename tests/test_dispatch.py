@@ -12,6 +12,7 @@ import pytest
 
 from litwatch import events
 from litwatch.api import create_app
+from litwatch.config import Models
 from litwatch.events import dispatch
 from litwatch.events import worker as delivery_worker
 from litwatch.events.worker import DeliveryWorker
@@ -19,6 +20,7 @@ from litwatch.gates.database import outside_unit
 from litwatch.gates.work import WorkGate
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.integrations.webhook import Webhook
+from litwatch.llm import ModelGate
 from litwatch.store import outbox
 from litwatch.store import work as queue
 from tests import sessions
@@ -669,7 +671,9 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
 
     monkeypatch.setattr(WorkGate, "run", run)
     monkeypatch.setattr(DeliveryWorker, "sweep", sweep)
-    app = create_app("postgresql://unused", "t", integrations=[deep, recorder])
+    # No database, and so no Model gate's journal: no batches to recover.
+    models = ModelGate(Models(), {})
+    app = create_app("postgresql://unused", "t", models=models, integrations=[deep, recorder])
     app.state.db = contextlib.nullcontext()  # no database: the gate the lifespan opens
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0)
@@ -695,7 +699,9 @@ async def test_a_sweep_that_fails_as_the_app_starts_still_closes_every_integrati
         raise psycopg.OperationalError("the connection dropped")
 
     monkeypatch.setattr(DeliveryWorker, "sweep", sweep)
-    app = create_app("postgresql://unused", "t", integrations=[deep, recorder])
+    # No database, and so no Model gate's journal: no batches to recover.
+    models = ModelGate(Models(), {})
+    app = create_app("postgresql://unused", "t", models=models, integrations=[deep, recorder])
     app.state.db = contextlib.nullcontext()  # no database: the gate the lifespan opens
     with pytest.raises(psycopg.OperationalError):
         async with app.router.lifespan_context(app):
