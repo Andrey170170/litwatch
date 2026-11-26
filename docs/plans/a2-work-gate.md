@@ -322,6 +322,12 @@ Found while building, owned by the stage named.
   keeps its ceiling reservation only in the run that made it, so a resumed re-run, which starts from the job's
   known spend (`jobs_store.spent`), no longer counts it (`llm/gateway.py:276`). It belongs with the ceiling
   across a job's chunks (V4): count an unknown charge at its reservation until it is known.
+- **P4: a recovered batch can be left unsettled.** After `gw.recover()`, `gw.settle()` sometimes returns before
+  the dead run's batch has been read, so none of its calls is journalled. Two tests flake on it, on main as well
+  (about 1 run in 6): `test_an_account_error_a_dead_runs_batch_gave_is_journalled_as_one` (CI on #188) and
+  `test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_again`. It is not a tight margin. V4's
+  recovered-batch claim rests on it; start from `Batcher.watch`, `_start_polling` and `settle`
+  (`llm/batches.py`).
 - **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the
   request one and the check. The `workers` rows are written and beat, but no one reads them yet: P5 adds the
   CLI's reader, which counts a row whose `heartbeat_at` is within a lease as alive.
