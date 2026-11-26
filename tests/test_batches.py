@@ -2532,8 +2532,9 @@ async def test_a_normal_calls_charge_is_recorded_though_its_item_is_cancelled_me
     conn: Session, db, monkeypatch
 ):
     """A normal call's reply came; writing its charge lost the connection, and the write waits
-    to be tried again when the item is cancelled (its lease lost): the write is finished first,
-    so the charge the provider made is on its row."""
+    to be tried again when the item is cancelled (`serve` stopping), then cancelled again (its
+    lease renewal failing): the write is finished first, so the charge the provider made is on
+    its row, and the item is cancelled after."""
     journal = CallJournal(db, await started(conn, "nightly"))
     gw, anthropic, _, _ = batching(journal)
     gw.gate.journal_delays = (0.3,)
@@ -2549,6 +2550,8 @@ async def test_a_normal_calls_charge_is_recorded_though_its_item_is_cancelled_me
     asked = asyncio.create_task(Tonight(gw.gate, journal, deadline=None).ask("brief", ask(1)))
     await asyncio.wait_for(failing.wait(), 3)
     asked.cancel()
+    await asyncio.sleep(0.05)
+    asked.cancel()  # again, as the write waits to be tried again
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(asked, 3)
     assert [c["cost"] for c in await calls(conn)] == [0.001] and len(anthropic.calls) == 1
@@ -2618,4 +2621,93 @@ async def test_an_item_asking_again_takes_a_stop_on_a_p3_row_its_run_names_it_on
     with working(a_work_item(await item_of(conn, dead))):
         answer = await asyncio.wait_for(gw.ask("brief", ask("refuse")), 3)
     assert answer.model == OTHER.label and anthropic.batches == {}
+    await gw.close()
+
+
+async def test_a_call_whose_look_fails_takes_the_answer_saved_meanwhile_not_a_normal_call(
+    conn: Session, db, monkeypatch
+):
+    """A job's call without a deadline reads a batch's row while the batch goes by its staged
+    reference; meanwhile the batch's task finds it, reads it and saves its answer. The call's
+    look, by the batch's id, then fails to read it: the answer is known, so the call takes it
+    rather than paying for a normal call."""
+    client = OpenAIBatches()  # no normal call can be made (`responses`)
+    client.creating = [(True, lost())]
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    journal = CallJournal(db, await started(conn, "job"))
+    gate = gw.gate.journal
+    assert isinstance(gate, CallJournal)
+    in_batch, adopted, read, go = journal.in_batch, gate.adopted, asyncio.Event(), asyncio.Event()
+
+    async def paused(key, work_id, owned=None):
+        row = await in_batch(key, work_id, owned)
+        if row is not None:
+            read.set()
+            await go.wait()
+        return row
+
+    async def after_the_read(reference, batch_id):
+        await read.wait()
+        await adopted(reference, batch_id)
+
+    provider = gw.gate.providers["openai"]
+    results, failing = provider.results, []
+
+    async def flaky(batch_id):
+        if failing:
+            failing.pop()
+            raise ProviderError("500 Internal Server Error")
+        return await results(batch_id)
+
+    monkeypatch.setattr(journal, "in_batch", paused)
+    monkeypatch.setattr(gate, "adopted", after_the_read)
+    monkeypatch.setattr(provider, "results", flaky)
+    first = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: "batch_1" in client.made)
+    client.end("batch_1")
+    job = asyncio.create_task(Tonight(gw.gate, journal, deadline=None).ask("brief", ask(1)))
+    assert (await asyncio.wait_for(first, 3)).usage.service_tier == "batch"
+    failing.append(True)  # the job's look fails to read it
+    go.set()
+    answer = await asyncio.wait_for(job, 3)
+    assert answer.usage.reused and answer.usage.cost == 0.0
+    assert len(await calls(conn)) == 1  # one row, one charge
+    await gw.close()
+
+
+async def test_a_staged_batch_whose_name_is_slow_to_read_is_looked_for_its_whole_window(
+    conn: Session, db, monkeypatch
+):
+    """A dead run's batch goes by its staged reference; recovery reads its name again, which
+    takes longer than the window a batch is looked for in (the database slow, its reads tried
+    again): the window starts once the name is read, so the batch is still looked for, found
+    and read, not given up on without a lookup."""
+    client = OpenAIBatches()
+    client.creating = [(True, lost())]
+    gw, _, clock = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    gw.batchers["openai"].find_delays = (30.0,)  # the run dies while it looks
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+
+    async def staged():
+        return [c["batch_id"] for c in await calls(conn)] == ["staged:file-1"]
+
+    await until(staged)
+    asked.cancel()
+    await asyncio.gather(asked, return_exceptions=True)
+    await gw.close()
+
+    journal = CallJournal(db, await started(conn, "nightly"))
+    named = journal.named
+
+    async def slow(batch):
+        await asyncio.sleep(1.2)  # past FAST's window of a second
+        return await named(batch)
+
+    monkeypatch.setattr(journal, "named", slow)
+    client.end("batch_1")
+    gw, _, _ = openai_batching(journal, client, clock)
+    await gw.recover()
+    await gw.settle()
+    assert [c["cost"] for c in await calls(conn)] == [pytest.approx(SOL_BATCHED)]
+    assert client.listings == 1
     await gw.close()

@@ -203,7 +203,7 @@ class _Batch:
     sending: bool = False
     cancelled: bool = False
     # Known by its staged reference: when looking for it ends (monotonic), from when its
-    # creation's outcome was known to be unknown, or it was first known so here.
+    # creation's outcome was known to be unknown, or its name was read again here.
     find_until: float | None = None
 
 
@@ -354,16 +354,9 @@ class Batcher:
 
     def _followed(self, identity: int, name: str, deadline: datetime) -> _Batch:
         """The batch of `identity` as this batcher follows it: when it is new here, under
-        `deadline`, in a task of its own from now (`_follow`), and one known by its staged
-        reference looked for from now."""
+        `deadline`, in a task of its own from now (`_taken`)."""
         if (batch := self._batches.get(identity)) is None:
-            staged = name.startswith(STAGED)
-            batch = _Batch(
-                deadline=deadline,
-                identity=identity,
-                name=name,
-                find_until=time.monotonic() + self.find_seconds if staged else None,
-            )
+            batch = _Batch(deadline=deadline, identity=identity, name=name)
             self._batches[identity] = batch
             self._supervised(batch, self._taken(batch))
         return batch
@@ -373,10 +366,13 @@ class Batcher:
         read them), its identity claimed here, so a call that attaches meanwhile joins: the name
         it goes by is read again first, before any provider request, so it is followed by its id
         when its rows have one now, not looked for by the reference read before (its task here
-        may have found and settled it meanwhile, and a lookup may miss it)."""
+        may have found and settled it meanwhile, and a lookup may miss it). Known still by its
+        staged reference, it is looked for from then, for the whole window."""
         if (journal := self.journal) is not None and (identity := batch.identity) is not None:
             name = await self._journalled("batch named", lambda: journal.named(identity))
             batch.name = name or batch.name
+        if batch.name is not None and batch.name.startswith(STAGED):
+            batch.find_until = time.monotonic() + self.find_seconds
         await self._follow(batch)
 
     @staticmethod

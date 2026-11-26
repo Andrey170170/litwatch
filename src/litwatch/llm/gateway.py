@@ -593,7 +593,11 @@ class Gateway:
         key = self.request_key(role, request)
         journal = self.journal
         # A batch's reply comes on its row, settled by its batcher but for the output.
-        call_id, reply = await self._batched(role_name, role, key, request, paper_id, send)
+        call_id, reply, attached = await self._batched(
+            role_name, role, key, request, paper_id, send
+        )
+        if attached and reply is None and (answer := await self._reused(role, request)):
+            return answer  # its batch's answer, saved meanwhile (another call validated it)
         batched = isinstance(reply, Reply)
         charged: Usage | None = None  # what a send that failed was charged, settled with it
 
@@ -681,19 +685,27 @@ class Gateway:
         """A journal write once the provider has answered, tried again while the database is
         briefly away, the answer kept here meanwhile (`llm.batches.journalled`). It runs to its
         end in a task of its own, outside the item's context (its units are the gate's
-        bookkeeping): the item's cancellation (its lease lost) waits for it, so a charge the
-        provider made is not lost with the item."""
+        bookkeeping): the item's cancellation (its lease lost, `serve` stopping), however many
+        times it comes, waits for it, so a charge the provider made is not lost with the item,
+        and is raised once it has ended."""
         task = asyncio.create_task(
             journalled(what, write, self.gate.journal_delays), context=contextvars.Context()
         )
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
+        cancelled = False
+        while not task.done():
             try:
-                await task
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                if task.cancelled():  # the write's own (the loop closing), not the item's
+                    raise
+                cancelled = True
             except Exception:
-                log.exception("journal: %s failed as its call was cancelled", what)
-            raise
+                break  # the write's failure, raised below
+        if cancelled:
+            if (exc := task.exception()) is not None:
+                log.error("journal: %s failed as its call was cancelled: %r", what, exc)
+            raise asyncio.CancelledError
+        task.result()
 
     def _call(
         self,
@@ -739,10 +751,11 @@ class Gateway:
         request: Request,
         paper_id: str | None,
         send: Callable[..., Awaitable[Reply]] | None,
-    ) -> tuple[int | None, Answered]:
+    ) -> tuple[int | None, Answered, bool]:
         """A batch's reply and the journal row it was answered on (its batcher settled the
         row's charge, and its refusal or truncation), or the account error a batch gave the
-        call; (None, None) to send it as a normal call, on rows of its own. One lookup decides
+        call; (None, None) to send it as a normal call, on rows of its own; and whether it
+        attached to a batch, whose answer may have been saved meanwhile. One lookup decides
         (`store.calls.CallJournal.in_batch`): a refusal or truncation a batch gave this item's
         attempt before is consumed, as that reply again; a key in a batch not yet settled that
         this gate follows, or no other live claim sent, waits on that batch, on its row, through
@@ -754,32 +767,34 @@ class Gateway:
         evaluation's call never is."""
         journal = self.journal
         if send is not None or journal is None or not journal.observes:
-            return None, None
+            return None, None, False
         if not isinstance(self.providers.get(role.provider), BatchProvider):
-            return None, None  # no batch of it can hold the request
+            return None, None, False  # no batch of it can hold the request
         deadline = context.current().deadline
         work = current_work()
         owned = self.gate.owned()
         if row := await journal.in_batch(key, work.item.id if work else None, owned):
             if row["error"] is not None:
-                return row["id"], _of_role(_stopped(row), role)
+                return row["id"], _of_role(_stopped(row), role), False
             batcher = self.gate.owner(row["batch"]) or self.gate.batcher(
                 role.provider, deadline or NO_DEADLINE
             )
             if batcher is None:
-                return None, None
+                return None, None, False
             batch, name = row["batch"], row["batch_id"]
             reply = await batcher.attach(batch, name, key, row["id"], until=deadline)
+            attached = True
         elif (until := self.batching_until()) and (
             batcher := self.gate.batcher(role.provider, until)
         ):
             start = self._call(role_name, role, key, paper_id)
             reply = await batcher.ask(key, role, request, start)
+            attached = False
         else:
-            return None, None
+            return None, None, False
         if not isinstance(reply, Reply):
-            return None, reply
-        return reply.usage.source_call_id, _of_role(reply, role)
+            return None, reply, attached
+        return reply.usage.source_call_id, _of_role(reply, role), attached
 
 
 def _stopped(row: dict[str, Any]) -> Reply:

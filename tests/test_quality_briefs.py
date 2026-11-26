@@ -55,7 +55,7 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     out, asked = tmp_path / "brief.jsonl", []
     pairs = list(zip([P, Q], entries(), strict=True))
     first = await briefs.run(gateway(asked), seeds.taxonomy(), pairs, archive, out, wait_seconds=0)
-    assert sorted((r.paper_id, r.error) for r in first) == [  # in the order they came
+    assert sorted((r.paper_id, r.error) for r in first) == [  # by paper, whatever came first
         (P.id, None),
         (Q.id, f"{Q.id}: no arXiv version known and no LaTeX text"),
     ]
