@@ -61,6 +61,27 @@ Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.m
   A2 fences work once its lease is lost; its acceptance includes a worker that exits while its last bookkeeping
   write fails. The run lock's case stays open through A3, which removes that lock.
 
+### Model gate hardening
+
+Found in A2 P4's last review round and fix checks, each reachable only in unusual cases, and deferred once its review cap was reached.
+
+- **Shutdown waits on a blocked journal write.** `Gateway._journalled` (`llm/gateway.py`) waits through every
+  cancellation with no bound, so a write blocked inside Postgres (on a lock another transaction holds) holds up
+  `serve`'s shutdown until that lock is released. Bound each attempt and the whole drain, then log any write left
+  unfinished.
+- **A batch's provider id can go unwritten at shutdown.** The provider accepts a batch, the first write of its id
+  (`Batcher._sent`, `CallJournal.batched`, `llm/batches.py`) fails, and the gate closes during the retry backoff: the
+  row keeps a null batch id and cost, startup recovers nothing (`ModelGate.recover`), and the same request is sent and
+  paid for again. Let post-send batch writes finish within the bounded drain above, while provider polling stays
+  cancellable (`Batcher.close`).
+- **A reservation outlives a cancelled call.** A call cancelled after its row commits and before it is sent
+  (`Gateway._complete`, `opened`) leaves that row's reservation (`inference_calls.reserved`) counted, so the job's
+  ceiling is overcounted by that one reservation: a conservative error.
+- **The cleanup that removes this class.** Several places decide whether a batched request's answer is already known
+  or paid for: `CallJournal.in_batch`, `Gateway._batched` and its cache recheck in `_ask`, and `Batcher.attach` and
+  `_taken`. One owner per batch in the gate, holding its waiters and its final result in one map, would take that
+  decision in one place.
+
 ### A3. Lanes and the Orchestrator
 
 Shape, blueprint, drive.
