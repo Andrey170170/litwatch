@@ -3,12 +3,15 @@
 
 - The work context: the work item a Worker runs, with its lease. The Work gate sets it in the
   item's task; the Database gate fences every write unit opened under it on that lease
-  (`gates.database`). Its ceiling and deadline are for the Model gate (A2's P4).
+  (`gates.database`), and the Model gate records its id on each call. What the item may spend
+  and when its batched calls must be answered by are the Model gate's (`llm.context`): the
+  gates cannot name its ceiling.
 - The attribution: a work item, a request, or a named system attribution. The Work gate sets
   it for an item's task and for its own bookkeeping; Entries set theirs in P5, which also turns
   on the check (`attribution()` read by the gates).
 
-A task started inside either inherits it, as context variables go."""
+A task started inside either inherits it, as context variables go. A gate's own bookkeeping
+for many items (`bookkeeping`) runs outside both."""
 
 from __future__ import annotations
 
@@ -16,8 +19,6 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
-from decimal import Decimal
 from typing import Literal
 
 from litwatch.core.work import WorkItem
@@ -25,13 +26,9 @@ from litwatch.core.work import WorkItem
 
 @dataclass(frozen=True)
 class Work:
-    """The work item a task runs under its lease (`item.lease_token`), with the most it may
-    spend (`ceiling`, dollars) and the time its batched calls must be answered by
-    (`deadline`), when it has them."""
+    """The work item a task runs under its lease (`item.lease_token`)."""
 
     item: WorkItem
-    ceiling: Decimal | None = None
-    deadline: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -84,3 +81,17 @@ def attributed(who: Attribution) -> Generator[None]:
         yield
     finally:
         _attribution.reset(token)
+
+
+@contextmanager
+def bookkeeping(name: str) -> Generator[None]:
+    """Run the block as a gate's own bookkeeping, under the system attribution `name` and
+    outside any work item, so its write units are not fenced: what it records (a model call's
+    charge, a batch's answers) serves items that may be gone, and stands whether or not the
+    item's lease does."""
+    work, who = _work.set(None), _attribution.set(Attribution.system(name))
+    try:
+        yield
+    finally:
+        _attribution.reset(who)
+        _work.reset(work)

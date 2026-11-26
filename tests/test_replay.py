@@ -11,11 +11,12 @@ from litwatch import grading
 from litwatch.api import create_app
 from litwatch.config import Classification, Config
 from litwatch.core import Depth, Fit, Status, Taxonomy, TaxonomyClass, Topic
+from litwatch.core.budget import CallStart
 from litwatch.core.classification import Source
 from litwatch.core.evaluation import Outcome, recall
 from litwatch.feedback import misses as misses_feedback
 from litwatch.jobs import worker
-from litwatch.llm import Gateway, ProviderError, prices
+from litwatch.llm import ModelGate, ProviderError, prices
 from litwatch.quality import replay
 from litwatch.store import classifications as classifications_store
 from litwatch.store import evaluation, quality, runs
@@ -189,7 +190,7 @@ async def start(conn: Session, models, labels=LABELLED, config=CONFIG) -> replay
     r = await in_read(conn, replay.prepare, labels)
     r.eval_run_id = await in_write(conn, replay.start, config, r, {})
     async with gate_on(conn) as db:
-        await replay.run(db, config, r, gateway=models.gateway)
+        await replay.run(db, config, r, models=models.gate(config))
     return r
 
 
@@ -286,7 +287,7 @@ async def test_a_failed_grading_is_a_miss_and_a_resume_redoes_only_what_failed(
     models.asked.clear()
     again = await in_read(conn, replay.resume, CONFIG, r.eval_run_id)
     assert again.to_classify == [] and set(again.to_grade) == {(A.id, TOPIC), (B.id, TOPIC)}
-    await replay.run(db, CONFIG, again, gateway=models.gateway)
+    await replay.run(db, CONFIG, again, models=models.gate(CONFIG))
     assert {step for step, _ in models.asked} == {"judge", "check"}
     assert {title for _, title in models.asked} == {A.title, B.title}
     (line, _) = recall(await in_read(conn, evaluation.outcomes, r.eval_run_id))
@@ -382,7 +383,7 @@ async def test_a_paper_whose_text_changed_is_classified_and_graded_again_on_resu
     again = await in_read(conn, replay.resume, CONFIG, r.eval_run_id)
     assert again.stale == {A.id}
     assert [p.id for p in again.to_classify] == [A.id] and again.to_grade == [(A.id, TOPIC)]
-    await replay.run(db, CONFIG, again, gateway=models.gateway)
+    await replay.run(db, CONFIG, again, models=models.gate(CONFIG))
     # Both stages read the new text, and the row says which.
     asked = [u for u in models.users if A.title in u]
     assert len(asked) == 3 and all(rewritten.abstract in u for u in asked)  # classify, judge, check
@@ -517,7 +518,7 @@ async def test_a_replay_job_from_overview_writes_only_to_the_evaluation_tables(
         assert (await run_replay(conn))["id"] == job["id"]
         assert (await http.get("/api/jobs/replays/offer")).json()["running"]["id"] == job["id"]
 
-    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED)))
     after = await contents(conn)
     changed = {t for t in before if before[t] != after[t]}
     # Its job, its chunks' work items, run and call journal; nothing of the pipeline moves,
@@ -552,7 +553,7 @@ async def test_a_replay_chunk_tried_again_after_a_lost_database_counts_what_it_g
             raise psycopg.OperationalError("the server closed the connection unexpectedly")
 
     monkeypatch.setattr(replay, "work", drops)
-    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED)))
     done = await job_of(conn, job["id"])
     assert lost and (done["state"], done["done"], done["counts"]["graded"]) == ("done", 3, 3)
 
@@ -577,7 +578,7 @@ async def test_a_replay_result_that_rolled_back_is_counted_once_when_tried_again
             raise psycopg.OperationalError("the server closed the connection unexpectedly")
 
     monkeypatch.setattr(evaluation, put, drops)
-    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED)))
     done = await job_of(conn, job["id"])
     assert lost and (done["state"], done["done"], done["counts"][counted]) == ("done", 3, 3)
 
@@ -588,12 +589,12 @@ async def test_a_replay_job_taken_back_goes_on_without_redoing_what_it_concluded
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await run_replay(conn)
     async with gate_on(conn) as dead:  # another process's
-        gone = worker.JobWorker(dead, SCHEDULED, priced.gateway)
+        gone = worker.JobWorker(dead, SCHEDULED, priced.gate(SCHEDULED))
         assert await step(gone)  # A's chunk
         await killed(gone, monkeypatch, "_replay")  # its process dies at the next
         await gone.close(RuntimeError("killed"))
 
-    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED)))
     done = await in_read(conn, jobs_store.get, job["id"])
     assert (done["state"], done["done"]) == ("done", 3)
     assert sorted(priced.sent("classify")) == sorted([A.title, B.title, C.title])
@@ -609,7 +610,7 @@ async def test_a_replay_job_stops_at_its_ceiling_and_run_replay_goes_on_with_it(
     recorded as concluded, and the job waits under Not run saying where. Run replay goes on
     with it under a new ceiling, and concludes every paper."""
     job = await run_replay(conn, ceiling=1e-6)
-    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED)))
     stopped = await in_read(conn, jobs_store.get, job["id"])
     assert stopped["state"] == "stopped"
     assert stopped["error"] == "stopped at the ceiling after 0 of 3"
@@ -621,7 +622,7 @@ async def test_a_replay_job_stops_at_its_ceiling_and_run_replay_goes_on_with_it(
         offer = (await http.get("/api/jobs/replays/offer")).json()
     assert (offer["continues"], offer["papers"], offer["pairs"]) == (job["id"], 3, 3)
     assert (await run_replay(conn, ceiling=5.0))["id"] == job["id"]
-    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED)))
     done = await in_read(conn, jobs_store.get, job["id"])
     assert (done["state"], done["error"], float(done["ceiling"])) == ("done", None, 5.0)
     assert done["scope"]["eval_run"] == eval_run
@@ -637,10 +638,10 @@ async def test_a_replay_jobs_ceiling_covers_all_its_chunks(conn: Session, db, pr
     the ceiling after the first's spend, which no second paper fits in: the job stops."""
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await run_replay(conn, ceiling=7 * COST)
-    first = worker.JobWorker(db, SCHEDULED, priced.gateway)
+    first = worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED))
     assert await step(first)
     await first.close(RuntimeError("the service stopped"))
-    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED)))
     stopped = await job_of(conn, job["id"])
     assert (stopped["state"], stopped["error"]) == (
         "stopped",
@@ -650,6 +651,30 @@ async def test_a_replay_jobs_ceiling_covers_all_its_chunks(conn: Session, db, pr
     assert 3 * COST <= spent <= 7 * COST  # the second's calls fit what the first left
     executions = await rows(conn, "SELECT id FROM runs WHERE job_id = %s", job["id"])
     assert len(executions) == 2
+
+
+async def test_a_replay_jobs_ceiling_covers_its_chunks_in_one_serve(
+    conn: Session, db, priced, monkeypatch
+):
+    """A chunk a paper, under a ceiling one paper's calls fit in, every chunk run by the one
+    job Worker of one `serve`, on the run it keeps: the second chunk has what the first left,
+    which no second paper fits in, and the job stops."""
+    monkeypatch.setattr(worker, "CHUNK", 1)
+    job = await run_replay(conn, ceiling=7 * COST)
+
+    async def stopped() -> bool:
+        return (await job_of(conn, job["id"]))["state"] == "stopped"
+
+    quiet = SCHEDULED.model_copy(update={"schedule": QUIET})
+    async with served(db, quiet, models=priced.gate(quiet)):
+        await until(stopped, "the job to stop at its ceiling")
+    found = await job_of(conn, job["id"])
+    assert found["error"] == "stopped at the ceiling after 1 of 3"
+    spent = await in_read(conn, jobs_store.spent, job["id"])
+    assert 3 * COST <= spent <= 7 * COST
+    assert len(priced.sent("judge")) == 1  # the second paper's calls never sent
+    executions = await rows(conn, "SELECT id FROM runs WHERE job_id = %s", job["id"])
+    assert len(executions) == 1  # one run, kept across its chunks
 
 
 async def test_a_replay_jobs_ceiling_holds_as_its_chunks_go_back_and_forth(
@@ -662,9 +687,9 @@ async def test_a_replay_jobs_ceiling_holds_as_its_chunks_go_back_and_forth(
     monkeypatch.setattr(worker, "CHUNK", 1)
     # A paper's calls spend 3 COST and need more than 4 COST left to be sent (the test above).
     job = await run_replay(conn, ceiling=10 * COST)
-    first = worker.JobWorker(db, SCHEDULED, priced.gateway)
+    first = worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED))
     async with gate_on(conn) as elsewhere:
-        other = worker.JobWorker(elsewhere, SCHEDULED, priced.gateway)
+        other = worker.JobWorker(elsewhere, SCHEDULED, priced.gate(SCHEDULED))
         assert await step(first)
         assert await step(other)
         assert await step(first)
@@ -688,7 +713,7 @@ async def test_serve_runs_a_replay_as_a_worker(conn: Session, db, priced):
         return (await job_of(conn, job["id"]))["state"] == "done"
 
     quiet = SCHEDULED.model_copy(update={"schedule": QUIET})
-    async with served(db, quiet, gateway=priced.gateway):
+    async with served(db, quiet, models=priced.gate(quiet)):
         await until(done, "the replay to be done")
     assert sorted(priced.sent("judge")) == sorted([A.title, B.title, C.title])
 
@@ -697,7 +722,7 @@ async def test_a_stopped_replay_that_no_longer_resumes_gives_way_to_a_new_one(
     conn: Session, db, priced
 ):
     job = await run_replay(conn, ceiling=1e-6)
-    await work_out(worker.JobWorker(db, SCHEDULED, priced.gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED)))
     stricter = SCHEDULED.model_copy(update={"classification": Classification(focus_threshold=0.6)})
     async with api(conn, stricter) as http:
         assert (await http.get("/api/jobs/replays/offer")).json()["continues"] is None
@@ -730,7 +755,7 @@ async def test_a_paper_revised_between_chunks_is_replayed_on_its_new_text(
 ):
     monkeypatch.setattr(worker, "CHUNK", 1)
     job = await run_replay(conn)
-    w = worker.JobWorker(db, SCHEDULED, priced.gateway)
+    w = worker.JobWorker(db, SCHEDULED, priced.gate(SCHEDULED))
     assert await step(w)  # A's chunk
     revised = A.model_copy(update={"abstract": "Sparse autoencoders on activations."})
     await in_write(conn, papers_store.upsert, [revised])
@@ -747,20 +772,23 @@ async def test_a_replay_leaves_a_dead_nightlys_batch_alone(conn: Session, db, pr
     request = grading.request(A, FAITH, TREE.get(FAITH.slug).name)
     batching = BatchingProvider("anthropic", priced.respond, hold=True)
 
-    def gateway(config, journal):
-        providers = {"anthropic": batching, "openrouter": Costed("openrouter", priced.respond)}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+    providers = {"anthropic": batching, "openrouter": Costed("openrouter", priced.respond)}
+    gate = ModelGate(SCHEDULED.models, providers, CallJournal(db), retry_delays=(0.0,))
 
-    key = gateway(SCHEDULED, None).request_key(role, request)
+    key = gate.on().request_key(role, request)
     batch = await batching.submit([(key, role, request)])
     nightly = await started(conn, "nightly")
     journal = CallJournal(db, nightly)
-    call = await journal.start("judge", role.model, key, A.id, role.provider)
+    start = CallStart(
+        run_id=nightly, work_id=None, operation="judge", model=role.model, key=key,
+        paper_id=A.id, via=role.provider,
+    )  # fmt: skip
+    call = await journal.start(start)
     await journal.batched([call], batch, role.provider)
     await in_write(conn, runs.finish, nightly, error="process died")
 
     await run_replay(conn)
-    await work_out(worker.JobWorker(db, SCHEDULED, gateway))
+    await work_out(worker.JobWorker(db, SCHEDULED, gate))
     assert batching.cancelled == []
     (left,) = await rows(conn, "SELECT output FROM inference_calls WHERE id = %s", call)
     assert left["output"] is None

@@ -35,7 +35,7 @@ from litwatch.fulltext import deep as deep_passes
 from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Later, database_lost
 from litwatch.integrations.deep import Deep
-from litwatch.jobs.context import GatewayFactory, default_gateway
+from litwatch.llm import ModelGate
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
 from litwatch.store import jobs as jobs_store
@@ -80,16 +80,13 @@ async def _tried_again(db: DatabaseGate, item: WorkItem, c: Claimed) -> AsyncGen
 
 
 class TextPassWorker:
-    """Works text passes, reading their texts from `archive`, through `gateway`'s models."""
+    """Works text passes, reading their texts from `archive`, through `models`, the process's
+    Model gate."""
 
     def __init__(
-        self,
-        db: DatabaseGate,
-        config: Config,
-        archive: ArchiveClient,
-        gateway: GatewayFactory = default_gateway,
+        self, db: DatabaseGate, config: Config, archive: ArchiveClient, models: ModelGate
     ) -> None:
-        self.db, self.config, self.archive, self.gateway = db, config, archive, gateway
+        self.db, self.config, self.archive, self.models = db, config, archive, models
 
     async def sweep(self) -> None:
         """Make sure each text pass a claim can take has an item."""
@@ -109,9 +106,7 @@ class TextPassWorker:
                 self.config,
                 self.archive,
                 [c],
-                run=None,
-                gateway=self.gateway,
-                owners=owners,
+                models=self.models,
             )
         return _awaiting(done["awaiting_text"] > 0)
 

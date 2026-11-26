@@ -7,7 +7,6 @@ must exclude each other."""
 import asyncio
 import json
 import logging
-from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import psycopg
@@ -28,7 +27,7 @@ from litwatch.gates.database import (
 )
 from litwatch.llm import Gateway, Request
 from litwatch.llm.types import DecisionRequest, Predicate
-from tests.fakes import BatchingProvider, ScriptedProvider
+from tests.fakes import ScriptedProvider, door
 from tests.sessions import Bridge, BridgeError, Session
 
 LOG = "litwatch.gates.database"
@@ -258,7 +257,7 @@ DECISION = DecisionRequest("Title: a paper", (Predicate("circuits", "Is it about
 
 def model_gateway(provider) -> Gateway:
     models = Models(writer=HAIKU, classify=HAIKU)
-    return Gateway(models, {"anthropic": provider}, retry_delays=(0.0,))
+    return door(models, {"anthropic": provider}, retry_delays=(0.0,))
 
 
 CALLS = {
@@ -278,19 +277,6 @@ async def test_the_model_gateway_called_inside_a_unit_raises_when_strict(db, cal
             await CALLS[call](gw)
     assert provider.calls == []  # refused before the provider was asked
     assert (await gw.ask("writer", REQUEST)).value == Answer(yes=True)  # outside one, it answers
-
-
-async def test_a_batched_model_call_inside_a_unit_raises_when_strict(db):
-    provider = BatchingProvider("anthropic", lambda role, request: json.dumps({"yes": True}))
-    gw = model_gateway(provider)
-    gw.batch_until(datetime.now(UTC) + timedelta(hours=1))
-    try:
-        async with db.read("the reader"):
-            with pytest.raises(NestingError):
-                await gw.ask("writer", REQUEST)
-        assert provider.batches == {} and provider.calls == []  # nothing waits to be sent
-    finally:
-        await gw.close()
 
 
 async def test_the_model_gateway_inside_a_unit_is_logged_when_lenient(db, monkeypatch, caplog):

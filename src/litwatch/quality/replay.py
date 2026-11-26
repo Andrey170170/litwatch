@@ -37,7 +37,8 @@ from litwatch.core import Depth, Fit, Paper, Status, Taxonomy
 from litwatch.core.classification import Source, keyword, with_ancestors
 from litwatch.core.evaluation import Outcome, Recall, Share
 from litwatch.gates.database import DatabaseGate, ReadUnit, WriteUnit
-from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
+from litwatch.jobs.context import ModelRun, model_run
+from litwatch.llm import ModelGate
 from litwatch.llm.decisions import chat_request
 from litwatch.llm.gateway import VALIDATION_VERSION
 from litwatch.llm.openrouter import DEFAULT_ROUTING
@@ -336,12 +337,12 @@ async def run(
     config: Config,
     r: Replay,
     *,
-    gateway: GatewayFactory = default_gateway,
+    models: ModelGate,
 ) -> dict[str, Any]:
     """Classify the papers and grade the pairs left to do, recording each as it concludes, as a
-    run of its own. Returns the run record's counts."""
+    run of its own, its calls through `models`. Returns the run record's counts."""
     assert r.eval_run_id is not None, "start the replay first"
-    async with model_run(db, config, calls.EVAL, gateway=gateway) as mr:
+    async with model_run(db, calls.EVAL, models=models) as mr:
         await work(db, config, r, mr)
         async with db.write("replay: finish") as unit:
             await store.finish(unit, r.eval_run_id)

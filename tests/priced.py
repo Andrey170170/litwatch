@@ -4,7 +4,7 @@
 import json
 
 from litwatch.config import Config, Models, RoleConfig
-from litwatch.llm import Gateway, Reply, Request
+from litwatch.llm import ModelGate, Reply, Request
 from litwatch.store import runs
 from tests.briefs import ANSWER
 from tests.conftest import started
@@ -47,9 +47,9 @@ class Priced:
             return json.dumps(ANSWER)
         return self.scripted.respond(role, request)
 
-    def gateway(self, config: Config, journal) -> Gateway:
+    def gate(self, config: Config) -> ModelGate:
         self.providers = {n: Costed(n, self.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, self.providers, journal, retry_delays=(0.0,))
+        return ModelGate(config.models, dict(self.providers), retry_delays=(0.0,))
 
     def sent(self, role: str) -> list[str]:
         """The titles `role` was asked about."""

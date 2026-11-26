@@ -51,7 +51,7 @@ from litwatch.gates.work import WorkGate
 from litwatch.intake import batch
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
-from litwatch.llm import Gateway, ProviderError
+from litwatch.llm import ProviderError
 from litwatch.store import analyses as analyses_store
 from litwatch.store import digests as digests_store
 from litwatch.store import fulltext as fulltext_store
@@ -80,7 +80,7 @@ from tests.briefs import (
 )
 from tests.conftest import FAITH, INTERP, TREE, gate_on, paper
 from tests.deep_service import DONE, make
-from tests.fakes import ScriptedProvider
+from tests.fakes import scripted_gate
 from tests.fakes_http import FakeArchive, FakeDeep
 from tests.scripted import refusal
 from tests.sessions import Bridge, Session, in_read, in_write
@@ -394,13 +394,11 @@ async def test_a_pass_every_brief_model_refused_stops_at_once_and_runs_again_fro
         asked.append(role.model)
         return refusal(role.model) if refusing else json.dumps(ANSWER)
 
-    def gateway(config: Config, journal) -> Gateway:
-        providers = {n: ScriptedProvider(n, respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+    models = scripted_gate(respond, listed)
 
     await graded(db, "central")
     fake = ready(FakeArchive())
-    worked = await fulltext.work(gate, listed, archive(fake), gateway=gateway)
+    worked = await fulltext.work(gate, listed, archive(fake), models=models)
     assert worked == {"fulltext_failed": 1}
     assert asked == [BRIEF_ROLE.model, fallback.model]
     (row,) = await passes(db)
@@ -422,7 +420,7 @@ async def test_a_pass_every_brief_model_refused_stops_at_once_and_runs_again_fro
     (row,) = await passes(db)
     assert (row["state"], row["failed_runs"], row["refused"]) == ("ready", 0, False)
     refusing, asked[:] = False, []
-    worked = await fulltext.work(gate, listed, archive(fake), gateway=gateway)
+    worked = await fulltext.work(gate, listed, archive(fake), models=models)
     assert worked == {"briefs_written": 1}
     assert asked == [BRIEF_ROLE.model]  # the owner's run starts from the role's own model
 
@@ -437,24 +435,22 @@ async def test_only_an_unusable_answer_starts_the_next_try_further_down_the_list
         asked.append(role.model)
         return "{not json" if role.model == BRIEF_ROLE.model else json.dumps(ANSWER)
 
-    def gateway(config: Config, journal) -> Gateway:
-        providers = {n: ScriptedProvider(n, respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+    models = scripted_gate(respond, listed)
 
     await graded(db, "central")
     fake = FakeArchive(status="failed")
-    worked = await fulltext.work(gate, listed, archive(fake), gateway=gateway)
+    worked = await fulltext.work(gate, listed, archive(fake), models=models)
     assert worked == {"fulltext_failed": 1}
     fake.status = "complete"
     ready(fake)
     await retry_failed(db)
-    worked = await fulltext.work(gate, listed, archive(fake), gateway=gateway)
+    worked = await fulltext.work(gate, listed, archive(fake), models=models)
     assert worked == {"fulltext_failed": 1}
     assert asked == [BRIEF_ROLE.model]  # after the run without text, the role's own model
     (row,) = await passes(db)
     assert (row["failed_runs"], row["unusable_runs"]) == (2, 1)
     await retry_failed(db)
-    worked = await fulltext.work(gate, listed, archive(fake), gateway=gateway)
+    worked = await fulltext.work(gate, listed, archive(fake), models=models)
     assert worked == {"briefs_written": 1}
     assert asked == [BRIEF_ROLE.model, fallback.model]
 
@@ -511,7 +507,7 @@ async def test_the_nightly_run_retries_failed_passes_and_works_the_queue(
     )
     fake = ready(FakeArchive())
     monkeypatch.setattr(fulltext, "archive_for", lambda config: archive(fake))
-    run_id = await nightly.run(gate, CONFIG, fetch=False, gateway=Writer().gateway)
+    run_id = await nightly.run(gate, CONFIG, fetch=False, models=Writer().gate(CONFIG))
     counts = (await in_read(db, runs.get, run_id))["counts"]
     assert (counts["fulltext_retried"], counts["briefs_written"]) == (1, 1)
     assert counts["calls"]["brief"]["calls"] == 1  # on the nightly run
@@ -641,7 +637,7 @@ async def test_a_paper_that_came_to_qualify_by_no_trigger_gets_its_pass_on_the_n
     await in_write(db, verdicts.add, found)  # and no settle
     assert await passes(db) == []
     monkeypatch.setattr(fulltext, "archive_for", lambda config: None)  # queued, not worked
-    await nightly.run(gate, CONFIG, fetch=False, gateway=Writer().gateway)
+    await nightly.run(gate, CONFIG, fetch=False, models=Writer().gate(CONFIG))
     (row,) = await passes(db)
     assert (row["kind"], row["reason"], row["state"]) == ("brief", "focus", "awaiting_text")
 
@@ -670,7 +666,7 @@ async def test_the_nightly_reconcile_is_not_cut_short_by_the_limit(db: Session, 
     )
     await in_write(db, verdicts.add, found)  # and no settle
     monkeypatch.setattr(fulltext, "archive_for", lambda config: None)
-    await nightly.run(gate, CONFIG, fetch=False, limit=1, gateway=Writer().gateway)
+    await nightly.run(gate, CONFIG, fetch=False, limit=1, models=Writer().gate(CONFIG))
     (row,) = await (
         await db.execute(
             "SELECT * FROM fulltext_passes WHERE paper_id = %s AND kind <> 'deep'", (other.id,)
@@ -745,7 +741,7 @@ async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(
         fake.texts[other.id] = (1, BODY)
     monkeypatch.setattr(fulltext, "TICK_SECONDS", 0)
     done = await fulltext.work_waiting(
-        gate, CONFIG, archive(fake), limit=2, wait=5, gateway=writer.gateway
+        gate, CONFIG, archive(fake), limit=2, wait=5, models=writer.gate(CONFIG)
     )
     assert done["briefs_written"] == 2 and len(writer.asked) == 2
 
@@ -761,7 +757,7 @@ def soon(monkeypatch):
 
 
 def workers(gate, fake: FakeArchive, writer: Writer) -> dict:
-    return {"fulltext": TextPassWorker(gate, CONFIG, archive(fake), gateway=writer.gateway)}
+    return {"fulltext": TextPassWorker(gate, CONFIG, archive(fake), models=writer.gate(CONFIG))}
 
 
 async def state_is(conn: Session, state: str) -> bool:
@@ -861,7 +857,12 @@ async def serve(db: Session, monkeypatch, fake: FakeArchive, writer: Writer, *in
     config = CONFIG.model_copy(update={"schedule": QUIET})
     dsn = f"{db.test_dsn}?options=-csearch_path%3D{db.test_schema}"
     app = create_app(
-        dsn, "t", config, writer.gateway, archive=archive(fake), integrations=list(integrations)
+        dsn,
+        "t",
+        config,
+        writer.gate(config),
+        archive=archive(fake),
+        integrations=list(integrations),
     )
     async with (
         app.router.lifespan_context(app),
@@ -1233,7 +1234,7 @@ async def test_a_nightly_beside_the_gate_takes_over_an_abandoned_pass_and_works_
             # Due again, the item looks once more, and leaves it to the nightly that runs: its
             # look holds the pass's row a moment, which the nightly's claim would skip.
             await until(looked_again, "the item looks again, and waits")
-            async with model_run(gate, CONFIG, "nightly", gateway=writer.gateway) as run:
+            async with model_run(gate, "nightly", models=writer.gate(CONFIG)) as run:
                 done = await nightly.text_passes(gate, CONFIG, run, None)
         assert done == {"briefs_written": 1}  # taken over by the nightly
         # The item waited for whatever held its pass when it last looked (the nightly's claim,
@@ -1299,7 +1300,7 @@ async def test_a_pass_finished_inline_as_its_item_decides_to_wait_leaves_it_no_w
         await until(held, "the item finds the pass held for an hour")
         # The nightly works it inline meanwhile: its write wants the running item again.
         done = await fulltext.wave(
-            gate, CONFIG, archive(fake), [c], run=None, gateway=writer.gateway
+            gate, CONFIG, archive(fake), [c], run=None, models=writer.gate(CONFIG)
         )
         assert done["briefs_written"] == 1
         finished.set()  # the Worker says Later, at the claim's end, an hour away
@@ -1331,7 +1332,7 @@ async def test_a_new_arxiv_version_is_read_again_by_the_next_nightly_run(
     assert await in_read(db, fulltext_store.outdated) == [P.id]
     fake = ready(FakeArchive(), version=2)
     monkeypatch.setattr(fulltext, "archive_for", lambda config: archive(fake))
-    await nightly.run(gate, CONFIG, fetch=False, gateway=Writer().gateway)
+    await nightly.run(gate, CONFIG, fetch=False, models=Writer().gate(CONFIG))
     old, new = await passes(db)
     assert (old["arxiv_version"], new["state"], new["paper_revision"], new["arxiv_version"]) == (
         1,

@@ -21,7 +21,7 @@ from litwatch.store import papers as papers_store
 from litwatch.store.calls import CallJournal
 from tests import settling
 from tests.conftest import FAITH, INTERP, TREE, AppClient, lease_lapses, paper, started
-from tests.fakes import ScriptedProvider
+from tests.fakes import ScriptedProvider, door
 from tests.sessions import Session, in_read, in_write
 
 STOPPED = {
@@ -358,7 +358,7 @@ def gateway(gate, run: int) -> Gateway:
         brief=RoleConfig(provider="openrouter", model="lab/b"),
     )
     providers = {n: ScriptedProvider(n, answer) for n in ("anthropic", "openrouter")}
-    return Gateway(models, providers, CallJournal(gate, run), retry_delays=(0.0,))
+    return door(models, providers, CallJournal(gate, run), retry_delays=(0.0,))
 
 
 async def test_an_account_error_fails_its_provider_until_its_next_reply(

@@ -420,11 +420,13 @@ async def wait(unit: WriteUnit, job_id: int, until: datetime) -> None:
 
 
 async def spent(unit: ReadUnit, job_id: int) -> float:
-    """What the job's calls cost so far, in all its runs (a call of unknown cost counts
-    nothing, as in the month's spend)."""
+    """What the job's calls cost so far, in all its runs: a call whose charge is unknown counts
+    at what it reserved against the ceiling (`inference_calls.reserved`) until its charge is
+    known, as the ceiling counted it (`llm.ceiling`), whichever process or run made it."""
     row = await (
         await unit.execute(
-            "SELECT coalesce(sum((c.usage ->> 'cost')::numeric), 0) AS cost "
+            "SELECT coalesce(sum(coalesce((c.usage ->> 'cost')::numeric, c.reserved::numeric)), 0) "
+            "AS cost "
             "FROM inference_calls c JOIN runs r ON r.id = c.run_id WHERE r.job_id = %s",
             (job_id,),
         )

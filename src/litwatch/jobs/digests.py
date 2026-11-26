@@ -12,7 +12,8 @@ from litwatch.core import Status
 from litwatch.core.digests import DigestPeriod, DigestState
 from litwatch.feedback import word
 from litwatch.gates.database import DatabaseGate
-from litwatch.jobs.context import GatewayFactory, ModelRun, default_gateway, model_run
+from litwatch.jobs.context import ModelRun, model_run
+from litwatch.llm import ModelGate
 from litwatch.store import digests as store_
 from litwatch.store import taxonomy as taxonomy_store
 
@@ -22,7 +23,8 @@ async def window(
     config: Config,
     first: date,
     last: date,
-    gateway: GatewayFactory = default_gateway,
+    *,
+    models: ModelGate,
 ) -> int:
     """The daily digests of every day from `first` to `last` in order, and the weekly digests
     of every Monday-to-Sunday week inside it, each after the next Monday's dailies (the last
@@ -33,7 +35,7 @@ async def window(
     rules = word.rules(config)
     async with (
         db.held("run"),
-        model_run(db, config, "digests", gateway=gateway) as run,
+        model_run(db, "digests", models=models) as run,
     ):
         async with db.read("write digests: taxonomy") as unit:
             tree = await taxonomy_store.load(unit)

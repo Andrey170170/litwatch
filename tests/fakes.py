@@ -12,9 +12,9 @@ import anthropic
 import httpx2
 import openai
 
-from litwatch.config import RoleConfig
+from litwatch.config import Config, RoleConfig
 from litwatch.intake.http import SourceError
-from litwatch.llm import ProviderError, Reply, Request, Stop, Usage
+from litwatch.llm import Gateway, ModelGate, ProviderError, Reply, Request, Stop, Usage
 
 
 def anthropic_message(
@@ -313,6 +313,21 @@ class ScriptedProvider:
         return Reply(answer, Stop.COMPLETE, usage)
 
 
+def door(models, providers, journal=None, **options: Any) -> Gateway:
+    """A door to a Model gate of its own over `providers` (`options`: `ModelGate`'s), its
+    calls journalled on `journal`: one run's calls, tested alone."""
+    return ModelGate(models, providers, **options).on(journal)
+
+
+def scripted_gate(
+    respond, config: Config, names: tuple[str, ...] = ("anthropic", "openrouter")
+) -> ModelGate:
+    """A Model gate over providers `names` scripted by `respond` (`ScriptedProvider`), serving
+    `config`'s models, a failed call tried again at once."""
+    providers = {n: ScriptedProvider(n, respond) for n in names}
+    return ModelGate(config.models, providers, retry_delays=(0.0,))
+
+
 class BatchingProvider(ScriptedProvider):
     """A scripted provider with Message Batches (`llm.batches.BatchProvider`). A batch's
     replies are computed when it is sent, at half of `ScriptedProvider`'s price, and given once
@@ -387,6 +402,7 @@ FAST: dict[str, Any] = {
     "poll": 0.01,
     "find_seconds": 1.0,
     "find_delays": (0.01, 0.01, 0.01),
+    "journal_delays": (0.01, 0.01),
 }
 
 

@@ -16,15 +16,16 @@ from litwatch.api import create_app
 from litwatch.api import settings as settings_api
 from litwatch.config import Classification, Config
 from litwatch.core import FAILED_RUNS, Cause, Paper
+from litwatch.core.budget import CallStart
 from litwatch.gates.database import WriteUnit
+from litwatch.jobs import context as job_context
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run, run_record
-from litwatch.llm import Gateway, ProviderError, Usage
+from litwatch.llm import ModelGate, ProviderError, Usage
 from litwatch.store import classifications as classifications_store
 from litwatch.store import failures, runs
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
-from litwatch.store.calls import CallJournal
 from tests import settling
 from tests.conftest import TREE, AppClient
 from tests.fakes import ScriptedProvider
@@ -278,7 +279,7 @@ async def test_a_paper_every_model_refused_stops_at_once_until_the_owner_tries_a
 
 async def test_a_result_for_text_that_changed_meanwhile_records_nothing(conn: Session, models):
     tree = await in_read(conn, taxonomy_store.load)
-    gateway = models.gateway(CONFIG, None)
+    gateway = models.gate(CONFIG).on()
     async with classification.classify([A], tree, gateway) as results:
         (found,) = [c async for c in results]
     rewritten = A.model_copy(update={"abstract": "An entirely different abstract about robots."})
@@ -337,9 +338,8 @@ async def test_a_failing_record_stops_every_call_before_the_run_closes(
                 cancelled.append(B.id)
                 raise
 
-    def gateway(config, journal):
-        providers = {n: Stalling(n, models.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+    providers = {n: Stalling(n, models.respond) for n in ("anthropic", "openrouter")}
+    gate = ModelGate(CONFIG.models, dict(providers), retry_delays=(0.0,))
 
     async def boom(unit: WriteUnit, found):
         await stalled.wait()
@@ -347,7 +347,7 @@ async def test_a_failing_record_stops_every_call_before_the_run_closes(
 
     monkeypatch.setattr(classification, "record", boom)
     with pytest.raises(RuntimeError):
-        await nightly.run(db, CONFIG, fetch=False, gateway=gateway)
+        await nightly.run(db, CONFIG, fetch=False, models=gate)
     assert cancelled == [B.id]
     (run,) = await rows(conn, "SELECT error, finished_at FROM runs")
     assert run["finished_at"] and "the database went away" in run["error"]
@@ -356,21 +356,26 @@ async def test_a_failing_record_stops_every_call_before_the_run_closes(
 @pytest.mark.parametrize(
     "failure", [RuntimeError("the journal's connection went away"), asyncio.CancelledError()]
 )
-async def test_a_journal_that_fails_after_the_job_keeps_the_jobs_error_and_its_cost(
+async def test_a_tally_that_fails_after_the_job_keeps_the_jobs_error_and_the_calls_charge(
     conn: Session, db, monkeypatch, failure
 ):
-    async def lost(self):
+    """The run's cost is its calls' rows, tallied in the unit that closes it: when that unit
+    fails after the job did, the job's error is the one raised, and each charge stands on its
+    row for the next tally."""
+
+    async def lost(unit, run_id):
         raise failure
 
-    monkeypatch.setattr(CallJournal, "by_role", lost)
+    monkeypatch.setattr(job_context, "tally", lost)
     with pytest.raises(ValueError, match="the job's own"):
-        async with model_run(db, CONFIG, "nightly", gateway=lambda config, journal: None) as run:
-            call = await run.journal.start("judge", "m", "key", None)
+        async with model_run(db, "nightly", models=ModelGate(CONFIG.models, {})) as run:
+            call = await run.journal.start(
+                CallStart(run_id=run.run_id, work_id=None, operation="judge", model="m", key="k")
+            )
             await run.journal.record(call, Usage(model="m", cost=0.25))
             raise ValueError("the job's own")
-    (run,) = await rows(conn, "SELECT error, cost, finished_at FROM runs")
-    assert run["finished_at"] and run["error"] == "ValueError: the job's own"
-    assert float(run["cost"]) == 0.25  # read before the count by role that failed
+    (row,) = await rows(conn, "SELECT usage->>'cost' AS cost FROM inference_calls")
+    assert float(row["cost"]) == 0.25
 
 
 async def test_a_run_that_cannot_close_after_the_job_failed_raises_the_jobs_error(

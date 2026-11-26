@@ -59,7 +59,7 @@ from litwatch.core.digests import DigestPeriod
 from litwatch.digests import writer
 from litwatch.fulltext import brief
 from litwatch.gates.database import DatabaseGate, ReadUnit
-from litwatch.llm import CallError, Gateway, Provider, Request
+from litwatch.llm import CallError, Gateway, ModelGate, Request
 from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
 from litwatch.store import digests as digests_store
 from litwatch.store import papers as papers_store
@@ -453,11 +453,11 @@ def todo(
     return found
 
 
-def gateway(role: str, candidate: Candidate, providers: Mapping[str, Provider]) -> Gateway:
-    """A gateway that serves `role` with the candidate alone, once a call (each attempt is a
-    call here, reserved and recorded), and validation's detail kept."""
-    models = Models().model_copy(update={role: candidate.role})
-    return Gateway(models, dict(providers), retry_delays=(), debug=True)
+def gateway(role: str, candidate: Candidate, models: ModelGate) -> Gateway:
+    """A door to the process's Model gate that serves `role` with the candidate alone, once a
+    call (each attempt is a call here, reserved and recorded)."""
+    served = Models().model_copy(update={role: candidate.role})
+    return models.on(models=served, retry_delays=())
 
 
 @dataclass
@@ -471,21 +471,21 @@ class Ran:
 
 async def run(
     work: list[Todo],
-    providers: Mapping[str, Provider],
+    models: ModelGate,
     out: Path,
     ceiling: float,
     *,
     concurrency: int = 8,
     progress: Callable[[Row], None] | None = None,
 ) -> Ran:
-    """Make the calls in `work` not already made, in order, appending each to
+    """Make the calls in `work` not already made through `models`, in order, appending each to
     `out/<role>.jsonl` as it ends, while the budget allows (see the module's docstring).
     Refuses, before any call, a ceiling or concurrency that can't bound a run, work on a
     provider without credentials (a call never sent would count against the ceiling), a
     directory another run holds, and one whose calls the ceiling can't count."""
     if not (math.isfinite(ceiling) and ceiling > 0) or concurrency < 1:
         raise ValueError("the ceiling is a positive amount, and the concurrency at least 1")
-    if missing := {t.candidate.role.provider for t in work} - set(providers):
+    if missing := {t.candidate.role.provider for t in work} - set(models.providers):
         raise ValueError(f"no credentials for {', '.join(sorted(missing))}")
     out.mkdir(parents=True, exist_ok=True)
     with (out / LOCK).open("w") as held:
@@ -507,12 +507,12 @@ async def run(
                 f"{OVERRUN} in an earlier run into {out}: correct its price_max and max_output, "
                 "then start a new directory"
             )
-        return await _run(work, providers, out, ceiling, concurrency, progress)
+        return await _run(work, models, out, ceiling, concurrency, progress)
 
 
 async def _run(
     work: list[Todo],
-    providers: Mapping[str, Provider],
+    models: ModelGate,
     out: Path,
     ceiling: float,
     concurrency: int,
@@ -545,7 +545,7 @@ async def _run(
             with (out / PENDING).open("a", encoding="utf-8") as f:
                 f.write(json.dumps(held | {"reserved": hold}) + "\n")
             started = time.monotonic()
-            row = await _ask(t, providers)
+            row = await _ask(t, models)
             row.reserved, row.attempt = hold, attempt
             row.seconds = round(time.monotonic() - started, 2)
             async with room:
@@ -577,7 +577,7 @@ async def _run(
     return ran
 
 
-async def _ask(t: Todo, providers: Mapping[str, Provider]) -> Row:
+async def _ask(t: Todo, models: ModelGate) -> Row:
     def row(outcome: str, usage: Any, **rest: Any) -> Row:
         return Row(
             set=t.case.set,
@@ -593,7 +593,7 @@ async def _ask(t: Todo, providers: Mapping[str, Provider]) -> Row:
         )
 
     try:
-        answer = await gateway(t.case.role, t.candidate, providers).ask(
+        answer = await gateway(t.case.role, t.candidate, models).ask(
             t.case.role, t.request, paper_id=t.case.paper
         )
     except CallError as exc:

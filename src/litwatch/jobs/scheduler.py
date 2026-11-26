@@ -38,7 +38,8 @@ from litwatch.core.work import WorkItem
 from litwatch.gates.database import BusyError, DatabaseGate, LeaseLostError, ReadUnit
 from litwatch.gates.work import Later, retryable
 from litwatch.jobs import nightly, publications
-from litwatch.jobs.context import GatewayFactory, UnclosedError, default_gateway
+from litwatch.jobs.context import UnclosedError
+from litwatch.llm import ModelGate
 from litwatch.publications import Dblp, PublicationSource
 from litwatch.store import runs, work
 
@@ -185,12 +186,11 @@ async def _served(db: DatabaseGate, kind: str, item: WorkItem) -> bool:
 
 
 class NightlyWorker:
-    """Runs the nightly of each fire, under the run lock, through `gateway`'s models."""
+    """Runs the nightly of each fire, under the run lock, through `models`, the process's
+    Model gate."""
 
-    def __init__(
-        self, db: DatabaseGate, config: Config, gateway: GatewayFactory = default_gateway
-    ) -> None:
-        self.db, self.config, self.gateway = db, config, gateway
+    def __init__(self, db: DatabaseGate, config: Config, models: ModelGate) -> None:
+        self.db, self.config, self.models = db, config, models
 
     async def __call__(self, item: WorkItem) -> Later | None:
         held = AsyncExitStack()
@@ -203,7 +203,7 @@ class NightlyWorker:
             async with held:
                 # Decided under the run lock, which every nightly run takes.
                 if not await _served(self.db, "nightly", item):
-                    await nightly.locked(self.db, self.config, gateway=self.gateway)
+                    await nightly.locked(self.db, self.config, models=self.models)
         except UnclosedError as exc:
             # Its run did not close, nor release the jobs it held back: the fire is not served,
             # and runs again after a backoff, its item waiting meanwhile, so no chunk starts

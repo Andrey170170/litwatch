@@ -25,8 +25,9 @@ from litwatch.archive import (
     read_text,
 )
 from litwatch.core import Paper, Taxonomy
+from litwatch.core.budget import CallStart
 from litwatch.fulltext import brief, trim
-from litwatch.llm import CallError, Gateway, Usage
+from litwatch.llm import CallError, Gateway, ModelGate, Usage
 
 # The Brief asked for, and the Gist's hard limit (`brief.SYSTEM`, `brief.Output`).
 ASKED_BRIEF_WORDS = (120, 200)
@@ -130,7 +131,10 @@ class _Spent:
     """A journal that only adds up each paper's charges, so a refusal the fallback answered
     counts in what its paper cost; a call with no known charge (none reported, or none
     recorded, as after a timeout) makes the total unknown. Nothing is reused: an evaluation
-    asks afresh."""
+    asks afresh, and nothing batches (`observes`)."""
+
+    run_id: int | None = 0  # no run: the rows are its own
+    observes: bool = False
 
     def __init__(self) -> None:
         self.calls: list[tuple[str | None, float | None]] = []  # paper, charge, by call id
@@ -142,16 +146,8 @@ class _Spent:
     async def cached(self, key: str) -> None:
         return None
 
-    async def start(
-        self,
-        role: str,
-        model: str,
-        key: str,
-        paper_id: str | None,
-        via: str | None = None,
-        effort: str | None = None,
-    ) -> int:
-        self.calls.append((paper_id, None))
+    async def start(self, call: CallStart) -> int:
+        self.calls.append((call.paper_id, None))
         return len(self.calls) - 1
 
     async def record(self, call_id: int, usage: Usage) -> None:
@@ -171,6 +167,12 @@ class _Spent:
     ) -> None:
         if usage is not None:
             self.calls[call_id] = (self.calls[call_id][0], usage.cost)
+
+    async def refused(self, key: str, paper_id: str | None) -> bool:
+        return False
+
+    async def in_batch(self, key: str, work_id: int | None, owned: list[int]) -> None:
+        return None
 
 
 def _usage(usage: Usage | None) -> dict:
@@ -203,7 +205,7 @@ async def _text(
 
 
 async def run(
-    gateway: Gateway,
+    models: ModelGate,
     tree: Taxonomy,
     papers: list[tuple[Paper, Entry]],
     archive: ArchiveClient,
@@ -215,10 +217,13 @@ async def run(
     poll: float = 20.0,
     progress: Callable[[Result], None] | None = None,
 ) -> list[Result]:
-    """Write the Brief of every paper not yet answered in `out`, appending each answer as it
-    arrives; a paper whose text could not be had is left to the next run. Refuses to resume a
-    run made with another configuration of the role or text variant (`TEXTS`); a paper whose
-    title, abstract, version, update or area changed since its answer is written again."""
+    """Write the Brief of every paper not yet answered in `out` through `models`, appending each
+    answer as it arrives with what its calls were charged; a paper whose text could not be had
+    is left to the next run. Refuses to resume a run made with another configuration of the
+    role or text variant (`TEXTS`); a paper whose title, abstract, version, update or area
+    changed since its answer is written again."""
+    spent = _Spent()
+    gateway = models.on(spent)
     asked = fingerprint(gateway, text)
     prepare = TEXTS[text]
     now = {p.id: inputs(p, e) for p, e in papers}
@@ -229,9 +234,6 @@ async def run(
         )
     gate = asyncio.Semaphore(concurrency)
     found: list[Result] = []
-    spent = _Spent()
-    if gateway.journal is None:  # a dry run's gateway: count what each paper cost
-        gateway.journal = spent
 
     async def one(paper: Paper, entry: Entry) -> None:
         area = tree.get(entry.area) if entry.area else None
@@ -267,8 +269,7 @@ async def run(
                         inputs=now[paper.id],
                     )
                 result.seconds = round(time.monotonic() - started, 2)
-                if gateway.journal is spent:
-                    result.cost = spent.cost(paper.id)
+                result.cost = spent.cost(paper.id)
             result.version, result.source = read.version, read.source
             result.chars = len(prepare(read.body, read.source))
         with out.open("a", encoding="utf-8") as f:

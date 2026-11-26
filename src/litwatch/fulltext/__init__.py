@@ -43,8 +43,8 @@ from litwatch.fulltext import brief
 from litwatch.gates.database import DatabaseGate, WriteUnit
 from litwatch.integrations import IntegrationError
 from litwatch.integrations import archive as archive_integration
-from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
-from litwatch.llm import CallError, Gateway
+from litwatch.jobs.context import ModelRun, model_run
+from litwatch.llm import CallError, Gateway, ModelGate
 from litwatch.llm.batches import DRAIN
 from litwatch.store import fulltext as store_
 from litwatch.store import outbox
@@ -277,18 +277,18 @@ async def work(
     archive: ArchiveClient,
     *,
     run: ModelRun | None = None,
-    gateway: GatewayFactory = default_gateway,
+    models: ModelGate | None = None,
     limit: int | None = None,
     deadline: float | None = None,
     job: int | None = None,
 ) -> Counter[str]:
     """Try every pass that is due once, up to `limit`, `BATCH` at a time: read its text, and
     write from it. No batch starts after `deadline` (`time.monotonic()`); those left are the
-    worker's. The calls go on `run`, or on a run of kind `fulltext` opened only when some text
-    arrived. Returns how the tries ended.
+    worker's. The calls go on `run`, or on a run of kind `fulltext` opened through `models`
+    only when some text arrived. Returns how the tries ended.
 
     A `run` (a nightly) leaves the owner's passes to their work items; batching, it claims all
-    the automatic ones due at once, held until its gateway's deadline. Without a run, while
+    the automatic ones due at once, held until its batches' deadline. Without a run, while
     another job holds the run lock, only the owner's are worked (models.md, batches). A re-run's
     passes are worked only by its `job`, on its run, until its ceiling is reached."""
     counts: Counter[str] = Counter()
@@ -312,7 +312,7 @@ async def work(
         if not claimed:
             break
         tried.update(c.id for c in claimed)
-        counts += await wave(db, config, archive, claimed, run=run, gateway=gateway, owners=owners)
+        counts += await wave(db, config, archive, claimed, run=run, models=models)
     return counts
 
 
@@ -322,15 +322,13 @@ async def wave(
     archive: ArchiveClient,
     claimed: list[Claimed],
     *,
-    run: ModelRun | None,
-    gateway: GatewayFactory = default_gateway,
-    owners: bool | None = None,
+    run: ModelRun | None = None,
+    models: ModelGate | None = None,
 ) -> Counter[str]:
     """Try the claimed passes once: settle each paper (`still_wanted`), read the texts, and
     write from them, `CONCURRENCY` at a time. The calls go on `run`, or on a run of kind
-    `fulltext` opened only when some text arrived; `owners` is how the passes were claimed
-    (`claim`): with no nightly running, a key in an open batch is a dead run's. Returns how
-    the tries ended."""
+    `fulltext` opened through `models` only when some text arrived. Returns how the tries
+    ended."""
     counts: Counter[str] = Counter()
     rules = word.rules(config)
     reads = asyncio.Semaphore(CONCURRENCY)
@@ -356,21 +354,16 @@ async def wave(
     texts = [a for a in attempts if a.text is not None]
     if not texts:
         return counts
-    # With no nightly running, a key in an open batch is a dead run's (models.md, batches).
-    factory = attaching(gateway) if owners is None else gateway
-    opened = (
-        contextlib.nullcontext(run) if run else model_run(db, config, "fulltext", gateway=factory)
-    )
-    async with opened as r:
-        try:
-            async with _write(texts, r.gateway) as answered:
-                async for a in answered:
-                    if await record_in_change(db, a, rules):
-                        counts[_outcome(a)] += 1
-                        r.add(_outcome(a))
-        finally:
-            if run is None:  # the gateway this wave opened, its batch polling included
-                await r.gateway.close()
+    if run is not None:
+        opened = contextlib.nullcontext(run)
+    else:
+        assert models is not None, "a wave's calls go on a run, or on one it opens"
+        opened = model_run(db, "fulltext", models=models)
+    async with opened as r, _write(texts, r.gateway) as answered:
+        async for a in answered:
+            if await record_in_change(db, a, rules):
+                counts[_outcome(a)] += 1
+                r.add(_outcome(a))
     return counts
 
 
@@ -381,7 +374,7 @@ async def work_waiting(
     *,
     limit: int | None = None,
     wait: float = 0,
-    gateway: GatewayFactory = default_gateway,
+    models: ModelGate,
     report: Callable[[Counter[str]], None] | None = None,
 ) -> Counter[str]:
     """`work`, and again every `TICK_SECONDS` for at most `wait` seconds while some passes await
@@ -393,7 +386,7 @@ async def work_waiting(
         allowance = None if limit is None else limit - worked(total)
         if allowance is not None and allowance <= 0:
             return total
-        done = await work(db, config, archive, gateway=gateway, limit=allowance)
+        done = await work(db, config, archive, models=models, limit=allowance)
         total.update(done)
         if report:
             report(done)

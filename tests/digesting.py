@@ -9,13 +9,13 @@ from litwatch import digests
 from litwatch.config import Config
 from litwatch.digests import writer
 from litwatch.jobs.context import model_run
-from litwatch.llm import Gateway
+from litwatch.llm import ModelGate
 from litwatch.store import digests as store_
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
 from tests import settling
 from tests.conftest import FAITH, INTERP, gate_on, paper
-from tests.fakes import ScriptedProvider
+from tests.fakes import scripted_gate
 from tests.seed import analyse, classify, grade
 from tests.sessions import Bridge, Session, in_read, in_write
 
@@ -48,9 +48,8 @@ class Writer:
             answer["text"] += f" As [an earlier paper]({min(out.earlier)}) found."
         return json.dumps(answer)
 
-    def gateway(self, config: Config, journal) -> Gateway:
-        providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+    def gate(self, config: Config) -> ModelGate:
+        return scripted_gate(self.respond, config)
 
 
 async def listed(conn: Session, day: date, *papers) -> None:
@@ -78,7 +77,7 @@ async def day(conn: Session, w: Writer, on: date, config: Config | None = None) 
     tree = await in_read(conn, taxonomy_store.load)
     async with (
         gate_on(conn) as db,
-        model_run(db, config or Config(), "digests", gateway=w.gateway) as run,
+        model_run(db, "digests", models=w.gate(config or Config())) as run,
     ):
         return await digests.write_day(Bridge(conn), run, tree, on, rules=settling.RULES)
 
@@ -87,7 +86,7 @@ async def week(conn: Session, w: Writer, monday: date) -> None:
     tree = await in_read(conn, taxonomy_store.load)
     async with (
         gate_on(conn) as db,
-        model_run(db, Config(), "digests", gateway=w.gateway) as run,
+        model_run(db, "digests", models=w.gate(Config())) as run,
     ):
         await digests.write_week(Bridge(conn), run, tree, monday, rules=settling.RULES)
 

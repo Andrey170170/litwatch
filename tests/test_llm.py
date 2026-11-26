@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 import anthropic
@@ -15,6 +16,7 @@ from litwatch.config import ROLES, Models, RoleConfig
 from litwatch.llm import CallError, Gateway, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm import ceiling as ceilings
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
+from litwatch.llm.context import spending
 from litwatch.llm.openai import BASE_URL, OpenAIProvider, responses_request
 from litwatch.llm.openrouter import OpenRouterProvider
 from litwatch.llm.types import DEFAULT_MAX_TOKENS
@@ -24,6 +26,7 @@ from tests.fakes import (
     ScriptedProvider,
     SdkClient,
     anthropic_message,
+    door,
     openai_response,
     openrouter_completion,
     status_error,
@@ -56,7 +59,7 @@ def gateway(
         providers["openrouter"] = OpenRouterProvider(client=openrouter)
     if openai is not None:
         providers["openai"] = OpenAIProvider(client=openai)
-    return Gateway(models, providers, journal, retry_delays=(0.0, 0.0), debug=debug)
+    return door(models, providers, journal, retry_delays=(0.0, 0.0), debug=debug)
 
 
 def test_anthropic_request_carries_the_schema_effort_and_a_cached_system_prompt():
@@ -261,7 +264,7 @@ async def test_a_5xx_may_have_been_billed_so_its_reservation_is_kept_and_its_row
     sdk, role = (openai, SOL) if provider == "openai" else (anthropic, HAIKU)
     reply = openai_response(GOOD) if provider == "openai" else anthropic_message(GOOD)
     client = SdkClient(status_error(sdk, 500), reply)
-    gw = Gateway(
+    gw = door(
         Models(brief=role),
         {"openai": OpenAIProvider(client=client), "anthropic": AnthropicProvider(client=client)},
         journal,
@@ -271,8 +274,8 @@ async def test_a_5xx_may_have_been_billed_so_its_reservation_is_kept_and_its_row
     bound = ceilings.listed_bound(role, tokens_in)
     assert bound is not None
     most = ceilings.Ceiling.most(bound, tokens_in, DEFAULT_MAX_TOKENS)
-    gw.ceiling = ceilings.Ceiling(1.5 * most, {})  # room for one send whose charge is unknown
-    with pytest.raises(CallError) as raised:
+    room = ceilings.Ceiling(1.5 * most, {})  # room for one send whose charge is unknown
+    with spending(ceiling=room), pytest.raises(CallError) as raised:
         await gw.ask("brief", REQUEST)
     assert raised.value.kind == "ceiling"  # the retry did not fit beside the kept reservation
     (row,) = await calls(conn)  # the retry, never admitted, has no row, nor overwrites this one
@@ -369,7 +372,7 @@ async def test_a_briefly_absent_provider_is_tried_again_and_a_timeout_is_not():
         return GOOD
 
     flaky.respond = respond
-    gw = Gateway(MODELS, {"anthropic": flaky}, retry_delays=(0.0, 0.0))
+    gw = door(MODELS, {"anthropic": flaky}, retry_delays=(0.0, 0.0))
     assert (await gw.ask("writer", REQUEST)).value.yes
     assert len(flaky.calls) == 3
 
@@ -378,14 +381,14 @@ async def test_a_briefly_absent_provider_is_tried_again_and_a_timeout_is_not():
 
     timing_out = ScriptedProvider("anthropic", slow)
     with pytest.raises(CallError, match="timeout"):
-        await Gateway(MODELS, {"anthropic": timing_out}).ask("writer", REQUEST)
+        await door(MODELS, {"anthropic": timing_out}).ask("writer", REQUEST)
     assert len(timing_out.calls) == 1
 
     def broken(role, request):
         raise ProviderError("BadRequestError: no")
 
     with pytest.raises(CallError, match="provider: BadRequestError"):
-        await Gateway(MODELS, {"anthropic": ScriptedProvider("anthropic", broken)}).ask(
+        await door(MODELS, {"anthropic": ScriptedProvider("anthropic", broken)}).ask(
             "writer", REQUEST
         )
 
@@ -511,7 +514,7 @@ async def test_calls_are_journalled_and_an_identical_call_is_reused_for_free(
     (row,) = await calls(conn)
     assert (row["operation"], row["paper_id"], row["error"]) == ("writer", "2609.1", None)
     assert row["output"] == {"yes": True, "why": "it says so"}
-    assert await journal.total() == pytest.approx(first.usage.cost)
+    assert row["usage"]["cost"] == pytest.approx(first.usage.cost)  # the reuse costs nothing
 
 
 async def test_reuse_is_keyed_by_who_answers_so_judge_and_check_never_share_a_reply(
@@ -524,7 +527,7 @@ async def test_reuse_is_keyed_by_who_answers_so_judge_and_check_never_share_a_re
         return GOOD
 
     providers = {n: ScriptedProvider(n, respond) for n in ("anthropic", "openrouter")}
-    gw = Gateway(Models(), providers, journal)
+    gw = door(Models(), providers, journal)
     await gw.ask("judge", REQUEST)
     await gw.ask("check", REQUEST)
     # The writer is configured exactly like the judge, so it may share its reply.
@@ -534,9 +537,9 @@ async def test_reuse_is_keyed_by_who_answers_so_judge_and_check_never_share_a_re
         OPUS.model_copy(update={"effort": "high"}),
         RoleConfig(provider="anthropic", model="claude-sonnet-5-5", effort="medium"),
     ):
-        await Gateway(Models(judge=changed), providers, journal).ask("judge", REQUEST)
+        await door(Models(judge=changed), providers, journal).ask("judge", REQUEST)
     rerouted = MUSE.model_copy(update={"routing": ("other",)})
-    await Gateway(Models(check=rerouted), providers, journal).ask("check", REQUEST)
+    await door(Models(check=rerouted), providers, journal).ask("check", REQUEST)
     assert len(said) == 5 and len(set(said)) == 4
 
 
@@ -553,7 +556,7 @@ async def test_a_rejected_reply_keeps_its_charge_and_is_not_reused(conn: Session
     def down(role, request):
         raise ProviderError("APIConnectionError", transient=True, unanswered=True)
 
-    offline = Gateway(MODELS, {"anthropic": ScriptedProvider("anthropic", down)}, journal)
+    offline = door(MODELS, {"anthropic": ScriptedProvider("anthropic", down)}, journal)
     offline.retry_delays = ()
     with pytest.raises(CallError):
         await offline.ask("writer", REQUEST)
@@ -569,7 +572,7 @@ GEMINI = RoleConfig(provider="openrouter", model="google/gemini-3.8-flash", effo
 LISTED = Models(brief=OPUS.model_copy(update={"fallbacks": (SONNET, MUSE)}))
 
 
-def listed(script: dict[str, object], said: list[str]) -> dict[str, ScriptedProvider]:
+def listed(script: Mapping[str, object], said: list[str]) -> dict[str, ScriptedProvider]:
     """Providers answering each model as `script` says (a reply's text, a `Reply`, or an
     exception), the answer `GOOD` when it says nothing; `said` gets each model asked."""
 
@@ -592,7 +595,7 @@ async def test_a_refusal_goes_down_the_list_in_order_each_journalled_under_the_r
 ):
     said: list[str] = []
     script = {OPUS.model: refusal(OPUS.model), SONNET.model: refusal(SONNET.model, "cyber")}
-    gw = Gateway(LISTED, listed(script, said), journal, retry_delays=())
+    gw = door(LISTED, listed(script, said), journal, retry_delays=())
     answer = await gw.ask("brief", REQUEST, paper_id="p")
     assert answer.value.yes and answer.model == MUSE.label
     assert said == [OPUS.model, SONNET.model, MUSE.model]  # in order, in the same run
@@ -614,7 +617,7 @@ async def test_a_refusal_goes_down_the_list_in_order_each_journalled_under_the_r
 async def test_every_model_refusing_stops_at_once_with_the_last_refusal(conn: Session, journal):
     said: list[str] = []
     script = {m.model: refusal(m.model) for m in LISTED.brief.models}
-    gw = Gateway(LISTED, listed(script, said), journal, retry_delays=())
+    gw = door(LISTED, listed(script, said), journal, retry_delays=())
     with pytest.raises(CallError) as raised:
         await gw.ask("brief", REQUEST, paper_id="p")
     assert (raised.value.kind, raised.value.model) == ("refused", MUSE.label)
@@ -627,7 +630,7 @@ async def test_a_run_started_down_the_list_goes_on_from_the_top_on_refusals():
     `start` answered unusably before, not refused."""
     said: list[str] = []
     script = {SONNET.model: refusal(SONNET.model), MUSE.model: refusal(MUSE.model)}
-    gw = Gateway(LISTED, listed(script, said), retry_delays=())
+    gw = door(LISTED, listed(script, said), retry_delays=())
     answer = await gw.ask("brief", REQUEST, start=1)
     assert answer.model == OPUS.label
     assert said == [SONNET.model, MUSE.model, OPUS.model]
@@ -649,7 +652,7 @@ async def test_a_run_started_down_the_list_goes_on_from_the_top_on_refusals():
 )
 async def test_an_unusable_answer_or_none_never_moves_down_in_the_run(answer, kind):
     said: list[str] = []
-    gw = Gateway(LISTED, listed({OPUS.model: answer}, said), retry_delays=(0.0,))
+    gw = door(LISTED, listed({OPUS.model: answer}, said), retry_delays=(0.0,))
     with pytest.raises(CallError) as raised:
         await gw.ask("brief", REQUEST)
     assert (raised.value.kind, raised.value.model) == (kind, OPUS.label)
@@ -658,16 +661,16 @@ async def test_an_unusable_answer_or_none_never_moves_down_in_the_run(answer, ki
 
 async def test_start_asks_further_down_the_list_and_past_its_end_the_last():
     said: list[str] = []
-    gw = Gateway(LISTED, listed({}, said), retry_delays=())
+    gw = door(LISTED, listed({}, said), retry_delays=())
     for start, model in ((1, SONNET), (2, MUSE), (7, MUSE)):
         user = f"start {start}"
         answer = await gw.ask("brief", Request(system="s", user=user, output=Answer), start=start)
         assert answer.model == model.label and said[-1] == model.model
     # A list of one: a refusal is the refusal of every model.
     with pytest.raises(CallError, match="refused"):
-        await Gateway(
-            LISTED, listed({"claude-haiku-5-5": refusal("h")}, said), retry_delays=()
-        ).ask("field_grade", REQUEST, start=2)
+        await door(LISTED, listed({"claude-haiku-5-5": refusal("h")}, said), retry_delays=()).ask(
+            "field_grade", REQUEST, start=2
+        )
 
 
 async def test_a_fallback_without_credentials_is_a_call_with_no_answer():
@@ -675,7 +678,7 @@ async def test_a_fallback_without_credentials_is_a_call_with_no_answer():
     models = Models(brief=OPUS.model_copy(update={"fallbacks": (MUSE, SONNET)}))
     for script, outcome in (({}, None), ({OPUS.model: refusal(OPUS.model)}, "no credentials")):
         anthropic_only = {"anthropic": listed(script, said)["anthropic"]}
-        gw = Gateway(models, anthropic_only, retry_delays=())
+        gw = door(models, anthropic_only, retry_delays=())
         if outcome is None:  # what the role's own model answers needs nothing else
             assert (await gw.ask("brief", REQUEST)).value.yes
             continue
@@ -823,7 +826,8 @@ async def test_in_debug_mode_a_kept_failed_reply_is_still_never_reused(conn: Ses
 
 def test_debug_mode_is_off_unless_the_file_or_the_environment_turns_it_on(tmp_path, monkeypatch):
     from litwatch import config  # noqa: PLC0415
-    from litwatch.jobs.context import default_gateway  # noqa: PLC0415
+    from litwatch.gates.database import DatabaseGate  # noqa: PLC0415
+    from litwatch.jobs.context import model_gate  # noqa: PLC0415
 
     monkeypatch.delenv("LITWATCH_DEBUG", raising=False)
     plain, on = tmp_path / "plain.toml", tmp_path / "debug.toml"
@@ -837,8 +841,9 @@ def test_debug_mode_is_off_unless_the_file_or_the_environment_turns_it_on(tmp_pa
     monkeypatch.delenv("LITWATCH_CONFIG", raising=False)
     monkeypatch.chdir(tmp_path)  # no litwatch.toml here: the defaults, and the environment
     assert config.load().debug
-    assert default_gateway(config.load(plain), None).debug
-    assert not default_gateway(config.Config(), None).debug
+    unopened = DatabaseGate("postgresql://unused")
+    assert model_gate(unopened, config.load(plain)).on().debug
+    assert not model_gate(unopened, config.Config()).on().debug
 
 
 @pytest.mark.parametrize(

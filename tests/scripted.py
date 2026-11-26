@@ -6,10 +6,10 @@ import json
 
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.jobs import nightly
-from litwatch.llm import Gateway, Reply, Stop, Usage
+from litwatch.llm import ModelGate, Reply, Stop, Usage
 from litwatch.store import runs
 from tests.conftest import TREE, gate_on, paper
-from tests.fakes import ScriptedProvider
+from tests.fakes import scripted_gate
 from tests.sessions import Session, in_read
 
 CLASSIFY = RoleConfig(provider="openrouter", model="test/decider")
@@ -104,14 +104,13 @@ class Scripted:
             raise answer
         return json.dumps(answer)
 
-    def gateway(self, config: Config, journal) -> Gateway:
-        providers = {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")}
-        return Gateway(config.models, providers, journal, retry_delays=(0.0,))
+    def gate(self, config: Config) -> ModelGate:
+        return scripted_gate(self.respond, config)
 
 
 async def night(conn: Session, models: Scripted, config: Config = CONFIG) -> dict:
     async with gate_on(conn) as db:
-        run_id = await nightly.run(db, config, fetch=False, gateway=models.gateway)
+        run_id = await nightly.run(db, config, fetch=False, models=models.gate(config))
     return (await in_read(conn, runs.get, run_id))["counts"]
 
 

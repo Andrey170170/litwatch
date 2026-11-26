@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch.gates.context import current_work
 from litwatch.gates.database import ReadUnit, WriteUnit
+from litwatch.store.text import stored, stored_json
 
 _JSON = {"counts", "intake"}
 _FIELDS = {"fetched", "inserted", "updated", "cost", "error", *_JSON}
@@ -180,7 +181,9 @@ async def _set(
     values = []
     for name, value in fields.items():
         sets.append(sql.SQL("{} = %s").format(sql.Identifier(name)))
-        values.append(Jsonb(value) if name in _JSON and value is not None else value)
+        if name == "error" and value is not None:  # text from outside: an exception's message
+            value = stored(value)
+        values.append(Jsonb(stored_json(value)) if name in _JSON and value is not None else value)
     await unit.execute(
         sql.SQL("UPDATE runs SET {} WHERE id = %s").format(sql.SQL(", ").join(sets)),
         (*values, run_id),

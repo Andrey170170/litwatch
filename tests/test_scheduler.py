@@ -167,7 +167,7 @@ async def test_a_fire_a_run_served_already_is_neither_submitted_nor_run(
     monkeypatch.setattr(nightly, "locked", never)
     async with db.write("a fire's item") as unit:
         item = await work.submit(unit, "nightly", scheduler.fire_key(fired), lasting=True)
-    assert await scheduler.NightlyWorker(db, config)(item) is None
+    assert await scheduler.NightlyWorker(db, config, Scripted().gate(config))(item) is None
 
 
 @pytest.mark.parametrize("ended", ["failed", "still open"])
@@ -212,7 +212,7 @@ async def test_a_run_started_before_a_fire_does_not_serve_it(conn: Session, db, 
     monkeypatch.setattr(nightly, "locked", runs_it)
     item = WorkItem(**{k: row[k] for k in ("id", "kind", "key", "admission", "not_before")},
                     state=ItemState.RUNNING, attempts=1)  # fmt: skip
-    assert await scheduler.NightlyWorker(db, config)(item) is None
+    assert await scheduler.NightlyWorker(db, config, Scripted().gate(config))(item) is None
     assert ran == ["the fire's nightly"]
 
 
@@ -256,7 +256,7 @@ async def test_a_nightly_blocked_by_the_run_lock_stays_pending_then_runs(
     monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False, with_digests=False))
     async with db.write("a fire's item") as unit:
         item = await work.submit(unit, "nightly", scheduler.fire_key(DAY), lasting=True)
-    workers = {"nightly": scheduler.NightlyWorker(db, CONFIG, models.gateway)}
+    workers = {"nightly": scheduler.NightlyWorker(db, CONFIG, models.gate(CONFIG))}
     gate = WorkGate(db, poll=0.1)
 
     async def tried() -> bool:
@@ -299,9 +299,9 @@ async def test_a_nightly_brings_forward_the_chunks_it_held_back_as_it_lets_go(
     if through == "the fire":
         async with db.write("a fire's item") as unit:
             item = await work.submit(unit, "nightly", scheduler.fire_key(DAY), lasting=True)
-        assert await scheduler.NightlyWorker(db, CONFIG)(item) is None
+        assert await scheduler.NightlyWorker(db, CONFIG, Scripted().gate(CONFIG))(item) is None
     else:
-        await nightly.run(db, CONFIG)
+        await nightly.run(db, CONFIG, models=Scripted().gate(CONFIG))
     (chunk,) = await items_of(conn, jobs_store.WORK, str(job))
     assert chunk["not_before"] <= datetime.now(UTC)
 
@@ -366,7 +366,8 @@ async def test_a_fire_whose_nightly_could_not_close_runs_it_again_and_releases_t
         return row["state"] == "ended"
 
     async with serving(
-        WorkGate(db, poll=0.1), {"nightly": scheduler.NightlyWorker(db, CONFIG, models.gateway)}
+        WorkGate(db, poll=0.1),
+        {"nightly": scheduler.NightlyWorker(db, CONFIG, models.gate(CONFIG))},
     ):
         await until(ended, "the fire's item to end")
     (row,) = await items_of(conn, "nightly", item.key)
@@ -435,8 +436,8 @@ async def test_a_fire_whose_digests_lose_a_conflict_is_tried_again(conn: Session
         return await ended() and (await job_of(conn, job))["state"] == "done"
 
     workers = {
-        "nightly": scheduler.NightlyWorker(db, config, models.gateway),
-        jobs_store.WORK: worker.JobWorker(db, config, models.gateway),
+        "nightly": scheduler.NightlyWorker(db, config, models.gate(config)),
+        jobs_store.WORK: worker.JobWorker(db, config, models.gate(config)),
     }
     async with serving(WorkGate(db, poll=0.1), workers):
         await until(job_done, "the fire's item to end, and the job to be done")
@@ -473,7 +474,7 @@ async def test_serve_runs_the_due_nightly_then_the_job_it_held_back(conn: Sessio
         ).fetchall()
         return (await job_of(conn, job))["state"] == "done" and not ended
 
-    async with served(db, config, gateway=models.gateway):
+    async with served(db, config, models=models.gate(config)):
         await until(done, "the job to be done, its items ended")
     night, chunk = await (
         await conn.execute("SELECT * FROM runs WHERE kind IN ('nightly', 'job') ORDER BY id")
@@ -515,7 +516,7 @@ async def test_serve_runs_a_fire_that_comes_while_it_runs(conn: Session, db, mon
         found = await items_of(conn, "nightly", fired)
         return bool(found) and found[0]["state"] == "ended"
 
-    async with served(db, config, gateway=Scripted().gateway):
+    async with served(db, config, models=Scripted().gate(config)):
         assert not await (
             await conn.execute("SELECT 1 FROM work_items WHERE kind = 'nightly'")
         ).fetchall()
@@ -549,7 +550,7 @@ async def test_serve_stopping_mid_nightly_closes_its_run_and_the_next_serve_runs
     monkeypatch.setattr(nightly, "classify", held)
     config = schedule(daily(timedelta(minutes=2)))
     job = await in_write(conn, jobs_store.create, "process", {"papers": [a.id]}, 1, "queued")
-    async with served(db, config, gateway=models.gateway):
+    async with served(db, config, models=models.gate(config)):
         await asyncio.wait_for(in_steps.wait(), 10)
     (night,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
     assert night["finished_at"] is not None and "CancelledError" in night["error"]
@@ -563,7 +564,7 @@ async def test_serve_stopping_mid_nightly_closes_its_run_and_the_next_serve_runs
     async def done() -> bool:
         return (await job_of(conn, job))["state"] == "done"
 
-    async with served(db, config, gateway=models.gateway):
+    async with served(db, config, models=models.gate(config)):
         await until(done, "the job to be done")  # well before the chunk's `worker.WAIT`
     first, again = await (
         await conn.execute("SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id")

@@ -34,8 +34,10 @@ A job is done once its papers have no step left failed; else it fails, and settl
 do (`store.jobs.settle_process`).
 
 A re-run (`jobs.reruns`) grades its scope for its topic, then works the text passes it queued,
-through a gateway that holds its ceiling across its chunks: one stopped by it waits on the owner
-as `stopped`. A replay (`jobs.replays`) works its papers the same way under its ceiling, writing
+each chunk under the job's ceiling (`llm.context`): one ceiling for the job while this process
+keeps its run, set as the run opens from what the job's runs spent, a charge still unknown
+counted at its reservation (`store.jobs.spent`). One stopped by it waits on the owner as
+`stopped`. A replay (`jobs.replays`) works its papers the same way under its ceiling, writing
 the evaluation tables only. A digest written again (`jobs.digests.again`) is one chunk, and goes
 first, as a Process job does.
 """
@@ -58,7 +60,10 @@ from litwatch.gates.database import BusyError, DatabaseGate, LeaseLostError, Rea
 from litwatch.gates.work import Later, retryable
 from litwatch.jobs import digests as digest_jobs
 from litwatch.jobs import nightly, replays, reruns, scheduler
-from litwatch.jobs.context import GatewayFactory, ModelRun, attaching, default_gateway, model_run
+from litwatch.jobs.context import ModelRun, model_run
+from litwatch.llm import ModelGate
+from litwatch.llm.ceiling import Ceiling
+from litwatch.llm.context import spending
 from litwatch.quality import replay
 from litwatch.store import failures
 from litwatch.store import fulltext as fulltext_store
@@ -101,20 +106,22 @@ class _Open:
     stack: AsyncExitStack
     run: ModelRun
     tried: set[str] = field(default_factory=set)  # a replay's papers this run has tried
+    ceiling: Ceiling | None = None  # the job's, its chunks' calls reserve against, once set
 
 
 class JobWorker:
-    """Works the chunks of the owner's jobs through `db`, their calls through `gateway`'s
-    models; a re-run's text passes read from `archive` (without, the re-run stops)."""
+    """Works the chunks of the owner's jobs through `db`, their calls through `models`, the
+    process's Model gate; a re-run's text passes read from `archive` (without, the re-run
+    stops)."""
 
     def __init__(
         self,
         db: DatabaseGate,
         config: Config,
-        gateway: GatewayFactory = default_gateway,
+        models: ModelGate,
         archive: ArchiveClient | None = None,
     ) -> None:
-        self.db, self.config, self.gateway, self.archive = db, config, gateway, archive
+        self.db, self.config, self.models, self.archive = db, config, models, archive
         self.open: dict[int, _Open] = {}  # the jobs this process runs, each with its run
 
     async def sweep(self) -> None:
@@ -277,10 +284,15 @@ class JobWorker:
         run.chunk_recorded()
         return after
 
-    async def _ceiling(self, job: dict[str, Any], run: ModelRun, roles: tuple[str, ...]) -> None:
-        if run.gateway.ceiling is None:
+    async def _ceiling(self, job: dict[str, Any], roles: tuple[str, ...]) -> Ceiling:
+        """The job's ceiling while this process keeps its run: set once, as the run opens, to
+        what is left of it after what its runs spent (`reruns.ceiling`), and the same object for
+        each of its chunks here, so what a chunk reserved and spent counts in the next."""
+        kept = self.open[job["id"]]
+        if kept.ceiling is None:
             async with self.db.read("job ceiling") as unit:
-                run.gateway.ceiling = await reruns.ceiling(unit, self.config, job, roles)
+                kept.ceiling = await reruns.ceiling(unit, self.config, job, roles)
+        return kept.ceiling
 
     async def _rerun(self, job: dict[str, Any], item: WorkItem) -> None:
         """A re-run's next chunk. One whose topic is no longer followed and active fails; one
@@ -299,8 +311,9 @@ class JobWorker:
             return
         try:
             run = await self._run_of(job, item)
-            await self._ceiling(job, run, reruns.roles(topic))
-            chunk = await reruns.work(self.db, self.config, run, job, tree, self.archive, CHUNK)
+            # The item is the chunk, the ceiling the job's.
+            with spending(ceiling=await self._ceiling(job, reruns.roles(topic))):
+                chunk = await reruns.work(self.db, self.config, run, job, tree, self.archive, CHUNK)
         except Exception as exc:
             if _retried(exc):
                 raise
@@ -327,9 +340,9 @@ class JobWorker:
         Its run is an evaluation's: it observes nothing of the providers."""
         try:
             run = await self._run_of(job, item)
-            await self._ceiling(job, run, replay.ROLES)
             tried = self.open[job["id"]].tried
-            chunk = await replays.work(self.db, self.config, run, job, tried, CHUNK)
+            with spending(ceiling=await self._ceiling(job, replay.ROLES)):
+                chunk = await replays.work(self.db, self.config, run, job, tried, CHUNK)
         except Exception as exc:
             if _retried(exc):
                 raise
@@ -376,19 +389,15 @@ class JobWorker:
     async def _run_of(self, job: dict[str, Any], item: WorkItem) -> ModelRun:
         """The run this process records the job's work on, of kind `job` (`eval` for a replay):
         opened at the job's first chunk here, kept across its chunks, each of whose items it is
-        alive by. Its gateway sends no batch, and answers a call a dead nightly left in an ended
-        batch from that batch (`attaching`); a replay's, as the CLI's, leaves other runs'
-        batches alone."""
+        alive by. Its calls have no deadline, so send no batch; one a dead run left in a batch
+        is answered from that batch if it has ended (`llm.gateway`). A replay's runs are
+        evaluation runs: they observe nothing of the providers, and leave batches alone."""
         if job["id"] not in self.open:
             stack = AsyncExitStack()
-            # A replay's runs are evaluation runs: they observe nothing of the providers.
-            replaying = job["kind"] == "replay"
-            factory = self.gateway if replaying else attaching(self.gateway)
-            kind = EVAL if replaying else "job"
+            kind = EVAL if job["kind"] == "replay" else "job"
             run = await stack.enter_async_context(
-                model_run(self.db, self.config, kind, gateway=factory, job_id=job["id"])
+                model_run(self.db, kind, models=self.models, job_id=job["id"])
             )
-            stack.push_async_callback(run.gateway.close)
             self.open[job["id"]] = _Open(stack, run)
         run = self.open[job["id"]].run
         async with self.db.write("job: the chunk's run") as unit:
