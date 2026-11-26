@@ -266,7 +266,8 @@ async def locked(
     (`llm.context`), so its calls on a provider that batches go in the gate's batches for it
     until the deadline, and it waits for those batches before it ends. Then its digests wait
     for the passes until the deadline, those queued since the night's first run started
-    included (docs/specs/v1/models.md, batches). Outside the night's window it sends no batch.
+    included (docs/specs/v1/models.md, batches). Outside the night's window it sends no batch,
+    its deadline its own start: a dead run's batch it asks again is cancelled and waited for.
 
     An incomplete harvest does not stop the rest: what arrived is classified, analysed and
     graded, and the gap stays open for the next run. `limit` caps the papers each step that
@@ -305,7 +306,9 @@ async def locked(
                     intake=result.details,
                 )
             run.counts["rewritten"] = len(result.rewritten)
-        with spending(deadline=batch_night[1] if batch_night else None):
+        # Outside the night's window, its own start: past, so it sends no batch, and a dead
+        # run's batch it asks again is cancelled at once and waited for (`batches.DRAIN`).
+        with spending(deadline=batch_night[1] if batch_night else until):
             await _steps(db, config, run, until, today, limit, with_digests, batch_night)
             await run.gateway.settle()  # its batches, a dead run's it took over included
     return run.run_id

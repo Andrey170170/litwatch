@@ -67,7 +67,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     Every model call of the process goes through one Model gate (`app.state.models`): the one
     given to `create_app`, else one built here on the app's Database gate and closed once
     everything has stopped. Before any work starts, it takes over the batches left open that no
-    live work item will read (`ModelGate.recover`), once for the process's life."""
+    live claim will read (`ModelGate.recover`), once for the process's life."""
     db, config = app.state.db, app.state.config
     owned = app.state.models is None
     models: ModelGate = app.state.models or model_gate(db, config)

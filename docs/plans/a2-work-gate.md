@@ -233,7 +233,7 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
 | **P1** | **The gate.** The migration; `WorkGate` with submit (a Repository call), keys (a scheduled one holds for good), `not_before`, admission per kind or per integration, leases and heartbeats, take-back, the fence in write units, LISTEN and the fallback poll; the `workers` rows; a Worker runner; the attribution context, not yet checked. Nothing uses it yet. | The gate's tests (V1); CI green. |
 | **P2** | **Passes and deliveries.** Full-text and Deep passes become items, submitted wherever a pass becomes eligible and by a startup sweep. Dispatch becomes delivery items per integration, each arranging its next turn. Their loops, wake events, ticks and the Deep and dispatch session locks go. | V2 for these kinds on the sandbox, deliveries to a test webhook included; the rollback rehearsal; then merge and deploy. |
 | **P3** | **Scheduler, nightly, jobs.** The scheduler submits fires within their catch-up window, served fires staying served, and its lock goes. The nightly is one item under the run lock. Job chunks are items, the job's run spanning them and its ceiling covering the job. Liveness comes from leases, and the presence session goes; the CLI's inline commands run as items in process. The re-trigger fix. | V2 and V3 on the sandbox; the rollback rehearsal; then merge and deploy. |
-| **P4** | **One Model gate.** Providers, limits and batchers per (provider, deadline) in one gate per process; ceiling, deadline and journal from the work context; recovery once at startup; `work_id` on calls; `eval ladders` through it. | V4; V3 again; then merge and deploy. |
+| **P4** | **One Model gate.** Providers, limits and batchers per (provider, deadline) in one gate per process; ceiling, deadline and journal from the work context; recovery once at startup (a batch a live claim then held, once that claim's lease lapses); `work_id` on calls; `eval ladders` through it. One task per batch, known by one identity (its first call's id) from its rows' opening; a call with no deadline looks once at a batch (`LOOKED_AT` when no one follows it), a nightly after its deadline drains it. | V4; V3 again; then merge and deploy. |
 | **P5** | **CLI and attribution.** The model and pipeline commands submit and wait; evaluations carry their inputs and stream their results to their files; Ctrl-C asks whether to cancel or detach, and `litwatch work follow ID` picks an item back up. The API, MCP, monitor and CLI set request attribution, and the check turns strict. | V5, V6; then merge and deploy. |
 | **P6** | **Release links.** The finder's endpoint and prompt in deep; `release_links`; the triggers (an analysis, a new version, the owner's action); placeholder re-checks; the paper's page, the API and MCP; the automatic Deep read switch. | V7; then merge and deploy with deep's image. |
 | **P7** | **Cleanup.** The old liveness columns (`backend_pid`, `backend_start`, written through `store.runs.SESSION`) dropped, now that no image reads them; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
@@ -380,18 +380,11 @@ Found while building, owned by the stage named.
   `Work`, which the gates cannot type. V5's check counts these as the gates' bookkeeping.
 - **P5 (from P4): a CLI command's Model gate.** Each command builds its own (`jobs.context.model_gate`) and closes
   it as it ends; only `serve` recovers the batches left open (`ModelGate.recover`, as it starts, and a batch a live
-  item sent then, once that item's lease lapses unrenewed). A batch a command killed while `serve` runs waits for
+  claim held then, once that claim's lease lapses unrenewed). A batch a command killed while `serve` runs waits for
   the next `serve` start, or for a later call asking the same thing, which attaches to it. Submit and wait moves the
-  commands' calls into `serve`'s gate, which must close two cases a second gate opens, and P5's review checks them:
-  (a) `owner()` sees only its own process, so a CLI's gate can attach to a batch `serve` is recovering (cancelling
-  it before its deadline and paying again), and `serve`'s startup can take over a live CLI nightly's batch whose
-  rows P3 wrote without `work_id` (the run's item is live; the rows do not say so); (b) a nightly run by hand after
-  the window, with no `serve` owning its batch, attaches with one look (cancel, then a normal call at once) and
-  loses P3's drain, up to 30 minutes, for the cancelled batch's answers.
-- **P5 (from P4): a call with no deadline attaches with one look.** A key found in a batch that nobody in the
-  process polls is attached through the gate's `LOOKED_AT` batcher (its deadline long past, no drain): one look,
-  the batch cancelled at once if still open, then a normal call. A batch whose calls a live item of another process
-  waits on is not attached to here (`store.calls._LIVE`), nor recovered until that item's lease lapses.
+  commands' calls into `serve`'s gate, which must close what a second gate opens, and P5's review checks it:
+  `owner()` sees only its own process, so a CLI's gate can attach to a batch `serve` is recovering (cancelling it
+  before its deadline and paying again, for a CLI nightly past its deadline), and two gates can follow one batch.
 
 ## Evidence
 

@@ -34,13 +34,22 @@ RESULTS_KEPT = timedelta(days=28)  # how long a batch's calls are waited on and 
 EVAL = "eval"  # an evaluation run's kind: its calls say nothing to the status document
 GATE = "model gate"  # the system attribution the journal's units run under
 
-# A batch some live work item sent, other than the asking one (`%(me)s`), for a row `c` of it:
-# left to that item, which reads it itself.
-_LIVE = (
-    "EXISTS (SELECT 1 FROM inference_calls l JOIN work_items w ON w.id = l.work_id "
-    "WHERE l.batch_id = c.batch_id AND w.id IS DISTINCT FROM %(me)s AND w.state = 'running' "
-    "AND w.lease_until > clock_timestamp())"
+# The live claims that sent batch `{batch}`'s calls (`w`): each call's run is alive by the claim
+# it was opened under (`store.runs.ALIVE`, its `lease_token`), which a take-back of the same item
+# replaces, and a P3 row's run too (its calls name no item). A claim of the asking item
+# (`%(me)s`) does not count: it is this process's own.
+_CLAIMS = (
+    "FROM inference_calls l JOIN runs r ON r.id = l.run_id "
+    "JOIN work_items w ON w.lease_token = r.lease_token WHERE l.batch_id = {batch} "
+    "AND w.state = 'running' AND w.lease_until > clock_timestamp() "
+    "AND w.id IS DISTINCT FROM %(me)s"
 )
+# A batch's identity, from its rows' opening on: its first call's id, whatever it is known by
+# (its staged reference, then its id; the same rows move from one to the other together).
+_FIRST = "(SELECT min(f.id) FROM inference_calls f WHERE f.batch_id = {batch})"
+# A batch's terminal answer to a call, which a call asking again in the same item consumes
+# rather than paying for the same answer twice: a refusal, a truncation.
+_STOPPED = "(c.error LIKE 'refused%%' OR c.error = 'truncated')"
 # What a provider said, kept in `provider_observations` by the same statement as the call rows
 # it came with (`c`, returning `via`, `replied` and `responded_at`), so the two never part and
 # the reply's time is its row's own. Observations from other processes can commit out of
@@ -184,34 +193,44 @@ class CallJournal:
         )
 
     async def in_batch(self, key: str, work_id: int | None) -> dict[str, Any] | None:
-        """The newest call sent in a batch with this request and not yet settled (no output, no
-        error), in a batch no live work item but `work_id` sent: a run started again waits on
-        its batch instead of paying again, and a live item's batch is left to it. Anthropic
-        keeps a batch's results for 29 days; `RESULTS_KEPT` stays inside that."""
+        """The newest call sent in a batch with this request whose answer is still to come or
+        is the asking item's to consume: not yet settled, in a batch no live claim but the
+        asking item's (`work_id`) sent, so a run started again waits on the batch instead of
+        paying again, and a live item's batch is left to it; or settled with a refusal or a
+        truncation, sent by the asking item (its attempt before was killed, or taken back), so
+        it takes that answer's path rather than asking the same model again. With its batch's
+        identity (`batch`) and the name it goes by now (`batch_id`), its `error` and `usage`.
+        Anthropic keeps a batch's results for 29 days; `RESULTS_KEPT` stays inside that."""
+        claims = _CLAIMS.format(batch="c.batch_id")
         return await self._one(
             "in batch",
-            "SELECT c.id, c.batch_id FROM inference_calls c WHERE c.request_key = %(key)s "
-            "AND c.batch_id IS NOT NULL AND c.output IS NULL AND c.error IS NULL "
-            f"AND c.started_at > now() - %(kept)s AND NOT {_LIVE} ORDER BY c.id DESC LIMIT 1",
+            f"SELECT c.id, c.batch_id, {_FIRST.format(batch='c.batch_id')} AS batch, c.error, "
+            "c.usage FROM inference_calls c WHERE c.request_key = %(key)s "
+            "AND c.batch_id IS NOT NULL AND c.output IS NULL "
+            "AND c.started_at > now() - %(kept)s "
+            f"AND (c.error IS NULL AND NOT EXISTS (SELECT 1 {claims}) "
+            f"OR c.work_id = %(me)s AND {_STOPPED}) ORDER BY c.id DESC LIMIT 1",
             {"key": key, "kept": RESULTS_KEPT, "me": work_id},
         )
 
-    async def open_batches(self, batch_ids: list[str] | None = None) -> list[dict[str, Any]]:
-        """The batches with calls not yet settled (of `batch_ids`, else all), with the provider
-        each went to and, while a live work item sent it, when the latest such lease lapses
-        (`live_until`; None for a dead run's batch, or one given up on): a live item's batch is
-        left to it, and taken over once its lease lapses unrenewed (`ModelGate.recover`)."""
-        among = "" if batch_ids is None else "AND c.batch_id = ANY(%(ids)s) "
+    async def open_batches(self, batches: list[int] | None = None) -> list[dict[str, Any]]:
+        """The batches with calls not yet settled (of the identities `batches`, else all): each
+        one's identity (`batch`), the name it goes by now (`batch_id`), the provider it went to
+        and, while a live claim sent it, when the latest such lease lapses (`live_until`; None
+        for a dead run's batch, or one given up on): a live claim's batch is left to it, and
+        taken over once that claim's lease lapses unrenewed (`ModelGate.recover`)."""
+        among = "" if batches is None else "AND b.batch = ANY(%(among)s) "
+        claims = _CLAIMS.format(batch="b.batch_id")
         return await self._all(
             "open batches",
-            "SELECT c.batch_id, min(c.usage->>'via') AS provider, (SELECT max(w.lease_until) "
-            "FROM inference_calls l JOIN work_items w ON w.id = l.work_id "
-            "WHERE l.batch_id = c.batch_id AND w.state = 'running' "
-            "AND w.lease_until > clock_timestamp()) AS live_until FROM inference_calls c "
-            "WHERE c.batch_id IS NOT NULL AND c.output IS NULL AND c.error IS NULL "
-            f"AND c.responded_at IS NULL AND c.started_at > now() - %(kept)s {among}"
-            "GROUP BY c.batch_id ORDER BY c.batch_id",
-            {"kept": RESULTS_KEPT, "ids": batch_ids},
+            "SELECT b.batch, b.batch_id, b.provider, "
+            f"(SELECT max(w.lease_until) {claims}) AS live_until FROM ("
+            "SELECT c.batch_id, min(c.id) AS batch, min(c.usage->>'via') AS provider, "
+            "bool_or(c.output IS NULL AND c.error IS NULL AND c.responded_at IS NULL) AS open "
+            "FROM inference_calls c WHERE c.batch_id IS NOT NULL "
+            "AND c.started_at > now() - %(kept)s GROUP BY c.batch_id) b "
+            f"WHERE b.open {among}ORDER BY b.batch",
+            {"kept": RESULTS_KEPT, "among": batches, "me": None},
         )
 
     @asynccontextmanager

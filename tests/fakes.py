@@ -402,6 +402,7 @@ FAST: dict[str, Any] = {
     "poll": 0.01,
     "find_seconds": 1.0,
     "find_delays": (0.01, 0.01, 0.01),
+    "journal_delays": (0.01, 0.01),
 }
 
 

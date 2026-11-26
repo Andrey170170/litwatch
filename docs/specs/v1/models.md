@@ -116,8 +116,14 @@ service's workers, the CLI's other commands and a nightly started outside that w
 - **Nothing is paid twice once a batch is recorded.** A batched call's journal row is written before the batch is
   sent and given the batch id once the provider accepts it; its request key is its id in the batch. A run that asks a
   key already in an open batch waits on that batch, so a run started again after a crash attaches to its batches
-  instead of resubmitting. A call whose batch was sent with neither its id nor a reference to find it by recorded (the
-  process died in between) is sent again: that one batch may be paid twice.
+  instead of resubmitting, and takes a refusal or truncation its batch already gave the item's attempt before rather
+  than asking the same model again. A run's wait follows its deadline: under the nightly's, until it (cancelled at it,
+  then the drain); a nightly started after its deadline has its own start for one, so it cancels at once and drains; a
+  call with no deadline (a worker's, a job's) looks once and is sent as a normal call if the batch has not ended, the
+  batch followed on by whoever owns it. A batch is one batch from its rows' opening on, whatever it is known by (the
+  reference its provider staged, then its id): one task in the process follows it. A call whose batch was sent with
+  neither its id nor a reference to find it by recorded (the process died in between) is sent again: that one batch
+  may be paid twice.
 - **The deadline.** `[schedule] deadline` (07:30 in the schedule's zone) is the nightly's: the first after the
   schedule's nightly time that the run belongs to, kept by a run started again the same night. At the deadline the
   run sends no more batches (calls held but not yet sent go as normal calls), cancels its open batches and waits for them to end (cancelling takes minutes; requests in flight may still be

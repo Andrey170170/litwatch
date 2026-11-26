@@ -62,10 +62,15 @@ def tonight() -> datetime:
     return datetime.now(UTC) + timedelta(hours=1)
 
 
-def gate_over(db, provider, role: RoleConfig = BRIEF, quiet: float | None = None) -> ModelGate:
+def gate_over(
+    db, provider, role: RoleConfig = BRIEF, quiet: float | None = None, now=None
+) -> ModelGate:
     """A process's Model gate over `provider`, serving `brief` as `role`, its journal on `db`;
-    a batch goes out once no call has joined it for `quiet` seconds (FAST's by default)."""
-    options = FAST | ({} if quiet is None else {"quiet": quiet})
+    a batch goes out once no call has joined it for `quiet` seconds (FAST's by default); its
+    batches' clock `now` when given."""
+    options = (
+        FAST | ({} if quiet is None else {"quiet": quiet}) | ({} if now is None else {"now": now})
+    )
     providers = {provider.name: provider}
     journal = CallJournal(db)
     return ModelGate(
@@ -249,10 +254,12 @@ async def test_a_killed_items_batch_is_recovered_once_its_lease_lapses_and_credi
     killed.cancel()
     await asyncio.gather(killed, return_exceptions=True)
     await dead.close()
-    # Killed, not stopped: its item still running as the process left it, its lease live.
+    # Killed, not stopped: its item still running under the claim its run was opened in, as
+    # the process left it, its lease live.
     await conn.execute(
-        "UPDATE work_items SET state = 'running', outcome = NULL, error = NULL, ended_at = NULL, "
-        "lease_token = gen_random_uuid(), lease_until = clock_timestamp() + interval '1 second'"
+        "UPDATE work_items w SET state = 'running', outcome = NULL, error = NULL, "
+        "ended_at = NULL, lease_until = clock_timestamp() + interval '1 second', "
+        "lease_token = (SELECT r.lease_token FROM runs r WHERE r.work_id = w.id)"
     )
     (left,) = await journalled(conn)
     assert left["cost"] is None and left["work_id"] is not None
@@ -302,6 +309,51 @@ async def test_a_killed_items_batch_is_recovered_once_its_lease_lapses_and_credi
     await gate.close()
 
 
+async def test_items_with_another_deadline_have_batches_of_their_own_cancelled_at_it(
+    conn: Session, db
+):
+    """Two items' calls under one deadline share a batch; a third item's, on the same provider
+    under a later deadline, goes in one of its own. The first deadline passes: its batch is
+    cancelled, its calls sent normally, and the third's batch runs on to answer its call."""
+    clock = SimpleNamespace(now=datetime(2026, 10, 16, 9, tzinfo=UTC))
+    first, later = clock.now + timedelta(hours=1), clock.now + timedelta(hours=2)
+    anthropic = BatchingProvider("anthropic", respond, hold=True)
+    gate = gate_over(db, anthropic, quiet=0.3, now=lambda: clock.now)
+    asked = [asked_in_an_item(db, gate, f"item{n}", n, d) for n, d in ((1, first), (2, first))]
+    third = asked_in_an_item(db, gate, "item3", 3, later)
+    await until(batched(conn, 3), "the three calls in batches")
+    sizes = {b: len(v["requests"]) for b, v in anthropic.batches.items()}
+    assert sorted(sizes.values()) == [1, 2]
+    shared = next(b for b, n in sizes.items() if n == 2)
+    own = next(b for b, n in sizes.items() if n == 1)
+    clock.now = first
+
+    async def cancelled() -> bool:
+        return anthropic.cancelled == [shared]
+
+    await until(cancelled, "the first deadline's batch cancelled, and it alone")
+    anthropic.end(shared)  # cancelled, answering nothing: its calls go as normal calls
+    answers = [await asyncio.wait_for(t, 5) for t in asked]
+    assert all(a.usage.service_tier is None for a in answers) and len(anthropic.calls) == 2
+    assert not third.done()
+    anthropic.end(own)
+    assert (await asyncio.wait_for(third, 5)).usage.service_tier == "batch"
+    await gate.close()
+
+
+def test_a_nightly_time_that_has_never_fired_has_no_night():
+    """A valid expression whose first time is still to come (a year's field), as the
+    scheduler already reads it: no night, rather than an error."""
+    schedule = QUIET.model_copy(update={"nightly": "0 2 1 1 * 0 2030"})
+    assert schedule.night(datetime(2026, 11, 25, tzinfo=UTC)) is None
+
+
+async def test_serve_starts_with_a_nightly_time_that_has_never_fired(db):
+    config = Config(schedule=QUIET.model_copy(update={"nightly": "0 2 1 1 * 0 2030"}))
+    async with served(db, config, models=ModelGate(Models(), {})) as app:
+        assert app.state.models is not None
+
+
 # -- the gateway under the work context ---------------------------------------------------------
 
 
@@ -329,6 +381,27 @@ async def test_a_call_cancelled_waiting_for_its_providers_limit_releases_its_res
     sent.cancel()  # once sent, its charge is unknown: its reservation stands
     await asyncio.gather(sent, return_exceptions=True)
     assert room.spent == pytest.approx(one / 2)
+    await gate.close()
+
+
+async def test_a_call_whose_row_could_not_be_opened_gives_its_reservation_back(
+    conn: Session, db, monkeypatch
+):
+    """Its journal row is opened before it is sent: that failing, the call was never sent, so
+    the ceiling it reserved against is as it was, for the chunk that is tried again."""
+    held = Held("anthropic", respond)
+    held.release.set()
+    gate = ModelGate(Models(brief=HAIKU), {"anthropic": held}, retry_delays=())
+    journal = CallJournal(db, await started(conn, "job"))
+
+    async def down(call):
+        raise OSError("the database went away")
+
+    monkeypatch.setattr(journal, "start", down)
+    room = ceilings.Ceiling(1.0, {})
+    with spending(ceiling=room), pytest.raises(OSError):
+        await gate.on(journal).ask("brief", ask(1))
+    assert (room.left, room.spent, room.in_flight, held.calls) == (1.0, 0.0, 0, [])
     await gate.close()
 
 

@@ -12,7 +12,7 @@ from typing import Literal
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from croniter import croniter
+from croniter import CroniterBadDateError, croniter
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from litwatch.core.classification import CHOSEN, Thresholds
@@ -295,9 +295,14 @@ class Schedule(_Section):
     def night(self, now: datetime) -> tuple[datetime, datetime] | None:
         """The night a nightly started at `now` (aware) belongs to: the nightly time that last
         fired and the first deadline after it, when `now` is before that deadline; else None,
-        and the run does not batch. A run started again the same night keeps its deadline."""
+        and the run does not batch; None too when the nightly time has never fired (a valid
+        expression whose first time is still to come). A run started again the same night keeps
+        its deadline."""
         local = (now.astimezone(UTC) + timedelta(microseconds=1)).astimezone(self.zone)
-        fired = croniter(self.nightly, local).get_prev(datetime)
+        try:
+            fired = croniter(self.nightly, local).get_prev(datetime)
+        except CroniterBadDateError:
+            return None
         deadline = datetime.combine(fired.date(), self.deadline, self.zone)
         if deadline <= fired:
             deadline = datetime.combine(fired.date() + timedelta(days=1), self.deadline, self.zone)
