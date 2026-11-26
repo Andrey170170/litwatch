@@ -839,8 +839,13 @@ async def test_a_job_put_on_tonights_run_while_the_fires_close_waits_is_released
             await asyncio.wait_for(held.wait(), 10)
             go.set()
             await asyncio.sleep(0.5)  # its closing unit has begun, and waits on the row
-            async with db.write("with tonight's run", locks=["tonight"]) as unit:
-                assert await jobs_store.move(unit, job, jobs_store.NOT_RUN, "tonight") is not None
+
+            async def move() -> None:
+                async with db.write("with tonight's run", locks=["tonight"]) as unit:
+                    moved = await jobs_store.move(unit, job, jobs_store.NOT_RUN, "tonight")
+                    assert moved is not None
+
+            await asyncio.wait_for(move(), 10)  # the `tonight` lock included
         finally:  # a failure above lets the holder and the nightly go, rather than hang
             go.set()
             let_go.set()

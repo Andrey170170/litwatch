@@ -563,10 +563,10 @@ async def inline[T](
             raise CommandCutOffError(f"{name}: {_describe(exc)}; run it again") from exc
         raise
     finally:
-        # Whatever happened, even cancelled (it waits for this), its claim's commit uncertain.
-        await _finished(asyncio.create_task(_abandon(db, name, key)))
-        # A renewal cut off at its lease's end still uses the pool the command then closes.
-        await _finished(asyncio.create_task(gate._unwound()))
+        try:  # whatever happened, even cancelled (it waits for this), its claim's commit uncertain
+            await _finished(asyncio.create_task(_abandon(db, name, key)))
+        finally:  # a renewal cut off at its lease's end still uses the pool the command closes
+            await _finished(asyncio.create_task(gate._unwound()))
 
 
 async def _abandon(db: DatabaseGate, name: str, key: str) -> None:
