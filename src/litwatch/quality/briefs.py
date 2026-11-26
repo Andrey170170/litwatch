@@ -171,7 +171,7 @@ class _Spent:
     async def refused(self, key: str, paper_id: str | None) -> bool:
         return False
 
-    async def in_batch(self, key: str, work_id: int | None) -> None:
+    async def in_batch(self, key: str, work_id: int | None, owned: list[int]) -> None:
         return None
 
 

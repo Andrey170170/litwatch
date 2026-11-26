@@ -40,7 +40,7 @@ from litwatch.llm import (
 from litwatch.llm.anthropic import AnthropicProvider, messages_request
 from litwatch.llm.batches import DRAIN, MAX_REQUESTS, Batcher
 from litwatch.llm.context import spending
-from litwatch.llm.gateway import LOOKED_AT
+from litwatch.llm.gateway import NO_DEADLINE
 from litwatch.llm.openai import OpenAIProvider, responses_request
 from litwatch.llm.prices import anthropic_cost
 from litwatch.store import calls as calls_store
@@ -142,7 +142,7 @@ class Silent:
     async def refused(self, key: str, paper_id: str | None) -> bool:
         return False
 
-    async def in_batch(self, key: str, work_id: int | None) -> None:
+    async def in_batch(self, key: str, work_id: int | None, owned: list[int]) -> None:
         return None
 
 
@@ -168,7 +168,7 @@ class Tonight:
 
     @property
     def batchers(self) -> dict[str, Batcher | None]:
-        until = self.deadline or LOOKED_AT
+        until = self.deadline or NO_DEADLINE
         return {name: self.gate.batcher(name, until) for name in self.gate.providers}
 
     async def ask(self, *args, **kwargs):
@@ -184,7 +184,7 @@ class Tonight:
         return await self.gate.recover(self.deadline or self.gate.now())
 
     async def settle(self) -> None:
-        await self.gate.settle(self.deadline or LOOKED_AT)
+        await self.gate.settle(self.deadline or NO_DEADLINE)
 
     async def close(self) -> None:
         await self.gate.close()
@@ -394,7 +394,7 @@ async def test_a_call_attached_to_a_batch_read_meanwhile_is_answered_past_the_dr
     batcher.watch(1, "A")
     batcher.watch(2, "B")
     await until(lambda: reads["A"])  # A given up on for the account, B still being read
-    attached = asyncio.create_task(batcher.attach(1, "A", "key", 1))
+    attached = asyncio.create_task(batcher.attach(1, "A", "key", 1, until=DEADLINE))
     await asyncio.sleep(0.05)
     other_read.set()
     reply = await asyncio.wait_for(attached, 1)
@@ -724,8 +724,8 @@ class Together(CallJournal):
         super().__init__(db, run_id)
         self._together, self._left = asyncio.Barrier(n), n
 
-    async def in_batch(self, key: str, work_id: int | None):
-        row = await super().in_batch(key, work_id)
+    async def in_batch(self, key: str, work_id: int | None, owned: list[int] | None = None):
+        row = await super().in_batch(key, work_id, owned)
         if self._left > 0:
             self._left -= 1
             await self._together.wait()
@@ -1804,8 +1804,8 @@ async def test_a_batch_whose_rows_open_as_its_deadline_passes_is_not_made(
     gw, anthropic, _, clock = batching(journal)
     start_many = journal.start_many
 
-    async def slow(calls, batch_id=None):
-        opened = await start_many(calls, batch_id)
+    async def slow(calls, batch_id=None, registered=None):
+        opened = await start_many(calls, batch_id, registered)
         clock.now = DEADLINE  # opening them took until the deadline
         return opened
 
@@ -2288,3 +2288,241 @@ async def test_a_run_past_its_deadline_waits_for_a_dead_runs_batch_it_asks_again
     anthropic.end("msgbatch_1", answered={gw.request_key(BRIEF, ask(0))})
     assert (await first).usage.service_tier == "batch" and anthropic.calls == []
     await gw.close()
+
+
+async def test_a_staged_batch_is_its_senders_before_any_call_can_read_its_rows(
+    conn: Session, db, monkeypatch
+):
+    """A batch's rows commit as its creation is asked for. An identical call that reads them
+    before its sender has heard back from opening them joins the sender's task, which owns the
+    batch from before they were committed: no second task looks for the batch and settles it
+    unfound while its provider makes it, and its answer is saved on its row."""
+    client = OpenAIBatches()
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, _, _ = openai_batching(journal, client)
+    start_many, committed, go = journal.start_many, asyncio.Event(), asyncio.Event()
+
+    async def slow(calls, batch_id=None, opened=None):
+        ids = await start_many(calls, batch_id, opened)
+        committed.set()
+        await go.wait()  # its sender not yet back from opening them
+        return ids
+
+    monkeypatch.setattr(journal, "start_many", slow)
+    first = asyncio.create_task(gw.ask("brief", ask(1)))
+    await asyncio.wait_for(committed.wait(), 3)
+    second = asyncio.create_task(gw.ask("brief", ask(1)))
+    await asyncio.sleep(0.2)  # past a lookup window's worth of lookups (FAST)
+    go.set()
+    await until(lambda: "batch_1" in client.made)
+    client.end("batch_1")
+    answers = await asyncio.wait_for(asyncio.gather(first, second), 3)
+    assert [a.usage.service_tier for a in answers] == ["batch", "batch"]
+    assert client.listings == 0  # never looked for
+    (row,) = await (await conn.execute("SELECT error, output FROM inference_calls")).fetchall()
+    assert row["error"] is None and row["output"] is not None
+    await gw.close()
+
+
+async def test_a_late_nightly_attaching_as_a_call_without_a_deadline_looks_keeps_its_drain(
+    conn: Session, db, monkeypatch
+):
+    """A dead run's batch no one follows: a job's call without a deadline looks once, which
+    cancels it, and a nightly started after its deadline attaches while that look is in
+    flight. The job's call goes normally after its look; the nightly's waits for the batch
+    through its own drain, which the job's limit does not cut short, and takes its answer."""
+    gw, anthropic, _, clock = batching(CallJournal(db, await started(conn, "nightly")), hold=True)
+    asked = asyncio.create_task(gw.ask("brief", ask(0)))
+    await until(batch_recorded(conn))
+    asked.cancel()
+    await asyncio.gather(asked, return_exceptions=True)
+    await gw.close()
+
+    clock.now = DEADLINE + timedelta(hours=1)
+    late = CallJournal(db, await started(conn, "nightly"))
+    nightly, _, _, _ = batching(late, provider=anthropic, clock=clock, deadline=clock.now)
+    status, looking, release = anthropic.status, asyncio.Event(), asyncio.Event()
+
+    async def slow(batch_id):
+        looking.set()
+        await release.wait()
+        return await status(batch_id)
+
+    monkeypatch.setattr(anthropic, "status", slow)
+    job = Tonight(nightly.gate, CallJournal(db, await started(conn, "job")), deadline=None)
+    looked = asyncio.create_task(job.ask("brief", ask(0)))
+    await asyncio.wait_for(looking.wait(), 3)
+    waiting = asyncio.create_task(nightly.ask("brief", ask(0)))
+    await asyncio.sleep(0.05)
+    release.set()
+    assert (await asyncio.wait_for(looked, 3)).usage.service_tier is None
+    await asyncio.sleep(0.1)
+    assert not waiting.done() and anthropic.cancelled == ["msgbatch_1"]
+    anthropic.end("msgbatch_1", answered={nightly.request_key(BRIEF, ask(0))})
+    assert (await asyncio.wait_for(waiting, 3)).usage.service_tier == "batch"
+    assert len(anthropic.calls) == 1  # the job's alone
+    await nightly.close()
+
+
+async def test_a_call_without_a_deadline_looks_once_at_a_live_items_batch_this_gate_follows(
+    conn: Session, db
+):
+    """A live nightly's batch, which this gate follows, has its answer and is between polls: a
+    job's call for the same request gets its look, which reads that answer, rather than being
+    sent normally, as another process's live item's batch would leave it."""
+    run = await started(conn, "nightly", alive=True)
+    gw, anthropic, _, _ = batching(CallJournal(db, run), hold=True)
+    gw.batchers["anthropic"].poll = 60.0
+    with working(a_work_item(await item_of(conn, run))):
+        asked = asyncio.create_task(gw.ask("brief", ask(0)))
+    await until(batch_recorded(conn))
+    await asyncio.sleep(0.05)  # its first look made: the next in a minute
+    anthropic.end("msgbatch_1")
+    job = Tonight(gw.gate, CallJournal(db, await started(conn, "job")), deadline=None)
+    answer = await asyncio.wait_for(job.ask("brief", ask(0)), 3)
+    assert answer.usage.service_tier == "batch" and anthropic.calls == []
+    assert (await asyncio.wait_for(asked, 3)).usage.service_tier == "batch"
+    await gw.close()
+
+
+async def test_a_reply_whose_journal_write_briefly_failed_is_written_again_not_bought_again(
+    conn: Session, db, monkeypatch
+):
+    """The connection is lost as a batched reply's output is saved, and as a normal call's
+    charge is recorded: each write is tried again with the answer kept, so the output is saved
+    and the charge known, and nothing is asked again."""
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, anthropic, _, _ = batching(journal)
+    lost: list[str] = []
+
+    def once(name, write):
+        async def flaky(*args, **kwargs):
+            if name not in lost:
+                lost.append(name)
+                raise psycopg.OperationalError("the server closed the connection unexpectedly")
+            return await write(*args, **kwargs)
+
+        return flaky
+
+    monkeypatch.setattr(journal, "accept", once("accept", journal.accept))
+    monkeypatch.setattr(journal, "record", once("record", journal.record))
+    assert (await asyncio.wait_for(gw.ask("brief", ask(1)), 3)).usage.service_tier == "batch"
+    normal = Tonight(gw.gate, journal, deadline=None)
+    assert (await asyncio.wait_for(normal.ask("brief", ask(2)), 3)).usage.service_tier is None
+    assert lost == ["accept", "record"]
+    assert [(c["cost"], c["answered"]) for c in await calls(conn)] == [
+        (0.0005, True),
+        (0.001, True),
+    ]
+    assert len(anthropic.calls) == len(anthropic.batched) == 1
+    await gw.close()
+
+
+async def test_a_call_without_a_deadline_is_let_go_after_a_lookup_misses_its_batch(
+    conn: Session, db
+):
+    """A batch's creation lost its reply, and its task looks for it through its window: a job's
+    call for the same request wakes the next lookup and, that missing the batch too, goes as a
+    normal call, while the task looks on."""
+    client = OpenAIBatches()
+    client.creating, client.misses = [(True, lost())], 100
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    batcher = gw.batchers["openai"]
+    batcher.find_seconds, batcher.find_delays = 30.0, (0.01, 10.0, 10.0)
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: client.listings == 1)  # missed once: the next lookup in 10 s
+    job = Tonight(gw.gate, CallJournal(db, await started(conn, "job")), deadline=None)
+    answer = await asyncio.wait_for(job.ask("brief", ask(1)), 3)
+    assert answer.usage.service_tier != "batch" and client.listings == 2  # its look, a miss
+    assert not asked.done()
+    asked.cancel()
+    await asyncio.gather(asked, return_exceptions=True)
+    await gw.close()
+
+
+async def test_a_call_without_a_deadline_does_not_wait_on_a_batch_being_made(conn: Session, db):
+    """An OpenAI batch's creation is under way, its rows open naming its file: a job's call for
+    the same request goes as a normal call at once, as no look at a batch being made can end
+    it."""
+    client = OpenAIBatches()
+    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
+    create, making, made = client.batches.create, asyncio.Event(), asyncio.Event()
+
+    async def slow(**kwargs):
+        making.set()
+        await made.wait()
+        return await create(**kwargs)
+
+    client.batches.create = slow
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+    await asyncio.wait_for(making.wait(), 3)
+    job = Tonight(gw.gate, CallJournal(db, await started(conn, "job")), deadline=None)
+    answer = await asyncio.wait_for(job.ask("brief", ask(1)), 3)
+    assert answer.usage.service_tier != "batch" and not asked.done()
+    made.set()
+    await until(lambda: "batch_1" in client.made)
+    client.end("batch_1")
+    assert (await asyncio.wait_for(asked, 3)).usage.service_tier == "batch"
+    await gw.close()
+
+
+async def test_a_refusal_a_p3_settlement_left_uncategorised_goes_on_its_row_when_read(
+    conn: Session, db
+):
+    """P3 kept a batched reply's charge and time on its row, not its refusal, when no call
+    waited on it. Read again, the refusal goes on that row, its charge and time kept, so the
+    request is known refused; the item takes the role's fallback."""
+    gw, anthropic, _, _ = batching(CallJournal(db, await started(conn, "nightly")))
+    key = gw.request_key(BRIEF, ask("refuse"))
+    batch_id = await anthropic.submit([(key, BRIEF, ask("refuse"))])
+    start = CallStart(
+        run_id=await started(conn, "nightly"), work_id=None, operation="brief",
+        model=BRIEF.model, key=key, via="anthropic",
+    )  # fmt: skip
+    (row_id,) = await CallJournal(db).start_many([start], batch_id)
+    replied = datetime(2026, 10, 16, 8, tzinfo=UTC)
+    await conn.execute(
+        "UPDATE inference_calls SET usage = usage || '{\"cost\": 0.0005}', responded_at = %s "
+        "WHERE id = %s",
+        (replied, row_id),
+    )
+    answer = await asyncio.wait_for(gw.ask("brief", ask("refuse")), 3)
+    assert answer.model == OTHER.label
+    found = "SELECT error, (usage->>'cost')::float AS cost, responded_at FROM inference_calls"
+    row = await (await conn.execute(f"{found} WHERE id = %s", (row_id,))).fetchone()
+    assert (row["error"], row["cost"], row["responded_at"]) == ("refused: cyber", 0.0005, replied)
+    assert await CallJournal(db).refused(key, None)
+    await gw.close()
+
+
+async def test_a_nightly_attaching_to_a_batch_a_look_took_over_waits_as_its_deadline_says(
+    conn: Session, db
+):
+    """A job's call without a deadline found a dead run's batch no one followed, which is then
+    settled as at a deadline: cancelled at once, its drain from then. Tonight's nightly asks the
+    same request: the batch is waited for as the nightly's deadline says, past that drain."""
+    gw, anthropic, _, clock = batching(CallJournal(db, await started(conn, "nightly")), hold=True)
+    asked = asyncio.create_task(gw.ask("brief", ask(0)))
+    await until(batch_recorded(conn))
+    asked.cancel()
+    await asyncio.gather(asked, return_exceptions=True)
+    await gw.close()
+
+    nightly, _, _, _ = batching(
+        CallJournal(db, await started(conn, "nightly")), provider=anthropic, clock=clock
+    )
+    anthropic.respond = lambda role, request: '{"yes": tr'  # its normal call, unusable
+    job = Tonight(nightly.gate, CallJournal(db, await started(conn, "job")), deadline=None)
+    with pytest.raises(CallError, match="invalid"):
+        await asyncio.wait_for(job.ask("brief", ask(0)), 3)
+    assert anthropic.cancelled == ["msgbatch_1"]
+    waiting = asyncio.create_task(nightly.ask("brief", ask(0)))
+    await asyncio.sleep(0.05)
+    clock.now = START + DRAIN + timedelta(minutes=1)  # the look's drain over, tonight's ahead
+    await asyncio.sleep(0.1)
+    assert not waiting.done()
+    anthropic.end("msgbatch_1", answered={nightly.request_key(BRIEF, ask(0))})
+    assert (await asyncio.wait_for(waiting, 3)).usage.service_tier == "batch"
+    await nightly.close()

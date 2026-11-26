@@ -455,9 +455,9 @@ def todo(
 
 def gateway(role: str, candidate: Candidate, models: ModelGate) -> Gateway:
     """A door to the process's Model gate that serves `role` with the candidate alone, once a
-    call (each attempt is a call here, reserved and recorded), and validation's detail kept."""
+    call (each attempt is a call here, reserved and recorded)."""
     served = Models().model_copy(update={role: candidate.role})
-    return models.on(models=served, retry_delays=(), debug=True)
+    return models.on(models=served, retry_delays=())
 
 
 @dataclass

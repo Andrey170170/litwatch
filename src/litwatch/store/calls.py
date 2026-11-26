@@ -18,7 +18,7 @@ touches a row (`_settling`)."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Iterable
+from collections.abc import AsyncGenerator, Callable, Iterable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any, LiteralString
@@ -149,31 +149,40 @@ class CallJournal:
         (call_id,) = await self.start_many([call])
         return call_id
 
-    async def start_many(self, calls: list[CallStart], batch_id: str | None = None) -> list[int]:
+    async def start_many(
+        self,
+        calls: list[CallStart],
+        batch_id: str | None = None,
+        opened: Callable[[list[int]], None] | None = None,
+    ) -> list[int]:
         """The rows of calls of distinct requests, in their order, opened in one statement, so
         all are or none is; with `batch_id`, naming the batch they go out in (its staged
-        reference, before it has an id)."""
-        rows = await self._write(
-            "start",
-            "INSERT INTO inference_calls "
-            "(run_id, work_id, operation, request_key, usage, paper_id, reserved, batch_id) "
-            "SELECT run_id, work_id, operation, key, usage, paper_id, reserved, %(batch)s "
-            "FROM jsonb_to_recordset(%(calls)s) AS s(run_id bigint, work_id bigint, "
-            "operation text, key text, usage jsonb, paper_id text, reserved double precision) "
-            "RETURNING id, request_key",
-            {
-                "batch": batch_id,
-                "calls": Jsonb(
-                    [
-                        c.model_dump(mode="json", exclude={"model", "via", "effort"})
-                        | {"usage": _opened(c).model_dump(mode="json")}
-                        for c in calls
-                    ]
-                ),
-            },
-        )
-        ids = {r["request_key"]: r["id"] for r in rows}
-        return [ids[c.key] for c in calls]
+        reference, before it has an id). `opened` is given their ids before they are
+        committed, so whatever it records is there before another unit can read them."""
+        async with self._writing("start") as unit:
+            cur = await unit.execute(
+                "INSERT INTO inference_calls "
+                "(run_id, work_id, operation, request_key, usage, paper_id, reserved, batch_id) "
+                "SELECT run_id, work_id, operation, key, usage, paper_id, reserved, %(batch)s "
+                "FROM jsonb_to_recordset(%(calls)s) AS s(run_id bigint, work_id bigint, "
+                "operation text, key text, usage jsonb, paper_id text, reserved double precision) "
+                "RETURNING id, request_key",
+                {
+                    "batch": batch_id,
+                    "calls": Jsonb(
+                        [
+                            c.model_dump(mode="json", exclude={"model", "via", "effort"})
+                            | {"usage": _opened(c).model_dump(mode="json")}
+                            for c in calls
+                        ]
+                    ),
+                },
+            )
+            found = {r["request_key"]: r["id"] for r in await cur.fetchall()}
+            ids = [found[c.key] for c in calls]
+            if opened is not None:
+                opened(ids)
+        return ids
 
     async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None:
         """The calls went out in `provider`'s batch `batch_id`."""
@@ -192,25 +201,30 @@ class CallJournal:
             (batch_id, reference),
         )
 
-    async def in_batch(self, key: str, work_id: int | None) -> dict[str, Any] | None:
+    async def in_batch(
+        self, key: str, work_id: int | None, owned: list[int] | None = None
+    ) -> dict[str, Any] | None:
         """The newest call sent in a batch with this request whose answer is still to come or
-        is the asking item's to consume: not yet settled, in a batch no live claim but the
-        asking item's (`work_id`) sent, so a run started again waits on the batch instead of
-        paying again, and a live item's batch is left to it; or settled with a refusal or a
-        truncation, sent by the asking item (its attempt before was killed, or taken back), so
-        it takes that answer's path rather than asking the same model again. With its batch's
-        identity (`batch`) and the name it goes by now (`batch_id`), its `error` and `usage`.
-        Anthropic keeps a batch's results for 29 days; `RESULTS_KEPT` stays inside that."""
+        is the asking item's to consume: not yet settled, in a batch the asking gate follows
+        (of the identities `owned`) or no live claim but the asking item's (`work_id`) sent, so
+        a run started again waits on the batch instead of paying again, and another process's
+        live item's batch is left to it; or settled with a refusal or a truncation, sent by the
+        asking item (its attempt before was killed, or taken back), so it takes that answer's
+        path rather than asking the same model again. With its batch's identity (`batch`) and
+        the name it goes by now (`batch_id`), its `error` and `usage`. Anthropic keeps a
+        batch's results for 29 days; `RESULTS_KEPT` stays inside that."""
         claims = _CLAIMS.format(batch="c.batch_id")
+        first = _FIRST.format(batch="c.batch_id")
         return await self._one(
             "in batch",
-            f"SELECT c.id, c.batch_id, {_FIRST.format(batch='c.batch_id')} AS batch, c.error, "
+            f"SELECT c.id, c.batch_id, {first} AS batch, c.error, "
             "c.usage FROM inference_calls c WHERE c.request_key = %(key)s "
             "AND c.batch_id IS NOT NULL AND c.output IS NULL "
             "AND c.started_at > now() - %(kept)s "
-            f"AND (c.error IS NULL AND NOT EXISTS (SELECT 1 {claims}) "
+            f"AND (c.error IS NULL AND ({first} = ANY(%(owned)s) "
+            f"OR NOT EXISTS (SELECT 1 {claims})) "
             f"OR c.work_id = %(me)s AND {_STOPPED}) ORDER BY c.id DESC LIMIT 1",
-            {"key": key, "kept": RESULTS_KEPT, "me": work_id},
+            {"key": key, "kept": RESULTS_KEPT, "me": work_id, "owned": owned or []},
         )
 
     async def open_batches(self, batches: list[int] | None = None) -> list[dict[str, Any]]:
@@ -260,7 +274,9 @@ class CallJournal:
         settled; with `rest`, every other call of it not yet settled fails with that, its charge
         unknown (the batch ended without naming it, or is gone). An account error it settles
         fails its provider, observed with it: a batch read again settles nothing, and observes
-        nothing again."""
+        nothing again. A refusal or truncation on a row whose charge and reply time are
+        recorded without it (P3 kept a batch's reply so when no call waited) is put on that row,
+        its charge and time kept, so the refusal is known and is not asked for again."""
         replied = "" if self.observes else "AND false"
         async with self._settling("settle batch", "u.batch_id = %s", (batch_id,)) as unit:
             cur = await unit.execute(
@@ -278,6 +294,14 @@ class CallJournal:
                     _ACCOUNT_ERROR.format(source=""),
                     {"provider": account["via"], "account": account["error"]},
                 )
+            await unit.execute(
+                f"WITH a AS (SELECT * FROM {_SETTLED.format(of='key text')}) "
+                "UPDATE inference_calls c SET error = a.error, reply = coalesce(a.reply, c.reply) "
+                "FROM a WHERE c.batch_id = %(batch)s AND c.request_key = a.key "
+                "AND c.output IS NULL AND c.error IS NULL AND c.responded_at IS NOT NULL "
+                "AND (a.error LIKE 'refused%%' OR a.error = 'truncated')",
+                {"batch": batch_id, "settled": _settled(answers.items(), "key")},
+            )
             if rest is not None:
                 await unit.execute(
                     "UPDATE inference_calls SET error = %s, responded_at = clock_timestamp() "

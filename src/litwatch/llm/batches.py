@@ -101,7 +101,10 @@ class BatchJournal(Protocol):
     """Where a batch's calls are opened and settled (`store.calls.CallJournal`, the gate's)."""
 
     async def start_many(
-        self, calls: list[CallStart], batch_id: str | None = None
+        self,
+        calls: list[CallStart],
+        batch_id: str | None = None,
+        opened: Callable[[list[int]], None] | None = None,
     ) -> list[int]: ...
     async def batched(self, call_ids: list[int], batch_id: str, provider: str) -> None: ...
     async def settle_batch(
@@ -178,19 +181,25 @@ class _Held:
 
 @dataclass
 class _Batch:
-    """A batch its batcher owns, in a task of its own, from its creation or adoption to its
-    settlement: the futures awaiting its answers and the journal rows its requests are on, by
-    request key; its identity, its first call's id, which never changes from its rows' opening
-    on (`store.calls.CallJournal.in_batch`), and the name it goes by now (its staged reference,
-    then its provider's id). A call that looks at it once waits on its next look (`lookers`),
-    which it wakes it for (`woken`): given None when that look does not end it."""
+    """A batch's one owner record in the process: the batcher that follows it, in a task of its
+    own, from its creation or adoption to its settlement. The futures awaiting its answers and
+    the journal rows its requests are on, by request key; its identity, its first call's id,
+    which never changes from its rows' opening on (`store.calls.CallJournal.in_batch`), and the
+    name it goes by now (its staged reference, then its provider's id). Its own `deadline`, at
+    which it is cancelled and from which its drain runs: its sender's, or the latest of the
+    calls that wait on it with one (a nightly started after its own). A call without a deadline
+    keeps its own limit, one look: it waits on the batch's next look (`lookers`), which it wakes
+    it for (`woken`), and is given None when that look does not end it, at once while the batch
+    is being created (`sending`)."""
 
+    deadline: datetime
     waiting: dict[str, asyncio.Future[Answered]] = field(default_factory=dict)
     rows: dict[str, int] = field(default_factory=dict)
     identity: int | None = None
     name: str | None = None
     lookers: list[asyncio.Future[None]] = field(default_factory=list)
     woken: asyncio.Event = field(default_factory=asyncio.Event)
+    sending: bool = False
     cancelled: bool = False
     # Known by its staged reference: when looking for it ends (monotonic), from when its
     # creation's outcome was known to be unknown, or it was first known so here.
@@ -202,7 +211,8 @@ class Batcher:
     task collects the calls handed to it, and each batch it sends, or is handed to follow, is
     owned by a task of its own (`_supervised`) through its settlement, so no batch's lookups,
     reads or failures hold up or fail another's. The batches are known here by their identity
-    (`_Batch`), so a call that finds one by either of its names joins its one task. A journal
+    (`_Batch`), so a call that finds one by either of its names joins its one task. Each batch
+    keeps its own deadline (`_Batch.deadline`), this batcher's for those it sends. A journal
     write after the provider has answered is tried again while the database is briefly away
     (`JOURNAL_DELAYS`), the answer kept. In `debug` mode a batched refusal's or truncation's
     text is kept on its row."""
@@ -243,6 +253,10 @@ class Batcher:
     def holds(self, batch: int) -> bool:
         """Whether this batcher follows the batch of identity `batch`."""
         return batch in self._batches
+
+    def followed(self) -> list[int]:
+        """The identities of the batches this batcher follows."""
+        return list(self._batches)
 
     def idle(self) -> bool:
         """Whether it holds, follows and runs nothing, past its deadline's drain: done for
@@ -288,12 +302,20 @@ class Batcher:
                         future.cancel()
 
     async def attach(
-        self, batch: int, name: str, key: str, call_id: int, *, once: bool = False
+        self, batch: int, name: str, key: str, call_id: int, *, until: datetime | None
     ) -> Answered:
-        """The reply of a call a dead run sent in the batch of identity `batch`, going by `name`
-        (an id, or a `STAGED` reference), on journal row `call_id`; with `once`, None (a normal
-        call) unless the batch's next look, which comes at once, ends it."""
-        followed = self._followed(batch, name)
+        """The reply of a call sent in the batch of identity `batch`, going by `name` (an id,
+        or a `STAGED` reference), on journal row `call_id`, waited for as the caller's deadline
+        `until` says: the batch is followed until it, or its own if later, and its drain (a
+        nightly started after its deadline has one past); without one, None (a normal call)
+        unless the batch's next look, which comes at once, ends it, the batch followed on as
+        it was, or, followed by no one before, as at a deadline: cancelled at once, then
+        drained."""
+        followed = self._followed(batch, name, until or self.now())
+        if until is not None:
+            followed.deadline = max(followed.deadline, until)
+        elif followed.sending:  # being created: no look of it can end it
+            return None
         if (future := self._futures.get(key)) is not None:
             answer = self._interested(key, self._shared(future))
         else:
@@ -301,7 +323,7 @@ class Batcher:
             self._futures[key] = future
             followed.waiting[key], followed.rows[key] = future, call_id
             answer = asyncio.shield(future)
-        return await (self._once(followed, answer) if once else answer)
+        return await (answer if until is not None else self._once(followed, answer))
 
     @staticmethod
     async def _once(batch: _Batch, answer: Awaitable[Answered]) -> Answered:
@@ -325,15 +347,18 @@ class Batcher:
 
     def watch(self, batch: int, name: str) -> None:
         """Read the batch of identity `batch`, going by `name`, once it ends, so the charges of
-        its answers no call awaits are journalled (a dead run's batch)."""
-        self._followed(batch, name)
+        its answers no call awaits are journalled (a dead run's batch): under this batcher's
+        deadline."""
+        self._followed(batch, name, self.deadline)
 
-    def _followed(self, identity: int, name: str) -> _Batch:
-        """The batch of `identity` as this batcher follows it: a task of its own from now when
-        it is new here (`_follow`), and one known by its staged reference looked for from now."""
+    def _followed(self, identity: int, name: str, deadline: datetime) -> _Batch:
+        """The batch of `identity` as this batcher follows it: when it is new here, under
+        `deadline`, in a task of its own from now (`_follow`), and one known by its staged
+        reference looked for from now."""
         if (batch := self._batches.get(identity)) is None:
             staged = name.startswith(STAGED)
             batch = _Batch(
+                deadline=deadline,
                 identity=identity,
                 name=name,
                 find_until=time.monotonic() + self.find_seconds if staged else None,
@@ -434,18 +459,7 @@ class Batcher:
             future.set_result(reply)
 
     async def _journalled[T](self, what: str, write: Callable[[], Awaitable[T]]) -> T:
-        """A journal write made once the provider has answered, tried again after each of
-        `journal_delays` while the database is briefly away or the write lost a conflict, so
-        the answer is not lost with it."""
-        for delay in (*self.journal_delays, None):
-            try:
-                return await write()
-            except Exception as exc:
-                if delay is None or not retryable(exc):
-                    raise
-                log.warning("batches: %s failed, trying again in %ss: %s", what, delay, exc)
-            await asyncio.sleep(delay)
-        raise AssertionError("unreachable")
+        return await journalled(what, write, self.journal_delays)
 
     # -- collecting ----------------------------------------------------------------------------
 
@@ -462,7 +476,7 @@ class Batcher:
                 await asyncio.sleep(min(left, 1.0))
                 continue
             held = self._take()
-            batch = _Batch(waiting={h.key: self._futures[h.key] for h in held})
+            batch = _Batch(self.deadline, waiting={h.key: self._futures[h.key] for h in held})
             self._supervised(batch, self._sent(batch, held))
 
     def _take(self) -> list[_Held]:
@@ -487,11 +501,18 @@ class Batcher:
     async def _sent(self, batch: _Batch, held: list[_Held]) -> None:
         """`batch`'s task from its creation: made of `held`, or, when its creation's outcome is
         unknown, looked for from then; then followed to its settlement (`_follow`). Its rows
-        open together just before it is made, and it is known here by its identity from then,
-        before any of its names is on them."""
+        open together just before it is made, and it is known here by its identity before they
+        are committed, so a call that reads them finds it here, and from then until the
+        provider has answered its creation it is being sent (`sending`)."""
         rows: list[int] = []
         handle: str | None = None  # the batch's staged reference, as its rows name it
         creating = False  # whether its creation was asked for: before that, none can be made
+
+        def opened(ids: list[int]) -> None:
+            """Its rows inserted, not yet committed: it is known here by its identity."""
+            batch.rows = dict(zip((h.key for h in held), ids, strict=True))
+            batch.identity, batch.name, batch.sending = min(ids), handle, True
+            self._batches[batch.identity] = batch
 
         async def staged(reference: str | None) -> None:
             """Just before the batch is created: past the deadline it is not; else its calls'
@@ -502,10 +523,11 @@ class Batcher:
                 raise _ExpiredError
             handle = None if reference is None else STAGED + reference
             if self.journal:
-                rows[:] = await self.journal.start_many([h.start for h in held], handle)
-                batch.rows = dict(zip((h.key for h in held), rows, strict=True))
-                batch.identity = min(rows)
-                self._batches[batch.identity] = batch
+                try:
+                    rows[:] = await self.journal.start_many([h.start for h in held], handle, opened)
+                except BaseException:  # not opened: no call can find it
+                    self._let_go(batch)
+                    raise
             batch.name = handle
             if not self.open():
                 await self._unsent(rows, CallOutcome(usage=UNBILLED, error=_EXPIRED))
@@ -516,7 +538,10 @@ class Batcher:
         try:
             if not self.open():
                 raise _ExpiredError
-            batch_id = await self._bounded(self.provider.submit(requests, staged))
+            try:
+                batch_id = await self._bounded(self.provider.submit(requests, staged))
+            finally:
+                batch.sending = False
         except _ExpiredError:
             self._answer(batch, {})
             return
@@ -589,14 +614,14 @@ class Batcher:
     async def _follow(self, batch: _Batch) -> None:
         """Follow `batch` to its settlement: known by its staged reference, it is looked for
         first (`_adopt`); then looked at every `poll`, or at once for a call that looks once,
-        until it ends, cancelled at the deadline, and given up on once the deadline's drain is
+        until it ends, cancelled at its deadline, and given up on once its deadline's drain is
         over, looked at first."""
         assert batch.name is not None
         if batch.name.startswith(STAGED) and not await self._adopt(batch, batch.name):
             return
         while not await self._check(batch, self.now()):
             self._looked(batch)
-            if self.now() >= self.deadline + self.drain:
+            if self.now() >= batch.deadline + self.drain:
                 # Left open on its rows, for the next process to account for (`recover`).
                 log.warning("batch %s still open after the deadline's drain", batch.name)
                 self._answer(batch, {})
@@ -605,14 +630,18 @@ class Batcher:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(batch.woken.wait(), self.poll)
 
-    async def _find(self, reference: str, end: float) -> str | None:
-        """The id of the batch made with `reference`, looked for until `end` (monotonic),
-        lookups and the waits between them included; None when not found by then, at once for a
-        provider that cannot find one. An account error is raised."""
+    async def _find(self, batch: _Batch, reference: str, end: float) -> str | None:
+        """The id of `batch`, made with `reference`, looked for until `end` (monotonic), lookups
+        and the waits between them included; None when not found by then, at once for a
+        provider that cannot find one. An account error is raised. Each lookup that does not
+        find it is a look: a call that looks once is let go, and its wake (`woken`) cuts the
+        wait before the next lookup short."""
         if (find := self.provider.find) is None:
             return None
         for delay in self.find_delays:
-            await asyncio.sleep(max(0.0, min(delay, end - time.monotonic())))
+            with contextlib.suppress(TimeoutError):
+                wait = max(0.0, min(delay, end - time.monotonic()))
+                await asyncio.wait_for(batch.woken.wait(), wait)
             if (left := end - time.monotonic()) <= 0:
                 break
             try:
@@ -624,6 +653,8 @@ class Batcher:
                 log.warning("looking for batch %s failed: %s", reference, exc)
             except TimeoutError:
                 break
+            self._looked(batch)
+            batch.woken.clear()
         return None
 
     async def _adopt(self, batch: _Batch, handle: str) -> bool:
@@ -633,7 +664,7 @@ class Batcher:
         go as normal calls; an account error fails them, its rows left to recover."""
         assert batch.find_until is not None
         try:
-            batch_id = await self._find(handle.removeprefix(STAGED), batch.find_until)
+            batch_id = await self._find(batch, handle.removeprefix(STAGED), batch.find_until)
         except ProviderError as exc:
             log.error("batch %s could not be looked for, for the account: %s", handle, exc)
             await self._account_error(exc)
@@ -669,7 +700,7 @@ class Batcher:
         try:
             status = await self._bounded(self.provider.status(batch_id))
             if status not in ("ended", "gone"):
-                if now >= self.deadline and not batch.cancelled:
+                if now >= batch.deadline and not batch.cancelled:
                     await self._bounded(self.provider.cancel(batch_id))
                     batch.cancelled = True
                     log.info("batch %s cancelled at the deadline", batch_id)
@@ -702,3 +733,20 @@ class Batcher:
     async def _bounded[T](self, operation: Coroutine[None, None, T]) -> T:
         """A provider operation, failing (as the provider's own errors do) past `operation`."""
         return await asyncio.wait_for(operation, self.operation)
+
+
+async def journalled[T](
+    what: str, write: Callable[[], Awaitable[T]], delays: tuple[float, ...] = JOURNAL_DELAYS
+) -> T:
+    """A journal write made once the provider has answered, tried again after each of `delays`
+    while the database is briefly away or the write lost a conflict, so the answer, which the
+    caller keeps, is not lost with it."""
+    for delay in (*delays, None):
+        try:
+            return await write()
+        except Exception as exc:
+            if delay is None or not retryable(exc):
+                raise
+            log.warning("journal: %s failed, trying again in %ss: %s", what, delay, exc)
+        await asyncio.sleep(delay)
+    raise AssertionError("unreachable")

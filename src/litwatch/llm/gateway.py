@@ -9,7 +9,9 @@ calls on the run and on the work item each serves (`gates.context.current_work`)
 call reserves against and the deadline its batch must be answered by come from the context the
 Worker sets for its item (`llm.context`), not from the call site. A call whose request a batch
 not yet settled holds waits on that batch, a dead run's included, as its deadline says, unless a
-live claim other than its item's sent it (`store.calls.CallJournal.in_batch`; `Gateway._batched`).
+live claim other than its item's sent it and this gate does not follow it
+(`store.calls.CallJournal.in_batch`; `Gateway._batched`). Each batch has one owner record in the
+gate (`llm.batches._Batch`), with its own deadline; each caller keeps its own wait.
 `recover`, once as the process starts, takes over the batches no live claim will read, so each is
 accounted for on its calls' own rows, their run and item kept; one a live claim sent is taken over
 once that claim's lease lapses unrenewed (a process killed with its lease still live)."""
@@ -22,7 +24,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Protocol, Self, cast
 
 from pydantic import BaseModel, ValidationError
@@ -34,7 +36,15 @@ from litwatch.gates.database import outside_unit
 from litwatch.gates.work import retryable
 from litwatch.llm import ceiling as ceilings
 from litwatch.llm import context
-from litwatch.llm.batches import MAX_REQUESTS, Answered, Batcher, BatchJournal, BatchProvider
+from litwatch.llm.batches import (
+    JOURNAL_DELAYS,
+    MAX_REQUESTS,
+    Answered,
+    Batcher,
+    BatchJournal,
+    BatchProvider,
+    journalled,
+)
 from litwatch.llm.decisions import Decision, chat_request, decision_of
 from litwatch.llm.types import (
     DEFAULT_MAX_TOKENS,
@@ -55,10 +65,10 @@ RETRY_DELAYS = (1.0, 5.0, 20.0)
 # Bump when validation changes what counts as an acceptable reply.
 VALIDATION_VERSION = 1
 NORMAL_CALLS = 16  # normal calls in flight per provider, whatever the steps' own limits
-# The deadline of the batcher that only reads the batches calls without one wait on: long past,
-# so it sends none, cancels what it reads at once and gives up on it after one look, as a call
-# outside the nightly never waits on a batch.
-LOOKED_AT = datetime.min.replace(tzinfo=UTC)
+# The key of the batcher that sends nothing and follows the batches a call without a deadline
+# finds no one following: each under its own deadline (`Batcher.attach`), as at a deadline,
+# cancelled at once and then drained.
+NO_DEADLINE = datetime.min.replace(tzinfo=UTC)
 # The least a recovery waits before looking again at a batch a live item's lease keeps.
 RECHECK_SECONDS = 1.0
 
@@ -124,7 +134,9 @@ class Journal(Protocol):
         usage: Usage | None = None,
     ) -> None: ...
     async def refused(self, key: str, paper_id: str | None) -> bool: ...
-    async def in_batch(self, key: str, work_id: int | None) -> dict[str, Any] | None: ...
+    async def in_batch(
+        self, key: str, work_id: int | None, owned: list[int]
+    ) -> dict[str, Any] | None: ...
 
 
 class GateJournal(BatchJournal, Protocol):
@@ -173,6 +185,9 @@ class ModelGate:
         self.retry_delays, self.debug = retry_delays, debug
         self.batch_options = batch_options or {}  # the `Batcher`'s timings and clock (tests)
         self.now: Callable[[], datetime] = self.batch_options.get("now", lambda: datetime.now(UTC))
+        self.journal_delays: tuple[float, ...] = self.batch_options.get(
+            "journal_delays", JOURNAL_DELAYS
+        )
         self.limits = {name: asyncio.Semaphore(normal_calls) for name in providers}
         self._batchers: dict[tuple[str, datetime], Batcher] = {}
         self._recovering: asyncio.Task[None] | None = None
@@ -189,40 +204,40 @@ class ModelGate:
         *,
         models: Models | None = None,
         retry_delays: tuple[float, ...] | None = None,
-        debug: bool | None = None,
     ) -> Gateway:
         """A door to the gate for one run's calls, journalled on `journal` (none: not at all),
-        serving `models` (by default the gate's), with `retry_delays` and `debug` its own when
-        given (an evaluation's)."""
+        serving `models` (by default the gate's), with `retry_delays` its own when given (an
+        evaluation's)."""
         return Gateway(
             self,
             journal,
             models or self.models,
             self.retry_delays if retry_delays is None else retry_delays,
-            self.debug if debug is None else debug,
+            self.debug,
         )
 
     def batcher(self, provider: str, deadline: datetime) -> Batcher | None:
-        """The batcher of `provider`'s calls with `deadline` (`LOOKED_AT`: of the calls without
-        one), made at its first call; None for a provider that does not batch. One whose drain
-        is over and that holds nothing is let go as another is made."""
+        """The batcher of `provider`'s calls with `deadline` (`NO_DEADLINE`: of the calls
+        without one), made at its first call; None for a provider that does not batch. One
+        whose drain is over and that holds nothing is let go as another is made."""
         found = self.providers.get(provider)
         if not isinstance(found, BatchProvider):
             return None
         if (provider, deadline) not in self._batchers:
             self._batchers = {k: b for k, b in self._batchers.items() if not b.idle()}
-            options: dict[str, Any] = self.batch_options | (
-                {"drain": timedelta(0)} if deadline == LOOKED_AT else {}
-            )
             self._batchers[(provider, deadline)] = Batcher(
-                found, self.journal, deadline, debug=self.debug, **options
+                found, self.journal, deadline, debug=self.debug, **self.batch_options
             )
         return self._batchers[(provider, deadline)]
 
     def owner(self, batch: int) -> Batcher | None:
-        """The batcher that follows the batch of identity `batch`, if any: each batch has one in
-        a process."""
+        """The batcher that follows the batch of identity `batch`, if any: each batch has one
+        owner record in a process, kept by that batcher."""
         return next((b for b in self._batchers.values() if b.holds(batch)), None)
+
+    def owned(self) -> list[int]:
+        """The identities of the batches this gate follows."""
+        return [i for b in self._batchers.values() for i in b.followed()]
 
     async def recover(self, deadline: datetime) -> int:
         """Take over the batches left open that no live claim will read (a dead process's, or
@@ -590,8 +605,10 @@ class Gateway:
             """A send that failed and is tried again, settled with its charge where known, and
             let go: the next send has a row of its own once admitted."""
             nonlocal call_id
-            if journal and call_id is not None:
-                await journal.reject(call_id, f"provider: {exc}", usage=usage)
+            if journal and (failed_id := call_id) is not None:
+                await self._journalled(
+                    "reject", lambda: journal.reject(failed_id, f"provider: {exc}", usage=usage)
+                )
             call_id = None
 
         try:
@@ -605,8 +622,9 @@ class Gateway:
                     raise
             if call_id is not None:
                 reply.usage.source_call_id = call_id
-            if journal and call_id is not None and not batched:
-                await journal.record(call_id, reply.usage)
+            if journal and (recorded := call_id) is not None and not batched:
+                usage = reply.usage
+                await self._journalled("record", lambda: journal.record(recorded, usage))
             log.info("inference role=%s usage=%s", role_name, reply.usage.model_dump_json())
             if reply.stop == Stop.REFUSED:
                 log.warning(
@@ -636,22 +654,32 @@ class Gateway:
             # admit it) or one its batch answered with an error has no row of its own to settle,
             # and a batch's refusal or truncation is settled on its row by its batcher.
             settled = batched and exc.kind in ("refused", "truncated")
-            if journal and call_id is not None and not settled:
+            if journal and (rejected := call_id) is not None and not settled:
                 answered = self.debug and isinstance(reply, Reply)
                 kept = _without_nul(reply.raw or reply.text) if answered else None
                 # A normal call's account error is observed with it; a batch's by its batcher.
                 normal = exc.kind == "account" and not isinstance(reply, ProviderError)
-                await journal.reject(
-                    call_id,
-                    str(exc),
-                    kept,
-                    account=role.provider if normal else None,
-                    usage=charged,
+                error = str(exc)
+                await self._journalled(
+                    "reject",
+                    lambda: journal.reject(
+                        rejected,
+                        error,
+                        kept,
+                        account=role.provider if normal else None,
+                        usage=charged,
+                    ),
                 )
             raise
-        if journal and call_id is not None:
-            await journal.accept(call_id, value.model_dump(mode="json"))
+        if journal and (accepted := call_id) is not None:
+            output = value.model_dump(mode="json")
+            await self._journalled("accept", lambda: journal.accept(accepted, output))
         return Answer(value, reply.usage, role.label)
+
+    async def _journalled(self, what: str, write: Callable[[], Awaitable[None]]) -> None:
+        """A journal write once the provider has answered, tried again while the database is
+        briefly away, the answer kept here meanwhile (`llm.batches.journalled`)."""
+        await journalled(what, write, self.gate.journal_delays)
 
     def _call(
         self,
@@ -703,12 +731,13 @@ class Gateway:
         call; (None, None) to send it as a normal call, on rows of its own. One lookup decides
         (`store.calls.CallJournal.in_batch`): a refusal or truncation a batch gave this item's
         attempt before is consumed, as that reply again; a key in a batch not yet settled that
-        no other live claim sent waits on that batch, on its row, through the gate's batcher
-        that follows it, else this deadline's, ahead or past (cancelled at it, waited for until
-        its drain: a nightly started after its deadline); a call with no deadline looks once
-        (`LOOKED_AT`: its next look, then a normal call). Under a deadline ahead the call goes in
-        that deadline's batches. A fallback is batched as the role's model is; an evaluation's
-        call never is."""
+        this gate follows, or no other live claim sent, waits on that batch, on its row, through
+        the batcher that follows it, else this deadline's, ahead or past (`NO_DEADLINE`
+        without one), as the call's deadline says (`Batcher.attach`): until it, or the batch's
+        own if later, and its drain (a nightly started after its deadline has one past); a call
+        with no deadline looks once, then goes as a normal call. Under a deadline ahead the call
+        goes in that deadline's batches. A fallback is batched as the role's model is; an
+        evaluation's call never is."""
         journal = self.journal
         if send is not None or journal is None or not journal.observes:
             return None, None
@@ -716,16 +745,17 @@ class Gateway:
             return None, None  # no batch of it can hold the request
         deadline = context.current().deadline
         work = current_work()
-        if row := await journal.in_batch(key, work.item.id if work else None):
+        owned = self.gate.owned()
+        if row := await journal.in_batch(key, work.item.id if work else None, owned):
             if row["error"] is not None:
                 return row["id"], _of_role(_stopped(row), role)
             batcher = self.gate.owner(row["batch"]) or self.gate.batcher(
-                role.provider, deadline or LOOKED_AT
+                role.provider, deadline or NO_DEADLINE
             )
             if batcher is None:
                 return None, None
-            once = deadline is None
-            reply = await batcher.attach(row["batch"], row["batch_id"], key, row["id"], once=once)
+            batch, name = row["batch"], row["batch_id"]
+            reply = await batcher.attach(batch, name, key, row["id"], until=deadline)
         elif (until := self.batching_until()) and (
             batcher := self.gate.batcher(role.provider, until)
         ):

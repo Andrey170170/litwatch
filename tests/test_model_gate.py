@@ -9,12 +9,13 @@ import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from pydantic import BaseModel
 
 from litwatch.api import app as app_module
 from litwatch.config import Config, Models, RoleConfig
-from litwatch.core import Cause, Fit, Verdict
+from litwatch.core import FAILED_RUNS, Cause, Fit, Verdict
 from litwatch.gates import work as work_gate
 from litwatch.gates.work import CommandCutOffError, inline
 from litwatch.jobs.context import model_run
@@ -38,7 +39,7 @@ from tests.fakes import (
 )
 from tests.fakes_http import FakeArchive
 from tests.sessions import Session, in_read, in_write
-from tests.working import QUIET, served, until
+from tests.working import QUIET, TOKEN, served, until
 
 BRIEF = RoleConfig(provider="anthropic", model="test-brief")
 HAIKU = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")  # listed
@@ -161,14 +162,27 @@ async def wanted(conn: Session, *papers) -> None:
 async def test_serve_builds_one_gate_whose_limits_its_concurrent_items_share(
     conn: Session, db, monkeypatch
 ):
-    """Two text passes run at once, each its own item and run; their calls go through the one
-    gate `serve` built, which lets one call at a time to the provider here."""
+    """Two text passes run at once, each its own item and run, and the owner grades a paper
+    now, a request's run: their calls go through the one gate `serve` built, which lets one
+    call at a time to the provider here, whichever kind of work makes it."""
     q = paper("2610.00002", title="Monitors under pressure", abstract="Monitors.", version=1)
+    r = paper("2610.00003", title="Graded now", abstract="Probes.", version=1)
     await wanted(conn, ft.P, q)
+    await in_write(conn, papers_store.upsert, [r])
+    await conn.execute(  # its grading failed three runs in a row: it waits for the owner
+        "INSERT INTO step_failures (paper_id, step, topic, paper_revision, failed_runs, "
+        "last_error) VALUES (%s, 'grading', %s, 1, %s, 'invalid')",
+        (r.id, FAITH.slug, FAILED_RUNS),
+    )
     fake = FakeArchive()
     for p in (ft.P, q):
         fake.texts[p.id] = (1, ft.BODY)
-    held, built = Held("anthropic", ft.Writer().respond), []
+    writer = ft.Writer()
+
+    def respond(role: RoleConfig, request: Request) -> str:  # the judge's answer unusable
+        return writer.respond(role, request) if role.model == ft.BRIEF_ROLE.model else "{}"
+
+    held, built = Held("anthropic", respond), []
 
     def model_gate(database, config):
         built.append(database)
@@ -190,17 +204,30 @@ async def test_serve_builds_one_gate_whose_limits_its_concurrent_items_share(
         found = await rows(conn, "SELECT state FROM fulltext_passes WHERE kind <> 'deep'")
         return [r["state"] for r in found] == ["done", "done"]
 
-    async with served(db, config, archive=ft.archive(fake)):
+    async with served(db, config, archive=ft.archive(fake)) as app:
         await until(both_open, "both passes' runs to open, one call in flight")
-        await asyncio.sleep(0.1)
-        assert held.flying == 1  # the second waits at the gate's limit, not at a gate of its own
-        held.release.set()
+        transport = httpx.ASGITransport(app=app)
+        headers = {"authorization": f"Bearer {TOKEN}"}
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://t", headers=headers
+        ) as c:
+            now = f"/api/settings/grading/{FAITH.slug}/{r.id}/now"
+            graded = asyncio.create_task(c.post(now, json={"revision": 1}))
+            await asyncio.sleep(0.1)
+            # The second pass and the request's call wait at the gate's limit, not at a gate
+            # or a limit of their own.
+            assert held.flying == 1 and not graded.done()
+            held.release.set()
+            assert (await asyncio.wait_for(graded, 10)).status_code == 200
         await until(both_done, "both Briefs to be written")
     assert built == [db] and held.most == 1
+    judged = await rows(conn, "SELECT 1 FROM inference_calls WHERE operation = 'judge'")
+    assert judged  # the request's call went through that gate
     found = await rows(
         conn,
         "SELECT c.run_id, c.work_id, r.work_id AS run_work, w.kind FROM inference_calls c "
-        "JOIN runs r ON r.id = c.run_id JOIN work_items w ON w.id = c.work_id",
+        "JOIN runs r ON r.id = c.run_id JOIN work_items w ON w.id = c.work_id "
+        "WHERE c.operation = 'brief'",
     )
     assert len({c["run_id"] for c in found}) == len({c["work_id"] for c in found}) == 2
     assert all(c["work_id"] == c["run_work"] and c["kind"] == "fulltext" for c in found)
@@ -423,7 +450,7 @@ async def test_a_call_on_a_provider_without_batches_looks_for_no_batch(
     gate = ModelGate(Models(brief=role), {"openrouter": openrouter}, CallJournal(db))
     journal, looked = CallJournal(db, await started(conn, "nightly")), []
 
-    async def in_batch(key, work_id):
+    async def in_batch(key, work_id, owned):
         looked.append(key)
 
     monkeypatch.setattr(journal, "in_batch", in_batch)

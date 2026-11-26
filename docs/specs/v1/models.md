@@ -119,9 +119,13 @@ service's workers, the CLI's other commands and a nightly started outside that w
   instead of resubmitting, and takes a refusal or truncation its batch already gave the item's attempt before rather
   than asking the same model again. A run's wait follows its deadline: under the nightly's, until it (cancelled at it,
   then the drain); a nightly started after its deadline has its own start for one, so it cancels at once and drains; a
-  call with no deadline (a worker's, a job's) looks once and is sent as a normal call if the batch has not ended, the
-  batch followed on by whoever owns it. A batch is one batch from its rows' opening on, whatever it is known by (the
-  reference its provider staged, then its id): one task in the process follows it. A call whose batch was sent with
+  call with no deadline (a worker's, a job's) looks once, the batch's next look or lookup, and is sent as a normal call
+  if that does not end it (at once while the batch is being created), the batch followed on by whoever owns it, or,
+  followed by no one before, settled as at a deadline: cancelled at once, then drained. That one look is the caller's
+  limit, not the batch's: a batch keeps its own deadline, its sender's or the latest of the calls waiting on it with
+  one. A call in the same process looks at a batch its process follows, a live item's included. A batch is one batch
+  from its rows' opening on, whatever it is known by (the reference its provider staged, then its id): one task in the
+  process follows it, from before its rows can be read. A call whose batch was sent with
   neither its id nor a reference to find it by recorded (the process died in between) is sent again: that one batch
   may be paid twice.
 - **The deadline.** `[schedule] deadline` (07:30 in the schedule's zone) is the nightly's: the first after the
@@ -129,8 +133,7 @@ service's workers, the CLI's other commands and a nightly started outside that w
   run sends no more batches (calls held but not yet sent go as normal calls), cancels its open batches and waits for them to end (cancelling takes minutes; requests in flight may still be
   answered); the answers are kept, and the cancelled requests are sent as normal calls, as is everything the run asks
   after the deadline. A batch still cancelling 30 minutes after the deadline has its unanswered requests sent as normal
-  calls all the same, at the risk of paying twice for some. Other batching jobs have no deadline and wait for their
-  batches, up to the provider's 24 hours.
+  calls all the same, at the risk of paying twice for some.
 - **A run started again.** The run lock means no other nightly runs, so a nightly that takes it takes back the leases
   of the automatic full-text passes a dead run held (pipeline.md, section 6), asks their calls again (which attach to
   the open batches), and waits, before the digests, for the passes queued since the night's first run started. The
