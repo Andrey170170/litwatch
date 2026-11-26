@@ -218,6 +218,10 @@ class WorkGate:
                 pass  # another took the admission at once
             await asyncio.sleep(RETRY_SECONDS)
 
+    async def _unwound(self) -> None:
+        """Wait for the renewals cut off at their lease's end (`_heartbeat`) to unwind."""
+        await asyncio.gather(*self._unwinding, return_exceptions=True)
+
     async def renew(self, item: WorkItem) -> bool:
         """Renew the lease on `item`; False when it is lost."""
         assert item.lease_token is not None  # a taken item has its lease
@@ -276,7 +280,7 @@ class WorkGate:
                         task.cancel()
                     await asyncio.gather(*supervisors, return_exceptions=True)
                     # Renewals cut off are cancelled already; their Workers have stopped.
-                    await asyncio.gather(*self._unwinding, return_exceptions=True)
+                    await self._unwound()
 
     async def _claim(
         self, kinds: list[str], workers: Mapping[str, Worker], supervisors: set[asyncio.Task[None]]
@@ -561,6 +565,8 @@ async def inline[T](
     finally:
         # Whatever happened, even cancelled (it waits for this), its claim's commit uncertain.
         await _finished(asyncio.create_task(_abandon(db, name, key)))
+        # A renewal cut off at its lease's end still uses the pool the command then closes.
+        await _finished(asyncio.create_task(gate._unwound()))
 
 
 async def _abandon(db: DatabaseGate, name: str, key: str) -> None:

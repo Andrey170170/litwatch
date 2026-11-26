@@ -7,6 +7,7 @@ nightly (`nightly_due`); `litwatch serve`'s app with its Work gate running (`ser
 import asyncio
 import contextlib
 from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,23 @@ from tests.sessions import Bridge, Session, in_read
 
 WAIT = 10.0  # how long a test waits on something that must happen
 # The schedule on, but no fire near now (29 February only), so `serve` submits none.
-QUIET = Schedule(enabled=True, nightly="0 0 29 2 *", publications="0 0 29 2 *")
+
+
+def quiet() -> Schedule:
+    """The schedule on (the workers run) with no fire near the tests' run, whatever the date:
+    daily, half a day from the time they start, so the last fire is past its catch-up window
+    (`jobs.scheduler.CATCH_UP`) and the next hours away; its deadline a minute after its time,
+    passed, so a nightly does not batch."""
+    zone = Schedule().zone
+    at = datetime.now(zone) + timedelta(hours=12)
+    at = at.replace(minute=min(at.minute, 58))  # its deadline on the same day
+    cron = f"{at.minute} {at.hour} * * *"
+    return Schedule(
+        enabled=True, nightly=cron, publications=cron, deadline=time(at.hour, at.minute + 1)
+    )
+
+
+QUIET = quiet()
 TOKEN = "test"  # the API token of the app `served` runs
 
 

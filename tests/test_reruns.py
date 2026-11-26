@@ -43,6 +43,7 @@ from tests.sessions import Bridge, Session, in_read, in_write
 from tests.working import (
     QUIET,
     chunks,
+    items_of,
     job_of,
     nightly_done,
     nightly_due,
@@ -766,9 +767,17 @@ async def test_a_worker_holding_its_most_runs_open_starts_only_process_jobs(
     await conn.execute(
         "UPDATE jobs SET wake_at = now() + interval '1 hour' WHERE id = %s", (first,)
     )
+    await conn.execute(  # its chunk's item too, so the next step takes the second's
+        "UPDATE work_items SET not_before = now() + interval '1 hour' "
+        "WHERE kind = %s AND key = %s AND state = 'pending'",
+        (jobs_store.WORK, str(first)),
+    )
     second = await rerun(conn, AGENTS.slug, [C.id], ceiling=1.0)
     assert not await step(w)
     assert (await in_read(conn, jobs_store.get, second))["state"] == "queued"
+    (deferred,) = await items_of(conn, jobs_store.WORK, str(second))
+    assert deferred["attempts"] == 1 and deferred["state"] == "pending"  # tried, and put off
+    assert deferred["not_before"] > datetime.now(UTC)
     process = await in_write(conn, jobs_store.create, "process", {"papers": [B.id]}, 1, "queued")
     assert await step(w)
     assert (await job_of(conn, process))["state"] == "done"

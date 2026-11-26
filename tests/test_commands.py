@@ -347,6 +347,65 @@ async def test_the_cli_deep_passes_wait_for_serves_and_close_their_clients_once(
     assert (item["attempts"], item["outcome"]) == (1, "failed")
 
 
+async def test_the_cli_deep_passes_that_lose_their_admission_close_their_clients_once(
+    conn: Session, tmp_path, monkeypatch
+):
+    """`litwatch fulltext --deep` loses the database as it takes its admission: it fails, cut
+    off, with no work done, and the clients it opened close once all the same."""
+    from litwatch import fulltext, integrations  # noqa: PLC0415
+    from litwatch.integrations import deep as deep_integration  # noqa: PLC0415
+
+    class Client:
+        def __init__(self) -> None:
+            self.closed = 0
+
+        async def aclose(self) -> None:
+            self.closed += 1
+
+    archive, maker = Client(), Client()
+
+    async def admit(*_, **__):
+        raise psycopg.OperationalError("the server closed the connection unexpectedly")
+
+    monkeypatch.setattr(fulltext, "archive_for", lambda cfg: archive)
+    monkeypatch.setattr(integrations, "enabled_using", lambda cfg, name: {"use": name})
+    monkeypatch.setattr(deep_integration, "load", lambda name, options, cfg: maker)
+    monkeypatch.setattr(queue, "admit", admit)
+    result = await command(conn, tmp_path, monkeypatch, "fulltext", "--deep")
+    assert result.exit_code != 0 and "run it again" in result.output, result.output
+    assert (archive.closed, maker.closed) == (1, 1)
+    assert await commands(conn) == []
+
+
+async def test_a_command_returns_only_once_a_renewal_cut_off_has_unwound(
+    conn: Session, db, monkeypatch
+):
+    """Its renewal does not answer before the lease lapses: the command fails, cut off, but not
+    before that renewal, cancelled, has unwound, which uses the pool the command then closes."""
+    from litwatch.gates import work as work_gate  # noqa: PLC0415
+
+    monkeypatch.setattr(work_gate, "LEASE", timedelta(seconds=0.6))
+    unwound = []
+
+    async def stalls(self, item) -> bool:
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.5)  # its unit rolling back
+            unwound.append(True)
+            raise
+        return True
+
+    monkeypatch.setattr(WorkGate, "renew", stalls)
+
+    async def work() -> None:
+        await asyncio.sleep(30)
+
+    with pytest.raises(CommandCutOffError, match="lease was lost"):
+        await asyncio.wait_for(inline(db, "intake", work), 10)
+    assert unwound == [True]
+
+
 @pytest.mark.parametrize("admission", ["deep", "intake:gone"])
 async def test_a_command_whose_process_died_is_ended_by_any_take_back(conn: Session, db, admission):
     """Its item holds its admission (`deep`, or its own) until its lease lapses; then any

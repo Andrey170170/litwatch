@@ -75,6 +75,7 @@ def _run[T](
     db: DatabaseGate | None = None,
     item: str | None = None,
     admission: str | None = None,
+    close: Callable[[], Awaitable[None]] | None = None,
 ) -> T:
     """Run `work` with the command's Database gate, the process's one, on the configured
     database, migrated first: `db` when the command built it already (unopened), else a new
@@ -82,16 +83,21 @@ def _run[T](
     does pipeline work runs it as a work item in this process (`gates.work.inline`, admitted by
     `admission` when given), whose lease keeps its run alive, until P5 sends it to `serve`. It
     has one attempt: the database lost under it fails it (`CommandCutOffError`), and the owner runs
-    it again."""
+    it again. `close` closes what the command opened for `work`, however it ends: its admission
+    waited for or lost included."""
     logs.setup()
 
     async def main() -> T:
-        async with db or DatabaseGate(configuration.database_url()) as gate:
-            if migrate:
-                await _migrate(gate)
-            if item is None:
-                return await work(gate)
-            return await inline(gate, item, lambda: work(gate), admission=admission)
+        try:
+            async with db or DatabaseGate(configuration.database_url()) as gate:
+                if migrate:
+                    await _migrate(gate)
+                if item is None:
+                    return await work(gate)
+                return await inline(gate, item, lambda: work(gate), admission=admission)
+        finally:
+            if close is not None:
+                await close()
 
     try:
         return asyncio.run(main())
@@ -1076,20 +1082,20 @@ def fulltext_queue(
             await asyncio.sleep(min(fulltext.TICK_SECONDS, left))
 
     async def work(db: DatabaseGate) -> Counter[str]:
-        try:
-            if maker is not None:
-                return await work_deep(db)
-            return await fulltext.work_waiting(
-                db, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
-            )
-        finally:
-            await archive.aclose()
-            if maker is not None:
-                await maker.aclose()
+        if maker is not None:
+            return await work_deep(db)
+        return await fulltext.work_waiting(
+            db, cfg, archive, limit=limit, wait=wait, report=lambda d: console.print(dict(d))
+        )
+
+    async def close() -> None:
+        await archive.aclose()
+        if maker is not None:
+            await maker.aclose()
 
     # Deep passes are admitted as `serve`'s are, so one Deep job runs at a time between them.
     item, admission = ("fulltext --deep", fulltext_store.DEEP_WORK) if deep else ("fulltext", None)
-    console.print_json(data=dict(_run(work, item=item, admission=admission)))
+    console.print_json(data=dict(_run(work, item=item, admission=admission, close=close)))
 
 
 @app.command()

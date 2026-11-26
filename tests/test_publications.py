@@ -231,21 +231,25 @@ async def test_runs_never_overlap(db: Session, gate, tmp_path, monkeypatch):
     async def going() -> bool:
         return source.going.is_set()
 
-    await until(going, "the command's run to start")
-    async with gate.write("a fire") as unit:
-        fired = datetime.now(UTC)
-        fire = await work.submit(unit, "publications", scheduler.fire_key(fired), lasting=True)
-
     async def ended() -> bool:
         (row,) = await items_of(db, "publications", fire.key)
         return row["state"] == "ended"
 
-    async with served(gate, CONFIG.model_copy(update={"schedule": QUIET}), publications=source):
-        await asyncio.sleep(0.3)
-        assert not await ended()  # it waits for the command's run
+    try:
+        await until(going, "the command's run to start")
+        async with gate.write("a fire") as unit:
+            fired = datetime.now(UTC)
+            fire = await work.submit(unit, "publications", scheduler.fire_key(fired), lasting=True)
+        quiet = CONFIG.model_copy(update={"schedule": QUIET})
+        async with served(gate, quiet, publications=source):
+            await asyncio.sleep(0.3)
+            assert not await ended()  # it waits for the command's run
+            source.hold.set()
+            result = await asyncio.wait_for(ran, 20)
+            await until(ended, "the fire's item to end")
+    finally:  # a failure above lets the command's thread go, rather than hang
         source.hold.set()
-        result = await ran
-        await until(ended, "the fire's item to end")
+        await asyncio.wait({ran}, timeout=20)
     assert result.exit_code == 0, result.output
     first, second = await (
         await db.execute("SELECT * FROM runs WHERE kind = 'publications' ORDER BY id")

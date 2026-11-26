@@ -3,7 +3,7 @@
 
 import json
 
-from litwatch.config import Config, Models, RoleConfig, Schedule
+from litwatch.config import Config, Models, RoleConfig
 from litwatch.llm import Gateway, Reply, Request
 from litwatch.store import runs
 from tests.briefs import ANSWER
@@ -11,10 +11,10 @@ from tests.conftest import started
 from tests.fakes import ScriptedProvider
 from tests.scripted import ROLES, Scripted
 from tests.sessions import Session, in_write
+from tests.working import quiet
 
 BRIEF = RoleConfig(provider="anthropic", model="test-brief")
-# The schedule on (the workers run), with no fire near now (`tests.working.QUIET`).
-QUIET = Schedule(enabled=True, nightly="0 0 29 2 *", publications="0 0 29 2 *")
+QUIET = quiet()  # the schedule on (the workers run), with no fire near now
 CONFIG = Config(models=Models(**ROLES, brief=BRIEF), schedule=QUIET)
 ZONE = CONFIG.schedule.zone
 COST = 0.01  # what every call costs

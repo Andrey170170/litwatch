@@ -48,7 +48,9 @@ def test_a_job_is_due_once_after_its_time_and_not_long_after():
     nightly = "0 6 * * *"
     assert scheduler.due_fire(nightly, at(6, 10), None) == at(6, 0)
     assert scheduler.due_fire(nightly, at(6, 10), last_run=at(6, 0, days=-1)) == at(6, 0)
-    assert not scheduler.due_fire(nightly, at(6, 10), last_run=at(6, 0, 5))  # ran already
+    ran = at(6) + timedelta(seconds=5)
+    assert not scheduler.due_fire(nightly, at(6, 10), last_run=ran)  # ran already
+    assert not scheduler.due_fire(nightly, at(6, 10), last_run=at(6))  # ran at its time
     assert not scheduler.due_fire(nightly, at(5, 59), last_run=at(6, 0, days=-1))  # not yet
     assert not scheduler.due_fire(nightly, at(13, 0), last_run=None)  # missed by too long
     weekly = "0 7 * * 1"
@@ -176,7 +178,8 @@ async def test_a_run_of_this_image_that_has_not_closed_cleanly_leaves_the_fire_d
     yet: it serves no fire yet, so the fire is submitted (and, the lookup's too), and a chunk
     counts it as due meanwhile; the fire's item finds out under the run lock what that run
     did."""
-    config = schedule(daily(timedelta(minutes=2)), daily(timedelta(minutes=2)))
+    cron = daily(timedelta(minutes=2))  # once, so both fires are one
+    config = schedule(cron, cron)
     fired = scheduler.last_fire(config.schedule.nightly, datetime.now(ZONE))
     for kind in ("nightly", "publications"):
         run = await started(conn, kind, alive=True)
@@ -490,30 +493,39 @@ async def test_serve_runs_the_due_nightly_then_the_job_it_held_back(conn: Sessio
 
 async def test_serve_runs_a_fire_that_comes_while_it_runs(conn: Session, db, monkeypatch):
     """No fire is due as `serve` starts; the nightly's comes three seconds later, while the app
-    runs: the scheduler's item, waiting for it, submits it then, and the gate runs the nightly."""
+    runs: the scheduler's item, waiting for it, submits it then, and the gate runs the nightly.
+    The scheduler's clock is held an hour back until `serve` has started, so however slow its
+    start, its sweep finds the fire still to come."""
     await settling.save_tree(conn, TREE)
     monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False, with_digests=False))
+
+    class Clock(datetime):
+        behind = timedelta(hours=1)
+
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.now(tz) - cls.behind
+
+    monkeypatch.setattr(scheduler, "datetime", Clock)
     soon = datetime.now(ZONE) + timedelta(seconds=3)
     config = schedule(f"{soon.minute} {soon.hour} * * * {soon.second}")  # seconds last
+    fired = scheduler.fire_key(soon.replace(microsecond=0))
 
-    async def ran() -> bool:
-        found = await (
-            await conn.execute(
-                "SELECT 1 FROM runs WHERE kind = 'nightly' AND finished_at IS NOT NULL"
-            )
-        ).fetchall()
-        return bool(found)
+    async def ended() -> bool:
+        found = await items_of(conn, "nightly", fired)
+        return bool(found) and found[0]["state"] == "ended"
 
     async with served(db, config, gateway=Scripted().gateway):
         assert not await (
             await conn.execute("SELECT 1 FROM work_items WHERE kind = 'nightly'")
         ).fetchall()
-        await until(ran, "the fire's nightly to run")
-    (night,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
-    assert night["started_at"] >= soon.replace(microsecond=0) and night["error"] is None
-    fired = scheduler.fire_key(soon.replace(microsecond=0))
+        Clock.behind = timedelta(0)
+        await until(ended, "the fire's item to end")
     (item,) = await items_of(conn, "nightly", fired)
-    assert item["outcome"] == "done"
+    (night,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
+    assert item["outcome"] == "done" and night["work_id"] == item["id"]
+    assert night["started_at"] >= soon.replace(microsecond=0) and night["error"] is None
+    assert night["finished_at"] is not None
 
 
 async def test_serve_stopping_mid_nightly_closes_its_run_and_the_next_serve_runs_its_job(

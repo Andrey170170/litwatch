@@ -832,15 +832,20 @@ async def test_a_job_put_on_tonights_run_while_the_fires_close_waits_is_released
         item = await queue.submit(unit, "nightly", fired, lasting=True)
     nightly_worker = scheduler.NightlyWorker(db, CONFIG, models.gateway)
     async with serving(WorkGate(db, poll=0.1), {"nightly": nightly_worker}):
-        await asyncio.wait_for(in_steps.wait(), 10)
-        holder = asyncio.create_task(hold())
-        await asyncio.wait_for(held.wait(), 10)
-        go.set()
-        await asyncio.sleep(0.5)  # its closing unit has begun, and waits on the row
-        async with db.write("with tonight's run", locks=["tonight"]) as unit:
-            assert await jobs_store.move(unit, job, jobs_store.NOT_RUN, "tonight") is not None
-        let_go.set()
-        await holder
+        holder = None
+        try:
+            await asyncio.wait_for(in_steps.wait(), 10)
+            holder = asyncio.create_task(hold())
+            await asyncio.wait_for(held.wait(), 10)
+            go.set()
+            await asyncio.sleep(0.5)  # its closing unit has begun, and waits on the row
+            async with db.write("with tonight's run", locks=["tonight"]) as unit:
+                assert await jobs_store.move(unit, job, jobs_store.NOT_RUN, "tonight") is not None
+        finally:  # a failure above lets the holder and the nightly go, rather than hang
+            go.set()
+            let_go.set()
+            if holder is not None:
+                await asyncio.wait_for(holder, 10)
 
         async def ended() -> bool:
             (row,) = await items_of(conn, "nightly", item.key)

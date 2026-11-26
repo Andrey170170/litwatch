@@ -1401,7 +1401,8 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
     texts = FakeArchive()
     texts.texts[P.id] = (P.version, briefs.BODY)
     monkeypatch.setattr(fulltext, "archive_for", lambda config: briefs.archive(texts))
-    monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False))
+    # One day for both runs, however long they take: the direct run is given it too.
+    monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False, today=today))
 
     async def record(conn: Session) -> tuple:
         (run,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
@@ -1412,7 +1413,7 @@ async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_direct
 
     await in_write(db, papers_store.upsert, [new])  # not yet classified, analysed or graded
     await seed(db)
-    await nightly.run(gate, config, fetch=False, gateway=Models().gateway)
+    await nightly.run(gate, config, fetch=False, gateway=Models().gateway, today=today)
     direct = await record(db)
 
     async with schema(db.test_dsn) as other:
