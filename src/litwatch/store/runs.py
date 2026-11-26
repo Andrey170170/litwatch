@@ -190,6 +190,18 @@ async def _set(
     )
 
 
+async def closed_by(unit: ReadUnit, work_id: int, kind: str) -> dict[str, Any] | None:
+    """The latest run of `kind` that the work item `work_id` opened and closed without an
+    error, if any: its work is done, whatever became of the item after."""
+    return await (
+        await unit.execute(
+            "SELECT * FROM runs WHERE work_id = %s AND kind = %s AND finished_at IS NOT NULL "
+            "AND error IS NULL ORDER BY id DESC LIMIT 1",
+            (work_id, kind),
+        )
+    ).fetchone()
+
+
 async def get(unit: ReadUnit, run_id: int) -> dict[str, Any] | None:
     return await (await unit.execute("SELECT * FROM runs WHERE id = %s", (run_id,))).fetchone()
 

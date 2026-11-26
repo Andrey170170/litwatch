@@ -5,12 +5,14 @@ resuming, and the report's tables. Providers are scripted."""
 import asyncio
 import fcntl
 import json
+from datetime import UTC, datetime
+from typing import Any, cast
 
 import pytest
 
 from litwatch import analysis, grading
 from litwatch.archive import ArchiveClient
-from litwatch.config import Models, RoleConfig
+from litwatch.config import Config, Models, RoleConfig
 from litwatch.fulltext import brief
 from litwatch.llm import ModelGate, ProviderError, Reply, Request, Stop, Usage
 from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
@@ -507,3 +509,95 @@ def test_the_tables_compare_with_the_owner_and_the_own_model_over_what_both_answ
     assert P.id not in listed_  # every candidate answered it
     failed = [*calls[:3], call(p, "other", "provider"), calls[3]]
     assert P.id not in ladders.answers(found, refusals, failed, built)  # an error says nothing
+
+
+class Earlier:
+    """A command item's `Output` as `serve`'s ladders handler sees it: the lines its earlier
+    attempts kept, per file; what it writes now, kept."""
+
+    def __init__(self, lines: dict[str, list[str]] | None = None) -> None:
+        self.lines, self.written = lines or {}, []
+
+    async def earlier(self, path: str) -> list[str]:
+        return self.lines.get(path, [])
+
+    async def line(self, path: str, text: str) -> None:
+        self.written.append((path, text))
+
+    async def say(self, text: str) -> None:
+        pass
+
+
+async def handled(conn: Session, db, tmp_path, todo_of, earlier: Earlier | None = None):
+    """`serve`'s handler of `eval ladders` on the cases judging P with each candidate, the
+    scope's `todo` as `todo_of` gives it from the real fingerprints; the providers' calls."""
+    from litwatch.core.work import ItemState, WorkItem
+    from litwatch.jobs import commands
+
+    if await in_read(conn, papers_store.get_many, [P.id]) == []:
+        await settling.save_tree(conn, TREE)
+        await in_write(conn, papers_store.upsert, [P])
+    tmp_path.mkdir(exist_ok=True)
+    found, chosen, out = ladder(tmp_path), judged(P), tmp_path / "runs"
+    built = await ladders.requests(Bridge(conn), None, chosen)
+    work = ladders.todo(chosen, found, built, [])
+    fit = FIT.model_dump_json()
+    providers = {n: ScriptedProvider(n, lambda r, q: fit) for n in ("anthropic", "openrouter")}
+    scope = {
+        "out": str(out),
+        "cases": [c.model_dump(mode="json") for c in chosen],
+        "ladders": {r: x.model_dump(mode="json") for r, x in found.items()},
+        "todo": todo_of(work),
+        "ceiling": 5.0,
+        "spent": 0.0,
+        "concurrency": 1,
+    }
+    item = WorkItem(7, "command:ladders", "k", "k", ItemState.RUNNING, datetime.now(UTC), 2, scope)
+    serving = commands.Serving(db, Config(), ModelGate(Models(), providers))
+    try:
+        result = await commands._ladders(serving, item, cast(Any, earlier or Earlier()))
+    finally:
+        calls = sum(len(p.calls) for p in providers.values())
+        if calls == 0:
+            assert not (out / ladders.PENDING).exists()  # refused before any reservation
+    return result, calls
+
+
+async def test_serve_refuses_a_ladder_call_whose_request_is_not_the_one_approved(
+    conn: Session, db, tmp_path
+):
+    """Each call's request as the command estimated it (its fingerprint) is built again by
+    `serve`: one that differs, or that `serve` cannot build, is refused, each named, before
+    any call."""
+
+    def approved(work):
+        return [(t.case.key, t.candidate.name, ladders.asked(t.candidate, t.request)) for t in work]
+
+    def other(work):
+        (key, name, _), *rest = approved(work)
+        return [(key, name, "not-this"), *rest, (key, "nobody", "x")]
+
+    with pytest.raises(ValueError, match="nothing asked") as refused:
+        await handled(conn, db, tmp_path, other)
+    assert f"{judged(P)[0].key} own: its request is not the one approved" in str(refused.value)
+    assert f"{judged(P)[0].key} nobody: no such candidate" in str(refused.value)
+    _, calls = await handled(conn, db, tmp_path / "again", approved)
+    assert calls == 2  # as approved, each candidate asked
+
+
+async def test_a_ladder_retry_refuses_an_earlier_attempts_overrun_before_any_call(
+    conn: Session, db, tmp_path
+):
+    """The item's own results, from an attempt before this one, are checked as a directory's
+    records are: a call that cost more than its reservation stops every later call."""
+
+    def approved(work):
+        return [(t.case.key, t.candidate.name, ladders.asked(t.candidate, t.request)) for t in work]
+
+    out = tmp_path / "runs"
+    dear = row(judged(P)[0].key, "other").model_copy(
+        update={"cost": 3.0, "reserved": 1.0, "attempt": "a1"}
+    )
+    earlier = Earlier({str(out / "judge.jsonl"): [dear.model_dump_json()]})
+    with pytest.raises(ValueError, match="cost more than its reservation"):
+        await handled(conn, db, tmp_path, approved, earlier)

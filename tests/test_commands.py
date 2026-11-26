@@ -11,20 +11,27 @@ import contextlib
 import functools
 import json
 import threading
+from collections import Counter
 from datetime import timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from litwatch import cli
 from litwatch.api import app as app_module
+from litwatch.archive import ArchiveClient
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.gates.work import WorkGate
+from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import commands
+from litwatch.jobs import intake as intake_job
 from litwatch.llm import ModelGate, Reply, Stop, Usage
-from litwatch.quality import classify
+from litwatch.quality import classify, jsonl
 from litwatch.store import papers as papers_store
+from litwatch.store import work as queue
 from tests.conftest import paper
+from tests.fakes_http import FakeArchive, mock
 from tests.scripted import CLASSIFY, Scripted, decision
 from tests.sessions import Session, in_write
 from tests.working import command, served, until
@@ -109,19 +116,28 @@ def interrupted(monkeypatch, when: threading.Event) -> None:
 async def test_a_command_with_no_serve_is_refused_and_writes_nothing(
     conn: Session, tmp_path, monkeypatch, argv
 ):
-    if argv[0] == "eval":  # a replay is prepared here first: as if one were found to resume
-        prepared = (_Replay(), {"classification": 0.0, "grading": 0.0})
-        monkeypatch.setattr(cli, "_run", lambda work, **_: prepared)
+    if argv[0] == "eval":  # a replay is prepared here first, with work left, to start
+        from litwatch.quality import replay  # noqa: PLC0415
+
+        async def resume(unit, cfg, eval_run_id):
+            return _Replay()
+
+        async def estimate(unit, cfg, r):
+            return {"classification": 0.0, "grading": 0.0}
+
+        monkeypatch.setattr(replay, "resume", resume)
+        monkeypatch.setattr(replay, "estimate", estimate)
     result = await command(conn, tmp_path, monkeypatch, *argv)
     assert result.exit_code != 0, result.output
     assert "no `litwatch serve` runs" in result.output and "dev-host.md" in result.output
     assert await rows(conn, "SELECT * FROM work_items") == []
+    assert await rows(conn, "SELECT * FROM eval_runs") == []  # a replay starts with its item
 
 
 class _Replay:
-    """A replay found to resume, with work left, as the CLI's preparation gives it."""
+    """A replay prepared, with work left and no record yet, as the CLI's preparation gives it."""
 
-    eval_run_id = 7
+    eval_run_id = None
     left_out = stale = labels = papers = ()
     to_classify, to_grade = ["2610.00001"], []
 
@@ -163,7 +179,6 @@ async def test_a_nightly_follows_its_item_across_a_serve_restart_and_is_done_onc
     assert result.exit_code == 0, result.output
     assert f"item {item['id']}: command:nightly" in result.output
     assert "no `litwatch serve` runs command:nightly now" in result.output
-    assert f"item {item['id']} runs again (attempt 2)" in result.output
     (item,) = await items(conn, "nightly")
     assert (item["state"], item["outcome"], item["attempts"]) == ("ended", "done", 2)
     assert [a["limit"] for a in attempts] == [5, 5]
@@ -208,7 +223,11 @@ async def test_ctrl_c_left_running_is_followed_again_and_cancelled_stops_serves_
         await until(stopped, "serve to stop the cancelled item's call")
     first, second = await items(conn, "ping")
     assert (first["outcome"], second["outcome"]) == ("done", "failed")
-    assert second["error"] == "cancelled by the owner (Ctrl-C)"
+    assert second["error"] == "cancelled by the owner"
+    # The ping's answer is its completion record, kept in the unit that ended it: no result.
+    (said,) = first["result"]
+    assert "test-brief -> 42" in said["say"]
+    assert await rows(conn, "SELECT * FROM work_results WHERE work_id = %s", first["id"]) == []
 
 
 @pytest.mark.usefixtures("short_leases")
@@ -231,11 +250,7 @@ async def test_an_evaluation_stopped_early_resumes_with_what_its_file_lacks(
     path = out / "decider.jsonl"
 
     def answered() -> list[str]:
-        return (
-            [json.loads(x)["paper_id"] for x in path.read_text().splitlines()]
-            if path.exists()
-            else []
-        )
+        return [json.loads(x)["paper_id"] for x in jsonl.lines(path)]
 
     async with served(db, Config(), models=ModelGate(Models(), {"openrouter": held})):
         four = threading.Event()
@@ -252,6 +267,8 @@ async def test_an_evaluation_stopped_early_resumes_with_what_its_file_lacks(
         assert stopped.exit_code != 0, stopped.output
         first = answered()
         assert len(first) == 4
+        with path.open("ab") as f:  # a kill cut a record off mid-write, mid-character
+            f.write('{"paper_id": "é'.encode()[:-1])
         held.release.set()
         resumed = await command(conn, tmp_path, monkeypatch, *argv)
     assert resumed.exit_code == 0, resumed.output
@@ -269,8 +286,8 @@ async def test_an_evaluation_stopped_early_resumes_with_what_its_file_lacks(
 async def test_intake_archive_here_runs_in_the_command_for_a_database_no_serve_works_from(
     conn: Session, tmp_path, monkeypatch
 ):
-    """`litwatch intake archive --here`, with no `serve`: its item runs in the command's own
-    Work gate, restricted to it, and ends done."""
+    """`litwatch intake archive --here`, with no `serve`: it runs in the command itself, no
+    work item and no Work gate (so nothing says it serves a command's kind), no Model gate."""
     seen = []
 
     class Done:
@@ -285,17 +302,179 @@ async def test_intake_archive_here_runs_in_the_command_for_a_database_no_serve_w
     async def aclose():
         pass
 
-    monkeypatch.setattr(commands.intake_job, "from_archive", from_archive)
+    monkeypatch.setattr(intake_job, "from_archive", from_archive)
     monkeypatch.setattr(
-        commands.archive_integration,
-        "source",
-        lambda cfg: type("C", (), {"aclose": staticmethod(aclose)})(),
+        archive_integration, "source", lambda cfg: type("C", (), {"aclose": staticmethod(aclose)})()
     )
     argv = ("intake", "archive", "--since", "2026-10-01", "--until", "2026-10-02", "--here")
     result = await command(conn, tmp_path, monkeypatch, *argv, config=None)
     assert result.exit_code == 0, result.output
     assert "intake from the archive, 2026-10-01 to 2026-10-02: 3 papers, 3 new" in result.output
     assert seen == [("2026-10-01", "2026-10-02")]
-    (item,) = await items(conn, "intake")
-    assert item["outcome"] == "done"
-    assert await rows(conn, "SELECT * FROM workers") == []  # its gate retired
+    assert await rows(conn, "SELECT * FROM work_items") == []
+    assert await rows(conn, "SELECT * FROM workers") == []
+
+
+async def test_a_nightly_whose_run_closed_is_not_run_again_when_serve_restarts(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """The nightly's run closed, then `serve` stopped before its item ended (given back): the
+    next attempt finds the run its item closed and returns that run's record. One run."""
+    real, attempts = commands.nightly_job.run, []
+    closed = threading.Event()
+
+    async def nightly(db_, cfg, **kwargs):
+        attempts.append(kwargs)
+        run_id = await real(db_, cfg, **kwargs)
+        closed.set()
+        await asyncio.Event().wait()  # until `serve` stops, its run closed
+        return run_id
+
+    monkeypatch.setattr(commands.nightly_job, "run", nightly)
+    models, config = Scripted(), Config()
+    async with served(db, config, models=models.gate(config)):
+        cli_task = asyncio.create_task(
+            command(conn, tmp_path, monkeypatch, "nightly", "--no-fetch", "--limit", "5")
+        )
+
+        async def ran() -> bool:
+            return closed.is_set()
+
+        await until(ran, "serve to close the nightly's run")
+    async with served(db, config, models=models.gate(config)):
+        result = await asyncio.wait_for(cli_task, 20)
+    assert result.exit_code == 0, result.output
+    (item,) = await items(conn, "nightly")
+    assert (item["outcome"], item["attempts"]) == ("done", 2)
+    (run,) = await rows(conn, "SELECT * FROM runs WHERE kind = 'nightly'")
+    assert len(attempts) == 1  # not run again
+    assert f"run {run['id']} closed in an earlier attempt" in result.output
+    assert result.output.count(f"run {run['id']}: cost") == 1
+
+
+async def test_a_fulltext_limit_counts_what_its_earlier_attempts_worked(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """`litwatch fulltext --limit 5`: its first attempt works 2 passes, counted in the unit
+    that records them, and `serve` stops; the next attempt works at most the 3 left."""
+    limits: list[int | None] = []
+    stopped = threading.Event()
+
+    async def work_waiting(db_, config, archive, *, limit, wait, models, report, counted):
+        limits.append(limit)
+        if len(limits) == 1:
+            async with db_.write("test: two passes recorded") as unit:
+                await counted(unit, 2)
+            stopped.set()
+            await asyncio.Event().wait()
+        return Counter(briefs_written=limit)
+
+    monkeypatch.setattr(commands.fulltext, "work_waiting", work_waiting)
+    archive = ArchiveClient("http://archive.test", "t", http=mock(FakeArchive().handle))
+    async with served(db, Config(), archive=archive):
+        cli_task = asyncio.create_task(
+            command(conn, tmp_path, monkeypatch, "fulltext", "--limit", "5")
+        )
+
+        async def worked() -> bool:
+            return stopped.is_set()
+
+        await until(worked, "serve to work two passes")
+    async with served(db, Config(), archive=archive):
+        result = await asyncio.wait_for(cli_task, 20)
+    assert result.exit_code == 0, result.output
+    assert limits == [5, 3]
+    (item,) = await items(conn, "fulltext")
+    assert item["progress"] == {"worked": 2}
+
+
+async def _classify_left_running(conn: Session, db, tmp_path, monkeypatch, held: Held):
+    """`eval classify` of 10 labelled papers, `serve` answering 4 before it waits on `held`,
+    left running at Ctrl-C; the command's arguments, its file, and what reads it."""
+    ids = classify.load(LABELS).papers[:10]
+    await in_write(conn, papers_store.upsert, [paper(i, title=f"Paper {i}") for i in ids])
+    (tmp_path / "candidates.toml").write_text(
+        f'[decider]\nprovider = "openrouter"\nmodel = "{CLASSIFY.model}"\n'
+    )
+    argv = ("eval", "classify", "decider", "--candidates", str(tmp_path / "candidates.toml"),
+            "--labels", str(LABELS), "--out", str(tmp_path / "runs"), "--limit", "10")  # fmt: skip
+    path = tmp_path / "runs" / "decider.jsonl"
+    four = threading.Event()
+
+    async def written() -> bool:
+        if len(jsonl.lines(path)) >= 4:
+            four.set()
+        return four.is_set()
+
+    interrupted(monkeypatch, four)
+    watching = asyncio.create_task(until(written, "4 answers in the file"))
+    left = await command(conn, tmp_path, monkeypatch, *argv, input="n\n")
+    await watching
+    assert left.exit_code == 130, left.output
+    return ids, argv, path
+
+
+@pytest.mark.usefixtures("short_leases")
+async def test_an_evaluation_rerun_writes_in_what_its_item_answered_while_no_one_followed(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """Ctrl-C leaves `eval classify` running and `serve` answers the rest with no command
+    following it: its answers are only the item's results. Run again, the command writes
+    them into its file before it decides what is left, so it asks nothing again."""
+    held = Held(json.dumps(decision()), free=4)
+    held.name = "openrouter"
+    async with served(db, Config(), models=ModelGate(Models(), {"openrouter": held})):
+        ids, argv, path = await _classify_left_running(conn, db, tmp_path, monkeypatch, held)
+        held.release.set()
+
+        async def ended() -> bool:
+            return (await items(conn, "classify"))[0]["state"] == "ended"
+
+        await until(ended, "the item to end, no one following it")
+        assert len(jsonl.lines(path)) == 4
+        again = await command(conn, tmp_path, monkeypatch, *argv)
+    assert again.exit_code == 0, again.output
+    assert "nothing left to ask" in again.output
+    assert sorted(json.loads(x)["paper_id"] for x in jsonl.lines(path)) == sorted(ids)
+    assert len(held.asked) == 10 and len(await items(conn, "classify")) == 1
+
+
+@pytest.mark.usefixtures("short_leases")
+async def test_an_evaluation_rerun_follows_its_item_while_it_still_runs(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """Run again while the item left running still writes into its file, the command follows
+    that item to its end instead of submitting another."""
+    held = Held(json.dumps(decision()), free=4)
+    held.name = "openrouter"
+    async with served(db, Config(), models=ModelGate(Models(), {"openrouter": held})):
+        ids, argv, path = await _classify_left_running(conn, db, tmp_path, monkeypatch, held)
+        again = asyncio.create_task(command(conn, tmp_path, monkeypatch, *argv))
+        await asyncio.sleep(0.5)
+        held.release.set()
+        result = await asyncio.wait_for(again, 20)
+    assert result.exit_code == 0, result.output
+    (item,) = await items(conn, "classify")
+    assert f"item {item['id']} still writes into these outputs" in result.output
+    assert sorted(json.loads(x)["paper_id"] for x in jsonl.lines(path)) == sorted(ids)
+    assert len(held.asked) == 10
+
+
+async def test_work_follow_is_for_a_commands_item_only(conn: Session, db, tmp_path, monkeypatch):
+    other = await in_write(conn, queue.submit, "fulltext", "1")
+    result = await command(conn, tmp_path, monkeypatch, "work", "follow", str(other.id))
+    assert result.exit_code != 0 and f"no command's work item {other.id}" in result.output
+
+
+def test_serve_runs_each_intake_where_it_has_what_the_handler_needs():
+    """arXiv intake whatever `serve` has (the schedule off too); a window from the archive only
+    with an archive; the catalog pass only when it harvests."""
+
+    def kinds(config: Config, archive: object = None) -> set[str]:
+        serving = commands.Serving(cast(Any, None), config, cast(Any, None), cast(Any, archive))
+        return {k for k in commands.CommandWorker(serving).kinds() if "intake" in k}
+
+    assert kinds(Config()) == {"command:intake"}
+    assert kinds(Config(), archive=object()) == {"command:intake", "command:intake-archive"}
+    harvests = Config(integrations={"archive": {"harvest": True}})
+    assert kinds(harvests) == {"command:intake", "command:intake-catalog"}

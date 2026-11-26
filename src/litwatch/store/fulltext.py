@@ -15,7 +15,7 @@ brought back after a withdrawal has its passes submitted again (`submit_restored
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, LiteralString
@@ -51,6 +51,10 @@ TEXT_WORK = "fulltext"
 DEEP_WORK = "deep"
 # The states in which a claim can take a pass (a running one once its claim's lease lapsed).
 _CLAIMABLE = [PassState.READY.value, PassState.AWAITING_TEXT.value, PassState.RUNNING.value]
+
+# What counts a CLI command's passes (its item's progress, `store.work.count`) in the unit that
+# commits them: the text passes worked, as each is recorded; the Deep passes, as each is claimed.
+type Tally = Callable[[WriteUnit, int], Awaitable[None]]
 
 
 def work_kind(kind: PassKind) -> str:

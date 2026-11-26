@@ -38,6 +38,7 @@ from litwatch.core.classification import (
 from litwatch.core.grading import grading_topics
 from litwatch.core.taxonomy import Depth, Taxonomy
 from litwatch.llm.gateway import CallError, Gateway
+from litwatch.quality import jsonl
 
 SEED = 20261014
 DRAW = 300
@@ -121,8 +122,7 @@ def results(path: Path) -> dict[str, Result]:
     """A run's answers: those kept gzipped (`<candidate>.jsonl.gz`) and those appended since."""
     packed = path.with_name(path.name + ".gz")
     lines = gzip.decompress(packed.read_bytes()).decode().splitlines() if packed.exists() else []
-    if path.exists():
-        lines += path.read_text(encoding="utf-8").splitlines()
+    lines += jsonl.lines(path)
     return {r.paper_id: r for r in (Result.model_validate_json(x) for x in lines if x)}
 
 

@@ -144,7 +144,14 @@ Found in a survey of the code at 548857e3:
   `command:<name>`, which the image before neither serves nor takes back; one left running holds its admission
   (`deep`, `publications`) there for good, and one pending never runs. So the switch is made with no command
   waiting, and the step above ends them with `WHERE kind LIKE 'command%' AND state <> 'ended'` in place of
-  `kind = 'command'`. Their `work_results` rows (migration 0051) the image before ignores.
+  `kind = 'command'`. Their `work_results` rows and their items' `result`, `progress` and `cancel_asked`
+  (migration 0051) the image before ignores.
+- **Rolling back from P5: the evaluations' calls count in P4's reuse and estimates.** P5 journals an evaluation's
+  calls on its run, of kind `eval`, which its production reads leave out (`store.calls`); the image before has
+  no such filter, so after a rollback it reuses an answer an evaluation got for an identical request and counts
+  evaluation calls in its price estimates. Accepted as P4 caveats: an evaluation asks the request production
+  would, so a reused answer is one the same role gave, validated as production validates it; and an estimate is
+  a mean the next nights' calls dilute. A filter that P4 alone would read was not worth a step of its own.
 - **Rolling back from P4: a reservation the image before does not count.** P4 counts a call's unknown charge at its
   reservation (`inference_calls.reserved`, migration 0050) against its job's ceiling; the image before counts it as
   nothing. So after a rollback, a job whose runs have an unknown charge can spend past its ceiling by that charge's
@@ -341,11 +348,22 @@ Found while building, owned by the stage named.
   service not those that need it), under its own configuration, so the commands lost `--config` but for the
   evaluations, which build their requests here. The command refuses when no `workers` row lists its kind and beat
   within a lease, follows the item read-only (its row, `work_results` after the last id it showed, on `NOTIFY`
-  of both channels or every 2 s), and holds no claim. A cancel (`store.work.cancel`) ends the item and takes its
-  lease away; its Worker stops at its next fenced write or its next renewal, within a third of the lease, so a
-  cancelled admission's next holder can start before it stops. `work_results` rows are kept with their item; P7's
-  cleanup may prune an ended item's. `intake archive --here` runs its item on a Work gate of the command's own
-  (`keys=`), for a database no `serve` works from (the sandbox's build). No CLI builds a Model gate any more:
+  of both channels or every 2 s), and holds no claim. Its progress is the item's `work_results` (an evaluation's
+  answers and reservations, as lines of its files); what it returns is the item's completion record (`result`),
+  written in the unit that ends it. An attempt after a take-back never does again what an earlier one committed:
+  a command whose run closed returns that run's record, a `--limit` counts what earlier attempts did
+  (`progress`, counted in the unit each pass commits in), an evaluation leaves out what its results hold. A
+  cancel (`store.work.cancel`) is a request on the item (`cancel_asked`), notified: a pending item ends at once;
+  a running one's supervisor stops its Worker, lets its cleanup (its run closed) finish under the claim, then
+  ends it failed, so its admission is free only once it has stopped. Only a command's item is followed or
+  cancelled from the CLI. Each evaluation's output names the item writing it (`<file>.item`, a ladders
+  directory's `item.json`): a rerun first writes in that item's results, its reservations included, so a
+  follower that stopped loses nothing, and follows the item instead while it is open. `work_results` rows are
+  kept with their item; P7's cleanup may prune an ended item's. `intake archive --here` is no item: it runs in
+  the command, with no Work gate and no Model gate, for a database no `serve` works from (the sandbox's build).
+  A gate that stops retires its `workers` row first, before its items drain, so no command is accepted for a
+  kind no one will run; a `serve` killed leaves its row until its heartbeat is a lease old (3 minutes at the
+  default lease), and a command submitted meanwhile waits for the next `serve`. No CLI builds a Model gate any more:
   P4's findings on a second gate meeting `serve`'s batches (`owner()` sees only its process) need no fix while
   that holds, and `jobs.context.model_gate` serves `serve` alone.
 - **P7 (from P5): the P3 `command` kind.** `store.work._retire_commands` still ends an expired P3-image `command`

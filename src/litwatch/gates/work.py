@@ -48,6 +48,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import psycopg
 
@@ -74,9 +75,11 @@ SYSTEM = Attribution.system("work gate")
 
 @dataclass(frozen=True)
 class Done:
-    """The item did its work, spending `cost` dollars (None: unknown)."""
+    """The item did its work, spending `cost` dollars (None: unknown); `result`, a CLI
+    command's outcome, is kept with the item, in the unit that ends it."""
 
     cost: Decimal | None = None
+    result: Any = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +153,12 @@ async def _finished[T](task: asyncio.Task[T]) -> None:
         pass  # the task's own error is its owner's to read
 
 
+async def _stop_when(cancelling: asyncio.Event, handler: asyncio.Task) -> None:
+    """Cancel `handler` once its owner asked to cancel its item."""
+    await cancelling.wait()
+    handler.cancel()
+
+
 def _reap(item: WorkItem, handler: asyncio.Task) -> None:
     """Log the error a Worker stopped by the gate raised as it stopped, if it raised one."""
     if not handler.cancelled() and (error := handler.exception()) is not None:
@@ -170,6 +179,9 @@ class WorkGate:
         # Renewals cut off at their lease's end, kept until they have unwound.
         self._unwinding: set[asyncio.Task[bool]] = set()
         self._keys: Mapping[str, Collection[str]] | None = None  # as `run` was given them
+        # The items running here, each with what is set when its owner asks to cancel it.
+        self._running: dict[int, asyncio.Event] = {}
+        self._retire: Callable[[], Awaitable[None]] | None = None  # while `run` serves
 
     @property
     def idle(self) -> bool:
@@ -233,6 +245,7 @@ class WorkGate:
                         self._wake.clear()
                         wait: float | None = None
                         try:
+                            await self._cancels()
                             await self.take_back(kinds)
                             while await self._claim(kinds, workers, supervisors):
                                 pass
@@ -255,6 +268,9 @@ class WorkGate:
                         finally:
                             self._waiting = False
                 finally:
+                    # No more taken from now: no command is accepted for a kind no one runs.
+                    if self._retire is not None:
+                        await self._retire()
                     for task in supervisors:
                         task.cancel()
                     await asyncio.gather(*supervisors, return_exceptions=True)
@@ -283,9 +299,25 @@ class WorkGate:
         task.add_done_callback(lambda _: self._wake.set())  # its admission is free again
         return True
 
+    async def _cancels(self) -> None:
+        """Tell the items running here whose owner asked to cancel them (`store.work.cancel`)."""
+        if not self._running:
+            return
+        async with self.db.read("work: cancels asked") as unit:
+            asked = await queue.asked_to_cancel(unit, list(self._running))
+        for item_id in asked:
+            if (cancelling := self._running.get(item_id)) is not None:
+                cancelling.set()
+
     async def _supervise(self, item: WorkItem, worker: Worker, since: float) -> None:
         """Own one committed claim to its settling: run its Worker under its lease, unless the
-        lease ran out before it could start."""
+        lease ran out before it could start, or its owner cancelled it before."""
+        if item.cancel_asked is not None:
+            await self._change(
+                "cancel",
+                lambda unit: queue.end(unit, item, Outcome.FAILED, error=queue.CANCELLED),
+            )
+            return
         if asyncio.get_running_loop().time() >= since + self.lease.total_seconds():
             # Its lease ran out before it could start: whoever runs next takes it.
             log.warning("work: %s %s (item %s) leased too late to start", *_name(item))
@@ -294,10 +326,13 @@ class WorkGate:
         await self._run(item, worker, since)
 
     async def _run(self, item: WorkItem, worker: Worker, since: float) -> None:
-        """Run `item` by `worker` under its lease and settle it."""
-        lost = asyncio.Event()
+        """Run `item` by `worker` under its lease and settle it. Its owner's cancel stops the
+        Worker, which finishes its cleanup under the claim; the item then ends failed."""
+        lost, cancelling = asyncio.Event(), asyncio.Event()
         handler = asyncio.create_task(self._handle(item, worker))
         beat = asyncio.create_task(self._heartbeat(item, handler, lost, since))
+        stopper = asyncio.create_task(_stop_when(cancelling, handler))
+        self._running[item.id] = cancelling
         try:
             try:
                 await asyncio.wait({handler})
@@ -313,11 +348,21 @@ class WorkGate:
                 log.warning("work: %s %s (item %s) stopped: its lease is lost", *_name(item))
                 _reap(item, handler)
                 return
+            if cancelling.is_set() and (handler.cancelled() or handler.exception() is not None):
+                log.warning("work: %s %s (item %s) cancelled by its owner", *_name(item))
+                _reap(item, handler)
+                await self._change(
+                    "cancel",
+                    lambda unit: queue.end(unit, item, Outcome.FAILED, error=queue.CANCELLED),
+                )
+                return
             if handler.cancelled():  # by no one here: it stopped, so it is given back
                 await self._give_back(item)
                 return
             await self._settle(item, handler)
         finally:
+            self._running.pop(item.id, None)
+            stopper.cancel()
             beat.cancel()
             try:
                 await asyncio.wait({beat})
@@ -348,8 +393,10 @@ class WorkGate:
             at = result.at
             await self._change("wait", lambda unit: queue.again(unit, item, at))
         else:
-            cost = None if result is None else result.cost
-            await self._change("end", lambda unit: queue.end(unit, item, Outcome.DONE, cost=cost))
+            cost, kept = (None, None) if result is None else (result.cost, result.result)
+            await self._change(
+                "end", lambda unit: queue.end(unit, item, Outcome.DONE, cost=cost, result=kept)
+            )
 
     async def _give_back(self, item: WorkItem) -> None:
         """Give back a claim whose Worker has stopped (or never started), its lease live or not,
@@ -408,12 +455,19 @@ class WorkGate:
 
     @asynccontextmanager
     async def _serving(self, kinds: list[str]) -> AsyncGenerator[None]:
-        """This process's `workers` row, kept beating, and the listener, for the block."""
+        """This process's `workers` row, kept beating, and the listener, for the block. The row
+        goes when the block ends, or sooner, as the gate stops taking work (`_retire`), so no
+        command is accepted for a kind no one will run; a process killed leaves it until its
+        heartbeat is a lease old."""
         me = await self._register(kinds)
         tasks = [asyncio.create_task(self._listen()), asyncio.create_task(self._beat(me))]
-        try:
-            yield
-        finally:
+        retired = False
+
+        async def retire() -> None:
+            nonlocal retired
+            if retired:
+                return
+            retired = True
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -422,6 +476,13 @@ class WorkGate:
                     await queue.retire(unit, me)
             except Exception:
                 log.warning("work: this process's worker row stays", exc_info=True)
+
+        self._retire = retire
+        try:
+            yield
+        finally:
+            self._retire = None
+            await retire()
 
     async def _register(self, kinds: list[str]) -> int:
         """Record this process as serving `kinds`, trying again while the database is lost."""

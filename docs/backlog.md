@@ -170,7 +170,14 @@ Its own project on top of A6: the labelled query set and goals first, then work 
     restart in between leaves a committed result out of the job's counts (a re-run's Brief, a replay result whose
     acknowledgement is lost). Counts only; one fix closes both: derive a job's progress from its committed results;
   - a normal call's `record` (`store/calls.py`) tried again after its commit acknowledgement was lost stamps a new
-    `responded_at`, and can move the provider's `replied_at` past another call's account error.
+    `responded_at`, and can move the provider's `replied_at` past another call's account error;
+  - two commands following one evaluation's item at once (`litwatch work follow` beside the command, or twice)
+    can each append a line after reading the same file, so it is written twice, and `work follow` of a ladders
+    run does not take its directory's lock (`quality.ladders.locked`): one follower per output, and the lock,
+    for each;
+  - a submission whose commit acknowledgement is lost leaves its item committed and running while the command
+    exits without its id: its output's `.item` names it, so a rerun finds it, but a command with no output
+    (`nightly`, `fulltext`) has nothing to find it by but `work_items`.
 
 - **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
   `evals/` and homelab specifics out of the repository (the image ships `evals/labels/` for Run replay: they move

@@ -1,7 +1,9 @@
--- A CLI command's results (docs/plans/a2-work-gate.md, P5): the command writes its work item
--- and `serve` runs it; what the command prints and the lines of its output files come back as
--- rows here, in order, each written in a unit fenced on the item's lease, which the command
--- reads as they arrive (`store.work.results`). Additive: the image before ignores it.
+-- A CLI command's item as `serve` runs it (docs/plans/a2-work-gate.md, P5). Its progress comes
+-- back as rows here, in order, each written in a unit fenced on the item's lease, which the
+-- command reads as they arrive (`store.work.results`); its outcome is the item's `result`,
+-- written in the unit that ends it. `progress` counts what its work committed (the passes it
+-- claimed), so an attempt after a take-back goes on from there; `cancel_asked` is the owner's
+-- cancel, which the supervisor owning the item acts on. Additive: the image before ignores it.
 CREATE TABLE work_results (
     id       bigserial PRIMARY KEY,
     work_id  bigint NOT NULL REFERENCES work_items (id),
@@ -9,3 +11,7 @@ CREATE TABLE work_results (
     body     jsonb NOT NULL
 );
 CREATE INDEX work_results_item ON work_results (work_id, id);
+ALTER TABLE work_items
+    ADD COLUMN result jsonb,
+    ADD COLUMN progress jsonb NOT NULL DEFAULT '{}',
+    ADD COLUMN cancel_asked timestamptz;

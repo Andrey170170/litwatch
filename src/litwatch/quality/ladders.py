@@ -63,6 +63,7 @@ from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.llm import CallError, Gateway, ModelGate, Request
 from litwatch.llm.anthropic import DEFAULT_MAX_TOKENS
 from litwatch.llm.gateway import Journal
+from litwatch.quality import jsonl
 from litwatch.store import digests as digests_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -294,26 +295,15 @@ def asked(candidate: Candidate, request: Request) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:12]
 
 
-def _lines(path: Path) -> list[str]:
-    """A JSON-lines file's records, but a last one cut off mid-write: each is written whole
-    with its newline, so one without is a write a kill interrupted."""
-    if not path.exists():
-        return []
-    text = path.read_text()
-    return [line for line in text[: text.rfind("\n") + 1].splitlines() if line]
-
-
 def _records(path: Path) -> list[dict[str, Any]]:
-    return [json.loads(line) for line in _lines(path)]
+    return [json.loads(line) for line in jsonl.lines(path)]
 
 
 def _mend(out: Path) -> None:
     """Cut a record a kill interrupted off the end of each file, before more is appended. A call
     whose row is cut off counts at its reservation; one whose reservation is was never sent."""
     for path in out.glob("*.jsonl"):
-        text = path.read_text()
-        if text and not text.endswith("\n"):
-            path.write_text(text[: text.rfind("\n") + 1])
+        jsonl.mend(path)
 
 
 def rows(out: Path) -> list[Row]:
@@ -322,7 +312,7 @@ def rows(out: Path) -> list[Row]:
     for path in sorted(out.glob("*.jsonl")):
         if path.name in (BUDGET, PENDING):
             continue
-        found += [Row.model_validate_json(line) for line in _lines(path)]
+        found += [Row.model_validate_json(line) for line in jsonl.lines(path)]
     return found
 
 
@@ -486,32 +476,49 @@ class Ran:
 
 
 @contextmanager
-def held(out: Path) -> Generator[list[Row]]:
-    """`out` held for one run, and the calls recorded in it (see the module's docstring): made
-    if need be, locked against another run, a record a kill cut off mended, and refused when
-    its calls are ones the ceiling can't count."""
+def locked(out: Path) -> Generator[None]:
+    """`out` held for one run: made if need be, and locked against another run."""
     out.mkdir(parents=True, exist_ok=True)
     with (out / LOCK).open("w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError(f"another run is using {out}") from None
-        _mend(out)
-        # The rows are the evidence: each is written as its call ends, before any record of why
-        # a run stopped, and a reservation recorded before `attempt` existed is no bound.
-        found = rows(out)
-        if blind := sum(r.cost is None and r.attempt is None for r in found):
-            raise ValueError(
-                f"{blind} calls in {out} have no known cost and no reservation that bounds it "
-                "(recorded before reservations were), so the ceiling can't count them: "
-                "start a new directory"
-            )
-        if any(r.attempt is not None and r.cost is not None and r.cost > r.reserved for r in found):
-            raise ValueError(
-                f"{OVERRUN} in an earlier run into {out}: correct its price_max and max_output, "
-                "then start a new directory"
-            )
-        yield found
+        yield
+
+
+def recorded(out: Path) -> list[Row]:
+    """The calls recorded in `out`, which a run holds (`locked`; see the module's docstring):
+    a record a kill cut off mended, and refused when its calls are ones the ceiling can't count
+    (`refuse`)."""
+    _mend(out)
+    found = rows(out)
+    refuse(found, f"{out}")
+    return found
+
+
+@contextmanager
+def held(out: Path) -> Generator[list[Row]]:
+    """`out` held for one run, and the calls recorded in it (`locked`, `recorded`)."""
+    with locked(out):
+        yield recorded(out)
+
+
+def refuse(found: list[Row], where: str) -> None:
+    """Refuse a run over calls the ceiling can't count: the rows are the evidence, each written
+    as its call ends, before any record of why a run stopped, and a reservation recorded before
+    `attempt` existed is no bound; a charge over its reservation means the bounds are wrong."""
+    if blind := sum(r.cost is None and r.attempt is None for r in found):
+        raise ValueError(
+            f"{blind} calls in {where} have no known cost and no reservation that bounds it "
+            "(recorded before reservations were), so the ceiling can't count them: "
+            "start a new directory"
+        )
+    if any(r.attempt is not None and r.cost is not None and r.cost > r.reserved for r in found):
+        raise ValueError(
+            f"{OVERRUN} in an earlier run into {where}: correct its price_max and max_output, "
+            "then start a new directory"
+        )
 
 
 async def ask(

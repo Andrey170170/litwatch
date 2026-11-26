@@ -32,6 +32,7 @@ from litwatch.core.budget import CallStart
 from litwatch.fulltext import brief, trim
 from litwatch.llm import CallError, ModelGate, Usage
 from litwatch.llm.gateway import Journal
+from litwatch.quality import jsonl
 
 # The Brief asked for, and the Gist's hard limit (`brief.SYSTEM`, `brief.Output`).
 ASKED_BRIEF_WORDS = (120, 200)
@@ -81,23 +82,14 @@ class Result(BaseModel):
 
 
 def results(path: Path) -> dict[str, Result]:
-    if not path.exists():
-        return {}
-    found = (
-        Result.model_validate_json(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line
-    )
+    found = (Result.model_validate_json(line) for line in jsonl.lines(path))
     return {r.paper_id: r for r in found}
 
 
 def spent(path: Path) -> list[float | None]:
     """What each call of the run cost, failed ones and those answered again included; None
     where the charge is unknown."""
-    if not path.exists():
-        return []
-    lines = (line for line in path.read_text(encoding="utf-8").splitlines() if line)
-    return [Result.model_validate_json(line).cost for line in lines]
+    return [Result.model_validate_json(line).cost for line in jsonl.lines(path)]
 
 
 def dollars(costs: list[float | None]) -> str:
@@ -226,12 +218,9 @@ def left(out: Path, asked: str, papers: list[tuple[Paper, Entry]]) -> list[tuple
         raise ValueError(
             f"{out} holds answers to another request ({sorted(other)}); use a new file"
         )
-    done = {pid for pid, r in found.items() if r.output and r.inputs == inputs(*_of(papers, pid))}
+    current = {p.id: inputs(p, e) for p, e in papers}  # an answer to a paper not asked now waits
+    done = {pid for pid, r in found.items() if r.output and r.inputs == current.get(pid)}
     return [(p, e) for p, e in papers if p.id not in done]
-
-
-def _of(papers: list[tuple[Paper, Entry]], pid: str) -> tuple[Paper, Entry]:
-    return next((p, e) for p, e in papers if p.id == pid)
 
 
 async def ask(

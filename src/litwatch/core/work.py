@@ -24,7 +24,9 @@ class Outcome(StrEnum):
 @dataclass(frozen=True)
 class WorkItem:
     """A work item as stored. While it runs, `lease_token` and `lease_until` are its lease: the
-    worker holding that token holds the item until then, unless renewed."""
+    worker holding that token holds the item until then, unless renewed. A CLI command's item
+    keeps its outcome in `result`, counts what its work committed in `progress`, and has its
+    owner's cancel in `cancel_asked`."""
 
     id: int
     kind: str
@@ -39,3 +41,6 @@ class WorkItem:
     outcome: Outcome | None = None
     error: str | None = None
     priority: int = 0  # its place in line among those due: the lowest first
+    result: Any = None
+    progress: dict[str, int] = field(default_factory=dict)
+    cancel_asked: datetime | None = None

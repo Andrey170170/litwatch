@@ -152,11 +152,17 @@ async def models(conn: Session):
 async def test_the_cli_replay_that_loses_the_database_as_it_starts_submits_nothing(
     conn: Session, models, tmp_path, monkeypatch
 ):
-    """`litwatch eval replay`: the database is lost as its start commits, so that start is
-    rolled back; the command fails before it submits the replay's item, so nothing runs."""
+    """`litwatch eval replay`: the database is lost as its start commits, in the unit that
+    submits the replay's item, so both are rolled back and nothing runs."""
     import psycopg  # noqa: PLC0415
 
+    from litwatch.store import work as queue  # noqa: PLC0415
     from tests.working import command  # noqa: PLC0415
+
+    async def served(unit, kind, within):  # as if a `serve` ran the replay
+        return True
+
+    monkeypatch.setattr(queue, "serving", served)
 
     labels = tmp_path / "labels"
     labels.mkdir()

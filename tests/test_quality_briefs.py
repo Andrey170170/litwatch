@@ -96,6 +96,10 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     assert sum(briefs.spent(out)) == pytest.approx(0.203 + third[0].cost)
     assert briefs.results(out)[P.id].output is not None
 
+    # A paper answered before but no longer asked (its entry gone, or no longer in the
+    # database) is no reason to fail: what is asked now is left as before.
+    assert briefs.left(out, briefs.fingerprint(ROLE, "pass"), [pairs[1]]) == []
+
     other = ModelGate(Models(brief=ROLE.model_copy(update={"model": "another"})), {})
     with pytest.raises(ValueError, match="another request"):
         await run(other, seeds.taxonomy(), pairs, archive, out)

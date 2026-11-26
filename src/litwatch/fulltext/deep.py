@@ -85,12 +85,13 @@ async def work(
     rules: word.Rules,
     limit: int | None = None,
     fires: bool = True,
+    claimed: store_.Tally | None = None,
 ) -> Counter[str]:
-    """Work the Deep passes that are due, one at a time, up to `limit` claimed (`litwatch
-    fulltext --deep`); their papers are settled by `rules`. A re-run's (background) passes
-    wait while a nightly run is running or due (pipeline.md, section 10): a scheduled fire
-    counts with `fires`, the configured schedule on (`store.jobs.nightly_waits`). Returns how
-    the tries ended."""
+    """Work the Deep passes that are due, one at a time, up to `limit` claimed (`litwatch fulltext
+    --deep`), each claim counted by `claimed` in its unit; their papers are settled by `rules`.
+    A re-run's (background) passes wait while a nightly run is running or due (pipeline.md,
+    section 10): a scheduled fire counts with `fires`, the configured schedule on
+    (`store.jobs.nightly_waits`). Returns how the tries ended."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
     while limit is None or len(tried) < limit:
@@ -99,15 +100,15 @@ async def work(
         async with db.write("claim a deep pass") as unit:
             # Asked at each claim: a nightly may have come due meanwhile.
             background = not await jobs_store.nightly_waits(unit, fires=fires)
-            claimed = await store_.claim(
-                unit, deep.lease, 1, tried, deep=True, background=background
-            )
+            taken = await store_.claim(unit, deep.lease, 1, tried, deep=True, background=background)
             # A pass with an attempt open has started: its job is followed whatever the paper
             # wants.
-            attempt = await cards.open_attempt(unit, claimed[0].id) if claimed else None
-        if not claimed:
+            attempt = await cards.open_attempt(unit, taken[0].id) if taken else None
+            if taken and claimed is not None:
+                await claimed(unit, 1)
+        if not taken:
             break
-        (c,) = claimed
+        (c,) = taken
         tried.add(c.id)
         why = await work_one(db, archive, deep, c, attempt, rules)
         if why != "lost":

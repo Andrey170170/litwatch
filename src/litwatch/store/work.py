@@ -34,10 +34,14 @@ COMMAND = "command"
 # The channel a command's results are notified on (`put_result`), its payload the item's id:
 # the command following the item listens on it, the Work gates do not.
 RESULTS = "litwatch_work_results"
+# The CLI's commands' kinds (`jobs.commands`), as a LIKE pattern: the only items an owner may
+# follow or cancel from the CLI.
+COMMANDS = "command:%"
+CANCELLED = "cancelled by the owner"
 
 _COLUMNS = (
     "id, kind, key, admission, state, not_before, attempts, scope, lease_token, lease_until, "
-    "outcome, error, priority"
+    "outcome, error, priority, result, progress, cancel_asked"
 )
 # An item whose key is taken: open, or lasting. As the unique index `work_items_key` says.
 _TAKEN = "(lasting OR state <> 'ended')"
@@ -87,6 +91,9 @@ def _item(row: dict[str, Any]) -> WorkItem:
         outcome=Outcome(row["outcome"]) if row["outcome"] else None,
         error=row["error"],
         priority=row["priority"],
+        result=row["result"],
+        progress=row["progress"],
+        cancel_asked=row["cancel_asked"],
     )
 
 
@@ -419,8 +426,10 @@ async def end(
     *,
     error: str | None = None,
     cost: Decimal | None = None,
+    result: Any = None,
 ) -> bool:
-    """End the item held under its live lease, with `outcome`. One resubmitted while it ran
+    """End the item held under its live lease, with `outcome` (and `result`, a command's
+    outcome, which a retry reads instead of running again). One resubmitted while it ran
     ends as itself, its record kept, and a fresh pending item takes its key, with its scope and
     admission, wanted when the resubmission asked. False when the lease is no longer held: the
     item is not this worker's to settle."""
@@ -428,11 +437,12 @@ async def end(
     held = await _held(unit, item.id, item.lease_token, live=True)
     if held is None:
         return False
+    kept = None if result is None else Jsonb(result)
     await unit.execute(
         "UPDATE work_items SET state = 'ended', outcome = %s, error = %s, cost = %s, "
-        "ended_at = %s, lease_token = NULL, lease_until = NULL, resubmitted = false "
-        "WHERE id = %s",
-        (outcome, _stored(error), cost, held["at"], item.id),
+        "result = %s, ended_at = %s, lease_token = NULL, lease_until = NULL, "
+        "resubmitted = false WHERE id = %s",
+        (outcome, _stored(error), cost, kept, held["at"], item.id),
     )
     if held["resubmitted"]:
         await unit.execute(
@@ -545,25 +555,58 @@ async def find(unit: ReadUnit, kind: str, key: str) -> WorkItem | None:
     return _item(row) if row else None
 
 
-async def cancel(unit: WriteUnit, item_id: int, error: str) -> WorkItem | None:
-    """End the item failed with `error` unless it has ended: its owner cancelled it (a CLI
-    command's, at Ctrl-C). A running one loses its lease with it, as when it is taken back: its
-    row is locked `FOR UPDATE` first, so a unit fenced on it ends before, and every one after
-    fails (`LeaseLostError`); its Worker stops at its next fenced write, or its next renewal at
-    the latest. Returns the item as it stands after."""
-    await unit.execute("SELECT 1 FROM work_items WHERE id = %s FOR UPDATE", (item_id,))
+async def cancel(unit: WriteUnit, item_id: int) -> WorkItem | None:
+    """The owner cancels the CLI command's item `item_id` (at Ctrl-C), or None when it is no
+    command's. One pending ends failed at once (`CANCELLED`); one running keeps its lease and
+    has the cancel asked (`cancel_asked`), notified: the supervisor owning it stops its Worker,
+    lets its cleanup finish under its claim, and only then ends it (`gates.work`). Returns the
+    item as it stands after."""
     row = await (
         await unit.execute(
-            "UPDATE work_items SET state = 'ended', outcome = 'failed', error = %s, "
-            "ended_at = now(), lease_token = NULL, lease_until = NULL, resubmitted = false "
-            f"WHERE id = %s AND state <> 'ended' RETURNING {_COLUMNS}",
-            (_stored(error), item_id),
+            f"SELECT {_COLUMNS} FROM work_items WHERE id = %s AND kind LIKE %s FOR UPDATE",
+            (item_id, COMMANDS),
         )
     ).fetchone()
-    if row is not None:
-        await _notify(unit, row["kind"])  # its admission is free
-        return _item(row)
-    return await get(unit, item_id)
+    if row is None or row["state"] == ItemState.ENDED:
+        return _item(row) if row else None
+    if row["state"] == ItemState.PENDING:
+        query = (
+            "UPDATE work_items SET state = 'ended', outcome = 'failed', error = %s, "
+            "ended_at = now(), resubmitted = false, cancel_asked = now() "
+            f"WHERE id = %s AND kind LIKE %s RETURNING {_COLUMNS}"
+        )
+        params: tuple[Any, ...] = (CANCELLED, item_id, COMMANDS)
+    else:
+        query = (
+            "UPDATE work_items SET cancel_asked = coalesce(cancel_asked, now()) "
+            f"WHERE id = %s AND kind LIKE %s RETURNING {_COLUMNS}"
+        )
+        params = (item_id, COMMANDS)
+    found = await (await unit.execute(query, params)).fetchone()
+    assert found is not None  # the row locked above
+    await _notify(unit, found["kind"])
+    return _item(found)
+
+
+async def asked_to_cancel(unit: ReadUnit, item_ids: Collection[int]) -> list[int]:
+    """Which of the running items `item_ids` their owner asked to cancel."""
+    rows = await (
+        await unit.execute(
+            "SELECT id FROM work_items WHERE id = ANY(%s) AND cancel_asked IS NOT NULL",
+            (list(item_ids),),
+        )
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
+async def count(unit: WriteUnit, item: WorkItem, name: str, n: int) -> None:
+    """Add `n` to the item's `progress[name]`, in the unit that committed that work (fenced
+    on the item's lease, as its writes are)."""
+    await unit.execute(
+        "UPDATE work_items SET progress = jsonb_set(progress, ARRAY[%(name)s], "
+        "to_jsonb(coalesce((progress->>%(name)s)::int, 0) + %(n)s)) WHERE id = %(id)s",
+        {"name": name, "n": n, "id": item.id},
+    )
 
 
 async def put_result(unit: WriteUnit, item: WorkItem, body: dict[str, Any]) -> None:

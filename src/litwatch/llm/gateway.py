@@ -550,10 +550,11 @@ class Gateway:
         self, role_name: str, request: Request, *, paper_id: str | None = None
     ) -> bool:
         """Whether every model of the role's list, as it is now, refused this identical question,
-        by the journal, and none has a validated answer to it (one an evaluation got, say, which
-        `ask` reuses): a refusal remembered from an earlier run holds only while the question
-        and the list are unchanged. A model without credentials now has not: asked, it is a
-        call with no answer."""
+        by the journal, and none has a validated answer to it (one an earlier run got, which
+        `ask` reuses; an evaluation's calls are no production run's, so neither its answers nor
+        its refusals count here): a refusal remembered from an earlier run holds only while the
+        question and the list are unchanged. A model without credentials now has not: asked, it
+        is a call with no answer."""
         outside_unit(f"the model journal read for role {role_name!r}")
         attributed_call(f"the model journal read for role {role_name!r}")
         if not self.journal:

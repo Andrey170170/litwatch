@@ -1067,3 +1067,67 @@ async def test_the_poll_takes_over_after_the_listener_drops(conn: Session, db, m
         await submit(db, "fulltext", "1")
         async with asyncio.timeout(WAIT):
             await ran.wait()
+
+
+async def test_a_cancelled_command_finishes_its_run_cleanup_under_its_claim_then_ends(
+    conn: Session, db
+):
+    """The owner cancels a running command's item (`store.work.cancel`, at Ctrl-C): a request,
+    which wakes the gate owning it. The gate stops its Worker, whose cleanup (its run closed,
+    in a unit fenced on the item's lease) commits under the claim it still holds, and only then
+    ends the item failed."""
+    from litwatch.jobs.context import run_record  # noqa: PLC0415
+
+    started = asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        async with run_record(db, "intake"):
+            started.set()
+            await asyncio.Event().wait()
+
+    submitted = await submit(db, "command:test", "1")
+    async with serving(WorkGate(db, lease=LONG, poll=60), {"command:test": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+        async with db.write("test: cancel") as unit:
+            asked = await queue.cancel(unit, submitted.id)
+        assert asked is not None and asked.state == ItemState.RUNNING and asked.cancel_asked
+        await until(state_is(conn, submitted.id, ItemState.ENDED), "the cancelled item to end")
+    ended = await item(conn, submitted.id)
+    assert (ended.outcome, ended.error) == (Outcome.FAILED, queue.CANCELLED)
+    (run,) = await (
+        await conn.execute("SELECT * FROM runs WHERE work_id = %s", (submitted.id,))
+    ).fetchall()
+    assert run["finished_at"] is not None  # closed by its Worker, under the claim
+
+
+async def test_only_a_commands_item_is_cancelled_and_a_pending_one_at_once(conn: Session, db):
+    other = await submit(db, "fulltext", "1")
+    pending = await submit(db, "command:test", "2")
+    async with db.write("test: cancel") as unit:
+        assert await queue.cancel(unit, other.id) is None  # no command's: `serve`'s own
+        ended = await queue.cancel(unit, pending.id)
+    assert ended is not None and (ended.state, ended.error) == (ItemState.ENDED, queue.CANCELLED)
+    assert (await item(conn, other.id)).state == ItemState.PENDING
+
+
+async def test_a_stopping_gate_retires_its_worker_row_before_its_items_drain(conn: Session, db):
+    """As the gate stops, it takes no more work: its `workers` row goes first, so no command is
+    accepted for a kind no one will run while its items finish their cleanup."""
+    started, rows = asyncio.Event(), []
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            found = await (await conn.execute("SELECT count(*) AS n FROM workers")).fetchone()
+            rows.append(found["n"])
+            raise
+
+    await submit(db, "command:test", "1")
+    async with serving(WorkGate(db, lease=LONG, poll=60), {"command:test": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+        assert (await (await conn.execute("SELECT count(*) AS n FROM workers")).fetchone())["n"]
+    assert rows == [0]

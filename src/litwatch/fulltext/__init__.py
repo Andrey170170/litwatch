@@ -138,16 +138,22 @@ def _read_of(text: PaperText | None) -> TextRead | None:
     return TextRead(text.version, text.source, text.sha256) if text else None
 
 
-async def record_in_change(db: DatabaseGate, a: Attempt, rules: word.Rules) -> bool:
+async def record_in_change(
+    db: DatabaseGate, a: Attempt, rules: word.Rules, counted: store_.Tally | None = None
+) -> bool:
     """Store one try's outcome (`record`) as a change of the paper, which settles it: its
     grades follow the Weight, its next pass may be queued (section 8), and a pass back in the
-    queue that is no longer wanted (a topic paused while it ran) is dropped. Returns False when
-    the worker no longer held the pass."""
+    queue that is no longer wanted (a topic paused while it ran) is dropped. A pass written or
+    failed is counted by `counted`, in that unit. Returns False when the worker no longer held
+    the pass."""
     c = a.claimed
     async with word.change(
         db, c.paper.id, cause=Cause.VERDICT, rules=rules, job=c.job, name="record text pass"
     ) as done:
-        return await record(done.unit, a)
+        held = await record(done.unit, a)
+        if held and counted is not None and _outcome(a) in WORKED:
+            await counted(done.unit, 1)
+        return held
 
 
 async def record(unit: WriteUnit, a: Attempt) -> bool:
@@ -266,9 +272,13 @@ def _outcome(a: Attempt) -> str:
     return "briefs_written" if a.output is not None else "fulltext_failed"
 
 
+# The outcomes of the passes a try spent on: written or failed, not those awaiting text.
+WORKED = ("briefs_written", "fulltext_failed")
+
+
 def worked(counts: Counter[str]) -> int:
-    """How many passes `work`'s tries spent on: written or failed, not those awaiting text."""
-    return counts["briefs_written"] + counts["fulltext_failed"]
+    """How many passes `work`'s tries spent on (`WORKED`)."""
+    return sum(counts[k] for k in WORKED)
 
 
 async def work(
@@ -281,11 +291,13 @@ async def work(
     limit: int | None = None,
     deadline: float | None = None,
     job: int | None = None,
+    counted: store_.Tally | None = None,
 ) -> Counter[str]:
-    """Try every pass that is due once, up to `limit`, `BATCH` at a time: read its text, and
-    write from it. No batch starts after `deadline` (`time.monotonic()`); those left are the
-    worker's. The calls go on `run`, or on a run of kind `fulltext` opened through `models`
-    only when some text arrived. Returns how the tries ended.
+    """Try every pass that is due once, up to `limit`, `BATCH` at a time: read its text, and write
+    from it, each pass worked counted by `counted` as it is recorded. No batch starts after
+    `deadline` (`time.monotonic()`); those left are the worker's. The calls go on `run`, or on a
+    run of kind `fulltext` opened through `models` only when some text arrived. Returns how the
+    tries ended.
 
     A `run` (a nightly) leaves the owner's passes to their work items; batching, it claims all
     the automatic ones due at once, held until its batches' deadline. Without a run, while
@@ -312,7 +324,7 @@ async def work(
         if not claimed:
             break
         tried.update(c.id for c in claimed)
-        counts += await wave(db, config, archive, claimed, run=run, models=models)
+        counts += await wave(db, config, archive, claimed, run=run, models=models, counted=counted)
     return counts
 
 
@@ -324,6 +336,7 @@ async def wave(
     *,
     run: ModelRun | None = None,
     models: ModelGate | None = None,
+    counted: store_.Tally | None = None,
 ) -> Counter[str]:
     """Try the claimed passes once: settle each paper (`still_wanted`), read the texts, and
     write from them, `CONCURRENCY` at a time. The calls go on `run`, or on a run of kind
@@ -347,7 +360,7 @@ async def wave(
                 run.add(why)
     attempts = await asyncio.gather(*(read_one(c) for c in wanted))
     for a in attempts:
-        if a.text is None and await record_in_change(db, a, rules):
+        if a.text is None and await record_in_change(db, a, rules, counted):
             counts[_outcome(a)] += 1
             if run:
                 run.add(_outcome(a))
@@ -361,7 +374,7 @@ async def wave(
         opened = model_run(db, "fulltext", models=models)
     async with opened as r, _write(texts, r.gateway) as answered:
         async for a in answered:
-            if await record_in_change(db, a, rules):
+            if await record_in_change(db, a, rules, counted):
                 counts[_outcome(a)] += 1
                 r.add(_outcome(a))
     return counts
@@ -376,17 +389,19 @@ async def work_waiting(
     wait: float = 0,
     models: ModelGate,
     report: Callable[[Counter[str]], Awaitable[None]] | None = None,
+    counted: store_.Tally | None = None,
 ) -> Counter[str]:
     """`work`, and again every `TICK_SECONDS` for at most `wait` seconds while some passes await
     their text (`litwatch fulltext --wait`), reporting each round. `limit` caps the passes
-    worked, written or failed, over all the rounds. Returns how the tries ended."""
+    worked, written or failed, over all the rounds; `counted` counts each (`work`). Returns how
+    the tries ended."""
     total: Counter[str] = Counter()
     deadline = asyncio.get_running_loop().time() + wait
     while True:
         allowance = None if limit is None else limit - worked(total)
         if allowance is not None and allowance <= 0:
             return total
-        done = await work(db, config, archive, models=models, limit=allowance)
+        done = await work(db, config, archive, models=models, limit=allowance, counted=counted)
         total.update(done)
         if report:
             await report(done)
