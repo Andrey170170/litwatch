@@ -17,7 +17,17 @@ from litwatch.store import papers as papers_store
 from litwatch.store import reading as reading_store
 from litwatch.store import taxonomy as taxonomy_store
 from tests import sessions, settling
-from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, answering, paper, started
+from tests.conftest import (
+    AGENTS,
+    FAITH,
+    INTERP,
+    TREE,
+    AppClient,
+    answering,
+    lease_lapses,
+    paper,
+    started,
+)
 from tests.seed import P, Q, analyse, classify, grade
 from tests.sessions import Bridge, Session, in_read, in_write
 
@@ -563,8 +573,8 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn: Sess
         "digests_failed": 0,
         "over_budget": [],
     }
-    # A run its process holds open (this test's own session).
-    await started(conn, "nightly")
+    # A run its process holds open, by its work item's lease.
+    night = await started(conn, "nightly", alive=True)
     await conn.execute("UPDATE runs SET started_at = now() - '1m'::interval")
     await classify(conn, P, FAITH.slug)
     running = (await client.get("/api/summary")).json()["status"]
@@ -583,7 +593,8 @@ async def test_the_status_line_follows_the_latest_nightly_run(client, conn: Sess
     status = (await client.get("/api/summary")).json()["status"]
     assert (status["state"], status["error"]) == ("failed", "boom")
     # A run left open by a process that is gone failed too.
-    await conn.execute("UPDATE runs SET error = NULL, finished_at = NULL, backend_pid = NULL")
+    await conn.execute("UPDATE runs SET error = NULL, finished_at = NULL")
+    await lease_lapses(conn, night)
     status = (await client.get("/api/summary")).json()["status"]
     assert (status["state"], status["error"]) == (
         "failed",

@@ -36,9 +36,9 @@ from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Later, database_lost
 from litwatch.integrations.deep import Deep
 from litwatch.jobs.context import GatewayFactory, default_gateway
-from litwatch.jobs.worker import nightly_waits
 from litwatch.store import fulltext as store_
 from litwatch.store import integrations as cards
+from litwatch.store import jobs as jobs_store
 from litwatch.store.fulltext import Claimed, Decision
 
 
@@ -131,9 +131,11 @@ class DeepPassWorker:
     async def __call__(self, item: WorkItem) -> Later | None:
         if until := await deep_passes.paused(self.db):
             return Later(until)
-        now = datetime.now(self.config.schedule.zone)
-        background = not await nightly_waits(self.db, self.config, now)
         async with self.db.write("claim a deep pass") as unit:
+            # A re-run's Deep pass waits while a nightly is due or running.
+            background = not await jobs_store.nightly_waits(
+                unit, fires=self.config.schedule.enabled
+            )
             decision = await store_.decide(
                 unit, int(item.key), self.deep.lease, deep=True, background=background
             )

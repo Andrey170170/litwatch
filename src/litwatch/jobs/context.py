@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -13,7 +13,7 @@ from typing import Any
 
 from litwatch import llm
 from litwatch.config import Config
-from litwatch.gates.database import DatabaseGate
+from litwatch.gates.database import DatabaseGate, Named, WriteUnit
 from litwatch.store import runs
 from litwatch.store.calls import EVAL, CallJournal
 
@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 # Tests swap this for a gateway over scripted providers.
 GatewayFactory = Callable[[Config, CallJournal], llm.Gateway]
+# What a job writes in the unit that closes its run, and the locks that unit takes for it.
+Closing = tuple[Callable[[WriteUnit], Awaitable[None]], Sequence[Named]]
 
 
 def default_gateway(config: Config, journal: CallJournal) -> llm.Gateway:
@@ -55,6 +57,17 @@ class RunRecord:
         self.counts[name] = self.counts.get(name, 0) + n
 
 
+class UnclosedError(RuntimeError):
+    """A run whose close carries a write (`closing`) did not close: that unit failed, so
+    neither the run's end nor its write stands. Raised from the close's error, in place of the
+    job's own when the job failed first (`failure`), so its caller knows the run is still open
+    and the write left to do: the scheduled nightly tries its fire again."""
+
+    def __init__(self, run_id: int, failure: BaseException | None) -> None:
+        super().__init__(f"run {run_id} did not close; its jobs wait for it")
+        self.run_id, self.failure = run_id, failure
+
+
 @asynccontextmanager
 async def run_record(
     db: DatabaseGate,
@@ -62,28 +75,42 @@ async def run_record(
     *,
     window: tuple[datetime, datetime] | None = None,
     job_id: int | None = None,
+    closing: Closing | None = None,
 ) -> AsyncIterator[RunRecord]:
-    """Open a run, in the process's name (`DatabaseGate.identity`), and close it with what the
-    job recorded on it and the error that ended it, whatever happens inside, a cancelled job
-    included. Each is a unit of its own."""
-    me = await db.identity()
+    """Open a run, alive while the work item it runs in holds its lease (`store.runs.ALIVE`),
+    and close it with what the job recorded on it and the error that ended it, whatever happens
+    inside, a cancelled job included. Each is a unit of its own; `closing` is written in the
+    closing one, under its locks, so it stands or falls with the run's end (the nightly's
+    release of the jobs it held back): when that unit fails, `UnclosedError` is raised."""
     async with db.write(f"open {kind} run") as unit:
-        run_id = await runs.start(unit, kind, *(window or (None, None)), job_id=job_id, me=me)
+        run_id = await runs.start(unit, kind, *(window or (None, None)), job_id=job_id)
     record = RunRecord(run_id)
-    failed = True
+    failure: BaseException | None = None
     try:
         yield record
-        failed = False
     except BaseException as exc:
+        failure = exc
         record.fields["error"] = f"{type(exc).__name__}: {exc}"
         raise
     finally:
-        await _closing(_finish(db, record), failed, record.run_id, "closing it")
+        try:
+            await _finish(db, record, closing)
+        except BaseException as exc:
+            # A failure here after the job's (a cancellation included) is logged, so the job's
+            # error is the one recorded and raised; but not a close that carried a write.
+            if closing is not None and isinstance(exc, Exception):
+                raise UnclosedError(record.run_id, failure) from exc
+            if failure is None:
+                raise
+            log.exception("run %s: closing it failed after the job did", record.run_id)
 
 
-async def _finish(db: DatabaseGate, record: RunRecord) -> None:
-    async with db.write("close run") as unit:
+async def _finish(db: DatabaseGate, record: RunRecord, closing: Closing | None) -> None:
+    write, locks = closing or (None, ())
+    async with db.write("close run", locks=locks) as unit:
         await runs.finish(unit, record.run_id, counts=record.counts, **record.fields)
+        if write is not None:
+            await write(unit)
 
 
 async def _closing(step: Awaitable[None], failed: bool, run_id: int, what: str) -> None:
@@ -103,6 +130,7 @@ class ModelRun:
     record: RunRecord
     gateway: llm.Gateway
     journal: CallJournal
+    began: Counter[str] | None = None  # `chunk_began`
 
     @property
     def run_id(self) -> int:
@@ -120,6 +148,19 @@ class ModelRun:
         (`tally()` after it less before) to its own counts."""
         return Counter({k: v for k, v in self.counts.items() if isinstance(v, int)})
 
+    def chunk_began(self) -> Counter[str]:
+        """What the run had counted as the job's chunk under way began (`tally`), which the
+        chunk's counts are taken from: kept until its progress is recorded (`chunk_recorded`),
+        so a chunk tried again after a lost database counts what its first try recorded too,
+        whose steps it then skips."""
+        if self.began is None:
+            self.began = self.tally()
+        return self.began
+
+    def chunk_recorded(self) -> None:
+        """The chunk's progress is recorded: the next one counts from here."""
+        self.began = None
+
 
 @asynccontextmanager
 async def model_run(
@@ -130,10 +171,11 @@ async def model_run(
     window: tuple[datetime, datetime] | None = None,
     gateway: GatewayFactory = default_gateway,
     job_id: int | None = None,
+    closing: Closing | None = None,
 ) -> AsyncIterator[ModelRun]:
-    """A run record (`run_record`) that also closes with the calls' cost and counts by role.
-    Its journal writes each call in units of its own on `db`."""
-    async with run_record(db, kind, window=window, job_id=job_id) as record:
+    """A run record (`run_record`, with `closing`) that also closes with the calls' cost and
+    counts by role. Its journal writes each call in units of its own on `db`."""
+    async with run_record(db, kind, window=window, job_id=job_id, closing=closing) as record:
         # An evaluation run writes its own tables only (AGENTS.md): no provider observations.
         journal = CallJournal(db, record.run_id, observes=kind != EVAL)
         failed = True

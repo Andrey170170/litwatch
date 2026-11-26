@@ -295,7 +295,7 @@ async def start(
     params: dict[str, Any],
     note: str | None = None,
 ) -> int:
-    """Record the run and freeze its labels, in the caller's unit."""
+    """Record the run and freeze its labels, in the caller's unit; returns its id, for `r`."""
     models = {role: config.models.role(role).model_dump(mode="json") for role in ROLES}
     topics = {t.slug: t.version for t in r.tree.topics if t.slug in focus(r.tree)}
     params = params | {
@@ -304,11 +304,11 @@ async def start(
         "thresholds": config.classification.model_dump(mode="json"),
         "left_out": r.left_out,
     }
-    r.eval_run_id = await store.start(unit, KIND, models, topics, params, note)
+    eval_run_id = await store.start(unit, KIND, models, topics, params, note)
     await store.put_labels(
-        unit, r.eval_run_id, [(x.paper_id, x.topic, x.cohort, x.positive) for x in r.labels]
+        unit, eval_run_id, [(x.paper_id, x.topic, x.cohort, x.positive) for x in r.labels]
     )
-    return r.eval_run_id
+    return eval_run_id
 
 
 def _concluded(tree: Taxonomy, c: classification.Classification, topic: str) -> dict[str, Any]:
@@ -382,12 +382,13 @@ async def work(
         async for c in found:
             if c.error is not None and cut():
                 continue
-            mr.add("classified" if c.error is None else "classification_failed")
             async with db.write("replay: classified") as unit:
                 for topic in topics_of[c.paper.id]:
                     await store.put_classified(
                         unit, eval_run_id, c.paper, topic, **_concluded(tree, c, topic)
                     )
+            # Counted once its record commits: a retry after one rolled back counts it once.
+            mr.add("classified" if c.error is None else "classification_failed")
             if c.error is None:
                 r.classified.add(c.paper.id)
     due = [
@@ -400,7 +401,6 @@ async def work(
             v = g.verdict
             if v is None and cut():
                 continue
-            mr.add("graded" if v is not None else "grading_failed")
             async with db.write("replay: graded") as unit:
                 await store.put_graded(
                     unit,
@@ -413,6 +413,7 @@ async def work(
                     split=v.split if v else None,
                     error=None if v else (g.error or "no answer"),
                 )
+            mr.add("graded" if v is not None else "grading_failed")
             if v is not None:
                 r.graded.add((g.due.paper.id, g.due.topic.slug))
 

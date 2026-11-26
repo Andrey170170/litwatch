@@ -181,7 +181,6 @@ async def process(body: s.ProcessIn, request: Request, db: Db, rules: Rules) -> 
         await word.settle_many(unit, [paper_id], cause=Cause.OWNER, rules=rules)
     if job is None:
         return None
-    request.app.state.jobs_wake.set()
     return s.ProcessJob(id=job["id"], state=job["state"], error=job["error"])
 
 
@@ -320,8 +319,6 @@ async def rerun(body: s.RerunIn, request: Request, db: Db) -> s.Jobs:
                     status_code=409,
                     detail=f"the same re-run is {where} already, its ceiling ${kept:.2f}",
                 )
-    if body.run:
-        request.app.state.jobs_wake.set()
     return await _listing(db)
 
 
@@ -390,7 +387,6 @@ async def run_replay(body: s.ReplayIn, request: Request, db: Db) -> s.Jobs:
             if not o.replay.papers:
                 raise HTTPException(status_code=409, detail="no labelled paper in the database")
             await replays.make(c, config, o, body.ceiling)
-    request.app.state.jobs_wake.set()
     return await _listing(db)
 
 
@@ -427,6 +423,8 @@ async def act(
     # One replay under way at a time: the replay lock before the row, as Run replay.
     replaying = job is not None and job["kind"] == "replay" and to in ("queued", "tonight")
     locks = ["replay"] if replaying else []
+    if to == "tonight":  # as a nightly releases the jobs there (`store.jobs.release`)
+        locks.append("tonight")
     async with db.write(f"job {action}", taxonomy="shared", papers=papers, locks=locks) as unit:
         if again and await failures.waits_on_owner(unit, papers, FAILED_RUNS):
             raise HTTPException(status_code=409, detail=WAITS)
@@ -448,6 +446,4 @@ async def act(
         await jobs_store.move(unit, job_id, sources, to, held)
         if to == "discarded":
             await fulltext_store.release_job(unit, job_id)
-    if to == "queued":
-        request.app.state.jobs_wake.set()
     return await _listing(db)

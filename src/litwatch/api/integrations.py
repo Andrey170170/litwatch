@@ -233,9 +233,11 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
         raise HTTPException(status_code=503, detail=misses.SILENT) from exc
     # The owner's change of the paper, in a unit opened here and settled by hand, since a
     # request asked again while it is open and its Process job under way is answered as it
-    # stands, before any change, whose settle would ask a running job again (`settle_process`)
-    # and run it once more for nothing. Under the paper's locks, so a request in flight has
-    # either committed or not started.
+    # stands, before any change. Under the paper's locks, so a request in flight has either
+    # committed or not started. Its settle leaves the paper's steps as they were (`steps`): a
+    # Process job running asks nothing more of them, so it is not asked again, and not run
+    # once more for nothing; unless its write stored new text (arXiv's record fetched before
+    # another stored the paper, a revision since), which makes the steps due again.
     async with db.write("request card", taxonomy="shared", papers=[paper_id]) as unit:
         open_pass = await fulltext_store.open_deep(unit, paper_id)
         if (
@@ -246,7 +248,10 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
             and not await papers_store.dropped(unit, paper_id)
         ):
             return s.CardRequested(pass_id=open_pass["id"])
-        await misses.keep(unit, paper_id, fetched)
+        # Only a record fetched can revise the paper; with none, `keep` reads it as it stands.
+        held = await papers_store.get(unit, paper_id) if fetched is not None else None
+        kept, _ = await misses.keep(unit, paper_id, fetched)
+        rewritten = held is not None and held.revision != kept.revision
         pass_id = await deep_passes.request(unit, paper_id)
         if pass_id is None:
             raise HTTPException(status_code=409, detail=DROPPED)
@@ -261,9 +266,7 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
         )
         if processing:
             await jobs_store.process(unit, paper_id)
-        await word.settle_many(unit, [paper_id], cause=Cause.OWNER, rules=rules)
-    if processing:
-        request.app.state.jobs_wake.set()
+        await word.settle_many(unit, [paper_id], cause=Cause.OWNER, rules=rules, steps=rewritten)
     return s.CardRequested(pass_id=pass_id)
 
 

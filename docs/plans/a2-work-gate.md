@@ -122,10 +122,32 @@ Found in a survey of the code at 548857e3:
   for, and a running one is taken back as its lease lapses. Only its priority is raised to its pass's when that is
   more urgent: the old image raises a pass's priority on the pass row alone (the owner's request for an automatic
   Deep pass), and the item would otherwise wait behind automatic ones. A switch is not made while a nightly runs. One interrupted
-  anyway counts its fire as served, as a nightly whose process dies does today, and its work waits for the next night
-  or a nightly run by hand.
+  anyway is run again by its fire's item once the receiving image takes it back (a run cut off served nothing); the
+  image before counts it served, as a nightly whose process dies does today, and its work waits for the next night or
+  a nightly run by hand.
+- **Rolling back from P3: the CLI's command items, ended by hand.** The image before admits one running item per
+  admission, whatever its lease, and takes back only its own kinds: a P3 `command` item its process left running
+  (`fulltext --deep` under `deep`, `publications` under `publications`) would hold that admission there for good.
+  P3 ends one wherever it runs (the next command for its admission, any `serve`'s take-back), but not one left as
+  the switch is made. So the switch to the image before is made with no CLI command running, and after `serve`
+  stops and before the image before starts, the command items left are ended (in the stack's terms):
+
+  ```sh
+  dc exec -T litwatch-db psql -U litwatch -d litwatch -c "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), error = 'its process stopped', lease_token = NULL, lease_until = NULL, resubmitted = false WHERE kind = 'command' AND state <> 'ended'"
+  ```
+
+  The rehearsal shows it: a `fulltext --deep` killed, the rollback with this step, then the image before claims a
+  pending Deep pass. Chosen over a row shape the image before does not count (the shared admission in a column of
+  its own): kept race-free between a command and `serve`, the admission index must cover that column, and then it
+  fails the image before's claim on the same stale row.
 - **The scheduler's handoff.** A fire the old scheduler already served (a run started after it) stays served when P3
-  starts inside the catch-up window: the submitter checks the runs as today before using the key.
+  starts inside the catch-up window: the submitter checks the runs before using the key. A run of the image before
+  (`runs.work_id` unset) serves its fire by starting, as it did there; a run of this image only once it closed without
+  an error (`store.runs.last_served`, `served`), so a nightly run by hand that failed leaves the fire due. Once
+  submitted, a fire's item runs its job unless such a run started since the fire: one by hand, or the item's own
+  earlier attempt whose end was lost. An attempt cut off (the database lost, its
+  close failed, its process or `serve` stopped) served nothing, so the retry runs the job again, whose steps take only
+  what is still due. An expression that never fires again, or never fired (one bound to a year), is left out.
 - **Release links:**
   - a `release_links` table holds paper, version, url, kind, state, license, `checked_at` and `found_by` (the
     finder, a re-check or the owner's action);
@@ -173,6 +195,14 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
   `paper.ts` parser goes; its numbering and appendix detection move into the Python parser, which MCP then gains.
   deep's PDF parts (`pdfParts`) stay: they are not LaTeX. Chosen over deep's parser behind an endpoint, which would
   break MCP's outline whenever deep is down.
+- **D4. A2 is built for one `serve`** (the owner, 2026-11-25, after P3's third review round). It keeps correct:
+  one `serve` whose Workers run concurrently, CLI commands run beside it, crashes and restarts (take-back once a lease
+  lapses), and the rollback switch to the previous image, which stops `serve` first. It need not handle, until after
+  A7: two `serve`s, CLI commands racing each other or the nightly's start, and a commit whose acknowledgement is lost.
+  There an extra run, a wait or an error is acceptable; lost or corrupted data is not. P3–P7 are built and reviewed to
+  this bar, and what falls outside it goes to the backlog ("Work with more than one writer"). Chosen over closing
+  every race between writers now, which kept P2's and P3's reviews open round after round; once every kind runs on
+  the gate, those races can be closed in one place.
 
 ## Risks
 
@@ -202,7 +232,7 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
 | **P4** | **One Model gate.** Providers, limits and batchers per (provider, deadline) in one gate per process; ceiling, deadline and journal from the work context; recovery once at startup; `work_id` on calls; `eval ladders` through it. | V4; V3 again; then merge and deploy. |
 | **P5** | **CLI and attribution.** The model and pipeline commands submit and wait; evaluations carry their inputs and stream their results to their files; Ctrl-C asks whether to cancel or detach, and `litwatch work follow ID` picks an item back up. The API, MCP, monitor and CLI set request attribution, and the check turns strict. | V5, V6; then merge and deploy. |
 | **P6** | **Release links.** The finder's endpoint and prompt in deep; `release_links`; the triggers (an analysis, a new version, the owner's action); placeholder re-checks; the paper's page, the API and MCP; the automatic Deep read switch. | V7; then merge and deploy with deep's image. |
-| **P7** | **Cleanup.** The old liveness columns dropped, now that no image reads them; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
+| **P7** | **Cleanup.** The old liveness columns (`backend_pid`, `backend_start`, written through `store.runs.SESSION`) dropped, now that no image reads them; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
 | **T1** ∥ | **Deep track:** the shared contracts (D2), one LaTeX parser (D3), Pi to the newest release, `gpt-6.2-sol` for the Deep read (high effort), the finder's own model setting (`gpt-6.2-sol`, medium). Starts with P1; P6 needs it. | V8; deployed, and rolled back if need be, as a litwatch and deep image pair. |
 | **T2** ∥ | **OpenAI adapter:** the Responses API with structured output, the Batch API behind the batcher's interface, prices and bounds. Built against today's provider interface from P1 on; it moves into the gate in P4. | V4's adapter part; merged before P4 starts. |
 
@@ -237,14 +267,15 @@ with one parser, the deep update, the re-trigger fix, leases and fencing.
 
 Found while building, owned by the stage named.
 
-- **P2, P3 (from P1): the gate's interface.** `store.work.submit(unit, kind, key, scope=, not_before=,
+- **P2, P3, P5 (from P1): the gate's interface.** `store.work.submit(unit, kind, key, scope=, not_before=,
   admission=, lasting=)` in the caller's unit; `WorkGate(db).run({kind: worker})` serves until cancelled, and a
   cancelled gate gives back each claim it still owns once its Worker has stopped. A Worker returns `Done(cost)`
   (or None) or `Later(at)`, which puts the item back to pending until `at` (a pass claimed by another owner, the
   run lock taken, text awaited). Raising fails the item; only a lost database (a dropped connection, a server
-  shutting down or ending the session, an empty pool) gives it back to try again. Settling needs a live lease.
+  shutting down or ending the session, an empty pool) or a lost deadlock or serialization conflict
+  (`gates.work.conflicted`) gives it back to try again. Settling needs a live lease.
   `LeaseLostError` from a write unit means the item is no longer the task's.
-- **P2, P3: keys.** A key is unique within its kind while open. A submission that finds its key pending brings
+- **P2, P3, P5: keys.** A key is unique within its kind while open. A submission that finds its key pending brings
   it forward to the sooner `not_before`, which is the owner's "run it now". One that finds it running marks it
   resubmitted: when that item ends (done or failed), it keeps its own record, and a fresh pending item with its
   kind, key, scope and admission takes the key, at the sooner of the asked `not_before`s, so an owner's retry
@@ -263,83 +294,13 @@ Found while building, owned by the stage named.
   it as a delivery failure with its backoff. Ported to a Worker, it lets a lost database (`gates.work._lost`)
   propagate and keeps the backoff for the integration's own errors. Done in P2, with `_lost` made public as
   `gates.work.database_lost`.
-- **P3: a lost database reaches the gate from a job chunk.** `jobs/worker.py`'s `_next` catches every error of
-  `_chunk` and ends the job failed. Ported to a Worker, it lets a lost database propagate, so the chunk's item is
-  tried again, and fails the job only on the chunk's own errors.
 - **P2 (hindsight from P1's review): one task fewer per claim.** Done in P2: the run loop owns each claim through
   its commit and starts the item's supervisor with it. One shielded task per take is left, so a claim committing
   as the gate stops is still given back.
-- **P3 (from P2): the CLI's Deep passes run beside `serve`'s.** The Deep session lock is gone, so
-  `litwatch fulltext --deep` can work a Deep pass while `serve` serves its item. The pass claim keeps them off
-  one pass, but no longer one at a time; P3's CLI-as-items closes it. Its check: with a Deep item running, a second
-  Deep job (the CLI's, as an item) waits for the `deep` admission.
-- **P3 (from P2): a shared setup failure decides no turn where setup is cached.** With two processes serving one
-  integration, A having run its setup and B's failing (a retry recorded in `setup_failures`), a turn A takes skips
-  setup and arranges the next (`events/worker.py`, `_arrange`) without reading `setup_failures`: with an empty
-  outbox and no `idle` hook, no turn stays open, and the failure waits for the owner's Retry. Production runs one
-  `serve`. The fix for later: the shared setup failure takes part in the turn's decision when setup is cached
-  too.
-- **P3 (from P2): events wake deliveries at commit.** `outbox.emit` registers `WriteUnit.at_commit`, which runs the
-  submit as the unit's last statement, once per unit for every integration with a cursor. Submitting at emit time
-  would hold the delivery item's row lock until commit and queue every other emitter behind it. A P3 path that
-  submits from a long unit should do the same. A first cursor is made under `LOCK TABLE outbox IN SHARE MODE`, so no
-  emitter looks up the cursors before it exists and commits after its first turn.
-- **P3 (from P2): the cursor's row serializes a delivery's schedule.** Every write that schedules a turn locks the
-  integration's cursor row first and its item's row after, and reads the backoff under the cursor's lock: an event's
-  wake (`outbox.wake`, cursors in name order, so two emitters lock them alike), the owner's retry and skip (which
-  update the cursor first), and a turn arranging the next (`outbox.locked` before
-  `work.forget_resubmission`). A backoff is recorded and cleared on that row, so no turn is scheduled by a backoff
-  read before it changed. An event's wake asks for the time the events may be delivered (now, or the backoff's
-  end): it brings forward a turn that waits for the `idle` hook, never one past its backoff. A turn asks for the
-  sooner of that time and, for an integration with an `idle` hook, when the hook is due, so the hook still runs
-  during a long backoff. A P3 Worker that schedules itself from state another write changes (job chunks) can take
-  the same order: the state's row, then the item's.
-- **P3 (from P2): a turn decides its next run alone.** A delivery turn calls `store.work.forget_resubmission` in its
-  last unit, then reads the cursor and the outbox and submits its own key for when it wants to run again; what was
-  submitted while it ran is forgotten, since that read sees it. A P3 Worker that arranges its own next run (the
-  scheduler's fires, job chunks) can do the same only when that last locked read accounts for every reason to run
-  again: a reason its read does not see (a request kept nowhere but in the resubmission) would be lost.
-- **P3, P7 (from P2): deliveries are served by name.** `WorkGate.run(workers, keys=)` serves a kind for some keys alone;
+- **P7 (from P2): deliveries are served by name.** `WorkGate.run(workers, keys=)` serves a kind for some keys alone;
   `serve` gives it the integrations it loads, so a process takes, takes back and waits on only its own deliveries.
   An item no process serves keeps its state: one pending is never taken, and one `running` whose lease expired is
   never taken back. One dropped from the configuration leaves it for good, which P7's cleanup could end.
-- **P3 (from P2): pass order and width.** A work item carries a `priority` apart from its `not_before`
-  (migration 0048): `take` runs the due item of the lowest priority first, then the one due longest, and a
-  submission keeps the more urgent of two priorities, as it keeps the sooner of two times. A pass's item carries its
-  pass's priority, so due passes run as `claim`'s priority order did (the owner's, then the automatic ones, then a
-  re-run's), after a wait too: Deep items that waited out one pause, all due at its end, resume in that order. Only a
-  write that moves a pass (`owners_first` changing its priority or job) submits it, so a settle does not cut a try's
-  wait short. Text-pass admission is spread over `TEXT_WAVE` slots (`fulltext:{id % 4}`), so up to four run at once
-  as a wave did; two passes in one slot wait for each other. Deep stays one per kind. Each text item opens its own
-  `fulltext` run and gateway, so four at once are four gateways until P4. `store.work.again` with no time keeps the
-  item's place in line (`LEAST(not_before, now())`). Other kinds leave the priority 0.
-- **P3 (from P2): a pass item decides under the pass's lock.** Both pass Workers decide with
-  `store.fulltext.decide`: it locks the pass's row (waiting for a settle that holds it), reads it in a statement of
-  its own, and claims it under that lock when a claim may take it, so a runnable pass never ends untried; else the
-  item waits for another owner's claim (`held_until`), looks again later (`held_back`), or ends; the claim and the
-  look are two statements, so one that finds the pass runnable after a claim that took nothing (its paper changed
-  between them) claims again. The startup sweep lists the open passes, then takes one unit per pass, which locks it,
-  looks again under the lock (`submit_open`, the claim's static predicates, `_eligible`) and submits its item, so it
-  never locks two items at once nor gives a pass worked inline meanwhile a new one. Every submission of a pass's item
-  goes through `store.fulltext.submit` (a Worker's retry after an error included), so its admission and priority come
-  from the pass. A Deep service failure stores the pause's start, and the pass that failed and every other wait for
-  the one deadline read from it (`paused_until`), so they resume in priority order. A pass worked inline (the nightly, the CLI) retires its item as it
-  ends (`done`, `failed` call `store.work.done_elsewhere`): a pending one ends, and a running one other than the
-  caller's is wanted again at once, so one that was about to wait looks again first, and finds the pass done; in
-  that race the look again is one more short item. A pass's writes submit its item by the pass's job as it stands
-  (`RETURNING job_id`), not the claim's, as the owner's Process may take a pass from a re-run meanwhile.
-- **P3 (from P2): a conflict is tried again, and a failure is always recorded.** The gate gives an item back to
-  be tried again when its Worker raises a lost deadlock or serialization conflict (`gates.work.conflicted`), as for
-  a lost database, so no pass or delivery is left with no item after one. Failure text from outside (a remote
-  answer in an error) is stored through `store.text.stored`, which replaces what PostgreSQL refuses (a NUL, a lone
-  surrogate), so the write that records a failure, and its backoff and Retry, cannot fail on it. P2 uses it for the
-  outbox's and the passes' errors; `runs`, `jobs`, `inference_calls`, `digests` and `failures` errors still cut
-  text alone, for the stages that move them.
-- **P3 (from P2): `fulltext.worker` imports `jobs.worker.nightly_waits`.** That is on the `(fulltext, jobs)` pair
-  of `CYCLES_BEFORE_THE_RULE`; when P3 moves the nightly gating into items, the import can go with it.
-- **P3 (from P2): job-owned text passes stay off the gate.** A text pass with a `job_id` is the re-run's, worked
-  inline by its chunk; only regular-queue text passes are submitted. A re-run's Deep passes are regular-queue
-  passes, submitted at background priority. `owners_first` and `release_job` submit the passes a job lets go.
 - **P4: work context.** `gates.context.current_work()` gives the item, with `ceiling` and `deadline` left
   `None` for P4 to fill.
 - **P4: a batch's outcome is settled in pieces, not once.** T2's review found five edge cases, each rare:
@@ -361,9 +322,89 @@ Found while building, owned by the stage named.
   keeps its ceiling reservation only in the run that made it, so a resumed re-run, which starts from the job's
   known spend (`jobs_store.spent`), no longer counts it (`llm/gateway.py:276`). It belongs with the ceiling
   across a job's chunks (V4): count an unknown charge at its reservation until it is known.
+- **P4: a recovered batch can be left unsettled.** After `gw.recover()`, `gw.settle()` sometimes returns before
+  the dead run's batch has been read, so none of its calls is journalled. Two tests flake on it, on main as well
+  (about 1 run in 6): `test_an_account_error_a_dead_runs_batch_gave_is_journalled_as_one` (CI on #188) and
+  `test_a_batch_a_dead_run_left_is_accounted_for_though_nothing_asks_again`. It is not a tight margin. V4's
+  recovered-batch claim rests on it; start from `Batcher.watch`, `_start_polling` and `settle`
+  (`llm/batches.py`).
 - **P5: request attribution.** `gates.context.Attribution` has `work` and `system` constructors; P5 adds the
   request one and the check. The `workers` rows are written and beat, but no one reads them yet: P5 adds the
   CLI's reader, which counts a row whose `heartbeat_at` is within a lease as alive.
+- **P4 (from P2): four text gateways.** Text-pass admission is spread over `TEXT_WAVE` slots, and each text item
+  opens its own `fulltext` run and gateway, so four at once are four gateways until P4's one Model gate.
+- **P4, P7 (from P2): failure text.** Errors from outside go through `store.text.stored` before a text column takes
+  them. The outbox's, the passes' and, since P3, the jobs' do; `runs`, `inference_calls`, `digests` and `failures`
+  still cut text alone, for the stages that move them.
+- **P4 (from P3): a job's ceiling across its chunks.** A chunk's run is opened at the job's first chunk in a
+  process and kept across its chunks there (`JobWorker.open`); its ceiling is set once, when the run opens, to the
+  job's ceiling less what all its runs spent (`reruns.ceiling`, `jobs_store.spent`). A chunk on another process, or
+  after a restart, opens a run of its own and starts from that spend. A process reuses the run it kept only while it
+  is still the job's latest (`jobs.run_id`, written as each chunk links its run): once another process's chunk ran
+  the job, the kept run is closed and the next chunk here opens one from the spend, so chunks going back and forth
+  between processes never spend past the ceiling, and a run kept for a job that moved on holds none of `OPEN_MOST`.
+  P4's ceiling from the work context keeps this reading: the item is the chunk, the ceiling is the job's.
+- **P4, P5 (from P3): runs and their items.** A run is alive while the claim it runs under holds a live lease
+  (`store.runs.ALIVE`): `runs.lease_token` is the lease token of the item it was opened in, or, for a job's run, of
+  its latest chunk's, moved as each chunk links it (`store.work.link_run`, migration 0049). An item taken again gets
+  a new token, so it revives no run of the claim before. `runs.work_id` and `work_items.run_id` stay as the
+  history of which item ran what: each run records the item it ran under (`runs.start` sets `work_id`, a chunk's
+  run its chunk's), and an item its latest run (`work_items.run_id`), so a chunk taken back keeps the run before.
+  A run opened outside any item reads dead at once: today only the API's grade now (`api/settings.py`, kind
+  `grading`), whose liveness nothing reads. P5's request attribution can give it one, or say why not.
+- **P5 (from P3): the CLI's commands are items in their own process.** `gates.work.inline` runs a `command` item
+  keyed `{name}:{uuid}`, admitted by its own key or by the kind whose work it does (`deep` for `fulltext --deep`,
+  `publications` for the lookup). Once that admission is free, it inserts its item already claimed, in one unit
+  (`store.work.admit`), so a command waiting leaves no row; then runs that claim under the supervision `serve`'s
+  claims have, its heartbeat included (`WorkGate._run`, `once`); no gate serves it. It has one attempt, as a
+  command run by hand has: a lost database or a lost conflict as it claims or works, a lost lease, or work that
+  stops cancelled ends it failed with a message to run it again (`CommandCutOffError`), and it is never given back;
+  it returns once its end is recorded done. Whatever stops it after its claim (Ctrl-C, an error of the gate's, its
+  end not recorded), its `finally` ends the item failed by its key (`store.work.abandon`). One whose process died
+  is ended failed once its lease lapses, by the next command for its admission (`admit`, so it recovers with no
+  `serve`) or by any `serve`'s take-back, whatever its admission. P5 replaces this with
+  submit and wait (spec, "The CLI"), where `serve`'s gate tries again. The callers to move:
+  - [ ] `intake`, `intake --catalog-from`, `intake archive` (inline today)
+  - [ ] `nightly`, `digests write` (inline today)
+  - [ ] `fulltext`, `fulltext --deep` (inline today, the latter under the `deep` admission)
+  - [ ] `publications` (inline today, under the `publications` admission) and `publications --paper` (not inline)
+  - [ ] `eval replay` (inline today)
+  - [ ] `ping` (not inline)
+  - [ ] the unjournaled evaluations: `eval classify`, `eval digests`, `eval briefs`, `eval ladders` (not inline)
+- **P5 (from P3): the nightly and the chunks.** No chunk starts while a `nightly` item is pending, or running
+  without having closed the run that claim opened without an error (opening it included; a lapsed lease too, until
+  the item is taken back; a failed run too, which the gate may try again), or a nightly run is open and alive (the
+  CLI's) (`store.jobs.nightly_waits`). The item clauses count only
+  where this process's configuration runs fires (`fires=`, the schedule on): a fire left pending by a `serve` since
+  started with the schedule off holds back no job, re-run pass or `fulltext --deep`. A close that fails leaves the
+  run open: the run context says so (`jobs.context.UnclosedError`, raised for a run whose close carries a write),
+  and the fire is tried again after a backoff (`jobs.scheduler.close_backoff`: `WAIT`, doubling, at most an hour),
+  its item waiting meanwhile, so the chunks wait until it closes; a chunk reads that before the run lock and again under it, before
+  it claims its job, and a waiting one looks again after `jobs.worker.WAIT`. The nightly releases every runnable
+  job's chunk in the unit that closes its run, failed or cut off too (`store.jobs.release`, `model_run(closing=)`),
+  so they go at once. Tonight's run and that release both take the `tonight` lock, so one of them sees the
+  other, each stamped by the clock after taking it (`jobs.queued_at`, `runs.finished_at`: `clock_timestamp()`, not
+  the transaction's start, which a unit waiting on its fence or the lock has long passed). `serve`'s sweep submits
+  the fires due before its gate starts. A fire's publication and a chunk's claim are one decision: both take the
+  `fire` lock, and the claim, under it and after its job's row, counts a nightly fire due but not published yet as a
+  nightly that waits (`jobs.scheduler.unpublished`), so either the nightly goes first or it waits that one chunk.
+  Once a nightly that took the run lock lets go of it, it brings forward the chunks it held back
+  (`jobs.nightly.wake`); one that never took it wakes none. The release and the wake are one operation per job
+  (`store.jobs.submit`, `how=`), in the order of the jobs' ids, each the job's row and then its item's; the wake
+  moves only a pending item.
+- **P5, P7 (from P3): each job write that can change whether or when it runs arranges its chunk.** A job's chunk
+  is a `job` item keyed by its id; such a write (its creation or queueing, a claim, progress, a wait, a finish or
+  failure, a release) arranges its next chunk in its unit, from the job's row it locked (`store.jobs.arrange`,
+  `submit`); a run link or a digest settling changes neither, so arranges none:
+  submitted if the job may run, and, written by the job's own chunk, after forgetting what was submitted while it
+  ran, so the chunk's item ends with the decision of the job's last write. An error the chunk's handling did not
+  record fails the job, which arranges none (`JobWorker._fail`); closing a run only records it. The lock order is
+  the job's row, then its item's, a settle's paper locks before either.
+- **P7 (from P3): the old liveness columns.** `runs.start` and `jobs.claim` still write `backend_pid` and
+  `backend_start` (`store.runs.SESSION`) and `jobs.finish` and `jobs.fail` clear them, for the image before the
+  Work gate; jobs keep their states. Nothing in this image reads them. Migration 0049's columns
+  (`runs.lease_token`, `jobs.run_id`) are additive: the image before ignores them. P7 drops them with `SESSION`. The held-across-calls list is down
+  to the run lock already (the `schedule` lock went in P3, with `held`'s key argument).
 
 ## Evidence
 

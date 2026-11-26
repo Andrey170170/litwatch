@@ -21,11 +21,8 @@ from litwatch import store
 from litwatch.gates.database import (
     Connection,
     DatabaseGate,
-    Identity,
     ReadUnit,
     WriteUnit,
-    identity_of,
-    outside_unit,
 )
 
 
@@ -127,11 +124,10 @@ def _idle(conn: Connection) -> None:
 
 class Bridge(DatabaseGate):
     """A Database gate whose units all run on one given connection, with no pool: a Service
-    under test then works on the test's own session, and its run records and job claims name
-    that session (`identity`). One unit at a time, as the connection serves one coroutine at a
-    time. The session locks (`held`) take connections of their own, as on any gate. It refuses
-    a connection inside a transaction, here and whenever a unit opens, so nesting stays
-    strict. Nothing to open or close: the connection is the test's."""
+    under test then works on the test's own session. One unit at a time, as the connection
+    serves one coroutine at a time. The session locks (`held`) take connections of their own,
+    as on any gate. It refuses a connection inside a transaction, here and whenever a unit
+    opens, so nesting stays strict. Nothing to open or close: the connection is the test's."""
 
     def __init__(self, conn: Connection) -> None:
         _idle(conn)
@@ -143,13 +139,6 @@ class Bridge(DatabaseGate):
 
     async def close(self) -> None:
         pass
-
-    async def identity(self) -> Identity:
-        """The connection's own session."""
-        outside_unit("asking for the presence session's identity")
-        if self._identity is None:
-            self._identity = await identity_of(self._conn)
-        return self._identity
 
     @asynccontextmanager
     async def _connection(self, name: str) -> AsyncIterator[Connection]:

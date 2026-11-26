@@ -43,7 +43,6 @@ from litwatch.core.fulltext import (
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.fulltext.worker import DeepPassWorker
-from litwatch.gates.database import identity_of
 from litwatch.gates.work import WorkGate
 from litwatch.intake import search
 from litwatch.integrations.deep import Deep, DeepClient
@@ -77,7 +76,7 @@ from tests.fakes_http import FakeArchive, FakeDeep, mock
 from tests.seed import analyse, classify
 from tests.seed import grade as verdict
 from tests.sessions import Bridge, Session, in_read, in_write
-from tests.working import items_of, serving, until
+from tests.working import items_of, job_of, serving, until
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=2)
 BODY = "\\section{Method} We read hidden steps off the residual stream. " * 40
@@ -1611,11 +1610,58 @@ async def test_deep_read_asked_again_while_its_process_job_runs_changes_nothing(
     _, http = client(db, [make(FakeDeep(DONE))], scheduled)
     async with http:
         asked = await http.post(f"/api/papers/{P.id}/card")
-        job = (await in_write(db, jobs_store.claim, me=await identity_of(db)))["id"]
+        (job,) = await in_read(db, jobs_store.open_ids)
+        await in_write(db, jobs_store.claim, job, afresh=True)
         again = await http.post(f"/api/papers/{P.id}/card")
     assert again.status_code == 202 and again.json() == asked.json()
-    await in_write(db, jobs_store.finish, job, "done", me=await identity_of(db))
+    await in_write(db, jobs_store.finish, job, "done")
     assert (await in_read(db, jobs_store.get, job))["state"] == "done"
+
+
+async def test_a_first_deep_read_asked_while_its_process_job_runs_does_not_ask_the_job_again(
+    db: Session,
+):
+    """The owner's first Deep request on a paper whose Process job is under way: the request
+    leaves the job's steps as they were, so the job ends done, not queued to run once more."""
+    scheduled = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
+    job = await in_write(db, jobs_store.create, "process", {"papers": [P.id]}, 1, "queued")
+    await in_write(db, jobs_store.claim, job, afresh=True)
+    _, http = client(db, [make(FakeDeep(DONE))], scheduled)
+    async with http:
+        asked = await http.post(f"/api/papers/{P.id}/card")
+    assert asked.status_code == 202
+    assert await in_write(db, jobs_store.finish, job, "done")
+    assert (await job_of(db, job))["state"] == "done"
+
+
+async def test_a_deep_read_that_stores_new_text_asks_its_running_process_job_again(
+    db: Session, monkeypatch
+):
+    """arXiv's record, fetched while litwatch lacked the paper, is rewritten text by the time
+    it is stored (another stored the paper meanwhile, its revision since): the request's write
+    makes the paper's steps due again, so the Process job under way is asked again, queued."""
+    scheduled = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
+    revised = P.model_copy(
+        update={
+            "abstract": "Sparse autoencoders recover planted features in toy models.",
+            "version": 3,
+        }
+    )
+
+    async def resolved(_db, text):
+        return P.id, revised
+
+    monkeypatch.setattr(misses, "resolve", resolved)
+    job = await in_write(db, jobs_store.create, "process", {"papers": [P.id]}, 1, "queued")
+    await in_write(db, jobs_store.claim, job, afresh=True)
+    _, http = client(db, [make(FakeDeep(DONE))], scheduled)
+    async with http:
+        asked = await http.post(f"/api/papers/{P.id}/card")
+    assert asked.status_code == 202
+    stored = await in_read(db, papers_store.get, P.id)
+    assert stored is not None and stored.revision == 2
+    await in_write(db, jobs_store.finish, job, "done")
+    assert (await job_of(db, job))["state"] == "queued"
 
 
 async def test_the_paper_page_shows_the_request_queued_then_the_card_and_write_again(

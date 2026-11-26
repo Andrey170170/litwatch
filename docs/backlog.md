@@ -65,6 +65,11 @@ Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.m
 
 Shape, blueprint, drive.
 
+- **Background Deep work beside a due nightly.** Since A2's P3, background Deep work (an automatic pass, a re-run's)
+  waits for the nightly once its fire is an item, but not in the moment between the fire falling due and the
+  scheduler submitting it (a retried submission widens it). A Deep pass started then holds the one `deep` admission,
+  up to an hour, beside that nightly and delays its Deep reads. Deep reads are off in production. Lanes give the
+  nightly its own share (found in A2 P3's review, and by Codex on #188).
 - **The taxonomy write API:** edit a class's name, description and threshold in place, with Save and the re-run
   offer (DESIGN.md, "Taxonomy"); Import YAML from Settings (only the CLI imports now); move a followed topic to
   another class (the topic save endpoint binds it to the URL's class). Re-runs after a class edit (classification,
@@ -121,6 +126,15 @@ Its own project on top of A6: the labelled query set and goals first, then work 
 [`notes/pg-search-spike.md`](notes/pg-search-spike.md)).
 
 ### After the fold
+
+- **Work with more than one writer.** A2 is built for one `serve` ([`plans/a2-work-gate.md`](plans/a2-work-gate.md),
+  D4). Before a second process serves work, close the races it leaves, found in A2's reviews:
+  - a nightly being taken back by one gate loses its place to a job chunk another gate admits (`SKIP LOCKED`);
+  - a progress write whose commit acknowledgement is lost counts its papers twice on the retry (Process, replay,
+    a re-run's text passes: each counts from where its chunk began, `ModelRun.chunk_began`);
+  - the same tallies live in the Worker's memory between a committed result and the chunk's progress write, so a
+    restart in between leaves a committed result out of the job's counts (a re-run's Brief, a replay result whose
+    acknowledgement is lost). Counts only; one fix closes both: derive a job's progress from its committed results.
 
 - **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
   `evals/` and homelab specifics out of the repository (the image ships `evals/labels/` for Run replay: they move

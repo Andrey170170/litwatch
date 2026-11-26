@@ -74,6 +74,8 @@ include = ["src", "tests"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# A test stuck for 5 minutes prints every thread's stack, so a hang in CI names itself.
+faulthandler_timeout = 300
 
 # The role rules (docs/specs/architecture.md, "Roles"), by package: `core` is Records and
 # Policies, `store` Repositories, `gates` the gates (the Database and Work gates), `llm` the Model

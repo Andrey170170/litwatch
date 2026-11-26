@@ -104,7 +104,7 @@ def today_run(
     if deadline <= due:
         deadline += timedelta(days=1)
     night = {"due": due, "deadline": deadline}
-    # Today's run started at or after tonight's fire, as the scheduler counts it (`is_due`): a run
+    # Today's run started at or after tonight's fire, as the scheduler counts it (`due_fire`): a run
     # by hand before it leaves the fire outstanding; one still going shows as it goes.
     started = run.get("started_at") if run else None
     ours = started is not None and started.astimezone(zone).date() == day
@@ -257,5 +257,4 @@ async def write_again(digest_id: int, request: Request, db: Db) -> s.Digest:
         ):
             raise HTTPException(status_code=409, detail="the digest is not one to write again")
         await jobs_store.write_digest(c, digest_id)
-    request.app.state.jobs_wake.set()
     return await _with_job(db, digest_id)

@@ -25,7 +25,7 @@ from litwatch.core.digests import DigestPeriod, listing_day, plain, voice_proble
 from litwatch.digests import writer
 from litwatch.gates.database import DatabaseGate
 from litwatch.jobs import digests as digests_job
-from litwatch.jobs import nightly, worker
+from litwatch.jobs import nightly, scheduler, worker
 from litwatch.jobs.context import model_run
 from litwatch.llm import ProviderError, Reply, Stop, Usage
 from litwatch.store import classifications as classifications_store
@@ -33,7 +33,7 @@ from litwatch.store import digests as store_
 from litwatch.store import papers as papers_store
 from litwatch.store import reading, runs, verdicts
 from litwatch.store import taxonomy as taxonomy_store
-from tests import settling
+from tests import settling, working
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, gate_on, paper, started
 from tests.digesting import (
     MON,
@@ -56,6 +56,7 @@ from tests.digesting import (
 from tests.feeds import entry, feed
 from tests.seed import analyse, classify, grade
 from tests.sessions import Bridge, Session, in_read, in_write
+from tests.working import QUIET, served, step, until
 
 TOKEN = "t"
 
@@ -1335,6 +1336,114 @@ async def test_a_nightly_run_past_midnight_writes_the_digests_of_the_day_it_star
     assert (await shown(db, FAITH.slug, "week", MON - timedelta(days=7)))[0] == "nothing_new"
 
 
+async def test_v3_the_seeded_nightly_through_its_fire_matches_the_one_run_directly(
+    db: Session, gate, monkeypatch
+):
+    """V3 (docs/plans/a2-work-gate.md): the same seeded nightly, a new paper classified,
+    analysed and graded, its digests written and its Brief written inline through the real pass
+    (the archive and the models faked), run directly on one schema and as the fire of a strict
+    `serve` on another: their run records' counts, cost and digests match, and the fire's item
+    ended done with its run."""
+    from functools import partial  # noqa: PLC0415
+
+    from litwatch.config import Models as Roles  # noqa: PLC0415
+    from litwatch.llm import Gateway  # noqa: PLC0415
+    from tests import briefs, scripted  # noqa: PLC0415
+    from tests.fakes import ScriptedProvider  # noqa: PLC0415
+    from tests.fakes_http import FakeArchive  # noqa: PLC0415
+    from tests.sessions import schema  # noqa: PLC0415
+
+    new = paper("2610.00099", title="Probing a reasoning trace", abstract="We probe traces.")
+
+    class Models:
+        """The nightly steps scripted (`tests.scripted`), the Brief and the digests' writer."""
+
+        def __init__(self) -> None:
+            self.steps, self.brief, self.writer = scripted.Scripted(), briefs.Writer(), Writer()
+            faith = {"cot-faithfulness": 0.9}
+            self.steps.decisions[new.title] = scripted.decision("cot-faithfulness", **faith)
+
+        def respond(self, role, request):
+            if role.model == briefs.BRIEF_ROLE.model:
+                return self.brief.respond(role, request)
+            by = self.steps if role.model in scripted.BY_MODEL else self.writer
+            return by.respond(role, request)
+
+        def gateway(self, config: Config, journal) -> Gateway:
+            return Gateway(
+                config.models,
+                {n: ScriptedProvider(n, self.respond) for n in ("anthropic", "openrouter")},
+                journal,
+                retry_delays=(0.0,),
+            )
+
+    now = datetime.now(UTC)
+    fired = now - timedelta(minutes=2)
+    config = scripted.CONFIG.model_copy(
+        update={"models": Roles(**scripted.ROLES, brief=briefs.BRIEF_ROLE), "schedule": Schedule(
+            enabled=True,
+            timezone="UTC",
+            nightly=f"{fired.minute} {fired.hour} * * *",
+            publications=QUIET.publications,
+            deadline=(fired + timedelta(minutes=1)).time(),  # past: neither run batches
+        )}
+    )  # fmt: skip
+    today = config.schedule.today(now)
+
+    async def seed(conn: Session) -> None:
+        await focus(conn, P, "central")  # queues P's Brief, worked inline
+        await in_write(conn, verdicts.passed, [(P.id, 1)])
+        await conn.execute(
+            "UPDATE papers SET dismissed_at = now() WHERE id <> ALL(%s)", ([P.id, new.id],)
+        )
+        await listed(conn, today, P)
+
+    texts = FakeArchive()
+    texts.texts[P.id] = (P.version, briefs.BODY)
+    monkeypatch.setattr(fulltext, "archive_for", lambda config: briefs.archive(texts))
+    # One day for both runs, however long they take: the direct run is given it too.
+    monkeypatch.setattr(nightly, "locked", partial(nightly.locked, fetch=False, today=today))
+
+    async def record(conn: Session) -> tuple:
+        (run,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
+        digests = await (
+            await conn.execute("SELECT topic, period, day, state FROM digests ORDER BY 1, 2, 3")
+        ).fetchall()
+        return run["error"], run["counts"], run["cost"], digests, run["work_id"]
+
+    await in_write(db, papers_store.upsert, [new])  # not yet classified, analysed or graded
+    await seed(db)
+    await nightly.run(gate, config, fetch=False, gateway=Models().gateway, today=today)
+    direct = await record(db)
+
+    async with schema(db.test_dsn) as other:
+        await settling.save_tree(other, TREE)
+        await in_write(other, papers_store.upsert, [P, Q, R, S, new])
+        await seed(other)
+        async with gate_on(other) as theirs:
+
+            async def closed() -> bool:
+                found = await (
+                    await other.execute(
+                        "SELECT 1 FROM work_items WHERE kind = 'nightly' AND state = 'ended'"
+                    )
+                ).fetchall()
+                return bool(found)
+
+            async with served(theirs, config, gateway=Models().gateway):
+                await until(closed, "the fire's item to end")
+        fire = await record(other)
+        (item,) = await (
+            await other.execute("SELECT * FROM work_items WHERE kind = 'nightly'")
+        ).fetchall()
+    assert direct[0] is None and direct[1].get("briefs_written") == 1  # its Brief, inline
+    assert all(direct[1].get(step, 0) >= 1 for step in ("classified", "analysed", "graded"))
+    assert any(d["state"] == "written" for d in direct[3]) and direct[4] is None
+    assert fire[:4] == direct[:4]
+    assert item["key"] == scheduler.fire_key(scheduler.last_fire(config.schedule.nightly, now))
+    assert (item["outcome"], fire[4]) == ("done", item["id"])  # its end, and its run, on record
+
+
 async def test_a_nightly_run_without_digests_writes_none(db: Session, gate):
     """`nightly --no-digests` (the restart, whose digests `digests write` makes for its window):
     on a Monday with a paper listed, neither the day's dailies nor last week's weeklies."""
@@ -1596,8 +1705,7 @@ async def test_the_tab_steps_only_through_the_digests_it_shows(db: Session, gate
     assert (wed["previous"], history["start"]) == (None, str(WED))
 
 
-SCHEDULED = Config(schedule=Schedule(enabled=True))  # the jobs worker runs
-AFTERNOON = datetime(2026, 10, 7, 14, 0, tzinfo=SCHEDULED.schedule.zone)  # no nightly due
+SCHEDULED = Config(schedule=working.QUIET)  # the jobs worker runs, no fire near
 
 
 async def failed_day(db: Session, w: Writer) -> int:
@@ -1611,11 +1719,12 @@ async def failed_day(db: Session, w: Writer) -> int:
 
 
 async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_written(
-    db: Session, gate
+    db: Session, gate, monkeypatch
 ):
     """Write again queues a job instead of answering 409 while another job holds the run lock;
     the worker writes the digest once the lock is free, and its Needs you item and its job
     settle together."""
+    monkeypatch.setattr(worker, "WAIT", timedelta(0))  # the chunk the lock held looks again at once
     w = Writer()
     digest_id = await failed_day(db, w)
     async with client(db, w, SCHEDULED) as http:
@@ -1630,13 +1739,13 @@ async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_w
             again = (await http.post(f"/api/digests/{digest_id}/write")).json()
             assert again["job"]["id"] == body["job"]["id"]
             # The lock is held: no chunk starts, and the job waits in the queue.
-            assert not await worker.Worker(gate, SCHEDULED, w.gateway).step(AFTERNOON)
+            assert not await step(worker.JobWorker(gate, SCHEDULED, w.gateway))
             jobs = (await http.get("/api/jobs")).json()
             [row] = jobs["running"]
             assert (row["kind"], row["state"]) == ("digest", "queued")
             assert row["digest"]["id"] == digest_id
             assert (row["topic"]["slug"], row["digest"]["period"]) == (FAITH.slug, "day")
-        assert await worker.Worker(gate, SCHEDULED, w.gateway).step(AFTERNOON)
+        assert await step(worker.JobWorker(gate, SCHEDULED, w.gateway))
         written = (await http.get(f"/api/digests/{digest_id}")).json()
         assert (written["state"], written["job"]["state"]) == ("written", "done")
         assert [p["id"] for p in written["papers"]] == [P.id]
@@ -1650,6 +1759,26 @@ async def test_a_failed_digest_written_again_queues_behind_a_held_lock_then_is_w
     assert [r["kind"] for r in job_runs] == ["job"]  # its cost reaches the month's spend
 
 
+async def test_serve_writes_a_failed_digest_again_as_a_worker(db: Session, gate):
+    """Through `serve`'s own lifespan: Write again queues its job, which the gate runs at once."""
+    w = Writer()
+    digest_id = await failed_day(db, w)
+    quiet = SCHEDULED.model_copy(update={"schedule": QUIET})
+
+    async def written() -> bool:
+        found = await in_read(db, store_.get, digest_id)
+        return found is not None and found["state"] == "written"
+
+    async with served(gate, quiet, gateway=w.gateway) as app:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://t",
+            headers={"Authorization": f"Bearer {working.TOKEN}"},
+        ) as http:
+            assert (await http.post(f"/api/digests/{digest_id}/write")).status_code == 202
+        await until(written, "the digest to be written")
+
+
 async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_run_writes_it(
     db: Session, gate
 ):
@@ -1658,7 +1787,7 @@ async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_ru
     async with client(db, w, SCHEDULED) as http:
         w.failures = [ProviderError("still down")] * 4  # every writer of the list
         assert (await http.post(f"/api/digests/{digest_id}/write")).status_code == 202
-        assert await worker.Worker(gate, SCHEDULED, w.gateway).step(AFTERNOON)
+        assert await step(worker.JobWorker(gate, SCHEDULED, w.gateway))
         failed = (await http.get(f"/api/digests/{digest_id}")).json()
         assert (failed["state"], failed["job"]["state"]) == ("failed", "failed")
         assert failed["job"]["error"].startswith("the writer failed again")

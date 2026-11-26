@@ -955,69 +955,9 @@
     ],
     "src/litwatch/llm/gateway.py": [
       {
-        "rule": "invalid-argument-type",
-        "startColumn": 36,
-        "endColumn": 48,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 60,
-        "endColumn": 69,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 60,
-        "endColumn": 69,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 60,
-        "endColumn": 69,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 60,
-        "endColumn": 69,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 60,
-        "endColumn": 69,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 60,
-        "endColumn": 69,
-        "lineCount": 1
-      },
-      {
         "rule": "invalid-explicit-return",
         "startColumn": 15,
         "endColumn": 86,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 37,
-        "endColumn": 44,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 20,
-        "endColumn": 27,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 33,
-        "endColumn": 40,
         "lineCount": 1
       },
       {
@@ -1360,12 +1300,6 @@
       }
     ],
     "src/litwatch/store/jobs.py": [
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 11,
-        "endColumn": 20,
-        "lineCount": 1
-      },
       {
         "rule": "not-subscriptable",
         "startColumn": 17,
@@ -1951,24 +1885,6 @@
         "lineCount": 1
       },
       {
-        "rule": "invalid-argument-type",
-        "startColumn": 61,
-        "endColumn": 67,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 61,
-        "endColumn": 67,
-        "lineCount": 1
-      },
-      {
-        "rule": "invalid-argument-type",
-        "startColumn": 61,
-        "endColumn": 67,
-        "lineCount": 1
-      },
-      {
         "rule": "invalid-assignment",
         "startColumn": 4,
         "endColumn": 36,
@@ -1978,12 +1894,6 @@
         "rule": "missing-union-attribute",
         "startColumn": 58,
         "endColumn": 77,
-        "lineCount": 1
-      },
-      {
-        "rule": "missing-union-attribute",
-        "startColumn": 12,
-        "endColumn": 29,
         "lineCount": 1
       },
       {
@@ -2216,12 +2126,6 @@
         "rule": "missing-union-attribute",
         "startColumn": 13,
         "endColumn": 27,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 14,
-        "endColumn": 84,
         "lineCount": 1
       },
       {
@@ -3028,24 +2932,6 @@
       },
       {
         "rule": "not-subscriptable",
-        "startColumn": 15,
-        "endColumn": 25,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 15,
-        "endColumn": 68,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 10,
-        "endColumn": 67,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
         "startColumn": 11,
         "endColumn": 61,
         "lineCount": 1
@@ -3054,12 +2940,6 @@
         "rule": "not-subscriptable",
         "startColumn": 11,
         "endColumn": 62,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 10,
-        "endColumn": 67,
         "lineCount": 1
       },
       {
@@ -3084,36 +2964,6 @@
         "rule": "not-subscriptable",
         "startColumn": 11,
         "endColumn": 62,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 15,
-        "endColumn": 58,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 15,
-        "endColumn": 75,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 11,
-        "endColumn": 62,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 12,
-        "endColumn": 29,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 31,
-        "endColumn": 47,
         "lineCount": 1
       },
       {
@@ -3198,12 +3048,6 @@
         "rule": "not-subscriptable",
         "startColumn": 11,
         "endColumn": 62,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 15,
-        "endColumn": 89,
         "lineCount": 1
       },
       {
@@ -4228,12 +4072,6 @@
       },
       {
         "rule": "not-subscriptable",
-        "startColumn": 10,
-        "endColumn": 73,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
         "startColumn": 12,
         "endColumn": 25,
         "lineCount": 1
@@ -4628,12 +4466,6 @@
         "rule": "not-subscriptable",
         "startColumn": 11,
         "endColumn": 65,
-        "lineCount": 1
-      },
-      {
-        "rule": "not-subscriptable",
-        "startColumn": 11,
-        "endColumn": 77,
         "lineCount": 1
       }
     ],

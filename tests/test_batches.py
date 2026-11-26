@@ -836,10 +836,13 @@ async def test_batches_whose_reads_hang_are_given_up_together_not_one_after_anot
     monkeypatch.setattr(anthropic, "status", hangs)
     gw, _, _, clock = batching(CallJournal(db, await started(conn, "nightly")), provider=anthropic)
     gw.batch_until(clock.now, drain=timedelta(0))  # as the service's worker attaches
-    gw.batchers["anthropic"].operation = 0.1  # one after another would take 0.8 s
-    await asyncio.wait_for(asyncio.gather(*(gw.ask("brief", ask(i)) for i in range(8))), 0.5)
-    assert len(anthropic.calls) == 8
-    await gw.close()
+    gw.batchers["anthropic"].operation = 0.2  # one after another would take 1.6 s
+    try:
+        asked = asyncio.gather(*(gw.ask("brief", ask(i)) for i in range(8)))
+        await asyncio.wait_for(asked, 1.0)
+        assert len(anthropic.calls) == 8
+    finally:  # whatever happened, the hung reads are cancelled, so teardown does not wait
+        await gw.close()
 
 
 async def test_a_batch_its_provider_no_longer_has_is_settled_not_waited_on(conn: Session, db):

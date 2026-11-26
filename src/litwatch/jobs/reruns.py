@@ -24,7 +24,7 @@ from litwatch.config import Config, RoleConfig
 from litwatch.core import Cause, Depth, Paper, Status, Taxonomy, Topic
 from litwatch.core.grading import GRADERS
 from litwatch.feedback import word
-from litwatch.gates.database import DatabaseGate, Identity, ReadUnit
+from litwatch.gates.database import DatabaseGate, ReadUnit
 from litwatch.jobs.context import ModelRun
 from litwatch.llm.ceiling import Bound, Ceiling, listed_bound, route
 from litwatch.llm.types import DEFAULT_MAX_TOKENS
@@ -164,7 +164,7 @@ async def ceiling(
 class Chunk:
     """How one chunk of a re-run ended: `more` to do, its passes `waiting` for their text,
     `stopped` by its ceiling (`where`), `done` (`failed` its papers whose grading failed), or
-    `gone` (no longer this session's)."""
+    `gone` (no longer running)."""
 
     outcome: Literal["more", "waiting", "stopped", "done", "gone"]
     where: str | None = None
@@ -191,13 +191,11 @@ async def work(
     tree: Taxonomy,
     archive: ArchiveClient | None,
     size: int,
-    *,
-    me: Identity,
 ) -> Chunk:
     """The re-run's next chunk: grade the next `size` papers of its scope that have no verdict
     under the topic's current version (D3), each recorded verdict settling its paper; once its
     scope is graded, work the text passes it queued. Calls go through the run's gateway, under
-    the job's ceiling. Its progress is recorded for the session `me` runs it in the name of."""
+    the job's ceiling."""
     slug = job["scope"]["topic"]
     topic = active_topic(tree, slug)
     assert topic is not None  # the worker ends a re-run whose topic is not active
@@ -248,7 +246,7 @@ async def work(
             # what earlier tries graded.
             graded = await verdicts_store.graded_under(unit, slug, topic.version, papers)
         done_n = job["done"] + (0 if reached else len(ids))
-        after = await _progress(db, job, run, counts, done_n, graded, ladder, me=me)
+        after = await _progress(db, job, run, counts, done_n, graded, ladder)
         if after is None:
             return Chunk("gone")
         if reached:
@@ -258,9 +256,15 @@ async def work(
         if left := await _open_passes(db, job):
             return Chunk("stopped", f"stopped with {left} full-text passes left: no archive")
     else:
+        # The passes count on the run as each commits; the job takes them from there, from
+        # where its chunk began (`chunk_began`), so a chunk tried again after its progress was
+        # not recorded counts the passes its first try committed too, which it then skips.
+        before = run.chunk_began()
         done = await fulltext.work(db, config, archive, run=run, job=job["id"], limit=size)
-        counts.update({k: v for k, v in done.items() if k != "awaiting_text"})
-        after = await _progress(db, job, run, counts, job["done"], on_run=False, me=me)
+        passes = run.tally() - before
+        counts.update({k: v for k, v in passes.items() if k != "awaiting_text"})
+        after = await _progress(db, job, run, counts, job["done"], on_run=False)
+        run.chunk_recorded()
         if after is None:
             return Chunk("gone")
         if run.gateway.ceiling is not None and run.gateway.ceiling.reached:
@@ -287,11 +291,10 @@ async def _progress(
     ladder: dict[str, Any] | None = None,
     *,
     on_run: bool = True,
-    me: Identity,
 ) -> dict[str, Any] | None:
     """Record the chunk on the job (with its scope's papers `graded` so far, when counted) and,
-    unless they are there already (`on_run`), on its run; None when the job is no longer the
-    session `me`'s."""
+    unless they are there already (`on_run`), on its run; None when the job is no longer
+    running."""
     merged = dict(job["counts"])
     for k, v in counts.items():
         merged[k] = merged.get(k, 0) + v
@@ -300,7 +303,7 @@ async def _progress(
     if graded is not None:
         merged["graded"] = graded
     async with db.write("re-run: progress") as unit:
-        return await jobs_store.progress(unit, job["id"], done, merged, ladder, me=me)
+        return await jobs_store.progress(unit, job["id"], done, merged, ladder)
 
 
 def _due(paper: Paper, topic: Topic, name: str, ladder: dict[str, Any] | None) -> grading.Due:

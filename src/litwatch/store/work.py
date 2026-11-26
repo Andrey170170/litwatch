@@ -28,6 +28,9 @@ from litwatch.store.text import stored
 # The channel a submission, and an item's settling, notify the Work gates on; the payload is the
 # item's kind.
 CHANNEL = "litwatch_work"
+# The kind of a CLI command's work run in its own process (`gates.work.inline`), which no
+# `serve` serves.
+COMMAND = "command"
 
 _COLUMNS = (
     "id, kind, key, admission, state, not_before, attempts, scope, lease_token, lease_until, "
@@ -293,18 +296,75 @@ async def take_back(
     expired back to pending, to be taken again at once in the place in line they had (a
     resubmission's later wish included): their worker died or lost the database. One whose row
     a unit holds (one fenced on it, or a settling) is left for a later call. Returns those taken
-    back."""
+    back.
+
+    A CLI command's item (`gates.work.inline`) whose lease expired ends failed, whatever
+    admission it holds (`_retire_commands`)."""
+    params = _serving(kinds, keys)
+    await _retire_commands(unit)
     rows = await (
         await unit.execute(
             "UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
             "not_before = LEAST(not_before, now()), resubmitted = false "
             f"WHERE id IN (SELECT id FROM work_items w WHERE {_served('w')} "
+            "AND w.kind <> %(command)s "
             "AND state = 'running' AND lease_until < now() FOR UPDATE SKIP LOCKED) "
             f"RETURNING {_COLUMNS}",
-            _serving(kinds, keys),
+            params | {"command": COMMAND},
         )
     ).fetchall()
     return [_item(r) for r in rows]
+
+
+async def abandon(unit: WriteUnit, key: str, error: str) -> None:
+    """End the CLI command's item `key` failed with `error` unless it has ended: its one
+    attempt is over (cut off, or the command stopped), and nothing runs a command's item again."""
+    await unit.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', error = %s, "
+        "ended_at = now(), lease_token = NULL, lease_until = NULL, resubmitted = false "
+        "WHERE kind = %s AND key = %s AND state <> 'ended'",
+        (_stored(error), COMMAND, key),
+    )
+    await _notify(unit, COMMAND)
+
+
+async def _retire_commands(unit: WriteUnit, admission: str | None = None) -> None:
+    """End failed the CLI commands' items (of `admission`, or all) whose lease expired: a
+    command has one attempt, its process is gone, and no other runs it."""
+    retired = await unit.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
+        "error = 'its process stopped', lease_token = NULL, lease_until = NULL, "
+        "resubmitted = false "
+        "WHERE id IN (SELECT id FROM work_items c WHERE c.kind = %(command)s "
+        "AND (%(admission)s::text IS NULL OR c.admission = %(admission)s) "
+        "AND c.state = 'running' AND c.lease_until < now() FOR UPDATE SKIP LOCKED)",
+        {"command": COMMAND, "admission": admission},
+    )
+    if retired.rowcount:
+        await _notify(unit, COMMAND)  # their admissions are free
+
+
+async def admit(unit: WriteUnit, key: str, admission: str, lease: timedelta) -> WorkItem | None:
+    """Make and claim a CLI command's item `key` (`gates.work.inline`) at once, once its
+    `admission` is free: inserted running, its one attempt, its lease `lease` from the clock
+    now. None while another item runs for that admission. A command's item there whose lease
+    expired is ended failed first (`_retire_commands`), so a command after one killed takes its
+    admission back with no `serve` running. Two claiming for one admission at once: the later
+    waits for the earlier's commit, then fails on `work_items_admitted`."""
+    await _retire_commands(unit, admission)
+    row = await (
+        await unit.execute(
+            "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until, "
+            "started_at, attempts) "
+            "SELECT %(kind)s, %(key)s, %(admission)s, 'running', gen_random_uuid(), "
+            "c.at + %(lease)s, c.at, 1 FROM (SELECT clock_timestamp() AS at) c "
+            "WHERE NOT EXISTS (SELECT 1 FROM work_items r "
+            "WHERE r.admission = %(admission)s AND r.state = 'running') "
+            f"RETURNING {_COLUMNS}",
+            {"kind": COMMAND, "key": key, "admission": admission, "lease": lease},
+        )
+    ).fetchone()
+    return _item(row) if row else None
 
 
 async def take(
@@ -463,6 +523,37 @@ async def wait_seconds(
     ).fetchone()
     assert row is not None  # an aggregate has its row
     return row["seconds"]
+
+
+async def link_run(unit: WriteUnit, item: WorkItem, run_id: int) -> None:
+    """Record that the running item works the run `run_id` (a job's chunk, on the job's run):
+    the run is alive by this claim of the item, while its lease is (`store.runs.ALIVE`), and no
+    longer by an earlier chunk's. In the item's own unit."""
+    await unit.execute("UPDATE work_items SET run_id = %s WHERE id = %s", (run_id, item.id))
+    await unit.execute("UPDATE runs SET lease_token = %s WHERE id = %s", (item.lease_token, run_id))
+
+
+async def submitted(unit: ReadUnit, kind: str, key: str) -> bool:
+    """Whether an item of `kind` and `key` was ever submitted: for a `lasting` key, whether its
+    one item exists."""
+    row = await (
+        await unit.execute(
+            "SELECT 1 FROM work_items WHERE kind = %s AND key = %s LIMIT 1", (kind, key)
+        )
+    ).fetchone()
+    return row is not None
+
+
+async def bring_forward(unit: WriteUnit, kind: str, key: str, at: datetime) -> None:
+    """Bring the pending item of `kind` and `key` forward to `at`, where that is sooner: work
+    that waited on something now over (a lock let go of) goes when it is due."""
+    moved = await unit.execute(
+        "UPDATE work_items SET not_before = %s WHERE kind = %s AND key = %s "
+        "AND state = 'pending' AND not_before > %s",
+        (at, kind, key, at),
+    )
+    if moved.rowcount:
+        await _notify(unit, kind)
 
 
 async def get(unit: ReadUnit, item_id: int) -> WorkItem | None:

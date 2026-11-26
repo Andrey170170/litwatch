@@ -825,6 +825,74 @@ async def test_the_owners_retry_during_a_failing_setup_runs_it_again_at_once(
     assert second - first < 2  # at once, not after `RETRY`
 
 
+class Counting(Recorder):
+    """Sets up every time, counting the setups, and records the order of its setups and
+    events."""
+
+    def __init__(self):
+        super().__init__("counting")
+        self.setups, self.order = 0, []
+
+    async def setup(self, db):
+        self.setups += 1
+        self.order.append("setup")
+
+    async def handle(self, db, event):
+        await super().handle(db, event)
+        self.order.append("handle")
+
+
+async def test_a_setup_failed_in_another_process_is_run_again_where_setup_is_cached(
+    conn: Session, db
+):
+    """Two processes serve one integration; this one set it up, the other's setup failed and
+    was recorded. This one's next turn reads the failure and sets up again, which clears it,
+    rather than leave it for the owner's Retry, and before it hands the turn's event over."""
+    rec = Counting()
+    gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()
+
+    async def set_up_again() -> bool:
+        cursor = await in_write(conn, outbox.cursor, rec.name)
+        return rec.setups == 2 and not cursor.setup_failures
+
+    async with served(gate, workers):
+        await until(lambda: _ended(conn, rec.name), "the first turn ends")
+        assert rec.setups == 1
+        at = datetime.now(UTC)
+        await in_write(conn, outbox.setup_failed, rec.name, 1, "down elsewhere", at, at)
+        ids = await emit(conn, events.PAPER_SAVED)  # a turn for it
+        await until(set_up_again, "the setup runs again here")
+        await until(lambda: _seen(rec, ids), "the event is handled")
+    assert rec.order == ["setup", "setup", "handle"]
+
+
+async def test_a_setup_failed_elsewhere_holds_the_cached_one_back_until_its_backoff(
+    conn: Session, db
+):
+    """As above, but the other process's failure waits out a backoff an hour off. A turn that
+    runs now anyway (the emit's own wake waits for the backoff, so one is brought forward): this
+    one's cached setup is undone and not run again yet, no event is handed over, and its next
+    turn is arranged for when the backoff ends."""
+    rec = Counting()
+    gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()
+
+    async def waits() -> bool:
+        found = await turns(conn, rec.name)
+        return any(t["state"] == "pending" and t["not_before"] == retry for t in found)
+
+    async with served(gate, workers):
+        await until(lambda: _ended(conn, rec.name), "the first turn ends")
+        at = datetime.now(UTC)
+        retry = at + timedelta(hours=1)
+        await in_write(conn, outbox.setup_failed, rec.name, 1, "down elsewhere", at, retry)
+        await emit(conn, events.PAPER_SAVED)
+        await in_write(conn, outbox.wake, rec.name, at=at)  # its turn, now
+        await until(waits, "the next turn waits for the backoff")
+    assert rec.setups == 1 and rec.seen == [] and "handle" not in rec.order
+
+
 class Conflicting(Recorder):
     """Loses a serialization conflict once, where it is told to: in `handle`, `setup` or
     `idle`."""

@@ -235,6 +235,16 @@ async def cursors(unit: ReadUnit, names: list[str]) -> dict[str, Cursor]:
     return {r["name"]: _cursor(r) for r in rows}
 
 
+async def setup_failing(unit: ReadUnit, name: str) -> bool:
+    """Whether the integration's last setup failed, in whichever process ran it."""
+    row = await (
+        await unit.execute(
+            "SELECT 1 FROM integration_cursors WHERE name = %s AND setup_failures > 0", (name,)
+        )
+    ).fetchone()
+    return row is not None
+
+
 async def failing(unit: ReadUnit, names: list[str]) -> set[str]:
     """Those of the named cursors stuck on an event or on their setup: what a card shows as
     failing, without the lag `cursors` counts."""

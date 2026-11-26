@@ -28,18 +28,10 @@ after a peer took the item. A plain update of the row (a submission marking the 
 again) does not wait for it, so a submitter holding a paper lock the unit waits for cannot
 deadlock with it (docs/plans/a2-work-gate.md, "The lease and fence"). Read
 units are not fenced.
-
-Transitional, until A2's Work gate replaces it with leases and heartbeats (docs/backlog.md, A2,
-"Leases replace the presence session"): the gate holds a presence session, a connection of its
-own for the process's life, whose `Identity` (`db.identity()`) stands for the process in run
-records and job claims, as a job's connection did before the pool (docs/plans/a1-database-gate.md,
-"Choices made without asking", decided 2026-11-18).
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 import os
 import time
@@ -55,13 +47,12 @@ from collections.abc import (
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Literal, LiteralString, Self
 
 import psycopg
 from psycopg import sql
 from psycopg.abc import Params
-from psycopg.rows import dict_row, tuple_row
+from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from litwatch.gates.context import Work, current_work
@@ -108,33 +99,10 @@ class LeaseLostError(RuntimeError):
 
 @dataclass(frozen=True)
 class Hold:
-    """A session lock `DatabaseGate.held` took: its name, what it is taken for (a keyed one's
-    `key_arg`), and the backend that holds it."""
+    """A session lock `DatabaseGate.held` took: its name, and the backend that holds it."""
 
     name: str
     pid: int
-    key_arg: str | int | None = None
-
-
-@dataclass(frozen=True)
-class Identity:
-    """A session that stands for a process: its backend's pid and start, as `pg_stat_activity`
-    shows them. A run record or a job claim made in its name is alive while it lasts
-    (`store.runs.ALIVE`)."""
-
-    pid: int
-    started: datetime
-
-
-async def identity_of(conn: psycopg.AsyncConnection[Any]) -> Identity:
-    """The identity of `conn`'s own session."""
-    async with conn.cursor(row_factory=tuple_row) as cur:
-        await cur.execute(
-            "SELECT pid, backend_start FROM pg_stat_activity WHERE pid = pg_backend_pid()"
-        )
-        row = await cur.fetchone()
-    assert row is not None  # every session has its row
-    return Identity(row[0], row[1])
 
 
 # -- the lock registry -----------------------------------------------------------------------------
@@ -170,12 +138,16 @@ REGISTRY: tuple[Lock, ...] = (
     Lock("rerun", 7213916, "unit", "text"),
     # Making replays, likewise.
     Lock("replay", 7213917, "unit"),
+    # Putting jobs on tonight's run, and a nightly releasing them as it closes its run, so one
+    # of the two sees the other (`store.jobs.release`).
+    Lock("tonight", 7213918, "unit"),
+    # Publishing a nightly fire and admitting a job's chunk, so a due nightly and a chunk are
+    # one decision (`jobs.scheduler.unpublished`).
+    Lock("fire", 7213919, "unit"),
     # One retally of a run's totals at a time, by run id.
     Lock("retally", 7213912, "unit", "int"),
     # One job that changes pipeline state at a time.
     Lock("run", 7213911, "session"),
-    # One scheduler deciding and running a job kind.
-    Lock("schedule", 7213913, "session", "text"),
     # Migrations, applied by one process at a time as it starts.
     Lock("migration", 7213910, "startup"),
 )
@@ -183,8 +155,8 @@ LOCKS = {lock.name: lock for lock in REGISTRY}
 _ORDER = {lock.name: position for position, lock in enumerate(REGISTRY)}
 
 # The session locks held across network calls, against the rule that only a unit holds a lock.
-# The list only shrinks: A2 turns their loops into Workers and A3 removes the run lock.
-HELD_ACROSS_CALLS = ("run", "schedule")
+# The list only shrinks: A3 removes the run lock.
+HELD_ACROSS_CALLS = ("run",)
 
 _ARGS: dict[str | None, LiteralString] = {None: "%s", "text": "%s, hashtext(%s)", "int": "%s, %s"}
 
@@ -415,10 +387,6 @@ class DatabaseGate:
         timeout: float = 30.0,
     ) -> None:
         self._dsn, self._schema, self.timeout = dsn, schema, timeout
-        # The presence session (`identity`): its connection, and its identity once known.
-        self._presence: psycopg.AsyncConnection[Any] | None = None
-        self._identity: Identity | None = None
-        self._presence_lock = asyncio.Lock()
         self._pool = AsyncConnectionPool[Connection](
             dsn,
             connection_class=psycopg.AsyncConnection[dict[str, Any]],
@@ -437,25 +405,18 @@ class DatabaseGate:
         await conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(self._schema)))
 
     async def open(self) -> None:
-        """Open the pool, waiting until its first connections are made, and the presence
-        session; `PoolTimeoutError` when the pool makes none within the timeout (the database
-        down or unreachable)."""
+        """Open the pool, waiting until its first connections are made; `PoolTimeoutError` when
+        the pool makes none within the timeout (the database down or unreachable)."""
         try:
             await self._pool.open(wait=True, timeout=self.timeout)
         except PoolTimeout as exc:
             raise PoolTimeoutError(
                 f"the pool made no connection to the database in {self.timeout:g}s"
             ) from exc
-        await self.identity()
 
     async def close(self) -> None:
-        """Close the pool and the presence session: the runs and job claims made in the
-        process's name are no longer alive."""
+        """Close the pool."""
         await self._pool.close()
-        async with self._presence_lock:
-            if self._presence is not None:
-                await self._presence.close()
-                self._presence = self._identity = None
 
     async def __aenter__(self) -> Self:
         await self.open()
@@ -463,34 +424,6 @@ class DatabaseGate:
 
     async def __aexit__(self, *exc: object) -> None:
         await self.close()
-
-    async def identity(self) -> Identity:
-        """The process's identity: its presence session's, the session a run record or a job
-        claim names (`store.runs.start`, `store.jobs.claim`). Transitional, until A2's leases.
-
-        The presence session is a connection of its own, outside the pool, opened with the gate
-        and closed with it. Asked for, it is checked first: one that dropped (the database
-        restarted, the connection was cut) is opened again, with a new identity, and what was
-        claimed in the old one's name is no longer alive, so `store.jobs.take_back` puts it
-        back. Asked for outside units, as a unit is opened."""
-        outside_unit("asking for the presence session's identity")
-        async with self._presence_lock:
-            conn = self._presence
-            if conn is not None and self._identity is not None:
-                try:
-                    await conn.execute("SELECT 1")
-                    return self._identity
-                except psycopg.Error:
-                    log.warning(
-                        "the presence session (backend %s) ended; opening another",
-                        self._identity.pid,
-                    )
-                    with contextlib.suppress(psycopg.Error):
-                        await conn.close()
-            self._presence = None
-            fresh = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
-            self._presence, self._identity = fresh, await identity_of(fresh)
-            return self._identity
 
     @asynccontextmanager
     async def _connection(self, name: str) -> AsyncIterator[Connection]:
@@ -556,15 +489,14 @@ class DatabaseGate:
                 await unit._committing()
 
     @asynccontextmanager
-    async def held(self, name: str, key_arg: str | int | None = None) -> AsyncIterator[Hold]:
+    async def held(self, name: str) -> AsyncIterator[Hold]:
         """Hold the session lock `name` (one of `HELD_ACROSS_CALLS`) for the block, on a
-        connection of its own outside the pool; `key_arg` is what a keyed one is taken for (the
-        job kind, the integration). Raises `BusyError` when another session holds it, another
-        `held` of this gate included: the lock is not taken twice. Yields the `Hold`, which
-        `held_elsewhere` takes to leave the holder's own hold out."""
+        connection of its own outside the pool. Raises `BusyError` when another session holds
+        it, another `held` of this gate included: the lock is not taken twice. Yields the
+        `Hold`, which `held_elsewhere` takes to leave the holder's own hold out."""
         if name not in HELD_ACROSS_CALLS:
             raise ValueError(f"{name!r} is not a session lock held across calls")
-        async with self._session_lock(LOCKS[name], key_arg, wait=False) as (hold, _):
+        async with self._session_lock(LOCKS[name], wait=False) as (hold, _):
             yield hold
 
     @asynccontextmanager
@@ -577,7 +509,7 @@ class DatabaseGate:
         lock = LOCKS.get(name)
         if lock is None or lock.scope != "startup":
             raise ValueError(f"{name!r} is not a startup lock")
-        async with self._session_lock(lock, None, wait=True) as (_, conn):
+        async with self._session_lock(lock, wait=True) as (_, conn):
             yield conn
 
     @asynccontextmanager
@@ -596,14 +528,13 @@ class DatabaseGate:
 
     @asynccontextmanager
     async def _session_lock(
-        self, lock: Lock, key_arg: str | int | None, *, wait: bool
+        self, lock: Lock, *, wait: bool
     ) -> AsyncIterator[tuple[Hold, Connection]]:
         """A session lock on a connection of its own, autocommit with dict rows on the gate's
         schema: waited for, or tried once (`BusyError` when another session holds it). Yields
         the hold and its connection. Its loss with its connection is logged. Refused while a
         unit is open on the task, as opening a unit is."""
-        params = _params(lock, key_arg)
-        label = lock.name if key_arg is None else f"{lock.name} ({key_arg})"
+        params, label = _params(lock, None), lock.name
         outside_unit(f"taking the {label} lock")
         conn = await psycopg.AsyncConnection[dict[str, Any]].connect(
             self._dsn, row_factory=dict_row, autocommit=True
@@ -618,7 +549,7 @@ class DatabaseGate:
                 if not (await taken.fetchone())["ok"]:
                     raise BusyError(f"the {label} lock is held by another session")
             try:
-                yield Hold(lock.name, conn.info.backend_pid, key_arg), conn
+                yield Hold(lock.name, conn.info.backend_pid), conn
             finally:
                 # A connection that ended let the lock go while the block still ran under it.
                 try:
@@ -633,11 +564,11 @@ class DatabaseGate:
 
     async def held_elsewhere(self, name: str, *, mine: Hold | None = None) -> bool:
         """Whether a session holds the session lock `name`, other than the caller's own `mine`:
-        for the run lock, whether a job is running. Another task's hold in this process counts.
-        For the locks without an argument."""
+        for the run lock, whether a job is running. Another task's hold in this process
+        counts."""
         lock = LOCKS[name]
-        if name not in HELD_ACROSS_CALLS or lock.arg is not None:
-            raise ValueError(f"{name!r} is not a session lock without an argument")
+        if name not in HELD_ACROSS_CALLS:
+            raise ValueError(f"{name!r} is not a session lock held across calls")
         # Our keys fit in the low half of the one-key form: classid 0, the key in objid.
         query = (
             "SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_database d ON d.oid = l.database "
