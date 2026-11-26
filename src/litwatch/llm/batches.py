@@ -627,7 +627,7 @@ class Batcher:
         assert batch.name is not None
         if batch.name.startswith(STAGED) and not await self._adopt(batch, batch.name):
             return
-        while not await self._check(batch, self.now()):
+        while not await self._check(batch):
             self._looked(batch)
             if self.now() >= batch.deadline + self.drain:
                 # Left open on its rows, for the next process to account for (`recover`).
@@ -642,16 +642,19 @@ class Batcher:
         """The id of `batch`, made with `reference`, looked for until `end` (monotonic), lookups
         and the waits between them included; None when not found by then, at once for a
         provider that cannot find one. An account error is raised. Each lookup that does not
-        find it is a look: a call that looks once is let go, and its wake (`woken`) cuts the
-        wait before the next lookup short."""
+        find it is a look: a call that looks once is let go, and its wake (`woken`) brings a
+        lookup of its own forward, the scheduled ones (`find_delays`) kept as they were."""
         if (find := self.provider.find) is None:
             return None
-        for delay in self.find_delays:
+        delays = iter(self.find_delays)
+        due = time.monotonic() + next(delays, 0.0)  # the next scheduled lookup
+        while True:
             with contextlib.suppress(TimeoutError):
-                wait = max(0.0, min(delay, end - time.monotonic()))
+                wait = max(0.0, min(due, end) - time.monotonic())
                 await asyncio.wait_for(batch.woken.wait(), wait)
             if (left := end - time.monotonic()) <= 0:
                 break
+            scheduled = time.monotonic() >= due
             try:
                 if (batch_id := await asyncio.wait_for(find(reference), left)) is not None:
                     return batch_id
@@ -663,6 +666,10 @@ class Batcher:
                 break
             self._looked(batch)
             batch.woken.clear()
+            if scheduled:
+                if (delay := next(delays, None)) is None:
+                    break
+                due = time.monotonic() + delay
         return None
 
     async def _adopt(self, batch: _Batch, handle: str) -> bool:
@@ -698,17 +705,17 @@ class Batcher:
             await self._journalled("batch adopted", lambda: journal.adopted(handle, batch_id))
         return True
 
-    async def _check(self, batch: _Batch, now: datetime) -> bool:
+    async def _check(self, batch: _Batch) -> bool:
         """Look at the batch once: True when it is done with, settled or failed on the account
-        (its calls answered); False while it runs (cancelled at the deadline) or could not be
-        read."""
+        (its calls answered); False while it runs (cancelled at the deadline, as the clock
+        stands once its status is read) or could not be read."""
         batch_id = batch.name
         assert batch_id is not None
         replies: dict[str, Answered] = {}
         try:
             status = await self._bounded(self.provider.status(batch_id))
             if status not in ("ended", "gone"):
-                if now >= batch.deadline and not batch.cancelled:
+                if self.now() >= batch.deadline and not batch.cancelled:
                     await self._bounded(self.provider.cancel(batch_id))
                     batch.cancelled = True
                     log.info("batch %s cancelled at the deadline", batch_id)

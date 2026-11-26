@@ -108,23 +108,26 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield
     finally:
-        if gate is not None:
-            # Each item running is stopped and given back once it has recorded how it ended.
-            gate.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await gate
-        if job_worker is not None:
-            await job_worker.close(RuntimeError("the service stopped"))
-        if owned:
-            await models.close()
-            app.state.models = None
-        app.state.search_pool.shutdown(wait=False, cancel_futures=True)
-        for integration in app.state.integrations:
-            if close := getattr(integration, "aclose", None):
-                with contextlib.suppress(Exception):
-                    await close()
-        if app.state.archive is not None:
-            await app.state.archive.aclose()
+        try:
+            if gate is not None:
+                # Each item running is stopped and given back once it has recorded how it
+                # ended; the gate's own failure is raised once everything below has stopped.
+                gate.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await gate
+        finally:
+            if job_worker is not None:
+                await job_worker.close(RuntimeError("the service stopped"))
+            if owned:
+                await models.close()
+                app.state.models = None
+            app.state.search_pool.shutdown(wait=False, cancel_futures=True)
+            for integration in app.state.integrations:
+                if close := getattr(integration, "aclose", None):
+                    with contextlib.suppress(Exception):
+                        await close()
+            if app.state.archive is not None:
+                await app.state.archive.aclose()
 
 
 async def _recover(models: ModelGate, config: Config) -> None:

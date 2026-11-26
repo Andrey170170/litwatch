@@ -424,8 +424,10 @@ async def test_an_unknown_charge_counts_at_its_reservation_across_the_jobs_runs(
     async with api(conn) as http:  # room for one call, were the unknown charge not counted
         again = await http.post(f"/api/jobs/{job}/run", json={"ceiling": 1.75 * hold})
         assert again.status_code == 200
+    assert (await job_of(conn, job))["state"] == "queued"
     await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     assert (await job_of(conn, job))["state"] == "stopped"
+    assert len(await rows(conn, "SELECT 1 FROM runs WHERE job_id = %s", job)) == 2  # ran again
     assert len(models.sent("field_grade")) == 1  # not sent: a quarter of a call's room left
 
 

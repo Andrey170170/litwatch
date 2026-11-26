@@ -77,6 +77,19 @@ Found in A2 P4's last review round and fix checks, each reachable only in unusua
 - **A reservation outlives a cancelled call.** A call cancelled after its row commits and before it is sent
   (`Gateway._complete`, `opened`) leaves that row's reservation (`inference_calls.reserved`) counted, so the job's
   ceiling is overcounted by that one reservation: a conservative error.
+- **A failed tally undoes a failed job's close.** P4 tallies a run in its close unit (`jobs/context.py`, `_finish`),
+  so a tally that fails once the job has failed rolls back `runs.finish`: the run keeps no finish time and no error,
+  and the nightly retries its fire through `UnclosedError`. Close again without the tally in a fresh unit,
+  and retally later.
+- **A found batch's reply is skipped on rows settled as may-have-been-made.** A caller paused on a staged name adopts
+  it after its owner gave up and settled its rows with `provider: the batch may have been made`; `settle_batch`
+  (`store/calls.py`) then skips those rows, so the reply's charge is missing from the run's totals and its output is
+  not saved.
+- **A batch registered during the lookup is missed.** `Gateway._batched` (`llm/gateway.py`) takes the gate's
+  `owned` identities before `in_batch` awaits, so a batch another item registers meanwhile is missed, and a call with
+  no deadline sends a second paid request.
+- **A nightly's call can be released past its drain** (`Batcher._follow`, `llm/batches.py`), by up to one poll
+  interval plus the status and results reads' budgets (`POLL_SECONDS`, `OPERATION_SECONDS`).
 - **The cleanup that removes this class.** Several places decide whether a batched request's answer is already known
   or paid for: `CallJournal.in_batch`, `Gateway._batched` and its cache recheck in `_ask`, and `Batcher.attach` and
   `_taken`. One owner per batch in the gate, holding its waiters and its final result in one map, would take that
@@ -155,7 +168,9 @@ Its own project on top of A6: the labelled query set and goals first, then work 
     a re-run's text passes: each counts from where its chunk began, `ModelRun.chunk_began`);
   - the same tallies live in the Worker's memory between a committed result and the chunk's progress write, so a
     restart in between leaves a committed result out of the job's counts (a re-run's Brief, a replay result whose
-    acknowledgement is lost). Counts only; one fix closes both: derive a job's progress from its committed results.
+    acknowledgement is lost). Counts only; one fix closes both: derive a job's progress from its committed results;
+  - a normal call's `record` (`store/calls.py`) tried again after its commit acknowledgement was lost stamps a new
+    `responded_at`, and can move the provider's `replied_at` past another call's account error.
 
 - **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
   `evals/` and homelab specifics out of the repository (the image ships `evals/labels/` for Run replay: they move

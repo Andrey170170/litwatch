@@ -1530,6 +1530,7 @@ async def test_a_dead_runs_staged_batch_is_looked_for_its_id_kept_and_read(conn:
         return [c["batch_id"] for c in await calls(conn)] == ["batch_1"]
 
     await until(staged)
+    await until(lambda: "batch_1" in client.made)  # made, its reply lost
     asked.cancel()
     await asyncio.gather(asked, return_exceptions=True)
     await gw.close()
@@ -1834,7 +1835,7 @@ async def test_a_batchs_rows_open_together_naming_its_reference_before_it_is_mad
         return await create(**kwargs)
 
     client.batches.create = watched
-    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    gw, _, _ = openai_batching(Together(db, await started(conn, "nightly"), 2), client)
     asked = asyncio.gather(gw.ask("brief", ask(1)), gw.ask("brief", ask(2)))
     await until(lambda: client.made)
     client.end("batch_1")
@@ -2692,6 +2693,7 @@ async def test_a_staged_batch_whose_name_is_slow_to_read_is_looked_for_its_whole
         return [c["batch_id"] for c in await calls(conn)] == ["staged:file-1"]
 
     await until(staged)
+    await until(lambda: "batch_1" in client.made)  # made, its reply lost
     asked.cancel()
     await asyncio.gather(asked, return_exceptions=True)
     await gw.close()
@@ -2710,4 +2712,53 @@ async def test_a_staged_batch_whose_name_is_slow_to_read_is_looked_for_its_whole
     await gw.settle()
     assert [c["cost"] for c in await calls(conn)] == [pytest.approx(SOL_BATCHED)]
     assert client.listings == 1
+    await gw.close()
+
+
+async def test_calls_that_look_once_bring_lookups_forward_and_leave_the_scheduled_ones(
+    conn: Session, db
+):
+    """A batch whose creation lost its reply is looked for on a schedule; three jobs' calls
+    without a deadline each wake a lookup of their own, which misses: the scheduled lookups
+    still come, and one of them finds the batch."""
+    client = OpenAIBatches()
+    client.creating, client.misses = [(True, lost())], 4
+    unusable = SdkClient(openai_response('{"yes": tr'))  # a job's normal call, cached by none
+    client.responses = SimpleNamespace(create=unusable.responses.create)
+    gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
+    batcher = gw.batchers["openai"]
+    batcher.find_seconds, batcher.find_delays = 10.0, (0.5, 0.2, 0.2)
+    asked = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: "batch_1" in client.made)
+    for _ in range(3):
+        job = Tonight(gw.gate, CallJournal(db, await started(conn, "job")), deadline=None)
+        with pytest.raises(CallError, match="invalid"):
+            await asyncio.wait_for(job.ask("brief", ask(1)), 3)
+    assert client.listings == 3  # the jobs' own, before any scheduled one
+    client.end("batch_1")
+    assert (await asyncio.wait_for(asked, 5)).usage.service_tier == "batch"
+    assert client.listings == 5
+    await gw.close()
+
+
+async def test_a_batch_whose_deadline_passes_while_its_status_is_read_is_cancelled_at_that_look(
+    conn: Session, db, monkeypatch
+):
+    """The deadline passes while a batch's status is read: it is cancelled at that look, as
+    the clock stands then, not a poll later."""
+    gw, anthropic, _, clock = batching(CallJournal(db, await started(conn, "nightly")), hold=True)
+    gw.batchers["anthropic"].poll = 60.0
+    status = anthropic.status
+
+    async def late(batch_id):
+        found = await status(batch_id)
+        clock.now = DEADLINE  # the read took until the deadline
+        return found
+
+    monkeypatch.setattr(anthropic, "status", late)
+    asked = asyncio.create_task(gw.ask("brief", ask(0)))
+    await until(lambda: anthropic.cancelled == ["msgbatch_1"])
+    anthropic.end("msgbatch_1", answered={gw.request_key(BRIEF, ask(0))})
+    asked.cancel()
+    await asyncio.gather(asked, return_exceptions=True)
     await gw.close()

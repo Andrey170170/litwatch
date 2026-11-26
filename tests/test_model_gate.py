@@ -233,6 +233,38 @@ async def test_serve_builds_one_gate_whose_limits_its_concurrent_items_share(
     assert all(c["work_id"] == c["run_work"] and c["kind"] == "fulltext" for c in found)
 
 
+async def test_serve_closes_its_model_gate_though_its_work_gate_failed(db, monkeypatch):
+    """The Work gate's task ends with an error of its own: `serve` still closes the job worker
+    and the Model gate it built, and the error is raised after."""
+    closed: list[str] = []
+
+    class Failing:
+        def __init__(self, db) -> None:
+            pass
+
+        async def run(self, workers, keys) -> None:
+            raise RuntimeError("the work gate failed")
+
+    def model_gate(database, config):
+        gate = ModelGate(config.models, {}, CallJournal(database))
+        close = gate.close
+
+        async def closing() -> None:
+            closed.append("models")
+            await close()
+
+        monkeypatch.setattr(gate, "close", closing)
+        return gate
+
+    monkeypatch.setattr(app_module, "WorkGate", Failing)
+    monkeypatch.setattr(app_module, "model_gate", model_gate)
+    config = ft.CONFIG.model_copy(update={"schedule": QUIET})
+    with pytest.raises(RuntimeError, match="the work gate failed"):
+        async with served(db, config, archive=ft.archive(FakeArchive())):
+            await asyncio.sleep(0.05)
+    assert closed == ["models"]
+
+
 # -- batches across items ------------------------------------------------------------------------
 
 

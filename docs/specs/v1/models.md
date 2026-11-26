@@ -113,7 +113,7 @@ service's workers, the CLI's other commands and a nightly started outside that w
   request the batch could not answer (errored, expired, cancelled) is sent again as a normal call when it is asked.
   A batch the provider no longer has (deleted, or the key is another workspace's) never answers: its calls are
   settled as unanswered, and those still asked go as normal calls.
-- **Nothing is paid twice once a batch is recorded.** A batched call's journal row is written before the batch is
+- **Once a batch is recorded, a request is paid twice only in the cases named here.** A batched call's journal row is written before the batch is
   sent and given the batch id once the provider accepts it; its request key is its id in the batch. A run that asks a
   key already in an open batch waits on that batch, so a run started again after a crash attaches to its batches
   instead of resubmitting, and takes a refusal or truncation its batch already gave the item's attempt before rather
@@ -127,9 +127,12 @@ service's workers, the CLI's other commands and a nightly started outside that w
   from its rows' opening on, whatever it is known by (the reference its provider staged, then its id): one task in the
   process follows it, from before its rows can be read; a call that finds no task following it reads its name again
   before following it. A call whose batch was sent with neither its id nor a reference to find it by recorded (the
-  process died in between) is sent again: that one batch may be paid twice. Once a provider has answered, what its
-  answer costs is written whatever becomes of the call's item (its lease lost), tried again while the database is
-  briefly away.
+  process died in between) is sent again: that one batch may be paid twice. So may a request in three more cases,
+  each sent as a normal call while its batch may still answer it: a call with no deadline whose one look did not end
+  its batch; a cancelled batch's request still unanswered when the drain ends (the deadline, below); and a batch
+  whose creation's outcome was unknown and that was not found in its window (above). Once a provider has answered,
+  what its answer costs is written whatever becomes of the call's item (its lease lost), tried again while the
+  database is briefly away.
 - **The deadline.** `[schedule] deadline` (07:30 in the schedule's zone) is the nightly's: the first after the
   schedule's nightly time that the run belongs to, kept by a run started again the same night. At the deadline the
   run sends no more batches (calls held but not yet sent go as normal calls), cancels its open batches and waits for them to end (cancelling takes minutes; requests in flight may still be
