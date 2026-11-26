@@ -258,9 +258,8 @@ async def test_an_evaluation_stopped_early_resumes_with_what_its_file_lacks(
     assert "decider: 6 sorted" in resumed.output  # sorted or failed: each asked once
     assert sorted(answered()) == sorted(ids) and len(answered()) == 10
     second = (await items(conn, "classify"))[1]
-    assert set(json.loads(json.dumps(second["scope"]))["candidates"][0]["papers"]) == set(
-        ids
-    ) - set(first)
+    (candidate,) = second["scope"]["candidates"]
+    assert set(candidate["papers"]) == set(ids) - set(first)  # only what the file lacked
     kinds = await rows(
         conn, "SELECT DISTINCT r.kind FROM inference_calls c JOIN runs r ON r.id = c.run_id"
     )
