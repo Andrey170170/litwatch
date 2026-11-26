@@ -50,11 +50,13 @@ class CallStart(BaseModel):
 class CallOutcome(BaseModel):
     """How a call's row is settled by what answered it: its charge (`usage`, None when unknown),
     its failure (`refused: …`, `truncated`, `provider: …`, `account: …`; None for a reply its
-    caller validates), and whether its provider replied (`replied`), which is observed."""
+    caller validates), whether its provider replied (`replied`), which is observed, and in
+    debug mode the text of a reply that could not be used (`reply`)."""
 
     usage: Usage | None = None
     error: str | None = None
     replied: bool = False
+    reply: str | None = None
 
 
 # A projection from the first hours of a month says little; spend is spread over at least a day.

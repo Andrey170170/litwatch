@@ -1234,7 +1234,7 @@ async def test_a_nightly_beside_the_gate_takes_over_an_abandoned_pass_and_works_
             # Due again, the item looks once more, and leaves it to the nightly that runs: its
             # look holds the pass's row a moment, which the nightly's claim would skip.
             await until(looked_again, "the item looks again, and waits")
-            async with model_run(gate, CONFIG, "nightly", models=writer.gate(CONFIG)) as run:
+            async with model_run(gate, "nightly", models=writer.gate(CONFIG)) as run:
                 done = await nightly.text_passes(gate, CONFIG, run, None)
         assert done == {"briefs_written": 1}  # taken over by the nightly
         # The item waited for whatever held its pass when it last looked (the nightly's claim,

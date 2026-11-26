@@ -396,7 +396,7 @@ class JobWorker:
             stack = AsyncExitStack()
             kind = EVAL if job["kind"] == "replay" else "job"
             run = await stack.enter_async_context(
-                model_run(self.db, self.config, kind, models=self.models, job_id=job["id"])
+                model_run(self.db, kind, models=self.models, job_id=job["id"])
             )
             self.open[job["id"]] = _Open(stack, run)
         run = self.open[job["id"]].run

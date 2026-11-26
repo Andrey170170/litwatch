@@ -391,6 +391,20 @@
         "lineCount": 1
       }
     ],
+    "src/litwatch/archive/text.py": [
+      {
+        "rule": "import-not-found",
+        "startColumn": 15,
+        "endColumn": 22,
+        "lineCount": 1
+      },
+      {
+        "rule": "import-not-found",
+        "startColumn": 15,
+        "endColumn": 26,
+        "lineCount": 1
+      }
+    ],
     "src/litwatch/cli.py": [
       {
         "rule": "unsupported-operator",

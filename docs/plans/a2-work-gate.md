@@ -140,6 +140,10 @@ Found in a survey of the code at 548857e3:
   pending Deep pass. Chosen over a row shape the image before does not count (the shared admission in a column of
   its own): kept race-free between a command and `serve`, the admission index must cover that column, and then it
   fails the image before's claim on the same stale row.
+- **Rolling back from P4: a reservation the image before does not count.** P4 counts a call's unknown charge at its
+  reservation (`inference_calls.reserved`, migration 0050) against its job's ceiling; the image before counts it as
+  nothing. So after a rollback, a job whose runs have an unknown charge can spend past its ceiling by that charge's
+  reservation. Accepted: unknown charges are rare and the overspend is bounded; nothing is backported.
 - **The scheduler's handoff.** A fire the old scheduler already served (a run started after it) stays served when P3
   starts inside the catch-up window: the submitter checks the runs before using the key. A run of the image before
   (`runs.work_id` unset) serves its fire by starting, as it did there; a run of this image only once it closed without
@@ -375,13 +379,19 @@ Found while building, owned by the stage named.
   A call's ceiling and deadline are `llm.context.spending`, set by the Worker in its item's task, not fields of
   `Work`, which the gates cannot type. V5's check counts these as the gates' bookkeeping.
 - **P5 (from P4): a CLI command's Model gate.** Each command builds its own (`jobs.context.model_gate`) and closes
-  it as it ends; only `serve` recovers the batches left open (`ModelGate.recover`, once as it starts). A batch a
-  killed command left waits for the next `serve` start, or for a later call asking the same thing, which attaches
-  to it. Submit and wait moves the commands' calls into `serve`'s gate.
+  it as it ends; only `serve` recovers the batches left open (`ModelGate.recover`, as it starts, and a batch a live
+  item sent then, once that item's lease lapses unrenewed). A batch a command killed while `serve` runs waits for
+  the next `serve` start, or for a later call asking the same thing, which attaches to it. Submit and wait moves the
+  commands' calls into `serve`'s gate, which must close two cases a second gate opens, and P5's review checks them:
+  (a) `owner()` sees only its own process, so a CLI's gate can attach to a batch `serve` is recovering (cancelling
+  it before its deadline and paying again), and `serve`'s startup can take over a live CLI nightly's batch whose
+  rows P3 wrote without `work_id` (the run's item is live; the rows do not say so); (b) a nightly run by hand after
+  the window, with no `serve` owning its batch, attaches with one look (cancel, then a normal call at once) and
+  loses P3's drain, up to 30 minutes, for the cancelled batch's answers.
 - **P5 (from P4): a call with no deadline attaches with one look.** A key found in a batch that nobody in the
   process polls is attached through the gate's `LOOKED_AT` batcher (its deadline long past, no drain): one look,
   the batch cancelled at once if still open, then a normal call. A batch whose calls a live item of another process
-  waits on is neither attached to nor recovered here (`store.calls._LIVE`).
+  waits on is not attached to here (`store.calls._LIVE`), nor recovered until that item's lease lapses.
 
 ## Evidence
 

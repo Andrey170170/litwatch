@@ -1,8 +1,8 @@
 """The process's one Model gate (docs/plans/a2-work-gate.md, P4; V4): built once by `serve`
 and shared by the items it runs, which give their calls a deadline through the work context;
 batches shared across items with one provider and deadline, each settled once on its calls'
-rows whatever happens to the items that wait on it, and a batch a killed item left recovered
-once as `serve` starts, credited to its original call and item."""
+rows whatever happens to the items that wait on it, and a batch a killed item left recovered by
+`serve`, once that item's lease lapses, credited to its original call and item."""
 
 import asyncio
 import json
@@ -15,9 +15,11 @@ from pydantic import BaseModel
 from litwatch.api import app as app_module
 from litwatch.config import Config, Models, RoleConfig
 from litwatch.core import Cause, Fit, Verdict
+from litwatch.gates import work as work_gate
 from litwatch.gates.work import CommandCutOffError, inline
 from litwatch.jobs.context import model_run
 from litwatch.llm import ModelGate, Request
+from litwatch.llm import ceiling as ceilings
 from litwatch.llm.context import spending
 from litwatch.llm.openai import OpenAIProvider
 from litwatch.store import papers as papers_store
@@ -25,7 +27,7 @@ from litwatch.store import runs, verdicts
 from litwatch.store.calls import CallJournal
 from tests import briefs as ft
 from tests import settling
-from tests.conftest import FAITH, TREE, paper
+from tests.conftest import FAITH, TREE, paper, started
 from tests.fakes import (
     FAST,
     BatchingProvider,
@@ -39,6 +41,7 @@ from tests.sessions import Session, in_read, in_write
 from tests.working import QUIET, served, until
 
 BRIEF = RoleConfig(provider="anthropic", model="test-brief")
+HAIKU = RoleConfig(provider="anthropic", model="claude-haiku-5-5", effort="medium")  # listed
 SOL = RoleConfig(provider="openai", model="gpt-6.2-sol", effort="high")
 GOOD = json.dumps({"yes": True})
 
@@ -82,7 +85,7 @@ def asked_in_an_item(db, gate: ModelGate, name: str, n: int, deadline: datetime 
     through `gate`, under `deadline`: its task."""
 
     async def work():
-        async with model_run(db, Config(), "nightly", models=gate) as run:
+        async with model_run(db, "nightly", models=gate) as run:
             with spending(deadline=deadline):
                 return await run.gateway.ask("brief", ask(n))
 
@@ -202,11 +205,12 @@ async def test_serve_builds_one_gate_whose_limits_its_concurrent_items_share(
 
 
 async def test_items_with_one_deadline_share_a_batch_whose_calls_settle_after_a_lease_is_lost(
-    conn: Session, db
+    conn: Session, db, monkeypatch
 ):
     """Two items' calls under one deadline go in one batch; the first item's lease is lost
-    while it waits (another process took its item), and the batch still settles both calls'
-    rows, each on its own run and item, and answers the second."""
+    while it waits (another process took its item), which stops its Worker; the batch then ends,
+    and still settles both calls' rows, each on its own run and item, and answers the second."""
+    monkeypatch.setattr(work_gate, "LEASE", timedelta(seconds=0.6))  # renewed every 0.2 s
     anthropic = BatchingProvider("anthropic", respond, hold=True)
     gate = gate_over(db, anthropic, quiet=0.5)
     deadline = tonight()
@@ -217,10 +221,11 @@ async def test_items_with_one_deadline_share_a_batch_whose_calls_settle_after_a_
     await conn.execute(
         "UPDATE work_items SET lease_token = gen_random_uuid() WHERE key LIKE 'first:%%'"
     )
+    with pytest.raises(CommandCutOffError, match="its lease was lost"):
+        await asyncio.wait_for(first, 5)  # its Worker stopped, its call no longer waiting
+    assert not second.done()
     anthropic.end("msgbatch_1")
     assert (await asyncio.wait_for(second, 5)).value.yes
-    with pytest.raises(CommandCutOffError):  # its run's close is fenced on the lease it lost
-        await asyncio.wait_for(first, 5)
     found = await journalled(conn)
     assert sorted(c["key"].split(":")[0] for c in found) == ["first", "second"]
     assert [c["cost"] for c in found] == [0.0005, 0.0005] and anthropic.calls == []
@@ -229,12 +234,14 @@ async def test_items_with_one_deadline_share_a_batch_whose_calls_settle_after_a_
     await gate.close()
 
 
-async def test_a_killed_items_batch_is_recovered_once_as_serve_starts_and_credited_to_its_call(
+async def test_a_killed_items_batch_is_recovered_once_its_lease_lapses_and_credited_to_its_call(
     conn: Session, db, monkeypatch
 ):
-    """The item is killed with its call in an open batch; the next `serve` takes the batch over
-    as it starts, reads it once it ends, and credits its charge to that call, on the dead item's
-    run and item, whose cost the run's tally then takes."""
+    """The process is killed with its item's call in an open batch, and `serve` starts again
+    within the item's lease (a restart takes seconds): it leaves the batch to that lease while
+    the lease is renewed, as a live command's is, takes the batch over once the lease lapses,
+    reads it once it ends, and credits its charge to that call, on the dead item's run and
+    item, whose cost the run's tally then takes."""
     anthropic = BatchingProvider("anthropic", respond, hold=True)
     dead = gate_over(db, anthropic)  # the killed process's
     killed = asked_in_an_item(db, dead, "nightly", 1, tonight())
@@ -242,6 +249,11 @@ async def test_a_killed_items_batch_is_recovered_once_as_serve_starts_and_credit
     killed.cancel()
     await asyncio.gather(killed, return_exceptions=True)
     await dead.close()
+    # Killed, not stopped: its item still running as the process left it, its lease live.
+    await conn.execute(
+        "UPDATE work_items SET state = 'running', outcome = NULL, error = NULL, ended_at = NULL, "
+        "lease_token = gen_random_uuid(), lease_until = clock_timestamp() + interval '1 second'"
+    )
     (left,) = await journalled(conn)
     assert left["cost"] is None and left["work_id"] is not None
     anthropic.end("msgbatch_1")
@@ -254,23 +266,97 @@ async def test_a_killed_items_batch_is_recovered_once_as_serve_starts_and_credit
 
     monkeypatch.setattr(anthropic, "results", counted)
     gate = gate_over(db, anthropic)
-    recover, recovered = gate.recover, []
+    assert gate.journal is not None
+    recover, recovered, listed, looked = gate.recover, [], gate.journal.open_batches, []
 
     async def counting(deadline):
-        recovered.append(deadline)
-        return await recover(deadline)
+        recovered.append(await recover(deadline))
+        return recovered[-1]
+
+    async def looking(batch_ids=None):
+        found = await listed(batch_ids)
+        looked.append([r["live_until"] is not None for r in found])
+        return found
 
     monkeypatch.setattr(gate, "recover", counting)
+    monkeypatch.setattr(gate.journal, "open_batches", looking)
 
     async def credited() -> bool:
         return (await journalled(conn))[0]["cost"] == 0.0005
 
+    async def looked_again() -> bool:
+        return len(looked) >= 2
+
     async with served(db, Config(), models=gate):
-        await until(credited, "the dead item's batch to be read")
+        assert recovered == [0]  # left to the live lease as it starts
+        await conn.execute(  # renewed, as a live command's lease is
+            "UPDATE work_items SET lease_until = clock_timestamp() + interval '2 seconds'"
+        )
+        await until(looked_again, "the batch looked at again as the first lease lapsed")
+        assert looked[1] == [True] and read == []  # renewed: still the item's
+        await until(credited, "the dead item's batch to be read once its lease lapsed")
     (found,) = await journalled(conn)
     assert (found["run_id"], found["work_id"]) == (left["run_id"], left["work_id"])
-    assert len(recovered) == 1 and read == ["msgbatch_1"] and anthropic.calls == []
+    assert looked[-1] == [False] and read == ["msgbatch_1"] and anthropic.calls == []
     assert await run_cost(conn, left["run_id"]) == 0.0005
+    await gate.close()
+
+
+# -- the gateway under the work context ---------------------------------------------------------
+
+
+async def test_a_call_cancelled_waiting_for_its_providers_limit_releases_its_reservation():
+    """Under a ceiling, a call holds the most it can cost from before it waits for the
+    provider's limit; cancelled there, it was never sent, so it gives all of that back, and
+    only the call that went out is counted (at its reservation while its charge is unknown)."""
+    held = Held("anthropic", respond)
+    gate = ModelGate(Models(brief=HAIKU), {"anthropic": held}, retry_delays=(), normal_calls=1)
+    door = gate.on()
+    room = ceilings.Ceiling(1.0, {})
+    with spending(ceiling=room):
+        sent = asyncio.create_task(door.ask("brief", ask(1)))
+        waiting = asyncio.create_task(door.ask("brief", ask(2)))
+
+    async def reserved() -> bool:
+        return held.flying == 1 and room.in_flight == 2
+
+    await until(reserved, "both calls reserved, one sent")
+    one = 1.0 - room.left
+    waiting.cancel()
+    await asyncio.gather(waiting, return_exceptions=True)
+    assert (room.in_flight, room.spent) == (1, 0.0)
+    assert room.left == pytest.approx(1.0 - one / 2)  # the waiting call's half given back
+    sent.cancel()  # once sent, its charge is unknown: its reservation stands
+    await asyncio.gather(sent, return_exceptions=True)
+    assert room.spent == pytest.approx(one / 2)
+    await gate.close()
+
+
+def test_calls_run_under_a_ceiling_or_a_deadline_not_both():
+    """A batch reserves nothing against a ceiling, so the two together would let a batch past
+    it: refused before any call."""
+    room = ceilings.Ceiling(1.0, {})
+    with spending(ceiling=room), pytest.raises(ValueError, match="not both"):
+        spending(deadline=tonight()).__enter__()
+
+
+async def test_a_call_on_a_provider_without_batches_looks_for_no_batch(
+    conn: Session, db, monkeypatch
+):
+    """Under a deadline, an OpenRouter call goes out at once: no batch of its provider can hold
+    its request, so the journal is not asked for one."""
+    openrouter = ScriptedProvider("openrouter", respond)
+    role = RoleConfig(provider="openrouter", model="lab/model")
+    gate = ModelGate(Models(brief=role), {"openrouter": openrouter}, CallJournal(db))
+    journal, looked = CallJournal(db, await started(conn, "nightly")), []
+
+    async def in_batch(key, work_id):
+        looked.append(key)
+
+    monkeypatch.setattr(journal, "in_batch", in_batch)
+    with spending(deadline=tonight()):
+        assert (await gate.on(journal).ask("brief", ask(1))).value.yes
+    assert looked == [] and len(openrouter.calls) == 1
     await gate.close()
 
 
@@ -288,7 +374,7 @@ async def test_openais_normal_and_batched_charges_are_journalled_on_the_items_ow
         return bool(client.made)
 
     async def work():
-        async with model_run(db, Config(), "nightly", models=gate) as run:
+        async with model_run(db, "nightly", models=gate) as run:
             normal = await run.gateway.ask("brief", ask(1))
             with spending(deadline=tonight()):
                 waiting = asyncio.create_task(run.gateway.ask("brief", ask(2)))

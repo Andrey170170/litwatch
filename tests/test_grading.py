@@ -388,7 +388,7 @@ async def test_a_grading_whose_topic_was_paused_during_the_call_is_dropped(
     paper = await in_read(conn, papers_store.get, B.id)
     due = grading.Due(paper, FAITH, "Chain-of-thought faithfulness")
     async with (
-        model_run(db, CONFIG, "grading", models=models.gate(CONFIG)) as run,
+        model_run(db, "grading", models=models.gate(CONFIG)) as run,
         grading.grade([due], run.gateway) as results,
     ):
         (graded,) = [g async for g in results]
@@ -601,7 +601,7 @@ async def test_a_remembered_refusal_gives_way_to_an_answer_journalled_since(
     tree = await in_read(conn, taxonomy_store.load)
     paper = await in_read(conn, papers_store.get, B.id)
     asked = grading.request(paper, tree.topic(FAITH.slug), tree.get(FAITH.slug).name)
-    async with model_run(db, LISTED, "eval", models=models.gate(LISTED)) as run:
+    async with model_run(db, "eval", models=models.gate(LISTED)) as run:
         await run.gateway.ask("judge", asked, paper_id=B.id)
     models.fits[("check", B.title)] = fit("adjacent")
     assert (await night(conn, models, LISTED))["graded"] == 1

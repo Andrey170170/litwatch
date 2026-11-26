@@ -479,7 +479,7 @@ async def test_a_paper_due_late_in_the_week_is_in_that_weekly_once(db: Session, 
     await area(db, R, "related")
     await listed(db, mon2, R)
     tree = await in_read(db, taxonomy_store.load)
-    async with model_run(gate, Config(), "digests", models=w.gate(Config())) as run:
+    async with model_run(gate, "digests", models=w.gate(Config())) as run:
         await digests.nightly(gate, run, tree, mon2, rules=settling.RULES)
     assert {p for p, _ in (await shown(db, INTERP.slug, "day", mon2))[1]} == {P.id, R.id}
     assert {p for p, _ in (await shown(db, INTERP.slug, "week", MON))[1]} == {P.id, Q.id}
@@ -521,7 +521,7 @@ async def test_a_focus_weekly_marks_a_late_paper_its_monday_daily_listed_as_its_
     await focus(db, Q, "central")
     await listed(db, mon2, Q)
     tree = await in_read(db, taxonomy_store.load)
-    async with model_run(gate, Config(), "digests", models=w.gate(Config())) as run:
+    async with model_run(gate, "digests", models=w.gate(Config())) as run:
         await digests.nightly(gate, run, tree, mon2, rules=settling.RULES)
     assert (P.id, "listed") in (await shown(db, FAITH.slug, "week", MON))[1]
     await week(db, w, mon2)
@@ -1101,7 +1101,7 @@ async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(d
     await focus(db, Q, "central")
     await listed(db, WED, Q)
     tree = await in_read(db, taxonomy_store.load)
-    async with model_run(gate, Config(), "digests", models=w.gate(Config())) as run:
+    async with model_run(gate, "digests", models=w.gate(Config())) as run:
         await digests.nightly(gate, run, tree, WED, rules=settling.RULES)
     assert await shown(db, FAITH.slug, "day", TUE) == ("written", [(P.id, "listed")])
     assert await shown(db, FAITH.slug, "day", WED) == ("written", [(Q.id, "listed")])
@@ -1137,7 +1137,7 @@ async def test_a_failed_digest_is_on_the_status_line_until_its_topic_pauses(db: 
     status = await in_read(db, reading.status)
     assert (status["state"], status["digests_failed"]) == ("quiet", 0)
     tree = await in_read(db, taxonomy_store.load)
-    async with model_run(gate, Config(), "digests", models=w.gate(Config())) as run:
+    async with model_run(gate, "digests", models=w.gate(Config())) as run:
         await digests.retry_failed(gate, run, tree, rules=settling.RULES)
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "failed"  # not written while paused
 
@@ -1169,7 +1169,7 @@ async def test_a_topics_failed_digests_step_down_the_writers_list_one_model_each
     await day(db, w, TUE)
     tree = await in_read(db, taxonomy_store.load)
     for _ in range(4):
-        async with model_run(gate, Config(), "digests", models=w.gate(Config())) as run:
+        async with model_run(gate, "digests", models=w.gate(Config())) as run:
             await digests.retry_failed(gate, run, tree, rules=settling.RULES)
     assert w.models == [opus, opus, sonnet, sonnet, sonnet, kimi, opus, opus, kimi]
     assert (await shown(db, FAITH.slug, "day", TUE))[0] == "written"
@@ -1225,7 +1225,7 @@ async def test_a_second_ask_with_no_answer_still_moves_the_next_attempt_down(db:
     row = await digest_row(db, FAITH.slug, "day", TUE)
     assert (row["state"], row["error"]) == ("failed", "invalid: not JSON")
     tree = await in_read(db, taxonomy_store.load)
-    async with model_run(gate, Config(), "digests", models=w.gate(Config())) as run:
+    async with model_run(gate, "digests", models=w.gate(Config())) as run:
         await digests.retry_failed(gate, run, tree, rules=settling.RULES)
     assert w.models == [opus, opus, sonnet]
 
@@ -1267,7 +1267,7 @@ async def test_the_wait_ends_when_the_passes_it_waits_for_finish(db: Session, ga
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
     monkeypatch.setattr(fulltext, "work", work)
     deadline = nightly.time.monotonic() + 60
-    async with model_run(gate, Config(), "nightly", models=Writer().gate(Config())) as run:
+    async with model_run(gate, "nightly", models=Writer().gate(Config())) as run:
         assert await in_read(db, store_.waiting_passes, since) == 1
         await nightly.wait_for_texts(gate, Config(), run, since, deadline, 0.01)
     assert worked == [deadline, deadline] and "digest_wait_ended" not in run.counts
@@ -1282,7 +1282,7 @@ async def test_the_wait_is_bounded_and_a_failed_pass_ends_it(db: Session, gate, 
 
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
     monkeypatch.setattr(fulltext, "work", work)
-    async with model_run(gate, Config(), "nightly", models=Writer().gate(Config())) as run:
+    async with model_run(gate, "nightly", models=Writer().gate(Config())) as run:
         deadline = nightly.time.monotonic() + 0.06
         wait = nightly.wait_for_texts(gate, Config(), run, since, deadline, 0.01)
         await asyncio.wait_for(wait, 5)  # the pass never finishes: only the bound ends it
@@ -1306,7 +1306,7 @@ async def test_the_wait_works_no_more_passes_than_the_runs_limit_leaves(
 
     monkeypatch.setattr(fulltext, "archive_for", lambda config: Archive())
     monkeypatch.setattr(fulltext, "work", work)
-    async with model_run(gate, Config(), "nightly", models=Writer().gate(Config())) as run:
+    async with model_run(gate, "nightly", models=Writer().gate(Config())) as run:
         deadline = nightly.time.monotonic() + 0.1
         await nightly.wait_for_texts(gate, Config(), run, since, deadline, 0.01, limit=2)
     assert limits == [2, 1]  # then the allowance is spent and the wait only waits
@@ -1685,7 +1685,7 @@ async def test_the_tab_steps_only_through_the_digests_it_shows(db: Session, gate
     """An unfollowed topic keeps its digests, but the tab neither shows nor steps to them."""
     w = Writer()
     tree = await in_read(db, taxonomy_store.load)
-    async with model_run(gate, Config(), "digests", models=w.gate(Config())) as run:
+    async with model_run(gate, "digests", models=w.gate(Config())) as run:
         await digests.write(
             gate, run, tree, tree.topic(FAITH.slug), DigestPeriod.DAY, TUE, rules=settling.RULES
         )
@@ -1790,7 +1790,7 @@ async def test_a_digest_that_fails_again_fails_its_job_and_both_settle_when_a_ru
         # The next run writes it: the failed job settles with it, done.
         w.failures = []
         tree = await in_read(db, taxonomy_store.load)
-        async with model_run(gate, Config(), "digests", models=w.gate(Config())) as run:
+        async with model_run(gate, "digests", models=w.gate(Config())) as run:
             await digests.retry_failed(gate, run, tree, rules=settling.RULES)
         settled = (await http.get(f"/api/digests/{digest_id}")).json()
         assert (settled["state"], settled["job"]["state"]) == ("written", "done")

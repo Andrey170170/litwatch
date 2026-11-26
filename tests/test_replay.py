@@ -653,6 +653,30 @@ async def test_a_replay_jobs_ceiling_covers_all_its_chunks(conn: Session, db, pr
     assert len(executions) == 2
 
 
+async def test_a_replay_jobs_ceiling_covers_its_chunks_in_one_serve(
+    conn: Session, db, priced, monkeypatch
+):
+    """A chunk a paper, under a ceiling one paper's calls fit in, every chunk run by the one
+    job Worker of one `serve`, on the run it keeps: the second chunk has what the first left,
+    which no second paper fits in, and the job stops."""
+    monkeypatch.setattr(worker, "CHUNK", 1)
+    job = await run_replay(conn, ceiling=7 * COST)
+
+    async def stopped() -> bool:
+        return (await job_of(conn, job["id"]))["state"] == "stopped"
+
+    quiet = SCHEDULED.model_copy(update={"schedule": QUIET})
+    async with served(db, quiet, models=priced.gate(quiet)):
+        await until(stopped, "the job to stop at its ceiling")
+    found = await job_of(conn, job["id"])
+    assert found["error"] == "stopped at the ceiling after 1 of 3"
+    spent = await in_read(conn, jobs_store.spent, job["id"])
+    assert 3 * COST <= spent <= 7 * COST
+    assert len(priced.sent("judge")) == 1  # the second paper's calls never sent
+    executions = await rows(conn, "SELECT id FROM runs WHERE job_id = %s", job["id"])
+    assert len(executions) == 1  # one run, kept across its chunks
+
+
 async def test_a_replay_jobs_ceiling_holds_as_its_chunks_go_back_and_forth(
     conn: Session, db, priced, monkeypatch
 ):

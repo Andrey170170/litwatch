@@ -107,7 +107,6 @@ class TextPassWorker:
                 self.archive,
                 [c],
                 models=self.models,
-                owners=owners,
             )
         return _awaiting(done["awaiting_text"] > 0)
 

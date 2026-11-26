@@ -524,32 +524,43 @@ async def test_a_journal_that_fails_fails_the_calls_waiting_on_their_batch(
     await gw.close()
 
 
-async def test_a_journal_that_fails_on_one_batch_lets_the_others_checks_end_first(
+async def test_a_journal_that_fails_on_one_batch_fails_only_that_batchs_calls(
     conn: Session, db, monkeypatch
 ):
-    anthropic, _ = await dead_batches(conn, db, 2)
+    """Batch B is still being made as A's settlement fails: A's call fails, and B, owned by a
+    task of its own, is still recorded, read and settled, its call answered from it."""
     journal = CallJournal(db, await started(conn, "nightly"))
-    gw, _, _, _ = batching(journal, provider=anthropic)
-    settle, results, ended = journal.settle_batch, anthropic.results, []
+    gw, anthropic, _, _ = batching(journal, hold=True)
+    submit, settle, making, made = anthropic.submit, journal.settle_batch, asyncio.Event(), []
+
+    async def held_second(requests, staged=None):
+        made.append(requests)
+        if len(made) == 2:  # the second batch waits inside its creation
+            await making.wait()
+        return await submit(requests, staged)
 
     async def fails_on_the_first(batch_id, answers, **rest):
         if batch_id == "msgbatch_1":
             raise OSError("the database went away")
         await settle(batch_id, answers, **rest)
 
-    async def slow_second(batch_id):
-        if batch_id == "msgbatch_2":
-            await asyncio.sleep(0.2)
-        replies = await results(batch_id)
-        ended.append(batch_id)
-        return replies
-
+    monkeypatch.setattr(anthropic, "submit", held_second)
     monkeypatch.setattr(journal, "settle_batch", fails_on_the_first)
-    monkeypatch.setattr(anthropic, "results", slow_second)
-    await gw.recover()
+    first = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: len(anthropic.batches) == 1)
+    second = asyncio.create_task(gw.ask("brief", ask(2)))
+    await until(lambda: len(made) == 2)
+    anthropic.end("msgbatch_1")
     with pytest.raises(OSError):
-        await asyncio.wait_for(gw.settle(), 2)
-    assert sorted(ended) == ["msgbatch_1", "msgbatch_2"]  # none still running past the failure
+        await asyncio.wait_for(first, 2)
+    making.set()
+    await until(lambda: len(anthropic.batches) == 2)
+    anthropic.end("msgbatch_2")
+    assert (await asyncio.wait_for(second, 2)).usage.service_tier == "batch"
+    assert [(c["batch_id"], c["answered"], c["cost"]) for c in await calls(conn)] == [
+        ("msgbatch_1", False, None),  # left open, for a later run to account for
+        ("msgbatch_2", True, 0.0005),
+    ]
     await gw.close()
 
 
@@ -952,16 +963,24 @@ async def test_a_batch_its_provider_no_longer_has_is_settled_not_waited_on(conn:
     await gw.close()
 
 
+async def retally(journal: CallJournal, runs: list[int]) -> None:
+    """The runs retallied as a settlement does, under their `retally` locks named in `runs`'
+    order."""
+    async with journal._writing("retally", [("retally", r) for r in runs]) as unit:
+        for run_id in runs:
+            await calls_store.tally(unit, run_id)
+
+
 async def test_retallies_on_two_connections_in_opposite_orders_do_not_deadlock(conn: Session, db):
     first, second = await started(conn, "nightly"), await started(conn, "nightly")
     async with gate_on(conn) as other:
         mine = CallJournal(db, await started(conn, "nightly"))
         theirs = CallJournal(other, await started(conn, "nightly"))
         both = [
-            mine._retally([first, second]),
-            theirs._retally([second, first]),
-            mine._retally([second]),
-            theirs._retally([first]),
+            retally(mine, [first, second]),
+            retally(theirs, [second, first]),
+            retally(mine, [second]),
+            retally(theirs, [first]),
         ]
         await asyncio.wait_for(asyncio.gather(*both), 5)
 
@@ -1205,7 +1224,7 @@ async def batching_work(conn: Session, writer, fake, anthropic, until=None):
     async with (
         gate_on(conn) as db,
         factory(writer.respond, anthropic, db, ft.CONFIG) as gate,
-        model_run(db, ft.CONFIG, "nightly", models=gate) as run,
+        model_run(db, "nightly", models=gate) as run,
     ):
         with spending(deadline=until or tonight()[1]):
             return await fulltext.work(db, ft.CONFIG, ft.archive(fake), run=run)
@@ -1297,7 +1316,7 @@ async def test_topics_digests_written_together_are_those_written_one_after_anoth
             if together:
                 anthropic = BatchingProvider("anthropic", w.respond)
                 gate = factory(w.respond, anthropic, db, Config())
-            async with gate, model_run(db, Config(), "nightly", models=gate) as run:
+            async with gate, model_run(db, "nightly", models=gate) as run:
                 if together:
                     with spending(deadline=tonight()[1]):
                         await digests.nightly(db, run, tree, dg.MON, rules=settling.RULES)
@@ -1602,7 +1621,8 @@ async def test_an_account_error_looking_for_a_batch_fails_its_calls_and_leaves_i
         "SELECT account_error FROM provider_observations WHERE provider = 'openai'"
     )
     assert "AuthenticationError" in (await observed.fetchone())["account_error"]
-    assert await journal.open_batches() == [{"batch_id": "staged:file-1", "provider": "openai"}]
+    left = {"batch_id": "staged:file-1", "provider": "openai", "live_until": None}
+    assert await journal.open_batches() == [left]
     await gw.close()
 
 
@@ -1841,30 +1861,39 @@ async def test_a_batchs_rows_open_together_naming_its_reference_before_it_is_mad
     await gw.close()
 
 
-async def test_a_batch_whose_creation_may_have_failed_is_looked_for_from_when_it_was_made(
+async def test_a_batch_whose_creation_may_have_failed_is_looked_for_at_once_and_adopted(
     conn: Session, db, monkeypatch
 ):
-    """Its window starts as its creation fails, not when the poller, asleep after reading
-    another batch, comes to it: here it has ended by then, so it is never looked for."""
-    client = OpenAIBatches()
+    """Its lookup starts as its creation fails, in its own batch's task: another batch's read,
+    hung past the whole window, holds it up not at all, and the batch, made after all, is found,
+    adopted and read."""
+    client = OpenAIBatches()  # no normal call can be made (`responses`)
     client.creating = [(True, None), (True, lost())]  # the second's reply lost on the way back
-    client.responses = SimpleNamespace(create=SdkClient(openai_response(GOOD)).responses.create)
-    retrieve, polled = client.batches.retrieve, []
+    retrieve, reads, reading = client.batches.retrieve, [], asyncio.Event()
 
-    async def counted(batch_id):
-        polled.append(batch_id)
+    async def hung(batch_id):
+        reads.append(batch_id)
+        if batch_id == "batch_1":
+            await reading.wait()
         return await retrieve(batch_id)
 
-    monkeypatch.setattr(client.batches, "retrieve", counted)
+    monkeypatch.setattr(client.batches, "retrieve", hung)
     gw, _, _ = openai_batching(CallJournal(db, await started(conn, "nightly")), client)
-    batcher = gw.batchers["openai"]
-    batcher.poll, batcher.find_seconds = 0.5, 0.1
+    gw.batchers["openai"].find_seconds = 0.5
     first = asyncio.create_task(gw.ask("brief", ask(1)))
-    await until(lambda: polled)  # the first batch read once, the poller asleep
-    second = await asyncio.wait_for(gw.ask("brief", ask(2)), 3)
-    assert second.usage.service_tier == "default" and client.listings == 0
+    await until(lambda: "batch_1" in reads)  # its read hangs
+    second = asyncio.create_task(gw.ask("brief", ask(2)))
+
+    async def adopted() -> bool:
+        return [c["batch_id"] for c in await calls(conn)] == ["batch_1", "batch_2"]
+
+    await until(adopted, 2)
+    assert client.listings == 1
+    client.end("batch_2")
+    assert (await asyncio.wait_for(second, 2)).usage.service_tier == "batch"
+    reading.set()
     client.end("batch_1")
-    assert (await first).usage.service_tier == "batch"
+    assert (await asyncio.wait_for(first, 2)).usage.service_tier == "batch"
     await gw.close()
 
 
@@ -1902,4 +1931,110 @@ async def test_an_identical_call_saves_its_answer_on_the_row_its_cancelled_first
     (row,) = await (await conn.execute("SELECT id, output FROM inference_calls")).fetchall()
     assert answer.usage.reused and answer.usage.source_call_id == row["id"]
     assert row["output"] == {"yes": True, "why": "it says so"}
+    await gw.close()
+
+
+def failing_tally(unit, run_id):
+    raise OSError("the database went away")
+
+
+async def test_a_batch_settlement_that_fails_part_way_leaves_it_whole_for_the_next_process(
+    conn: Session, db, monkeypatch
+):
+    """Its calls' outcomes and their runs' totals commit together: a settlement that fails on
+    a run's tally leaves its rows as they were, so the next process settles them, and the run's
+    cost is then its call's charge."""
+    anthropic, clock = await dead_batches(conn, db, 1)
+    tally = calls_store.tally
+    monkeypatch.setattr(calls_store, "tally", failing_tally)
+    gw, _, _, _ = batching(CallJournal(db, await started(conn, "nightly")), provider=anthropic)
+    await gw.recover()
+    await gw.settle()
+    await gw.close()
+    (row,) = await calls(conn)
+    assert row["cost"] is None  # nothing of it committed
+
+    monkeypatch.setattr(calls_store, "tally", tally)
+    again, _, _, _ = batching(CallJournal(db, await started(conn, "nightly")), provider=anthropic)
+    await again.recover()
+    await again.settle()
+    assert [c["cost"] for c in await calls(conn)] == [0.0005]
+    found = await in_read(conn, runs.get, row["run_id"])
+    assert found is not None and float(found["cost"]) == 0.0005
+    await again.close()
+
+
+async def test_a_batch_refused_for_the_account_as_it_is_made_is_observed_with_its_rows(
+    conn: Session, db, monkeypatch
+):
+    """The provider refused the batch's creation for the account, its rows opened: the refusal
+    is observed in the same unit that settles them, so neither stands without the other."""
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, anthropic, _, _ = batching(journal)
+
+    async def refused(requests, staged):
+        await staged(None)
+        raise ProviderError("AuthenticationError: invalid x-api-key", account=True)
+
+    monkeypatch.setattr(anthropic, "submit", refused)
+    tally = calls_store.tally
+    monkeypatch.setattr(calls_store, "tally", failing_tally)
+    with pytest.raises(OSError):
+        await gw.ask("brief", ask(0))
+    assert "anthropic" not in await in_read(conn, calls_store.observations)
+    assert [(c["error"], c["cost"]) for c in await calls(conn)] == [(None, None)]
+
+    monkeypatch.setattr(calls_store, "tally", tally)
+    with pytest.raises(CallError) as found:
+        await gw.ask("brief", ask(1))
+    assert found.value.kind == "account"
+    seen = (await in_read(conn, calls_store.observations))["anthropic"]
+    assert "invalid x-api-key" in seen["account_error"]
+    assert (await calls(conn))[1]["error"] == "account: AuthenticationError: invalid x-api-key"
+    await gw.close()
+
+
+async def test_a_settled_batch_read_again_does_not_observe_its_account_error_again(
+    conn: Session, db
+):
+    """A dead run's batch answered one request and refused the other for the account: its
+    settlement observes that once. A call that asks for the answer no call awaited reads the
+    batch again, which settles nothing more, so a reply the provider gave since stands."""
+    dead = CallJournal(db, await started(conn, "nightly"))
+    gw, anthropic, _, clock = batching(dead, hold=True)
+    asked = [asyncio.create_task(gw.ask("brief", ask(n))) for n in (0, "account")]
+    await until(batch_recorded(conn))
+    for task in asked:
+        task.cancel()
+    await asyncio.gather(*asked, return_exceptions=True)
+    await gw.close()
+    anthropic.end("msgbatch_1")
+
+    later, _, _, _ = batching(
+        CallJournal(db, await started(conn, "nightly")), provider=anthropic, clock=clock
+    )
+    await later.recover()
+    await later.settle()
+    await later.close()
+    first = (await in_read(conn, calls_store.observations))["anthropic"]
+    assert "authentication_error" in first["account_error"]
+    await conn.execute("UPDATE provider_observations SET replied_at = clock_timestamp()")
+
+    journal = CallJournal(db, await started(conn, "nightly"))
+    asking, _, _, _ = batching(journal, provider=anthropic, clock=clock, deadline=None)
+    assert (await asking.ask("brief", ask(0))).usage.service_tier == "batch"
+    seen = (await in_read(conn, calls_store.observations))["anthropic"]
+    assert seen["account_error_at"] == first["account_error_at"] < seen["replied_at"]
+    await asking.close()
+
+
+async def test_a_batched_truncation_keeps_its_text_on_its_row_in_debug_mode(conn: Session, db):
+    """As a normal call's does: its batch's settlement keeps it, as no call saves the row."""
+    gw, _, _, _ = batching(CallJournal(db, await started(conn, "nightly")))
+    gw.gate.debug = True  # before its batcher is made, which takes it
+    with pytest.raises(CallError) as found:
+        await gw.ask("brief", ask("truncate"))
+    assert found.value.kind == "truncated"
+    row = await (await conn.execute("SELECT error, reply FROM inference_calls")).fetchone()
+    assert row == {"error": "truncated", "reply": '{"yes": tr'}
     await gw.close()

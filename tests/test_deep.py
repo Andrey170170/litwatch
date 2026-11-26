@@ -1533,7 +1533,7 @@ async def test_a_pick_whose_settle_was_missed_is_swept_up_whatever_the_limit(db:
     await picked(db)
     await db.execute("DELETE FROM fulltext_passes WHERE kind = 'deep'")  # its settle missed
     assert P.id in await in_read(db, fulltext_store.candidates, RECONCILE_LOOKBACK)
-    async with model_run(gate, Config(), "nightly", models=Writer().gate(Config())) as run:
+    async with model_run(gate, "nightly", models=Writer().gate(Config())) as run:
         await nightly.text_passes(gate, Config(), run, limit=0)  # no archive: it only reconciles
     assert [r["reason"] for r in await deep_rows(db)] == ["pick"]
 

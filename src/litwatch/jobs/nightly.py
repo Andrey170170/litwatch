@@ -284,7 +284,7 @@ async def locked(
     today = today or until.astimezone(config.schedule.zone).date()
     release = (jobs_store.release, ["tonight"])
     async with model_run(
-        db, config, "nightly", window=(since, until), models=models, closing=release
+        db, "nightly", window=(since, until), models=models, closing=release
     ) as run:
         if fetch:
             result = await intake.collect(

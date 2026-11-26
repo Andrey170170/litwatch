@@ -147,7 +147,6 @@ class ModelRun:
 @asynccontextmanager
 async def model_run(
     db: DatabaseGate,
-    config: Config,
     kind: str,
     *,
     models: llm.ModelGate,

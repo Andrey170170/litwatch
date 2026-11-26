@@ -312,7 +312,7 @@ async def work(
         if not claimed:
             break
         tried.update(c.id for c in claimed)
-        counts += await wave(db, config, archive, claimed, run=run, models=models, owners=owners)
+        counts += await wave(db, config, archive, claimed, run=run, models=models)
     return counts
 
 
@@ -324,12 +324,11 @@ async def wave(
     *,
     run: ModelRun | None = None,
     models: ModelGate | None = None,
-    owners: bool | None = None,
 ) -> Counter[str]:
     """Try the claimed passes once: settle each paper (`still_wanted`), read the texts, and
     write from them, `CONCURRENCY` at a time. The calls go on `run`, or on a run of kind
-    `fulltext` opened through `models` only when some text arrived; `owners` is how the passes
-    were claimed (`claim`). Returns how the tries ended."""
+    `fulltext` opened through `models` only when some text arrived. Returns how the tries
+    ended."""
     counts: Counter[str] = Counter()
     rules = word.rules(config)
     reads = asyncio.Semaphore(CONCURRENCY)
@@ -359,7 +358,7 @@ async def wave(
         opened = contextlib.nullcontext(run)
     else:
         assert models is not None, "a wave's calls go on a run, or on one it opens"
-        opened = model_run(db, config, "fulltext", models=models)
+        opened = model_run(db, "fulltext", models=models)
     async with opened as r, _write(texts, r.gateway) as answered:
         async for a in answered:
             if await record_in_change(db, a, rules):

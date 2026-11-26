@@ -342,7 +342,7 @@ async def run(
     """Classify the papers and grade the pairs left to do, recording each as it concludes, as a
     run of its own, its calls through `models`. Returns the run record's counts."""
     assert r.eval_run_id is not None, "start the replay first"
-    async with model_run(db, config, calls.EVAL, models=models) as mr:
+    async with model_run(db, calls.EVAL, models=models) as mr:
         await work(db, config, r, mr)
         async with db.write("replay: finish") as unit:
             await store.finish(unit, r.eval_run_id)

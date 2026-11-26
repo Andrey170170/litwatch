@@ -10,15 +10,18 @@ not settled again, so a batch read twice is accounted for once.
 
 Every unit is the Model gate's bookkeeping (`gates.context.bookkeeping`), not fenced: a call's
 charge stands whatever becomes of its item's lease. A run's cost and calls by role are derived
-from its rows under its `retally` lock (`tally`), by each batch settlement that reaches it and by
-its close alike, so whichever writes last has seen every row."""
+from its rows under its `retally` lock (`tally`), by its close and by each batch settlement that
+reaches it alike, so whichever writes last has seen every row. A batch settlement commits its
+calls' outcomes, what the provider said with them and the totals of the runs it reached in one
+unit, which takes those runs' `retally` locks (in the gate's order) as it opens, before it
+touches a row (`_settling`)."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Iterable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, LiteralString
 
 from psycopg.types.json import Jsonb
 
@@ -64,7 +67,12 @@ _MERGED = (
     "jsonb_build_object('model', c.usage->'model', 'effort', c.usage->'effort')"
 )
 # Settlements as rows (`a`): by request key or by call id.
-_SETTLED = "jsonb_to_recordset(%(settled)s) AS a({of}, usage jsonb, error text, replied boolean)"
+_SETTLED = (
+    "jsonb_to_recordset(%(settled)s) AS a({of}, usage jsonb, error text, reply text, "
+    "replied boolean)"
+)
+# The rows not yet settled (`u`): no output, no error, no reply's time.
+_UNSETTLED = "u.output IS NULL AND u.error IS NULL AND u.responded_at IS NULL"
 
 
 def _settled(outcomes: Iterable[tuple[Any, CallOutcome]], name: str) -> Jsonb:
@@ -75,6 +83,7 @@ def _settled(outcomes: Iterable[tuple[Any, CallOutcome]], name: str) -> Jsonb:
                 name: of,
                 "usage": o.usage and o.usage.model_dump(mode="json", exclude_none=True),
                 "error": o.error and stored(o.error),
+                "reply": o.reply and stored(o.reply, None),
                 "replied": o.replied,
             }
             for of, o in outcomes
@@ -187,76 +196,98 @@ class CallJournal:
             {"key": key, "kept": RESULTS_KEPT, "me": work_id},
         )
 
-    async def open_batches(self) -> list[dict[str, Any]]:
-        """The batches with calls not yet settled, with the provider each went to, that no live
-        work item sent (a live item's batch is left to it): a dead run's, or one given up on
-        after a deadline, whose charges are read when they end."""
+    async def open_batches(self, batch_ids: list[str] | None = None) -> list[dict[str, Any]]:
+        """The batches with calls not yet settled (of `batch_ids`, else all), with the provider
+        each went to and, while a live work item sent it, when the latest such lease lapses
+        (`live_until`; None for a dead run's batch, or one given up on): a live item's batch is
+        left to it, and taken over once its lease lapses unrenewed (`ModelGate.recover`)."""
+        among = "" if batch_ids is None else "AND c.batch_id = ANY(%(ids)s) "
         return await self._all(
             "open batches",
-            "SELECT c.batch_id, min(c.usage->>'via') AS provider FROM inference_calls c "
+            "SELECT c.batch_id, min(c.usage->>'via') AS provider, (SELECT max(w.lease_until) "
+            "FROM inference_calls l JOIN work_items w ON w.id = l.work_id "
+            "WHERE l.batch_id = c.batch_id AND w.state = 'running' "
+            "AND w.lease_until > clock_timestamp()) AS live_until FROM inference_calls c "
             "WHERE c.batch_id IS NOT NULL AND c.output IS NULL AND c.error IS NULL "
-            "AND c.responded_at IS NULL AND c.started_at > now() - %(kept)s "
-            f"AND NOT {_LIVE} GROUP BY c.batch_id ORDER BY c.batch_id",
-            {"kept": RESULTS_KEPT, "me": None},
+            f"AND c.responded_at IS NULL AND c.started_at > now() - %(kept)s {among}"
+            "GROUP BY c.batch_id ORDER BY c.batch_id",
+            {"kept": RESULTS_KEPT, "ids": batch_ids},
         )
 
+    @asynccontextmanager
+    async def _settling(
+        self, name: str, where: LiteralString, params: Any
+    ) -> AsyncGenerator[WriteUnit]:
+        """A settlement's unit: holding the `retally` locks of the runs whose rows `where` (on
+        `u`) picks and are not yet settled, read just before it opens (a batch's rows are all
+        opened before it is made, so none joins them), each of those runs retallied before it
+        commits. A row settled meanwhile is left alone, and its run's tally is the same."""
+        found = await self._all(
+            f"{name}: runs",
+            f"SELECT DISTINCT u.run_id FROM inference_calls u WHERE {where} AND {_UNSETTLED}",
+            params,
+        )
+        runs = sorted(r["run_id"] for r in found)
+        async with self._writing(name, [("retally", r) for r in runs]) as unit:
+            yield unit
+            for run_id in runs:
+                await tally(unit, run_id)
+
     async def settle_batch(
-        self,
-        batch_id: str,
-        answers: dict[str, CallOutcome],
-        *,
-        rest: str | None = None,
-        account: tuple[str, str] | None = None,
+        self, batch_id: str, answers: dict[str, CallOutcome], *, rest: str | None = None
     ) -> None:
-        """Batch `batch_id`'s outcome, in one unit: each request's answer (`answers`, by request
-        key) on the call that asked for it, if not yet settled; with `rest`, every other call of
-        it not yet settled fails with that, its charge unknown (the batch ended without naming
-        it, or is gone); with `account` (provider, error), that provider refused it for the
-        account, observed here whether or not a call waits on it. The runs it reached are
-        retallied after, in one unit (`_retally`)."""
+        """Batch `batch_id`'s outcome, in one unit with its runs' totals (`_settling`): each
+        request's answer (`answers`, by request key) on the call that asked for it, if not yet
+        settled; with `rest`, every other call of it not yet settled fails with that, its charge
+        unknown (the batch ended without naming it, or is gone). An account error it settles
+        fails its provider, observed with it: a batch read again settles nothing, and observes
+        nothing again."""
         replied = "" if self.observes else "AND false"
-        reached: list[int] = []
-        async with self._writing("settle batch") as unit:
+        async with self._settling("settle batch", "u.batch_id = %s", (batch_id,)) as unit:
             cur = await unit.execute(
                 f"WITH a AS (SELECT * FROM {_SETTLED.format(of='key text')}), "
                 f"c AS (UPDATE inference_calls c SET usage = {_MERGED}, error = a.error, "
-                "responded_at = clock_timestamp() FROM a WHERE c.batch_id = %(batch)s "
-                "AND c.request_key = a.key AND c.output IS NULL AND c.error IS NULL "
-                "AND c.responded_at IS NULL RETURNING c.run_id, c.usage->>'via' AS via, "
-                f"a.replied {replied} AS replied, c.responded_at), {_REPLIED} "
-                "SELECT run_id FROM c",
+                "reply = coalesce(a.reply, c.reply), responded_at = clock_timestamp() FROM a "
+                "WHERE c.batch_id = %(batch)s AND c.request_key = a.key AND c.output IS NULL "
+                "AND c.error IS NULL AND c.responded_at IS NULL RETURNING c.usage->>'via' AS via, "
+                f"a.replied {replied} AS replied, c.responded_at, c.error), {_REPLIED} "
+                "SELECT via, error FROM c WHERE error LIKE 'account:%%' LIMIT 1",
                 {"batch": batch_id, "settled": _settled(answers.items(), "key")},
             )
-            reached += [r["run_id"] for r in await cur.fetchall()]
-            if rest is not None:
-                cur = await unit.execute(
-                    "UPDATE inference_calls SET error = %s, responded_at = clock_timestamp() "
-                    "WHERE batch_id = %s AND output IS NULL AND error IS NULL "
-                    "AND responded_at IS NULL AND request_key <> ALL(%s::text[]) RETURNING run_id",
-                    (stored(rest), batch_id, list(answers)),
-                )
-                reached += [r["run_id"] for r in await cur.fetchall()]
-            if account is not None and self.observes:
-                provider, error = account
+            if (account := await cur.fetchone()) and self.observes:
                 await unit.execute(
                     _ACCOUNT_ERROR.format(source=""),
-                    {"provider": provider, "account": stored(error)},
+                    {"provider": account["via"], "account": account["error"]},
                 )
-        await self._retally(reached)
+            if rest is not None:
+                await unit.execute(
+                    "UPDATE inference_calls SET error = %s, responded_at = clock_timestamp() "
+                    "WHERE batch_id = %s AND output IS NULL AND error IS NULL "
+                    "AND responded_at IS NULL AND request_key <> ALL(%s::text[])",
+                    (stored(rest), batch_id, list(answers)),
+                )
 
-    async def unsent(self, call_ids: list[int], outcome: CallOutcome) -> None:
+    async def unsent(
+        self, call_ids: list[int], outcome: CallOutcome, *, account: str | None = None
+    ) -> None:
         """The calls' batch was not made, or may have been and was not found: their rows settled
         with `outcome` (no charge for a batch not made, an unknown one for a batch that may have
-        been), each call asked again on a row of its own."""
-        rows = await self._write(
-            "unsent",
-            f"WITH a AS (SELECT * FROM {_SETTLED.format(of='id bigint')}) "
-            f"UPDATE inference_calls c SET usage = {_MERGED}, error = a.error, "
-            "responded_at = clock_timestamp() FROM a WHERE c.id = a.id "
-            "AND c.output IS NULL AND c.error IS NULL RETURNING c.run_id",
-            {"settled": _settled(((i, outcome) for i in call_ids), "id")},
-        )
-        await self._retally(r["run_id"] for r in rows)
+        been), each call asked again on a row of its own, in one unit with their runs' totals;
+        with `account`, that provider refused the batch for the account, observed with them."""
+        observed = account is not None and self.observes
+        async with self._settling("unsent", "u.id = ANY(%s)", (call_ids,)) as unit:
+            cur = await unit.execute(
+                f"WITH a AS (SELECT * FROM {_SETTLED.format(of='id bigint')}) "
+                f"UPDATE inference_calls c SET usage = {_MERGED}, error = a.error, "
+                "responded_at = clock_timestamp() FROM a WHERE c.id = a.id "
+                "AND c.output IS NULL AND c.error IS NULL RETURNING c.id",
+                {"settled": _settled(((i, outcome) for i in call_ids), "id")},
+            )
+            if await cur.fetchall() and observed and outcome.error:
+                await unit.execute(
+                    _ACCOUNT_ERROR.format(source=""),
+                    {"provider": account, "account": stored(outcome.error)},
+                )
 
     async def record(self, call_id: int, usage: Usage) -> None:
         """A normal call's reply came: its accounting, whether or not the answer is usable, and
@@ -273,9 +304,9 @@ class CallJournal:
         )
 
     async def account_error(self, provider: str, error: str) -> None:
-        """The provider refused a batch, or a request in one, for the account (models.md, the
-        gateway), seen by its batcher whether or not a call waits on it. A normal call's is its
-        `reject`."""
+        """The provider refused a batch's creation, status or results read for the account
+        (models.md, the gateway), seen by its batcher whether or not a call waits on it. A
+        normal call's is its `reject`; a request's in a batch, its batch's settlement's."""
         if not self.observes:
             return
         await self._write(
@@ -283,15 +314,6 @@ class CallJournal:
             _ACCOUNT_ERROR.format(source=""),
             {"provider": provider, "account": stored(error)},
         )
-
-    async def _retally(self, run_ids: Iterable[int]) -> None:
-        """Retally the runs a settlement reached (`tally`), in one unit holding their `retally`
-        locks, which the gate takes in its order."""
-        runs = sorted(set(run_ids))
-        if runs:
-            async with self._writing("retally", [("retally", r) for r in runs]) as unit:
-                for run_id in runs:
-                    await tally(unit, run_id)
 
     async def accept(self, call_id: int, output: dict[str, Any]) -> None:
         """The call's validated output, on its row unless that is settled already: a batched

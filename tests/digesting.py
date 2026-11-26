@@ -77,7 +77,7 @@ async def day(conn: Session, w: Writer, on: date, config: Config | None = None) 
     tree = await in_read(conn, taxonomy_store.load)
     async with (
         gate_on(conn) as db,
-        model_run(db, config or Config(), "digests", models=w.gate(config or Config())) as run,
+        model_run(db, "digests", models=w.gate(config or Config())) as run,
     ):
         return await digests.write_day(Bridge(conn), run, tree, on, rules=settling.RULES)
 
@@ -86,7 +86,7 @@ async def week(conn: Session, w: Writer, monday: date) -> None:
     tree = await in_read(conn, taxonomy_store.load)
     async with (
         gate_on(conn) as db,
-        model_run(db, Config(), "digests", models=w.gate(Config())) as run,
+        model_run(db, "digests", models=w.gate(Config())) as run,
     ):
         await digests.write_week(Bridge(conn), run, tree, monday, rules=settling.RULES)
 

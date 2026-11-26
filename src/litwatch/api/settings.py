@@ -474,7 +474,7 @@ async def grade_now(
     due = [grading.Due(paper, followed, tree.get(topic).name)]
     recorded = False
     async with (
-        model_run(db, config, "grading", models=request.app.state.models) as run,
+        model_run(db, "grading", models=request.app.state.models) as run,
         grading.grade(due, run.gateway, config.grading) as found,
     ):
         async for g in found:

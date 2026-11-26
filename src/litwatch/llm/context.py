@@ -39,8 +39,11 @@ def current() -> Spending:
 @contextmanager
 def spending(**changes: Any) -> Generator[Spending]:
     """Run the block's model calls under `changes` (`ceiling`, `deadline`), the rest as it
-    stands."""
+    stands. Not both: a batch reserves nothing against a ceiling, and no caller needs both (a
+    nightly has a deadline, a ceiling-limited job a ceiling)."""
     now = dataclasses.replace(current(), **changes)
+    if now.ceiling is not None and now.deadline is not None:
+        raise ValueError("model calls run under a ceiling or a deadline, not both")
     token = _spending.set(now)
     try:
         yield now

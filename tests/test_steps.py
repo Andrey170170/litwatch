@@ -368,7 +368,7 @@ async def test_a_tally_that_fails_after_the_job_keeps_the_jobs_error_and_the_cal
 
     monkeypatch.setattr(job_context, "tally", lost)
     with pytest.raises(ValueError, match="the job's own"):
-        async with model_run(db, CONFIG, "nightly", models=ModelGate(CONFIG.models, {})) as run:
+        async with model_run(db, "nightly", models=ModelGate(CONFIG.models, {})) as run:
             call = await run.journal.start(
                 CallStart(run_id=run.run_id, work_id=None, operation="judge", model="m", key="k")
             )

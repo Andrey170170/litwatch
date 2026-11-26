@@ -10,8 +10,9 @@ call reserves against and the deadline its batch must be answered by come from t
 Worker sets for its item (`llm.context`), not from the call site. A call whose request a batch
 not yet settled holds waits on that batch, a dead run's included, unless a live work item other
 than its own sent it (`store.calls.CallJournal.in_batch`). `recover`, once as the process starts,
-watches the batches no live item will read, so each is accounted for on its calls' own rows,
-their run and item kept."""
+takes over the batches no live item will read, so each is accounted for on its calls' own rows,
+their run and item kept; one a live item sent is taken over once that item's lease lapses
+unrenewed (a process killed with its lease still live)."""
 
 from __future__ import annotations
 
@@ -57,6 +58,8 @@ NORMAL_CALLS = 16  # normal calls in flight per provider, whatever the steps' ow
 # so it sends none, cancels what it reads at once and gives up on it after one look, as a call
 # outside the nightly never waits on a batch.
 LOOKED_AT = datetime.min.replace(tzinfo=UTC)
+# The least a recovery waits before looking again at a batch a live item's lease keeps.
+RECHECK_SECONDS = 1.0
 
 
 def _without_nul(value: Any) -> Any:
@@ -126,7 +129,7 @@ class Journal(Protocol):
 class GateJournal(BatchJournal, Protocol):
     """The gate's own journal: its batches' calls, and the batches left open."""
 
-    async def open_batches(self) -> list[dict[str, Any]]: ...
+    async def open_batches(self, batch_ids: list[str] | None = None) -> list[dict[str, Any]]: ...
 
 
 @dataclass(frozen=True)
@@ -171,6 +174,7 @@ class ModelGate:
         self.now: Callable[[], datetime] = self.batch_options.get("now", lambda: datetime.now(UTC))
         self.limits = {name: asyncio.Semaphore(normal_calls) for name in providers}
         self._batchers: dict[tuple[str, datetime], Batcher] = {}
+        self._recovering: asyncio.Task[None] | None = None
 
     async def __aenter__(self) -> Self:
         return self
@@ -209,7 +213,9 @@ class ModelGate:
             options: dict[str, Any] = self.batch_options | (
                 {"drain": timedelta(0)} if deadline == LOOKED_AT else {}
             )
-            self._batchers[(provider, deadline)] = Batcher(found, self.journal, deadline, **options)
+            self._batchers[(provider, deadline)] = Batcher(
+                found, self.journal, deadline, debug=self.debug, **options
+            )
         return self._batchers[(provider, deadline)]
 
     def owner(self, batch_id: str) -> Batcher | None:
@@ -217,20 +223,50 @@ class ModelGate:
         return next((b for b in self._batchers.values() if b.holds(batch_id)), None)
 
     async def recover(self, deadline: datetime) -> int:
-        """Watch the batches left open that no live work item will read (a dead process's, or
-        one given up on), each until it ends or `deadline`'s drain is over (cancelled at the
-        deadline), so each is accounted for in full, on its calls' rows, whether or not its
-        calls are asked again: once, as the process starts. Returns how many it watches."""
+        """Take over the batches left open that no live work item will read (a dead process's,
+        or one given up on), each followed until it ends or `deadline`'s drain is over
+        (cancelled at the deadline), so each is accounted for in full, on its calls' rows,
+        whether or not its calls are asked again: once, as the process starts. One a live item
+        sent (its process killed with its lease still live, or a command still running) is
+        looked at again as that lease lapses (`_reconsidered`). Returns how many it takes over
+        now."""
         if self.journal is None:
             return 0
-        watched = 0
-        for row in await self.journal.open_batches():
-            # The batch's provider, whatever roles use now; one without credentials now is left.
-            batcher = self.batcher(row["provider"], deadline)
-            if batcher is not None and self.owner(row["batch_id"]) is None:
+        rows = await self.journal.open_batches()
+        taken = self._take_over(rows, deadline)
+        if blocked := [r["batch_id"] for r in rows if r["live_until"] is not None]:
+            self._recovering = asyncio.create_task(self._reconsidered(blocked, deadline))
+            self._recovering.add_done_callback(_logged)
+        return taken
+
+    def _take_over(self, rows: list[dict[str, Any]], deadline: datetime) -> int:
+        """Follow each batch of `rows` that no live item sent and no batcher here follows, by
+        its provider whatever roles use now (one without credentials now is left)."""
+        taken = 0
+        for row in rows:
+            if row["live_until"] is not None or self.owner(row["batch_id"]) is not None:
+                continue
+            if (batcher := self.batcher(row["provider"], deadline)) is not None:
                 batcher.watch(row["batch_id"])
-                watched += 1
-        return watched
+                taken += 1
+        return taken
+
+    async def _reconsidered(self, blocked: list[str], deadline: datetime) -> None:
+        """The batches a live item sent as the process started, looked at again as the earliest
+        of their leases lapses: each taken over once no live item holds it (its lease lapsed
+        unrenewed, or its item ended), and let go once it is settled or followed here (its item,
+        run again here, attached to it). A command that keeps its lease keeps its batch."""
+        assert self.journal is not None
+        while blocked:
+            rows = await self.journal.open_batches(blocked)
+            self._take_over(rows, deadline)
+            held = [
+                r for r in rows if r["live_until"] is not None and self.owner(r["batch_id"]) is None
+            ]
+            blocked = [r["batch_id"] for r in held]
+            if held:
+                lapse = min(r["live_until"] for r in held) - datetime.now(UTC)
+                await asyncio.sleep(max(RECHECK_SECONDS, lapse.total_seconds() + 0.5))
 
     async def settle(self, deadline: datetime) -> None:
         """Wait until the batches of calls with `deadline` are read or given up on."""
@@ -239,7 +275,10 @@ class ModelGate:
                 await batcher.settle()
 
     async def close(self) -> None:
-        """Stop batching; calls still waiting on a batch go as normal calls."""
+        """Stop recovering and batching; calls still waiting on a batch go as normal calls."""
+        if self._recovering is not None:
+            self._recovering.cancel()
+            await asyncio.gather(self._recovering, return_exceptions=True)
         for batcher in list(self._batchers.values()):
             await batcher.close()
         self._batchers = {}
@@ -350,8 +389,12 @@ class Gateway:
         for delay in (*self.retry_delays, None):
             reserved = await self._reserve(bound, role, request)
             cost: float | None = None  # what the attempt was charged, when known
+            # Whether it went out, from its row's opening: an attempt stopped before (cancelled
+            # waiting for the provider's limit, say) was charged nothing.
+            sent = False
             try:
                 async with self.gate.limits[role.provider]:
+                    sent = True
                     if opened is not None:
                         await opened(reserved)
                     async with asyncio.timeout(role.timeout_seconds):
@@ -378,7 +421,7 @@ class Gateway:
                 log.warning("role=%s %s, trying again in %ss", role_name, exc, delay)
             finally:
                 if reserved is not None and bound is not None:
-                    await bound.settle(reserved, cost)
+                    await bound.settle(reserved, cost if sent else 0.0)
             await asyncio.sleep(delay)
         raise AssertionError("unreachable")
 
@@ -654,6 +697,8 @@ class Gateway:
         journal = self.journal
         if send is not None or journal is None or not journal.observes:
             return None, None
+        if not isinstance(self.providers.get(role.provider), BatchProvider):
+            return None, None  # no batch of it can hold the request
         deadline = self.batching_until()
         work = current_work()
         if row := await journal.in_batch(key, work.item.id if work else None):
@@ -671,6 +716,11 @@ class Gateway:
         if not isinstance(reply, Reply):
             return None, reply
         return reply.usage.source_call_id, _of_role(reply, role)
+
+
+def _logged(task: asyncio.Task[None]) -> None:
+    if not task.cancelled() and (exc := task.exception()) is not None:
+        log.error("model gate: recovering stopped: %r", exc)
 
 
 def _max_output(role: RoleConfig, request: Request) -> int:

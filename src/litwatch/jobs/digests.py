@@ -35,7 +35,7 @@ async def window(
     rules = word.rules(config)
     async with (
         db.held("run"),
-        model_run(db, config, "digests", models=models) as run,
+        model_run(db, "digests", models=models) as run,
     ):
         async with db.read("write digests: taxonomy") as unit:
             tree = await taxonomy_store.load(unit)

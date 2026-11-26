@@ -278,7 +278,7 @@ async def test_a_job_answers_a_call_a_dead_nightly_left_in_an_ended_batch_from_i
         return ModelGate(CONFIG.models, providers, journal, retry_delays=(0.0,), batch_options=FAST)
 
     with spending(deadline=datetime.now(UTC) + timedelta(hours=1)):  # as the nightly's
-        async with model_run(db, CONFIG, "nightly", models=gate()) as night:
+        async with model_run(db, "nightly", models=gate()) as night:
             await nightly.classify(db, CONFIG, night, ids=[A.id])
             await nightly.analyse(db, CONFIG, night, ids=[A.id])
     assert anthropic.batched and not anthropic.calls
@@ -482,7 +482,7 @@ async def test_a_job_taken_back_mid_chunk_skips_the_steps_it_had_done(conn: Sess
     async with DatabaseGate(conn.test_dsn, conn.test_schema) as dead:  # another process's
         async with dead.write("claim") as unit:
             await jobs_store.claim(unit, job, afresh=True)
-        async with model_run(dead, CONFIG, "job", models=models.gate(CONFIG)) as run:
+        async with model_run(dead, "job", models=models.gate(CONFIG)) as run:
             await nightly.classify(dead, CONFIG, run, ids=[A.id])
     await work_out(worker.JobWorker(db, CONFIG, models.gate(CONFIG)))
     assert asked(models, "classify", A.title) == 1 and asked(models, "analyse", A.title) == 1
