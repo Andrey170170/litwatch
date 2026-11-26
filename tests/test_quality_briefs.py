@@ -55,13 +55,15 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     out, asked = tmp_path / "brief.jsonl", []
     pairs = list(zip([P, Q], entries(), strict=True))
     first = await briefs.run(gateway(asked), seeds.taxonomy(), pairs, archive, out, wait_seconds=0)
-    assert [(r.paper_id, r.error) for r in first] == [
+    assert sorted((r.paper_id, r.error) for r in first) == [  # in the order they came
         (P.id, None),
         (Q.id, f"{Q.id}: no arXiv version known and no LaTeX text"),
     ]
     (user,) = asked
     assert "Area: Chain-of-thought faithfulness" in user and "Probes on two tasks." in user
-    assert first[0].source == "latex" and first[0].output.weight == "solid"
+    answered = next(r for r in first if r.paper_id == P.id)
+    assert answered.source == "latex" and answered.output is not None
+    assert answered.output.weight == "solid"
 
     fake.texts[Q.id] = (None, "\\section{Setup} Monitors. " * 20)
     second = await briefs.run(gateway(asked), seeds.taxonomy(), pairs, archive, out, wait_seconds=0)

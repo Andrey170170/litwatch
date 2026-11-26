@@ -247,6 +247,13 @@ async def test_items_with_one_deadline_share_a_batch_whose_calls_settle_after_a_
     gate = gate_over(db, anthropic, quiet=0.5)
     deadline = tonight()
     first = asked_in_an_item(db, gate, "first", 1, deadline)
+    held = gate.batcher("anthropic", deadline)
+    assert held is not None
+
+    async def first_held() -> bool:
+        return bool(held._held)
+
+    await until(first_held, "the first item's call held, first")
     second = asked_in_an_item(db, gate, "second", 2, deadline)
     await until(batched(conn, 2), "both calls in a batch")
     assert [len(keys) for keys in anthropic.submitted] == [2]  # one batch, the two items'
@@ -258,11 +265,16 @@ async def test_items_with_one_deadline_share_a_batch_whose_calls_settle_after_a_
     assert not second.done()
     anthropic.end("msgbatch_1")
     assert (await asyncio.wait_for(second, 5)).value.yes
-    found = await journalled(conn)
-    assert sorted(c["key"].split(":")[0] for c in found) == ["first", "second"]
+    found = await rows(
+        conn,
+        "SELECT c.work_id, r.work_id AS run_work, w.key, (c.usage->>'cost')::float AS cost, "
+        "c.output IS NOT NULL AS answered FROM inference_calls c "
+        "JOIN runs r ON r.id = c.run_id JOIN work_items w ON w.id = c.work_id ORDER BY c.id",
+    )
+    assert [c["key"].split(":")[0] for c in found] == ["first", "second"]  # as they joined
+    assert all(c["work_id"] == c["run_work"] for c in found)  # each on its own item's run
     assert [c["cost"] for c in found] == [0.0005, 0.0005] and anthropic.calls == []
-    assert len({c["run_id"] for c in found}) == 2
-    assert next(c for c in found if c["key"].startswith("second"))["answered"]
+    assert [c["answered"] for c in found] == [False, True]
     await gate.close()
 
 

@@ -111,6 +111,7 @@ class BatchJournal(Protocol):
         self, batch_id: str, answers: dict[str, CallOutcome], *, rest: str | None = None
     ) -> None: ...
     async def adopted(self, reference: str, batch_id: str) -> None: ...
+    async def named(self, batch: int) -> str | None: ...
     async def unsent(
         self, call_ids: list[int], outcome: CallOutcome, *, account: str | None = None
     ) -> None: ...
@@ -364,8 +365,19 @@ class Batcher:
                 find_until=time.monotonic() + self.find_seconds if staged else None,
             )
             self._batches[identity] = batch
-            self._supervised(batch, self._follow(batch))
+            self._supervised(batch, self._taken(batch))
         return batch
+
+    async def _taken(self, batch: _Batch) -> None:
+        """A batch followed from its rows (a dead run's, or one whose task here ended as a call
+        read them), its identity claimed here, so a call that attaches meanwhile joins: the name
+        it goes by is read again first, before any provider request, so it is followed by its id
+        when its rows have one now, not looked for by the reference read before (its task here
+        may have found and settled it meanwhile, and a lookup may miss it)."""
+        if (journal := self.journal) is not None and (identity := batch.identity) is not None:
+            name = await self._journalled("batch named", lambda: journal.named(identity))
+            batch.name = name or batch.name
+        await self._follow(batch)
 
     @staticmethod
     async def _shared(future: asyncio.Future[Answered]) -> Answered:

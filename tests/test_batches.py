@@ -2526,3 +2526,96 @@ async def test_a_nightly_attaching_to_a_batch_a_look_took_over_waits_as_its_dead
     anthropic.end("msgbatch_1", answered={nightly.request_key(BRIEF, ask(0))})
     assert (await asyncio.wait_for(waiting, 3)).usage.service_tier == "batch"
     await nightly.close()
+
+
+async def test_a_normal_calls_charge_is_recorded_though_its_item_is_cancelled_meanwhile(
+    conn: Session, db, monkeypatch
+):
+    """A normal call's reply came; writing its charge lost the connection, and the write waits
+    to be tried again when the item is cancelled (its lease lost): the write is finished first,
+    so the charge the provider made is on its row."""
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, anthropic, _, _ = batching(journal)
+    gw.gate.journal_delays = (0.3,)
+    record, failing = journal.record, asyncio.Event()
+
+    async def flaky(*args, **kwargs):
+        if not failing.is_set():
+            failing.set()
+            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+        return await record(*args, **kwargs)
+
+    monkeypatch.setattr(journal, "record", flaky)
+    asked = asyncio.create_task(Tonight(gw.gate, journal, deadline=None).ask("brief", ask(1)))
+    await asyncio.wait_for(failing.wait(), 3)
+    asked.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(asked, 3)
+    assert [c["cost"] for c in await calls(conn)] == [0.001] and len(anthropic.calls) == 1
+    await gw.close()
+
+
+async def test_a_call_that_read_a_batchs_staged_name_follows_it_by_the_id_it_has_since(
+    conn: Session, db, monkeypatch
+):
+    """A call reads a batch's row while the batch goes by its staged reference; meanwhile the
+    batch's task finds it, puts its id on its rows, reads it and lets it go. The call, finding
+    no task following it, claims it and reads its name again before any provider request: it
+    reads the batch by its id rather than looking for it again, which may miss it, and pays for
+    nothing twice."""
+    client = OpenAIBatches()  # no normal call can be made (`responses`)
+    client.creating = [(True, lost())]
+    journal = CallJournal(db, await started(conn, "nightly"))
+    gw, _, _ = openai_batching(journal, client)
+    in_batch, adopted, read, go = (
+        journal.in_batch,
+        journal.adopted,
+        asyncio.Event(),
+        asyncio.Event(),
+    )
+
+    async def paused(key, work_id, owned=None):
+        row = await in_batch(key, work_id, owned)
+        if row is not None and row["batch_id"].startswith("staged:"):
+            read.set()
+            await go.wait()
+        return row
+
+    async def after_the_read(reference, batch_id):
+        await read.wait()
+        await adopted(reference, batch_id)
+
+    monkeypatch.setattr(journal, "in_batch", paused)
+    monkeypatch.setattr(journal, "adopted", after_the_read)
+    first = asyncio.create_task(gw.ask("brief", ask(1)))
+    await until(lambda: "batch_1" in client.made)
+    client.end("batch_1")
+    second = asyncio.create_task(gw.ask("brief", ask(1)))
+    assert (await asyncio.wait_for(first, 3)).usage.service_tier == "batch"
+    client.misses = 100  # a lookup now would miss it
+    go.set()
+    assert (await asyncio.wait_for(second, 3)).usage.service_tier == "batch"
+    assert client.listings == 1  # the first task's, finding it
+    await gw.close()
+
+
+async def test_an_item_asking_again_takes_a_stop_on_a_p3_row_its_run_names_it_on(conn: Session, db):
+    """A P3 nightly's call names no item, its run does; its batch's refusal was settled on its
+    row. The item, asking again, takes that refusal (down to the role's fallback) rather than
+    batching the same model again."""
+    dead = await started(conn, "nightly", alive=True)
+    gw, anthropic, _, _ = batching(CallJournal(db, await started(conn, "nightly")), hold=True)
+    key = gw.request_key(BRIEF, ask("refuse"))
+    start = CallStart(
+        run_id=dead, work_id=None, operation="brief", model=BRIEF.model, key=key, via="anthropic"
+    )
+    (row_id,) = await CallJournal(db).start_many([start], "msgbatch_0")
+    await conn.execute(
+        "UPDATE inference_calls SET error = 'refused: cyber', responded_at = clock_timestamp() "
+        "WHERE id = %s",
+        (row_id,),
+    )
+    with working(a_work_item(await item_of(conn, dead))):
+        answer = await asyncio.wait_for(gw.ask("brief", ask("refuse")), 3)
+    assert answer.model == OTHER.label and anthropic.batches == {}
+    await gw.close()

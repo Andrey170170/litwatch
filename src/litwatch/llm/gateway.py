@@ -19,6 +19,7 @@ once that claim's lease lapses unrenewed (a process killed with its lease still 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
@@ -678,8 +679,21 @@ class Gateway:
 
     async def _journalled(self, what: str, write: Callable[[], Awaitable[None]]) -> None:
         """A journal write once the provider has answered, tried again while the database is
-        briefly away, the answer kept here meanwhile (`llm.batches.journalled`)."""
-        await journalled(what, write, self.gate.journal_delays)
+        briefly away, the answer kept here meanwhile (`llm.batches.journalled`). It runs to its
+        end in a task of its own, outside the item's context (its units are the gate's
+        bookkeeping): the item's cancellation (its lease lost) waits for it, so a charge the
+        provider made is not lost with the item."""
+        task = asyncio.create_task(
+            journalled(what, write, self.gate.journal_delays), context=contextvars.Context()
+        )
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            try:
+                await task
+            except Exception:
+                log.exception("journal: %s failed as its call was cancelled", what)
+            raise
 
     def _call(
         self,

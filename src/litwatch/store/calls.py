@@ -50,6 +50,8 @@ _FIRST = "(SELECT min(f.id) FROM inference_calls f WHERE f.batch_id = {batch})"
 # A batch's terminal answer to a call, which a call asking again in the same item consumes
 # rather than paying for the same answer twice: a refusal, a truncation.
 _STOPPED = "(c.error LIKE 'refused%%' OR c.error = 'truncated')"
+# The item call `c` served: its own, or, for a P3 row (its calls name no item), its run's.
+_ITEM = "coalesce(c.work_id, (SELECT i.work_id FROM runs i WHERE i.id = c.run_id))"
 # What a provider said, kept in `provider_observations` by the same statement as the call rows
 # it came with (`c`, returning `via`, `replied` and `responded_at`), so the two never part and
 # the reply's time is its row's own. Observations from other processes can commit out of
@@ -209,7 +211,8 @@ class CallJournal:
         (of the identities `owned`) or no live claim but the asking item's (`work_id`) sent, so
         a run started again waits on the batch instead of paying again, and another process's
         live item's batch is left to it; or settled with a refusal or a truncation, sent by the
-        asking item (its attempt before was killed, or taken back), so it takes that answer's
+        asking item (the row's, or a P3 row's run's: its calls name no item; its attempt before
+        was killed, or taken back), so it takes that answer's
         path rather than asking the same model again. With its batch's identity (`batch`) and
         the name it goes by now (`batch_id`), its `error` and `usage`. Anthropic keeps a
         batch's results for 29 days; `RESULTS_KEPT` stays inside that."""
@@ -223,9 +226,17 @@ class CallJournal:
             "AND c.started_at > now() - %(kept)s "
             f"AND (c.error IS NULL AND ({first} = ANY(%(owned)s) "
             f"OR NOT EXISTS (SELECT 1 {claims})) "
-            f"OR c.work_id = %(me)s AND {_STOPPED}) ORDER BY c.id DESC LIMIT 1",
+            f"OR {_ITEM} = %(me)s AND {_STOPPED}) ORDER BY c.id DESC LIMIT 1",
             {"key": key, "kept": RESULTS_KEPT, "me": work_id, "owned": owned or []},
         )
+
+    async def named(self, batch: int) -> str | None:
+        """The name the batch of identity `batch` goes by now (its staged reference, or its id):
+        its first call's row has it, as all its rows do."""
+        row = await self._one(
+            "batch named", "SELECT batch_id FROM inference_calls WHERE id = %s", (batch,)
+        )
+        return None if row is None else row["batch_id"]
 
     async def open_batches(self, batches: list[int] | None = None) -> list[dict[str, Any]]:
         """The batches with calls not yet settled (of the identities `batches`, else all): each
@@ -294,14 +305,15 @@ class CallJournal:
                     _ACCOUNT_ERROR.format(source=""),
                     {"provider": account["via"], "account": account["error"]},
                 )
-            await unit.execute(
-                f"WITH a AS (SELECT * FROM {_SETTLED.format(of='key text')}) "
-                "UPDATE inference_calls c SET error = a.error, reply = coalesce(a.reply, c.reply) "
-                "FROM a WHERE c.batch_id = %(batch)s AND c.request_key = a.key "
-                "AND c.output IS NULL AND c.error IS NULL AND c.responded_at IS NOT NULL "
-                "AND (a.error LIKE 'refused%%' OR a.error = 'truncated')",
-                {"batch": batch_id, "settled": _settled(answers.items(), "key")},
-            )
+            if stops := [(k, o) for k, o in answers.items() if _stop(o.error)]:
+                await unit.execute(
+                    f"WITH a AS (SELECT * FROM {_SETTLED.format(of='key text')}) "
+                    "UPDATE inference_calls c SET error = a.error, "
+                    "reply = coalesce(a.reply, c.reply) FROM a "
+                    "WHERE c.batch_id = %(batch)s AND c.request_key = a.key "
+                    "AND c.output IS NULL AND c.error IS NULL AND c.responded_at IS NOT NULL",
+                    {"batch": batch_id, "settled": _settled(stops, "key")},
+                )
             if rest is not None:
                 await unit.execute(
                     "UPDATE inference_calls SET error = %s, responded_at = clock_timestamp() "
@@ -410,6 +422,11 @@ class CallJournal:
             (paper_id, key),
         )
         return row is not None
+
+
+def _stop(error: str | None) -> bool:
+    """Whether a settlement's error is a refusal or a truncation (`_STOPPED`)."""
+    return error is not None and (error.startswith("refused") or error == "truncated")
 
 
 def _opened(call: CallStart) -> Usage:
