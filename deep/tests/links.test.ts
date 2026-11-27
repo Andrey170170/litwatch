@@ -103,6 +103,39 @@ test("the checks' own GET stops with the find: none starts once its session is a
   assert.equal(asked, 1);
 });
 
+test("a find's host checks, by its own transport, stop when the find ends: the one under way cancelled, no next one", async () => {
+  const { models: m, faux } = models();
+  const repo = (name: string) => ({ url: `https://github.com/o/${name}`, kind: "code", state: "public", license: null });
+  faux.setResponses([answers([repo("first"), repo("second")])]);
+  const asked: { url: string; cancelled: boolean }[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const call = { url: String(url), cancelled: false };
+    asked.push(call);
+    return new Promise<Response>((resolve, reject) => {
+      const answered = setTimeout(() => resolve(new Response("", { status: 404 })), 3000); // were it never cancelled
+      init?.signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(answered);
+          call.cancelled = true;
+          reject(init.signal?.reason);
+        },
+        { once: true },
+      );
+    });
+  }) as typeof fetch;
+  try {
+    // No `hostGet`: the find's default transport. Its wall clock ends it while the first check is under way.
+    const outcome = await findLinks(INPUT, m, { ...HOSTS, guard: OPEN }, { ...OPTS, wallClockMs: 500 });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.match(outcome.error ?? "", /wall clock/);
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.deepEqual(asked, [{ url: "https://api.github.com/repos/o/first", cancelled: true }], "the second check never started");
+});
+
 test("a GitHub or Hugging Face link takes its state from the host's API, whatever the draft says", async () => {
   const { models: m, faux } = models();
   const hf = { url: "https://huggingface.co/o/m", kind: "weights", state: "public", license: null };
