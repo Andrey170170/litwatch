@@ -8,6 +8,7 @@ deep service, a fake archive, a fake GitHub and Hugging Face."""
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -68,12 +69,21 @@ class Finder:
     next of `ends` (its `result`, or its `error` and `failure`), else none found; a key it has
     is that find, and `GET /links/keys/<key>` finds it. `lose` submissions are answered 502
     after the find started, as a proxy losing the answer would; with `refuse`, every
-    submission is turned down with that status. `sent` is what each submission sent."""
+    submission is turned down with that status; with `lookup_fails`, every lookup by key
+    answers 503. `sent` is what each submission sent, `lookups` counts the lookups."""
 
-    def __init__(self, *ends: dict[str, Any], lose: int = 0, refuse: int | None = None) -> None:
+    def __init__(
+        self,
+        *ends: dict[str, Any],
+        lose: int = 0,
+        refuse: int | None = None,
+        lookup_fails: bool = False,
+    ) -> None:
         self.ends = list(ends)
         self.lose = lose
         self.refuse = refuse
+        self.lookup_fails = lookup_fails
+        self.lookups = 0
         self.keys: dict[str, str] = {}
         self.finds: dict[str, dict[str, Any]] = {}
         self.sent: list[dict[str, Any]] = []
@@ -84,6 +94,9 @@ class Finder:
 
     def handle(self, req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and req.url.path.startswith("/links/keys/"):
+            self.lookups += 1
+            if self.lookup_fails:
+                return httpx.Response(503)
             asked = unquote(req.url.path.removeprefix("/links/keys/"))
             if asked not in self.keys:
                 return httpx.Response(404, json={"error": "no job for that key"})
@@ -198,6 +211,11 @@ async def owners(db: DatabaseGate, paper_id: str = A.id) -> WorkItem:
         item = await links.request(unit, paper_id)
     assert item is not None
     return item
+
+
+def claimed(item: WorkItem, attempts: int) -> WorkItem:
+    """The item as its `attempts`th claim hands it to its Worker (the gate counts each)."""
+    return replace(item, attempts=attempts)
 
 
 async def done(worker: FindWorker, item: WorkItem) -> Done:
@@ -346,7 +364,7 @@ async def test_a_find_whose_answer_was_lost_follows_the_same_find(held: Session,
     finder = Finder({"result": {"links": [found("https://github.com/o/probes", "public")]}}, lose=1)
     worker = FindWorker(db, archive()[0], deep(finder))
     assert isinstance(await worker(item), Later)  # the submission's answer lost
-    assert isinstance(await worker(item), Done)
+    assert isinstance(await worker(claimed(item, 2)), Done)
     assert finder.started == 1 and len(finder.sent) == 1  # found by its key, not sent again
 
 
@@ -365,7 +383,7 @@ async def test_a_find_whose_answer_was_lost_is_followed_whatever_came_meanwhile(
     mine = await owners(db)
     assert isinstance(await worker(mine), Done)  # the owner's answers meanwhile
     await ended_by_the_gate(held, mine, {"links": 1})
-    answered = await done(worker, automatic)
+    answered = await done(worker, claimed(automatic, 2))
     assert answered.cost == Decimal("0.01") and answered.result["links"] == 1
     assert finder.started == 2  # its own, followed: not dropped as answered by another
     v1 = await owners(db)
@@ -373,11 +391,33 @@ async def test_a_find_whose_answer_was_lost_is_followed_whatever_came_meanwhile(
     assert isinstance(await worker(v1), Later)
     rules = settling.configured(SERVED)
     await batch.store(db, [A.model_copy(update={"version": 2})], source="oai", rules=rules)
-    superseded = await done(worker, v1)
+    superseded = await done(worker, claimed(v1, 2))
     assert superseded.cost == Decimal("0.01") and superseded.result["superseded"]
     assert superseded.result["usage"]["list_cost"] == 0.01
     assert finder.started == 3 and len(finder.sent) == 3  # each sent once
     assert await urls(held) == ["https://github.com/o/probes"]  # v1's answer replaced nothing
+
+
+async def test_a_first_claim_asks_deep_nothing_before_it_hands_over_or_sends(held: Session, db):
+    """Through `serve`, deep's lookup by key failing: the owner's find of v1, v2 stored before
+    its first claim, hands over at once, and v2's is sent at once. A first claim has sent
+    nothing to look up."""
+    await seed.analyse(held, A, code=False)  # no automatic find
+    rules = settling.configured(SERVED)
+    await owners(db)
+    await batch.store(db, [A.model_copy(update={"version": 2})], source="oai", rules=rules)
+    finder = Finder({"result": {"links": [found("https://github.com/o/v2", "public")]}})
+    finder.lookup_fails = True
+    client, fake = archive()
+    fake.texts[A.id] = (2, BODY)
+    async with served(
+        db, SERVED, models=Scripted().gate(SERVED), integrations=[deep(finder)], archive=client
+    ):
+        await until(all_ended(held, 2), "v1's hands over, and v2's is sent")
+    v1, v2 = await finds(held)
+    assert v1["result"]["superseded"] and (v2["scope"]["version"], v2["outcome"]) == (2, "done")
+    assert (finder.lookups, finder.started) == (0, 1)
+    assert await urls(held) == ["https://github.com/o/v2"]
 
 
 async def test_a_find_taken_back_after_it_handed_over_ends_by_its_record(

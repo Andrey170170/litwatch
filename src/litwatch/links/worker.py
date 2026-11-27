@@ -7,14 +7,14 @@ failed, superseded, dropped or answered by another, with the usage the service r
 in the unit, holding the paper's locks, that replaces the paper's links or hands the find over.
 A try of an item with its record ends by it before anything else, so a find is never paid for
 twice nor handed over twice (its item's end, a commit of the Work gate's own after the Worker's,
-lost when its process died). One without asks deep about its key first: a find a try before
-started (its answer lost, its end not known) is followed to its end and recorded as any, an
-answer for what the paper no longer is ending superseded with its cost. Only a key deep does not
-know is sent: the paper's text read first from the archive, waiting for it a while as a Deep
-pass does, then without it (the finder starts from the abstract and arXiv's comments), and
-right before it pays, after any wait, the find asked whether it is still to be asked
-(`links.check`). A failed find fails its item with its cost (`FindError`); a later trigger
-submits a fresh one (`links.due`).
+lost when its process died). One without, claimed before (`attempts`), asks deep about its key
+first: a find a try before started (its answer lost, its end not known) is followed to its end
+and recorded as any, an answer for what the paper no longer is ending superseded with its cost.
+A first claim has sent nothing, so it asks nothing. Only a key deep does not know is sent: the
+paper's text read first from the archive, waiting for it a while as a Deep pass does, then
+without it (the finder starts from the abstract and arXiv's comments), and right before it pays,
+after any wait, the find asked whether it is still to be asked (`links.check`). A failed find
+fails its item with its cost (`FindError`); a later trigger submits a fresh one (`links.due`).
 
 A re-check is the link's `check`th of four: its count, what it found and the next check, a
 week later, commit in the unit it ends with, so a try after that commit finds the count past it
@@ -87,10 +87,12 @@ class FindWorker:
             return Done(result=links.SKIPPED)
         key = f"links:{item.id}:{paper_id}"
         try:
-            # A find a try before started (its answer lost, its end not known) is followed, so
-            # what it spent is recorded and its answer checked as any; only one deep does not
-            # know is sent.
-            started = await self.deep.client.find_for(key) or await self._start(item, paper, key)
+            # On a later claim, a find a try before may have started (its answer lost, its end
+            # not known) is followed, so what it spent is recorded and its answer checked as
+            # any; only one deep does not know is sent. A first claim has sent nothing: it goes
+            # straight to its check and its send.
+            known = await self.deep.client.find_for(key) if item.attempts > 1 else None
+            started = known or await self._start(item, paper, key)
             if isinstance(started, Done | Later):
                 return started
             if isinstance(started, str):

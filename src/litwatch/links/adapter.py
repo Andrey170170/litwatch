@@ -5,7 +5,8 @@ repository's own page; a link anywhere else is not checked again (`checkable`). 
 check as the finder's in deep (`deep/src/hostcheck.ts`), one table of fixture responses
 (`deep/tests/fixtures/host-checks.json`) driving both suites:
 
-- Hugging Face: its `gated` flag is gated; else, for weights, a listed weight file is public;
+- Hugging Face: its `gated` flag (`true`, "auto", "manual"; `false` or absent is not; anything
+  else says nothing) is gated; else, for weights, a listed weight file is public;
   for code, a listed file beside the filler; a repository with neither is a placeholder. A 401
   or 404 is missing (it answers 401 for a repository it does not have).
 - GitHub: for code, a file beside the filler in its contents is public; for weights, a weight
@@ -218,7 +219,10 @@ async def _huggingface(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked
     if not isinstance(found, dict):
         return None
     license = _hf_license(found)
-    if found.get("gated") not in (None, False):
+    gated = found.get("gated", False)  # absent: not gated
+    if not (gated is False or gated is True or gated in ("auto", "manual")):
+        return None  # not a value its API gives
+    if gated is not False:
         return "gated", license
     if not isinstance(found.get("siblings"), list):
         return None

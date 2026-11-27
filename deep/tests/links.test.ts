@@ -88,6 +88,21 @@ test("the checks' own GET reads a large answer whole, up to the bound litwatch's
   assert.equal(await huge("https://api.github.com/repos/o/huge"), null);
 });
 
+test("the checks' own GET stops with the find: none starts once its session is aborted", async () => {
+  const session = new AbortController();
+  let asked = 0;
+  const get = apiGet(async (_url, init) => {
+    asked++;
+    assert.ok(init.signal, "each request carries the find's signal with its timeout");
+    session.abort(); // the find ends while its first request is answered
+    return new Response(null, { status: 301, headers: { location: "https://api.github.com/repos/o/new" } });
+  }, session.signal);
+  assert.equal(await get("https://api.github.com/repos/o/old"), null);
+  assert.equal(asked, 1, "the redirect is not followed once the find has ended");
+  assert.equal(await get("https://api.github.com/repos/o/r"), null);
+  assert.equal(asked, 1);
+});
+
 test("a GitHub or Hugging Face link takes its state from the host's API, whatever the draft says", async () => {
   const { models: m, faux } = models();
   const hf = { url: "https://huggingface.co/o/m", kind: "weights", state: "public", license: null };

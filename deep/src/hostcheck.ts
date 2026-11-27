@@ -5,9 +5,9 @@
  * from it whatever the model drafted; litwatch's weekly re-check (`litwatch.links.adapter`) is the same check in
  * Python, and one table of fixture responses (`tests/fixtures/host-checks.json`) drives both suites.
  *
- * - Hugging Face: its `gated` flag is gated; else, for weights, a listed weight file is public; for code, a listed
- *   file beside the filler; a repository with neither is a placeholder. A 401 or 404 is missing (it answers 401 for a
- *   repository it does not have).
+ * - Hugging Face: its `gated` flag (`true`, "auto", "manual"; `false` or absent is not; anything else says nothing) is
+ *   gated; else, for weights, a listed weight file is public; for code, a listed file beside the filler; a repository
+ *   with neither is a placeholder. A 401 or 404 is missing (it answers 401 for a repository it does not have).
  * - GitHub: for code, a file beside the filler in its contents is public; for weights, a weight file in its tree or a
  *   release asset with a weight file's name; anything else a placeholder. A 404 is missing.
  *
@@ -40,17 +40,20 @@ const TIMEOUT_MS = 30_000;
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /** The host checks' own GET (`fetchImpl` the network; tests give a fake one): each redirect followed by hand, only
- * over HTTPS on the host asked, the answer to a hop elsewhere standing; a body read whole, `MAX_BYTES` at most. */
-export function apiGet(fetchImpl: Fetch = fetch): Get {
+ * over HTTPS on the host asked, the answer to a hop elsewhere standing; a body read whole, `MAX_BYTES` at most. Under
+ * `signal` (the find's session): once it is aborted no request starts, and one under way stops. */
+export function apiGet(fetchImpl: Fetch = fetch, signal?: AbortSignal): Get {
   return async (url) => {
     try {
       const host = new URL(url).hostname;
       let at = url;
       for (let hop = 0; hop <= REDIRECTS; hop++) {
+        if (signal?.aborted) return null;
+        const timeout = AbortSignal.timeout(TIMEOUT_MS);
         const resp = await fetchImpl(at, {
           redirect: "manual",
           headers: { accept: "application/json", "user-agent": "litwatch-deep" },
-          signal: AbortSignal.timeout(TIMEOUT_MS),
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
         const location = resp.headers.get("location");
         if (resp.status >= 300 && resp.status < 400 && location) {
@@ -200,7 +203,9 @@ async function huggingface(api: string, kind: Link["kind"], get: Get): Promise<H
   const card = object(repo.cardData) ? (repo.cardData as { license?: unknown }) : {};
   const license = typeof card.license === "string" ? card.license : tag?.slice("license:".length);
   const at = (state: Link["state"]): HostState => ({ state, ...(license ? { license } : {}), status: 200 });
-  if (repo.gated !== undefined && repo.gated !== null && repo.gated !== false) return at("gated");
+  const gated = repo.gated ?? (Object.hasOwn(repo, "gated") ? null : false); // absent: not gated
+  if (gated !== false && gated !== true && gated !== "auto" && gated !== "manual") return null; // not a value its API gives
+  if (gated !== false) return at("gated");
   if (!Array.isArray(repo.siblings)) return null;
   const names = strings(repo.siblings, "rfilename");
   const held = kind === "weights" ? names.some((n) => WEIGHTS.test(n)) : !filler(names);

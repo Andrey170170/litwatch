@@ -615,6 +615,42 @@
     }
    },
    "expect": null
+  },
+  {
+   "name": "a gated flag that is not one of the API's values says nothing",
+   "url": "https://huggingface.co/o/m",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/m": {
+     "status": 200,
+     "json": {
+      "gated": "false",
+      "siblings": []
+     }
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a Hugging Face model gated automatically is gated",
+   "url": "https://huggingface.co/o/auto",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/auto": {
+     "status": 200,
+     "json": {
+      "gated": "auto",
+      "siblings": [
+       {
+        "rfilename": "model.safetensors"
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "gated"
+   }
   }
  ]
 }

@@ -288,7 +288,7 @@ export async function findLinks(
     },
   };
 
-  const get: Get = hostGet ?? apiGet();
+  const get: Get = hostGet ?? apiGet(fetch, session.signal); // stops with the find
   const repl = await Repl.create(
     {
       paper: paper.body,
