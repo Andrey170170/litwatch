@@ -176,7 +176,8 @@ comments and the paper's text, and goes to the open web only when they say nothi
 `answer({links, note?})`: each link's `url`, `kind` (code or weights), `state` (public, gated, placeholder or
 missing) and `license` where it is cheap to see. A GitHub or Hugging Face link takes its state from the host's API
 (`src/hostcheck.ts`, the same check as litwatch's weekly re-check, both driven by `tests/fixtures/host-checks.json`),
-whatever the agent drafted. Any other link must be one it fetched in the session, by that URL, with an answer that
+whatever the agent drafted, asked by a plain GET of its own, not the session's fetch: 8 MB at most, each redirect hop
+over HTTPS on the host asked. Any other link must be one it fetched in the session, by that URL, with an answer that
 shows its state: a 404 or 410 (or no such host) for missing, a 401 or 403 or a quoted request form for gated, a 2xx
 with a quote of what the page holds for public; a page that answered but is not quoted is dropped, and anything else
 is refused back to it. Its `checked_at` is that fetch's, or the check's, time. An empty list is an answer: none found.

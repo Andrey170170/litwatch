@@ -81,7 +81,7 @@ from tests.scripted import ANALYSIS, CONFIG, Scripted, decision
 from tests.seed import analyse, classify
 from tests.seed import grade as verdict
 from tests.sessions import Bridge, Session, in_read, in_write
-from tests.working import QUIET, items_of, job_of, served, serving, until
+from tests.working import QUIET, items_of, job_of, night, served, serving, until
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=2)
 BODY = "\\section{Method} We read hidden steps off the residual stream. " * 40
@@ -1777,7 +1777,7 @@ async def test_with_automatic_reads_off_a_must_read_queues_none_and_the_owners_r
     async with served(
         gate, off, models=models.gate(off), integrations=integrations, archive=archive(with_text(P))
     ) as app:
-        await nightly.run(gate, off, fetch=False, models=models.gate(off), with_digests=False)
+        await night(gate, db)  # a `litwatch nightly` item, worked by this `serve`
         grades = await in_read(db, word_store.effective_for, P.id)
         assert grades[FAITH.slug].grade == Grade.MUST_READ  # one an automatic Deep read is for
         assert await deep_rows(db) == []

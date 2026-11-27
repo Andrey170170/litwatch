@@ -94,6 +94,12 @@ def _answered(answer: Any) -> bool:
     return isinstance(answer, dict) and isinstance(answer.get("links"), int)
 
 
+def _answered_at(answer: Any) -> datetime | None:
+    """When the answer replaced the paper's links (`links.record` keeps it as `at`)."""
+    at = answer.get("at") if _answered(answer) else None
+    return datetime.fromisoformat(at) if isinstance(at, str) else None
+
+
 async def finds(unit: ReadUnit, paper_id: str) -> list[Find]:
     """The paper's finds, oldest first. A find answered once its answer is recorded: while its
     item is open, by the result `links.record` keeps with it in the unit that writes the links;
@@ -120,6 +126,7 @@ async def finds(unit: ReadUnit, paper_id: str) -> list[Find]:
             outcome=r["outcome"],
             answered=_answered(r["answer"]),
             links=r["answer"]["links"] if _answered(r["answer"]) else None,
+            answered_at=_answered_at(r["answer"]),
             error=r["error"],
             at=r["at"],
         )

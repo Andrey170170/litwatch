@@ -13,14 +13,18 @@ check as the finder's in deep (`deep/src/hostcheck.ts`), one table of fixture re
   404 is missing.
 
 A redirect (a renamed repository: GitHub answers 301, Hugging Face 307) is followed, `REDIRECTS`
-at most, over HTTPS on the same host, as deep's fetch is; one elsewhere is not, and says nothing.
+at most, each hop over HTTPS on the host asked, as deep's check follows it; a hop elsewhere is
+not, and says nothing. An answer that is not the API's (not JSON, past `MAX_BYTES`, not the
+shape the API gives) says nothing either: the re-check counts it, and checks again later.
 
 An Adapter over today's HTTP client until the Fetch gate (A5)."""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -44,8 +48,10 @@ _WEIGHTS = re.compile(
     r"\.(safetensors|bin|pt|pth|ckpt|gguf|onnx|h5|msgpack|npz)(\.part\d+(of\d+)?)?$",
     re.IGNORECASE,
 )
-# How many redirects a re-check follows.
+# How many redirects a re-check follows, and the most an answer may hold: a large GitHub tree
+# fits. Deep's check takes the same (`deep/src/hostcheck.ts`).
 REDIRECTS = 3
+MAX_BYTES = 8_000_000
 
 type Checked = tuple[State, str | None]  # its state, and its license when the host gives one
 
@@ -87,7 +93,9 @@ def _strings(items: Any, field: str) -> list[str]:
 
 
 def _github_license(repo: dict[str, Any]) -> str | None:
-    found = repo.get("license") or {}
+    found = repo.get("license")
+    if not isinstance(found, dict):
+        return None
     spdx = found.get("spdx_id")
     name = found.get("name")
     if isinstance(spdx, str) and spdx and spdx != "NOASSERTION":
@@ -96,10 +104,12 @@ def _github_license(repo: dict[str, Any]) -> str | None:
 
 
 def _hf_license(model: dict[str, Any]) -> str | None:
-    card = model.get("cardData") or {}
-    if isinstance(card.get("license"), str):
+    card, tags = model.get("cardData"), model.get("tags")
+    if isinstance(card, dict) and isinstance(card.get("license"), str):
         return card["license"]
-    tags = [t for t in model.get("tags") or [] if isinstance(t, str) and t.startswith("license:")]
+    if not isinstance(tags, list):
+        return None
+    tags = [t for t in tags if isinstance(t, str) and t.startswith("license:")]
     return tags[0].removeprefix("license:") if tags else None
 
 
@@ -110,7 +120,8 @@ def client() -> httpx.AsyncClient:
 
 async def check(url: str, kind: Kind) -> Checked | None:
     """What the `kind` link holds now, as the module says; None when the host could not say
-    (it is not checked here, did not answer, refused, or was rate limited)."""
+    (it is not checked here, did not answer, refused, was rate limited, or answered what is not
+    its API's)."""
     target = _target(url)
     if target is None:
         return None
@@ -120,65 +131,97 @@ async def check(url: str, kind: Kind) -> Checked | None:
             if host == "github":
                 return await _github(http, api, kind)
             return await _huggingface(http, api, kind)
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+    except httpx.HTTPError as exc:
         log.warning("re-checking %s: %s could not say: %s", url, host, exc)
         return None
 
 
-async def _get(http: httpx.AsyncClient, url: str) -> httpx.Response:
-    """GET `url`, following its redirects over HTTPS on its own host, `REDIRECTS` at most."""
-    resp = await http.get(url)
-    for _ in range(REDIRECTS):
-        if not resp.is_redirect or "location" not in resp.headers:
-            break
-        moved = resp.url.join(resp.headers["location"])
-        if moved.scheme != "https" or moved.host != resp.url.host:
-            break
-        resp = await http.get(moved)
-    return resp
+@dataclass(frozen=True)
+class _Answer:
+    """What a host's API answered: its status, and its JSON when it is a 2xx (else None)."""
+
+    status: int
+    body: Any = None
+
+
+async def _get(http: httpx.AsyncClient, url: str) -> _Answer | None:
+    """GET `url` of a host's API, as deep's check asks it (`apiGet`): each redirect followed,
+    `REDIRECTS` at most, only over HTTPS on the host asked, the answer to a hop elsewhere
+    standing (it says nothing); a 2xx's JSON read, `MAX_BYTES` at most. None for a 2xx that is
+    not JSON or holds more, or for redirects past `REDIRECTS`."""
+    at, host = httpx.URL(url), httpx.URL(url).host
+    for _ in range(REDIRECTS + 1):
+        async with http.stream("GET", at) as resp:
+            if resp.is_redirect and "location" in resp.headers:
+                moved = at.join(resp.headers["location"])
+                if moved.scheme != "https" or moved.host != host:
+                    return _Answer(resp.status_code)
+                at = moved
+                continue
+            if not 200 <= resp.status_code < 300:
+                return _Answer(resp.status_code)
+            body = bytearray()
+            async for chunk in resp.aiter_bytes():
+                body += chunk
+                if len(body) > MAX_BYTES:
+                    return None
+        try:
+            return _Answer(resp.status_code, json.loads(body))
+        except ValueError:
+            return None
+    return None
 
 
 async def _github(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked | None:
     repo = await _get(http, api)
-    if repo.status_code == 404:
-        return "missing", None
-    if repo.status_code != 200:
+    if repo is None or repo.status not in (200, 404):
         return None
-    found = repo.json()
+    if repo.status == 404:
+        return "missing", None
+    found = repo.body
+    if not isinstance(found, dict) or not isinstance(found.get("full_name"), str):
+        return None
     license = _github_license(found)
     named = f"https://{GITHUB_API}/repos/{found['full_name']}"  # as GitHub now names it
     if kind == "code":
         contents = await _get(http, f"{named}/contents")
-        if contents.status_code == 404:  # a repository with no commit has no contents
+        if contents is not None and contents.status == 404:  # no commit, no contents
             return "placeholder", license
-        if contents.status_code != 200:
+        if contents is None or contents.status != 200 or not isinstance(contents.body, list):
             return None
-        return ("placeholder" if _filler(_strings(contents.json(), "path")) else "public"), license
+        return ("placeholder" if _filler(_strings(contents.body, "path")) else "public"), license
     branch = found.get("default_branch") if isinstance(found.get("default_branch"), str) else "HEAD"
     tree = await _get(http, f"{named}/git/trees/{quote(branch, safe='')}?recursive=1")
-    if tree.status_code == 200:
-        if any(_WEIGHTS.search(p) for p in _strings(tree.json().get("tree"), "path")):
+    if tree is None or tree.status not in (200, 404, 409):  # 404, 409: no commit yet
+        return None
+    if tree.status == 200:
+        if not isinstance(tree.body, dict) or not isinstance(tree.body.get("tree"), list):
+            return None
+        if any(_WEIGHTS.search(p) for p in _strings(tree.body["tree"], "path")):
             return "public", license
-    elif tree.status_code not in (404, 409):  # 404, 409: no commit yet
-        return None
     releases = await _get(http, f"{named}/releases?per_page=100")
-    if releases.status_code != 200:
+    if releases is None or releases.status != 200 or not isinstance(releases.body, list):
         return None
-    body = releases.json()
-    assets = [a for r in body if isinstance(r, dict) for a in _strings(r.get("assets"), "name")]
+    assets = [
+        a for r in releases.body if isinstance(r, dict) for a in _strings(r.get("assets"), "name")
+    ]
     return ("public" if any(_WEIGHTS.search(a) for a in assets) else "placeholder"), license
 
 
 async def _huggingface(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked | None:
     resp = await _get(http, api)
-    if resp.status_code in (401, 404):  # Hugging Face answers 401 for a repository it has not
-        return "missing", None
-    if resp.status_code != 200:
+    if resp is None or resp.status not in (200, 401, 404):
         return None
-    found = resp.json()
+    if resp.status in (401, 404):  # Hugging Face answers 401 for a repository it has not
+        return "missing", None
+    found = resp.body
+    if not isinstance(found, dict):
+        return None
     license = _hf_license(found)
     if found.get("gated") not in (None, False):
         return "gated", license
-    names = _strings(found.get("siblings"), "rfilename")
+    if not isinstance(found.get("siblings"), list):
+        return None
+    names = _strings(found["siblings"], "rfilename")
     held = any(_WEIGHTS.search(n) for n in names) if kind == "weights" else not _filler(names)
     return ("public" if held else "placeholder"), license

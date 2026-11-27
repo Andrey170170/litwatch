@@ -280,6 +280,14 @@ class DeepClient:
         resp.raise_for_status()
         return _job_ref(resp).id
 
+    async def find_for(self, key: str) -> str | None:
+        """The find a submission with `key` started, if the service still has it."""
+        resp = await self.http.get(f"{self.base_url}/links/keys/{quote(key, safe='')}")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return _job_ref(resp).id
+
     async def follow(self, job_id: str, since: datetime, label: str = "") -> Outcome:
         """Poll a job until it ends, or until `timeout_seconds` after `since` (when it was
         submitted). A failed poll raises, and the job can be followed again later, until then.

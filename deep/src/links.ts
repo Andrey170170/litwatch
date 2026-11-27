@@ -23,7 +23,7 @@ import { Queue } from "./jobs.ts";
 import { headings } from "./paper.ts";
 import { Repl, type HostFn } from "./repl.ts";
 import { schemaErrors } from "./schema.ts";
-import { hostState, type Get, type HostState } from "./hostcheck.ts";
+import { apiGet, hostState, type Get, type HostState } from "./hostcheck.ts";
 import type { Static } from "typebox";
 
 /** The finder's budget: it looks a few things up, it writes nothing long. */
@@ -208,7 +208,8 @@ export function linksMessage(input: LinksInput): string {
   return `arXiv:${paper.id}: ${paper.title}\n\nAbstract:\n${paper.abstract}\n\narXiv comments: ${comments || "none"}\n\n${text}`;
 }
 
-/** A find. A supported link's host is asked through `hostGet` (tests give their own), else the session's own fetch. */
+/** A find. A supported link's host is asked through `hostGet` (tests give their own), else the checks' own GET
+ * (`apiGet`), never the model's fetch. */
 export async function findLinks(
   input: LinksInput,
   models: Models,
@@ -287,16 +288,7 @@ export async function findLinks(
     },
   };
 
-  const get: Get =
-    hostGet ??
-    (async (url) => {
-      try {
-        const v = (await hosts.fetch!([url])) as { url?: string; status?: number; text?: unknown };
-        return { status: v.status ?? 0, url: v.url ?? url, text: typeof v.text === "string" ? v.text : "" };
-      } catch {
-        return null;
-      }
-    });
+  const get: Get = hostGet ?? apiGet();
   const repl = await Repl.create(
     {
       paper: paper.body,

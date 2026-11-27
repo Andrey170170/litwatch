@@ -183,8 +183,9 @@ italics. It offers no Deep read. Where a row of it shows (a digest that listed i
    any ("Process notes · 2", folded until opened, each with its kind as a tag: access, tool, budget, input), Prior work (rows that open the paper
    when it has an arXiv id), Among the collection (rows with their rarity stripe and a tag: agrees, extends,
    contradicts, supersedes). It ends with what it was written from and when, and "Write again". Without a card: one
-   line saying when cards are automatic and "Deep read" to ask for one, only while a Deep provider is loaded (no
-   rung at all without one); while one is queued or being written, a status line with a pulsing dot.
+   line, "None yet", and "Deep read" to ask for one (true whether automatic cards are on or off), only while a Deep
+   provider is loaded (no rung at all without one); while one is queued or being written, a status line with a
+   pulsing dot.
 
    A card in the Deep read's format (`"format": "read"`, [deep-read.md](../deep-read.md)) shows as the **Deep read**
    instead, and a card without the tag as above. The rung reads "Deep read", and each section of the read is a rung

@@ -185,7 +185,9 @@ Its own project on top of A6: the labelled query set and goals first, then work 
     (`nightly`, `fulltext`) has nothing to find it by but `work_items`;
   - a CLI nightly submitted while a scheduled fire or chunk is admitted: an extra wait or run, the run lock still
     serializing;
-  - overlapping `serve` processes can delete each other's live `workers` row (a registration supersedes every row).
+  - overlapping `serve` processes can delete each other's live `workers` row (a registration supersedes every row);
+  - two `serve`s on cloned databases sharing one deep can reuse each other's release-link find on deep where a paper
+    and an item id coincide (the find's key, `links:<item>:<paper>`).
 
 - **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
   `evals/` and homelab specifics out of the repository (the image ships `evals/labels/` for Run replay: they move

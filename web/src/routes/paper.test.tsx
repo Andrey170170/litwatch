@@ -530,13 +530,21 @@ describe("a paper's page", () => {
     expect(rung.querySelector('a[href^="javascript"]')).toBeNull();
   });
 
+  it("says a paper has no Deep card yet without promising one, whether automatic cards are on or off", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
+    renderApp("/paper/2610.00002");
+    expect(await screen.findByText(/None yet\./)).toHaveTextContent("None yet. Deep read asks for one.");
+    expect(screen.queryByText(/automatic/)).toBeNull();
+  });
+
   it("has no Deep card rung for a paper without one while no card can be asked for", async () => {
     viewport(true);
     scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, card_requestable: false } });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.queryByText("Deep card")).toBeNull();
-    expect(screen.queryByText(/cards are automatic/)).toBeNull();
+    expect(screen.queryByText(/None yet/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Deep read" })).toBeNull();
   });
 

@@ -162,6 +162,82 @@
    "expect": null
   },
   {
+   "name": "a hop off GitHub's API is not followed, even one that comes back",
+   "url": "https://github.com/o/hop",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/hop": {
+     "status": 301,
+     "location": "https://elsewhere.test/back"
+    },
+    "https://elsewhere.test/back": {
+     "status": 301,
+     "location": "https://api.github.com/repos/o/r"
+    },
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": null
+     }
+    },
+    "https://api.github.com/repos/o/r/contents": {
+     "status": 200,
+     "json": [
+      {
+       "path": "train.py"
+      }
+     ]
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "GitHub contents that are not a list say nothing",
+   "url": "https://github.com/o/r",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": null
+     }
+    },
+    "https://api.github.com/repos/o/r/contents": {
+     "status": 200,
+     "json": {
+      "message": "not a list"
+     }
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a GitHub tree with no list of entries says nothing",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": null
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "sha": "abc"
+     }
+    }
+   },
+   "expect": null
+  },
+  {
    "name": "GitHub weights with code but no checkpoint are a placeholder",
    "url": "https://github.com/o/r",
    "kind": "weights",
@@ -524,6 +600,18 @@
    "answers": {
     "https://huggingface.co/api/models/o/m": {
      "status": 503
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a Hugging Face answer of JSON null says nothing",
+   "url": "https://huggingface.co/o/m",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/m": {
+     "status": 200,
+     "json": null
     }
    },
    "expect": null

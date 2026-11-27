@@ -331,9 +331,13 @@ under the paper's locks: a find of what the paper no longer is ends superseded w
 with its answer dropped, and hands over in the same unit (the owner's is asked again of the paper
 as it is, an automatic one is due again); an automatic find whose paper another find answered
 meanwhile ends without asking deep. A find's answer replaces the paper's links (`release_links`:
-url, kind, access state, license, when checked, what set it) and is recorded with its item's
-result in one commit, by which a find tried again ends without asking again; the Work gate ends
-the item in a second. A wrong answer (a URL that is not absolute http(s), a time that is not one
+url, kind, access state, license, when checked, what set it). Each find ends with one record, its
+item's result: answered (with when it replaced the links, which orders the paper's answers),
+failed, superseded, dropped or answered by another, with what it cost, written in the unit that
+replaces the links or hands the find over; the Work gate ends the item in a second commit. A find
+tried again (its process died before that) ends by its record before anything else; one without
+asks deep about its key first, follows a find deep has to its end (an answer for what the paper
+no longer is ending superseded, with its cost), and sends only one deep does not know. A wrong answer (a URL that is not absolute http(s), a time that is not one
 in UTC) fails the find and touches nothing. A GitHub or Hugging Face link takes its state from
 the host's API, by one check shared by deep's finder and the weekly re-check (`deep/src/hostcheck.ts`,
 `links.adapter`, both suites driven by `deep/tests/fixtures/host-checks.json`); deep confirms any

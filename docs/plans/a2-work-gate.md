@@ -181,8 +181,9 @@ Found in a survey of the code at 548857e3:
     finder, a re-check or the owner's action);
   - on the paper's page they show as chips coloured by state (`web/src/components/paper/Actions.tsx`, `linkCells`),
     and a Deep card's Code link stays where no release link exists;
-  - an automatic find is keyed for good by paper and version, a "none found" outcome included; the owner's action
-    always runs a fresh find;
+  - an automatic find is keyed by the paper's identity (its version, or its update when none is known), which
+    keeps one open at a time; its saved answer, "none found" included, keeps later automatic finds of the same
+    identity from running; the owner's action runs a fresh find, one open at a time;
   - re-checks use GitHub's and Hugging Face's APIs;
   - the automatic Deep read switch is `[integrations.deep] automatic`, which sets `word.Rules.automatic_deep`;
     unset keeps today's behaviour, and production sets it `false`.

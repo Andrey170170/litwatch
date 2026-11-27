@@ -10,6 +10,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Map
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -22,6 +23,7 @@ from litwatch.core.work import WorkItem
 from litwatch.gates import work as work_gate
 from litwatch.gates.database import DatabaseGate, LeaseLostError
 from litwatch.gates.work import Result, Worker, WorkGate
+from litwatch.jobs import commands
 from litwatch.jobs.worker import JobWorker
 from litwatch.store import jobs as jobs_store
 from litwatch.store import work as queue
@@ -300,3 +302,29 @@ async def command(
         path.write_text(config)
         monkeypatch.setenv("LITWATCH_CONFIG", str(path))
     return await asyncio.to_thread(CliRunner().invoke, cli.app, list(argv), input=input)
+
+
+async def night(db: DatabaseGate, conn: Session) -> None:
+    """The nightly as `litwatch nightly` runs it, without fetching or digests: an item
+    (`jobs.commands`) the test's `serve` works, through to its end."""
+    name = str(uuid4())
+    scope = {"fetch": False, "days": None, "limit": None, "digests": False}
+    async with db.write("litwatch nightly") as unit:
+        item = await queue.submit(unit, commands.kind("nightly"), name, scope=scope, admission=name)
+
+    async def ended() -> bool:
+        return (await state_of(conn, item.id))["state"] == "ended"
+
+    await until(ended, "the nightly ends")
+    assert (await state_of(conn, item.id))["outcome"] == "done"
+
+
+async def state_of(conn: Session, item_id: int) -> dict[str, Any]:
+    found = await (
+        await conn.execute(
+            "SELECT state, outcome, error, cost, attempts FROM work_items WHERE id = %s",
+            (item_id,),
+        )
+    ).fetchone()
+    assert found is not None
+    return found

@@ -379,27 +379,29 @@ async def release_links(
     c: ReadUnit, paper_id: str, *, finds: bool, processed: bool
 ) -> dict[str, Any]:
     """The paper page's release links (`s.Paper`'s fields), as the paper is now (`links`'s
-    identity): those stored, shown whatever is loaded; the last answer for the paper as it is;
-    the owner's last find of it; its open find, and whether one runs here (`finds`,
-    `link_finder`); and whether "Find links" applies: finds run here, the paper is `processed`
-    (not dropped), and no find of the owner's of it is open."""
+    identity): those stored, shown whatever is loaded; the answer for the paper as it is that
+    replaced them last; the owner's last find of it; its open find; whether the page is to poll
+    (`finding_links`: finds run here, `link_finder`, and one of it is open, or one of the
+    owner's of what it was, still to hand over); and whether "Find links" applies: finds run
+    here, the paper is `processed` (not dropped), and no find of the owner's of it is open."""
     stored = [
         s.ReleaseLink(**link.model_dump()) for link in await links_store.of_paper(c, paper_id)
     ]
     all_finds = await links_store.finds(c, paper_id)
     now = await links_store.current(c, paper_id)
     of_now = links.covering(all_finds, now.of) if now else []
-    answers = sorted((f for f in of_now if f.answered), key=lambda f: f.at)
+    # The answer that replaced the links last, whichever item the Work gate ended last.
+    answers = sorted((f for f in of_now if f.answered), key=lambda f: f.answered_at or f.at)
     owners = [f for f in of_now if f.by == "owner"]
-    open_finds = sorted(
-        (f for f in all_finds if f.open), key=lambda f: (f.state != "running", f.id)
-    )
+    open_finds = sorted((f for f in of_now if f.open), key=lambda f: (f.state != "running", f.id))
+    # An owner's find of what the paper was, still open, is to hand over: the page waits for it.
+    handing_over = any(f.open and f.by == "owner" for f in all_finds)
     return {
         "links": stored,
         "link_answer": _find(answers[-1] if answers else None),
         "owner_find": _find(owners[-1] if owners else None),
         "open_find": _find(open_finds[0] if open_finds else None),
-        "finding_links": finds and bool(open_finds),
+        "finding_links": finds and (bool(open_finds) or handing_over),
         "links_findable": finds and processed and not any(f.open for f in owners),
     }
 

@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from urllib.parse import unquote
 
 import httpx
 import pytest
@@ -32,7 +32,7 @@ from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Done, Later
 from litwatch.intake import batch
 from litwatch.integrations.deep import Deep, DeepClient
-from litwatch.jobs import commands, nightly
+from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
 from litwatch.links import adapter
 from litwatch.links import worker as worker_module
@@ -44,9 +44,9 @@ from litwatch.store import work as queue
 from tests import seed, settling
 from tests.conftest import TREE, answering, paper
 from tests.fakes_http import FakeArchive, mock
-from tests.scripted import CONFIG, Scripted, decision
+from tests.scripted import ANALYSIS, CONFIG, Scripted, decision
 from tests.sessions import Session, in_read
-from tests.working import QUIET, TOKEN, served, until
+from tests.working import QUIET, TOKEN, night, served, state_of, until
 
 A = paper("2610.00001", title="Probes for hidden steps", abstract="Linear probes.", version=1)
 BODY = "\\section{Code} Our code is at github.com/o/probes. " * 20
@@ -66,9 +66,9 @@ def found(url: str, state: str, kind: str = "code", checked: str = NOW) -> dict[
 class Finder:
     """deep's finds: a key it has not seen starts a find, which ends on its first poll as the
     next of `ends` (its `result`, or its `error` and `failure`), else none found; a key it has
-    is that find. `lose` submissions are answered 502 after the find started, as a proxy losing
-    the answer would; with `refuse`, every submission is turned down with that status. `sent` is
-    what each submission sent."""
+    is that find, and `GET /links/keys/<key>` finds it. `lose` submissions are answered 502
+    after the find started, as a proxy losing the answer would; with `refuse`, every
+    submission is turned down with that status. `sent` is what each submission sent."""
 
     def __init__(self, *ends: dict[str, Any], lose: int = 0, refuse: int | None = None) -> None:
         self.ends = list(ends)
@@ -83,6 +83,11 @@ class Finder:
         return len(self.keys)
 
     def handle(self, req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path.startswith("/links/keys/"):
+            asked = unquote(req.url.path.removeprefix("/links/keys/"))
+            if asked not in self.keys:
+                return httpx.Response(404, json={"error": "no job for that key"})
+            return httpx.Response(200, json={"id": self.keys[asked], "status": "running"})
         if req.method == "POST" and req.url.path == "/links":
             self.sent.append(json.loads(req.content))
             if self.refuse is not None:
@@ -165,32 +170,6 @@ def key(version: int | None, updated: str | None = None, paper_id: str = A.id) -
     return Identity(version, updated).key(paper_id)
 
 
-async def night(db: DatabaseGate, conn: Session) -> None:
-    """The nightly as `litwatch nightly` runs it, without fetching or digests: an item
-    (`jobs.commands`) the test's `serve` works, through to its end."""
-    name = str(uuid4())
-    scope = {"fetch": False, "days": None, "limit": None, "digests": False}
-    async with db.write("litwatch nightly") as unit:
-        item = await queue.submit(unit, commands.kind("nightly"), name, scope=scope, admission=name)
-
-    async def ended() -> bool:
-        return (await state_of(conn, item.id))["state"] == "ended"
-
-    await until(ended, "the nightly ends")
-    assert (await state_of(conn, item.id))["outcome"] == "done"
-
-
-async def state_of(conn: Session, item_id: int) -> dict[str, Any]:
-    found = await (
-        await conn.execute(
-            "SELECT state, outcome, error, cost, attempts FROM work_items WHERE id = %s",
-            (item_id,),
-        )
-    ).fetchone()
-    assert found is not None
-    return found
-
-
 async def died_running(conn: Session, item_id: int) -> None:
     """The item as a process that died working it leaves it: running, its lease lapsed, so a
     `serve`'s Work gate takes it back."""
@@ -219,6 +198,12 @@ async def owners(db: DatabaseGate, paper_id: str = A.id) -> WorkItem:
         item = await links.request(unit, paper_id)
     assert item is not None
     return item
+
+
+async def done(worker: FindWorker, item: WorkItem) -> Done:
+    ended = await worker(item)
+    assert isinstance(ended, Done)
+    return ended
 
 
 async def page_of(db: DatabaseGate, *, finds: bool = True) -> dict[str, Any]:
@@ -261,6 +246,23 @@ async def test_finds_run_once_per_version_after_the_nightly_s_analysis_and_after
     assert [s["paper"]["body"] for s in finder.sent] == [BODY, BODY]  # from the paper's text
     assert finder.sent[0].get("comments") is None  # A has none: sent as absent
     assert await urls(held) == []  # the newest find's answer stands, none found included
+
+
+async def test_an_analysis_that_says_weights_alone_is_found_by_the_nightly(
+    held: Session, db: DatabaseGate
+):
+    models = Scripted()
+    models.decisions[A.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
+    models.analyses[A.title] = ANALYSIS | {"releases_code": False, "releases_weights": True}
+    weights = found("https://huggingface.co/o/m", "public", "weights")
+    finder = Finder({"result": {"links": [weights]}})
+    client, _ = archive()
+    async with served(
+        db, SERVED, models=models.gate(SERVED), integrations=[deep(finder)], archive=client
+    ):
+        await night(db, held)
+        await until(all_ended(held, 1), "the find ends")
+    assert finder.started == 1 and await urls(held) == ["https://huggingface.co/o/m"]
 
 
 async def test_with_automatic_reads_off_links_are_still_found(held: Session, db: DatabaseGate):
@@ -345,7 +347,96 @@ async def test_a_find_whose_answer_was_lost_follows_the_same_find(held: Session,
     worker = FindWorker(db, archive()[0], deep(finder))
     assert isinstance(await worker(item), Later)  # the submission's answer lost
     assert isinstance(await worker(item), Done)
-    assert finder.started == 1 and len(finder.sent) == 2  # sent twice, one find
+    assert finder.started == 1 and len(finder.sent) == 1  # found by its key, not sent again
+
+
+async def test_a_find_whose_answer_was_lost_is_followed_whatever_came_meanwhile(held: Session, db):
+    """Deep took the find but its answer was lost; before the next try the paper's v2 is
+    stored, or another find answered: the next try follows deep's find, by its key, rather
+    than deciding afresh, so what it cost is recorded, and an answer for v1 ends superseded."""
+    await seed.analyse(held, A, code=True)
+    async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
+        await links.due(unit, [A.id])
+    automatic = await item_of(held, key(1))
+    probes = {"result": {"links": [found("https://github.com/o/probes", "public")]}}
+    finder = Finder(probes, probes, probes, lose=1)
+    worker = FindWorker(db, archive()[0], deep(finder))
+    assert isinstance(await worker(automatic), Later)  # deep has it; its answer lost
+    mine = await owners(db)
+    assert isinstance(await worker(mine), Done)  # the owner's answers meanwhile
+    await ended_by_the_gate(held, mine, {"links": 1})
+    answered = await done(worker, automatic)
+    assert answered.cost == Decimal("0.01") and answered.result["links"] == 1
+    assert finder.started == 2  # its own, followed: not dropped as answered by another
+    v1 = await owners(db)
+    finder.lose = 1
+    assert isinstance(await worker(v1), Later)
+    rules = settling.configured(SERVED)
+    await batch.store(db, [A.model_copy(update={"version": 2})], source="oai", rules=rules)
+    superseded = await done(worker, v1)
+    assert superseded.cost == Decimal("0.01") and superseded.result["superseded"]
+    assert superseded.result["usage"]["list_cost"] == 0.01
+    assert finder.started == 3 and len(finder.sent) == 3  # each sent once
+    assert await urls(held) == ["https://github.com/o/probes"]  # v1's answer replaced nothing
+
+
+async def test_a_find_taken_back_after_it_handed_over_ends_by_its_record(
+    held: Session, db, monkeypatch
+):
+    """A paid find of v1, superseded by v2 while deep worked it, recorded and handed over, and
+    its process died before the gate ended it: taken back after v2's find has ended, it ends by
+    its record, with its cost, before reading the archive, and hands over nothing again."""
+    await seed.analyse(held, A, code=False)
+    rules = settling.configured(SERVED)
+    finder = Finder({"result": {"links": []}}, {"result": {"links": []}})
+    client, fake = archive()
+    fake.texts[A.id] = (2, BODY)
+    service = deep(finder)
+    follow = service.client.follow_find
+
+    async def v2_meanwhile(find_id: str) -> Any:
+        if finder.started == 1:
+            await batch.store(db, [A.model_copy(update={"version": 2})], source="oai", rules=rules)
+        return await follow(find_id)
+
+    monkeypatch.setattr(service.client, "follow_find", v2_meanwhile)
+    worker = FindWorker(db, client, service)
+    v1 = await owners(db)
+    first = await done(worker, v1)
+    assert first.cost == Decimal("0.01") and first.result["superseded"]
+    _, v2 = await finds(held)
+    v2_item = await in_read(held, queue.get, v2["id"])
+    assert v2_item is not None
+    assert isinstance(await worker(v2_item), Done)
+    await ended_by_the_gate(held, v2_item, {"links": 0})
+
+    async def no_archive(*args, **kwargs):
+        raise AssertionError("a find with its record reads no text")
+
+    monkeypatch.setattr(worker_module, "read_text", no_archive)
+    assert await worker(v1) == first
+    assert len(await finds(held)) == 2 and finder.started == 2  # handed over once
+
+
+async def test_the_answer_that_replaced_the_links_last_is_the_papers_answer(held: Session, db):
+    """An automatic find writes a link, and its process dies before its item ends; the owner's
+    then answers none found and ends; the automatic item ends after it. The paper's answer is
+    the owner's, which replaced the links last, not the one the gate ended last."""
+    await seed.analyse(held, A, code=True)
+    async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
+        await links.due(unit, [A.id])
+    automatic = await item_of(held, key(1))
+    probes = {"result": {"links": [found("https://github.com/o/probes", "public")]}}
+    finder = Finder(probes, {"result": {"links": []}})
+    worker = FindWorker(db, archive()[0], deep(finder))
+    first = await done(worker, automatic)
+    mine = await owners(db)
+    second = await done(worker, mine)
+    await ended_by_the_gate(held, mine, second.result)
+    await ended_by_the_gate(held, automatic, first.result)
+    page = await page_of(db)
+    assert page["links"] == [] and page["link_answer"].links == 0
+    assert page["link_answer"].by == "owner"
 
 
 async def test_a_find_taken_back_after_its_end_committed_does_not_ask_again(
@@ -449,8 +540,14 @@ async def test_a_find_of_what_the_paper_no_longer_is_hands_over_and_replaces_not
 
     monkeypatch.setattr(worker_module, "read_text", stored_meanwhile)
     assert await worker(v1) == Done(result=links.SUPERSEDED)
-    monkeypatch.setattr(worker_module, "read_text", read_text)
     assert finder.started == 0
+
+    async def no_archive(*args, **kwargs):
+        raise AssertionError("a find with its record reads no text")
+
+    monkeypatch.setattr(worker_module, "read_text", no_archive)
+    assert await worker(v1) == Done(result=links.SUPERSEDED)  # tried again: by its record
+    monkeypatch.setattr(worker_module, "read_text", read_text)
     # Its answer, had it come as the version was stored: under the paper's lock, refused.
     answer = contract.LinksAnswer.model_validate({"links": [found("https://o.io/x", "public")]})
     async with db.write("a late answer", taxonomy="shared", papers=[A.id]) as unit:
@@ -662,6 +759,26 @@ async def test_the_page_polls_only_a_find_that_runs_here(held: Session, db):
     assert page["finding_links"] and page["links_findable"] and page["owner_find"] is None
 
 
+async def test_the_page_says_a_find_is_open_only_of_the_paper_as_it_is(held: Session, db):
+    """v1's automatic find still queued, v2 stored rewritten (not analysed yet, so not due): no
+    find of v2 is open, and none is said to be; an owner's find of v1, still to hand over,
+    keeps the page polling."""
+    await seed.analyse(held, A, code=True)
+    async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
+        await links.due(unit, [A.id])
+    rules = settling.configured(SERVED)
+    v2 = A.model_copy(update={"version": 2, "abstract": "Linear probes, read anew."})
+    await batch.store(db, [v2], source="oai", rules=rules)
+    assert len(await finds(held)) == 1  # v1's alone
+    page = await page_of(db)
+    assert (page["open_find"], page["finding_links"]) == (None, False)
+    said = mcp._links_lines(s.Paper.model_construct(**page))  # the page's release links alone
+    assert not any("A find of its links" in line for line in said)
+    await held.execute('UPDATE work_items SET scope = scope || \'{"by": "owner"}\'')
+    page = await page_of(db)
+    assert (page["open_find"], page["finding_links"]) == (None, True)
+
+
 async def test_an_answer_that_breaks_the_contract_fails_the_find_and_replaces_nothing(
     held: Session, db: DatabaseGate
 ):
@@ -833,6 +950,29 @@ async def test_a_re_check_taken_back_after_its_write_committed_asks_nothing(
     ]
 
 
+async def test_a_re_check_its_host_answers_badly_is_counted_and_due_again(
+    held: Session, db, monkeypatch
+):
+    """A 200 that is not the API's (JSON `null`) says nothing: the check is counted, the next
+    one submitted, as for a host that did not answer."""
+    hosting(monkeypatch, lambda req: httpx.Response(200, content=b"null"))
+    await seed.analyse(held, A, code=True)
+    async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
+        await links.due(unit, [A.id])
+    item = await item_of(held, key(1))
+    await FindWorker(db, archive()[0], deep(Finder({"result": {"links": PLACEHOLDER}})))(item)
+    (first,) = await rechecks(held)
+    check = await in_read(held, queue.find, store.RECHECK, first["key"])
+    assert check is not None
+    await RecheckWorker(db)(check)
+    (link,) = [k for k in await in_read(held, store.of_paper, A.id) if k.state == "placeholder"]
+    assert link.rechecks == 1
+    assert [r["key"] for r in await rechecks(held)] == [
+        recheck_key(link.id, 1),
+        recheck_key(link.id, 2),
+    ]
+
+
 async def test_a_placeholder_that_has_its_code_now_is_public_and_left(
     held: Session, db, monkeypatch
 ):
@@ -869,8 +1009,8 @@ async def test_a_hosts_api_says_what_a_link_holds_as_the_shared_table_says(monke
             return httpx.Response(404)
         if "location" in answer:
             return httpx.Response(answer["status"], headers={"location": answer["location"]})
-        if "json" in answer:
-            return httpx.Response(answer["status"], json=answer["json"])
+        if "json" in answer:  # `null` too, sent as such
+            return httpx.Response(answer["status"], content=json.dumps(answer["json"]).encode())
         return httpx.Response(answer["status"])
 
     hosting(monkeypatch, handle)
@@ -884,6 +1024,29 @@ async def test_a_hosts_api_says_what_a_link_holds_as_the_shared_table_says(monke
             else {"state": checked[0]} | ({"license": checked[1]} if checked[1] else {})
         )
     assert said == case["expect"]
+
+
+async def test_a_hosts_api_answer_is_read_whole_up_to_the_bound_deeps_check_takes_too(
+    monkeypatch,
+):
+    tree = [{"path": f"src/module_{i}/file_{i}.py"} for i in range(10_000)]
+    tree.append({"path": "ckpt/model.safetensors"})
+    big = json.dumps({"tree": tree}).encode()
+    assert len(big) > 300_000
+
+    def handle(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/repos/o/big":
+            return httpx.Response(200, json={"full_name": "o/big", "default_branch": "main"})
+        if req.url.path == "/repos/o/big/git/trees/main":
+            return httpx.Response(200, content=big)
+        if req.url.path == "/repos/o/huge":  # its API's JSON, past the bound
+            pad = "x" * adapter.MAX_BYTES
+            return httpx.Response(200, json={"full_name": "o/huge", "pad": pad})
+        return httpx.Response(200, json=[{"path": "train.py"}])  # its contents: code
+
+    hosting(monkeypatch, handle)
+    assert await adapter.check("https://github.com/o/big", "weights") == ("public", None)
+    assert await adapter.check("https://github.com/o/huge", "code") is None
 
 
 async def test_a_paper_dropped_during_its_find_keeps_its_links(held: Session, db):

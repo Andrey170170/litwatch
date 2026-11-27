@@ -85,9 +85,9 @@ class Identity:
 @dataclass(frozen=True)
 class Find:
     """One find of a paper, its work item: by the owner or the finder, of what (`of`), where it
-    stands (`state`, `outcome` once ended), whether it answered (ended done with its answer,
-    "none found" included) and with how many links, its error, and when it ended, started or is
-    due (`at`)."""
+    stands (`state`, `outcome` once ended), whether it answered ("none found" included) and with
+    how many links, its error, when it ended, started or is due (`at`), and when its answer
+    replaced the paper's links (`answered_at`), which orders a paper's answers."""
 
     id: int
     by: Literal["owner", "finder"]
@@ -98,6 +98,7 @@ class Find:
     links: int | None
     error: str | None
     at: datetime
+    answered_at: datetime | None = None
 
     @property
     def open(self) -> bool:

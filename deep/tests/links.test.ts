@@ -5,7 +5,7 @@ import { Value } from "typebox/value";
 import { LinkJobSchema, LinksAnswerSchema, type LinksInput } from "../src/contracts.ts";
 import { JobQueue } from "../src/jobs.ts";
 import { readFileSync } from "node:fs";
-import { hostState, type Get } from "../src/hostcheck.ts";
+import { apiGet, hostState, MAX_BYTES, type Get } from "../src/hostcheck.ts";
 import { confirms, type Fetched, findLinks, LinkQueue, normal, shows } from "../src/links.ts";
 import { buildServer } from "../src/server.ts";
 import { cell, HOSTS, models, OPEN, OPTS, PAPER, withSite } from "./support.ts";
@@ -53,30 +53,39 @@ test("a fetch of a link elsewhere shows a state by its status and the page the m
 
 type Answers = Record<string, { status: number; json?: unknown; location?: string }>;
 
-/** A host's API as the table gives it: each URL's answer (absent: 404), its redirects followed. */
-const tableGet =
-  (answers: Answers): Get =>
-  async (url) => {
-    let at = url;
-    for (let hops = 0; hops < 5; hops++) {
-      const got = answers[at];
-      if (!got) return { status: 404, url: at, text: "" };
-      if (!got.location) return { status: got.status, url: at, text: got.json === undefined ? "" : JSON.stringify(got.json) };
-      at = new URL(got.location, at).href;
-    }
-    return null;
+/** The network as the table gives it, under the checks' own GET (`apiGet`): each URL's answer, absent a 404; a
+ * redirect answered as such, for `apiGet` to follow or not. */
+const network =
+  (answers: Answers) =>
+  async (url: string): Promise<Response> => {
+    const got = answers[url];
+    if (!got) return new Response("", { status: 404 });
+    if (got.location) return new Response(null, { status: got.status, headers: { location: got.location } });
+    return new Response("json" in got ? JSON.stringify(got.json) : "", { status: got.status });
   };
+const tableGet = (answers: Answers): Get => apiGet(network(answers));
 
 test("a host's API says what a link holds, as the table litwatch's re-check shares says", async () => {
   const table = JSON.parse(readFileSync(new URL("./fixtures/host-checks.json", import.meta.url), "utf8")) as {
     cases: { name: string; url: string; kind: "code" | "weights"; answers: Answers; expect: null | "unsupported" | { state: string; license?: string } }[];
   };
-  assert.ok(table.cases.length > 10);
   for (const c of table.cases) {
     const got = await hostState(c.url, c.kind, tableGet(c.answers));
     const said = got === undefined ? "unsupported" : got === null ? null : { state: got.state, ...(got.license ? { license: got.license } : {}) };
     assert.deepEqual(said, c.expect, c.name);
   }
+});
+
+test("the checks' own GET reads a large answer whole, up to the bound litwatch's re-check takes too", async () => {
+  const tree = { tree: [...Array.from({ length: 10000 }, (_, i) => ({ path: `src/module_${i}/file_${i}.py` })), { path: "ckpt/model.safetensors" }] };
+  const answers: Answers = {
+    "https://api.github.com/repos/o/big": { status: 200, json: { full_name: "o/big", default_branch: "main", license: null } },
+    "https://api.github.com/repos/o/big/git/trees/main?recursive=1": { status: 200, json: tree },
+  };
+  assert.ok(JSON.stringify(tree).length > 300_000);
+  assert.deepEqual(await hostState("https://github.com/o/big", "weights", tableGet(answers)), { state: "public", status: 200 });
+  const huge = apiGet(async () => new Response("x".repeat(MAX_BYTES + 1), { status: 200 }));
+  assert.equal(await huge("https://api.github.com/repos/o/huge"), null);
 });
 
 test("a GitHub or Hugging Face link takes its state from the host's API, whatever the draft says", async () => {

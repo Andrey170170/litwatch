@@ -142,34 +142,39 @@ async def _ends(unit: WriteUnit, item: WorkItem) -> tuple[store.Now | None, dict
 async def check(unit: WriteUnit, item: WorkItem) -> dict[str, Any] | None:
     """Before the find pays, in its item's unit holding the paper's locks: what it ends with
     instead (`_ends`, or `ANSWERED` for an automatic find whose identity another answered),
-    or None when it is to be asked."""
+    kept as its record (`record` says why), or None when it is to be asked."""
     now, ended = await _ends(unit, item)
-    if ended is not None or item.scope["by"] == "owner":
-        return ended
-    assert now is not None
-    finds = covering(await store.finds(unit, item.scope["paper_id"]), now.of)
-    return ANSWERED if any(f.answered and f.id != item.id for f in finds) else None
+    if ended is None and item.scope["by"] != "owner":
+        assert now is not None
+        finds = covering(await store.finds(unit, item.scope["paper_id"]), now.of)
+        ended = ANSWERED if any(f.answered and f.id != item.id for f in finds) else None
+    if ended is not None:
+        await work.put_result(unit, item, ended)
+    return ended
 
 
 async def record(
     unit: WriteUnit, item: WorkItem, answer: contract.LinksAnswer | None, result: dict[str, Any]
 ) -> dict[str, Any]:
     """How the find ended, its `answer` or its failure (None) alike, in its item's unit holding
-    the paper's locks: unless the find ends otherwise (`_ends`: dropped, or superseded and
-    handed over), the paper's links replaced by an answer, each placeholder's first re-check
-    submitted, and `result` (the answer's count, or the failure) kept as the item's, by which a
-    try of the item after this commits ends as it did. Returns what the item ends with."""
+    the paper's locks, `result` the answer's count or the failure, with what it spent (`model`,
+    `usage`): ended otherwise (`_ends`: dropped, or superseded and handed over) with what it
+    spent; else an answer replaces the paper's links, each placeholder's first re-check
+    submitted, and is kept with when it replaced them (`at`), which orders the paper's answers.
+    What it ends with is kept as the item's record, in the same unit, so a try of the item after
+    this commits ends as it did, asking nothing (`worker.FindWorker`). Returns that record."""
     now, ended = await _ends(unit, item)
     if ended is not None:
-        return ended
-    assert now is not None
-    if answer is None:
-        await work.put_result(unit, item, result)
-        return result
-    found_by: FoundBy = "owner" if item.scope["by"] == "owner" else "finder"
-    paper_id = item.scope["paper_id"]
-    for link in await store.replace(unit, paper_id, now.of.version, answer.links, found_by):
-        if rechecked_again(link.state, link.rechecks) and adapter.checkable(link.url):
-            await store.submit_recheck(unit, link, 1, next_check(link.checked_at))
-    await work.put_result(unit, item, result)
-    return result
+        kept = ended | {k: result[k] for k in ("model", "usage") if k in result}
+    elif answer is None:
+        kept = result
+    else:
+        assert now is not None
+        found_by: FoundBy = "owner" if item.scope["by"] == "owner" else "finder"
+        paper_id = item.scope["paper_id"]
+        for link in await store.replace(unit, paper_id, now.of.version, answer.links, found_by):
+            if rechecked_again(link.state, link.rechecks) and adapter.checkable(link.url):
+                await store.submit_recheck(unit, link, 1, next_check(link.checked_at))
+        kept = result | {"at": datetime.now(UTC).isoformat()}
+    await work.put_result(unit, item, kept)
+    return kept
