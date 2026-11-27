@@ -7,11 +7,13 @@ does, then goes on without it: the finder starts from the abstract and arXiv's c
 before it pays, after any wait, it asks whether it is still to be asked (`links.check`: the
 paper dropped, another identity now, handed over; or answered meanwhile). Its submission is keyed
 by its item, so while its end is not known (no reply, litwatch stopped waiting, the service lost
-it) the item is tried again after `PAUSE` and follows the same find. Its answer is recorded in
-the item's own unit (`links.record`), its failure too (the finder never answered, the service
-turned it down, broke, or answered what is not the contract's), with the usage the service
-reported; a try after that commit ends as it did: no find is paid for twice, nor a failure
-replayed. A failed find fails its item; a later trigger submits a fresh one (`links.due`). The
+it) the item is tried again after `PAUSE` and follows the same find. How it ended, its answer
+or its failure alike (the finder never answered, the service turned it down, broke, or answered
+what is not the contract's), is recorded by one path (`links.record`), in a unit holding the
+paper's locks, with the usage the service reported: a find of what the paper no longer is ends
+superseded and hands over, whichever way it ended, with what it spent; and a try after that
+commit ends as it did: no find is paid for twice, nor a failure replayed. A failed find fails
+its item with its cost (`FindError`); a later trigger submits a fresh one (`links.due`). The
 Work gate ends the item in a commit of its own after the Worker's.
 
 A re-check is the link's `check`th of four: its count, what it found and the next check, a
@@ -40,7 +42,7 @@ from litwatch.core.fulltext import TEXT_WAIT
 from litwatch.core.links import RECHECK_EVERY, ReleaseLink, rechecked_again
 from litwatch.core.work import WorkItem
 from litwatch.gates.database import DatabaseGate
-from litwatch.gates.work import Done, Later
+from litwatch.gates.work import Done, Later, TerminalError
 from litwatch.integrations.deep import Deep, Found, RejectedError, find_input
 from litwatch.links import adapter
 from litwatch.store import links as store
@@ -57,8 +59,9 @@ TEXT_TRIES = 20
 PAUSE = timedelta(minutes=15)
 
 
-class FindError(RuntimeError):
-    """A find that ended without an answer: tried again by its key it would end so again."""
+class FindError(TerminalError):
+    """A find that ended without an answer, with what it cost: tried again by its key it would
+    end so again."""
 
 
 def _cost(usage: dict[str, Any] | None) -> Decimal | None:
@@ -79,7 +82,7 @@ class FindWorker:
             if kept := await work.results(unit, item.id):  # by a try whose end was lost
                 body = kept[-1][1]
                 if "failed" in body:
-                    raise FindError(body["failed"])
+                    raise FindError(body["failed"], _cost(body.get("usage")))
                 return Done(_cost(body.get("usage")), body)
             paper = await papers_store.get(unit, paper_id)
         if paper is None:
@@ -115,19 +118,17 @@ class FindWorker:
         if found.unsettled:
             log.warning("find links %s: %s; followed again", paper_id, found.error)
             return Later(datetime.now(UTC) + PAUSE)
-        cost = _cost(found.usage)
+        cost, paid = _cost(found.usage), {"model": found.model, "usage": found.usage}
         if found.answer is None:
-            error = found.error or "the find gave no answer"
-            async with self.db.write("record a failed find") as unit:
-                failed = {"failed": error, "model": found.model, "usage": found.usage}
-                await work.put_result(unit, item, failed)
-            raise FindError(error)
-        result = {"links": len(found.answer.links), "model": found.model, "usage": found.usage}
-        async with self.db.write(
-            "record release links", taxonomy="shared", papers=[paper_id]
-        ) as unit:
+            result = {"failed": found.error or "the find gave no answer"} | paid
+        else:
+            result = {"links": len(found.answer.links)} | paid
+        async with self.db.write("record a find", taxonomy="shared", papers=[paper_id]) as unit:
             ended = await links.record(unit, item, found.answer, result)
-        return Done(cost, ended)
+        if "failed" in ended:
+            raise FindError(ended["failed"], cost)
+        # Dropped or superseded meanwhile: what it spent is kept with how it ended.
+        return Done(cost, ended if ended is result else ended | paid)
 
 
 class RecheckWorker:

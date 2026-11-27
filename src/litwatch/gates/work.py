@@ -18,9 +18,10 @@ whatever the Worker returns after that is ignored. An item whose lease expires (
 died, or lost the database) is taken back and run again, by this process or another.
 
 A Worker returns how the item ended: `Done` (or None), or `Later` to have it wait and run again.
-One that raises fails the item, unless the database was lost under it, or a statement lost a
-deadlock or a serialization conflict to another transaction (`conflicted`): then the item is
-given back to be tried again, so a turn or a pass is never left with no item to run it.
+One that raises fails the item, with the cost a `TerminalError` carries, unless the database was
+lost under it, or a statement lost a deadlock or a serialization conflict to another transaction
+(`conflicted`): then the item is given back to be tried again, so a turn or a pass is never left
+with no item to run it.
 Settling needs the lease still live. A failed settling (the database lost) is logged, and the
 item is left to its lease, so it is taken back once that lapses.
 
@@ -91,6 +92,15 @@ class Later:
     waits until `at` and runs again."""
 
     at: datetime
+
+
+class TerminalError(Exception):
+    """A Worker's item failed for good after spending `cost` dollars (None: unknown): raised,
+    the item ends failed with its cost, as `Done` ends one done with it."""
+
+    def __init__(self, message: str, cost: Decimal | None = None) -> None:
+        super().__init__(message)
+        self.cost = cost
 
 
 type Result = Done | Later
@@ -415,9 +425,13 @@ class WorkGate:
             await self._change("try again", lambda unit: queue.again(unit, item))
         elif error is not None:
             log.error("work: %s %s (item %s) failed", *_name(item), exc_info=error)
-            failure = _describe(error)
+            failure, spent = (
+                _describe(error),
+                error.cost if isinstance(error, TerminalError) else None,
+            )
             await self._change(
-                "fail", lambda unit: queue.end(unit, item, Outcome.FAILED, error=failure)
+                "fail",
+                lambda unit: queue.end(unit, item, Outcome.FAILED, error=failure, cost=spent),
             )
         elif isinstance(result := handler.result(), Later):
             at = result.at

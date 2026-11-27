@@ -69,7 +69,8 @@ def link_finder(state: State) -> Deep | None:
     """The card provider that finds release links in this process, if one does: with the
     schedule on, an archive to read papers' texts from and a card provider loaded. `app.serve`
     registers the find's Worker by it, and "Find links" is offered and taken by it, so no find
-    is asked for that no Worker would run."""
+    is asked for that no Worker would run. An automatic find submitted meanwhile (a nightly run
+    with the schedule off) waits, queued, and runs once a process here finds links again."""
     if not state.config.schedule.enabled or state.archive is None:
         return None
     return card_maker(state.integrations)

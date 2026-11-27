@@ -314,7 +314,8 @@ asked for, or arXiv's PDF of it. Everything else answers it 403.
 The service also finds where a paper's code and weights are released (`POST /links`, followed at
 `GET /links/<id>`, the same key protocol as a read; `deep/README.md`). A find is a work item of
 kind `links` (`litwatch.links`), worked only by a `serve` with the schedule on and an archive to
-read papers from. Each find is of the paper as it is when submitted (`core.links.Identity`): its
+read papers from. A find submitted while none runs (the schedule off: the nightly or intake
+still submits automatic ones) waits in the queue, and runs once such a `serve` is back. Each find is of the paper as it is when submitted (`core.links.Identity`): its
 arXiv version, or its update when no version is known; every decision about it asks whether it is
 of the paper as it is now. An automatic one runs when the paper's analysis says it releases code
 or weights, unless the paper as it is has an answer, "none found" included, the owner's or an

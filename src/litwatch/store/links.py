@@ -82,7 +82,7 @@ async def submit_find(unit: WriteUnit, paper_id: str, of: Identity, *, by: Found
     """Submit a find of the paper as `of` is: the finder's, keyed by it (`Identity.key`), so a
     submission while one is open is that one; the owner's, a fresh one."""
     key = of.key(paper_id)
-    scope = {"paper_id": paper_id, "version": of.version, "updated": of.updated, "find": key}
+    scope = {"paper_id": paper_id, "version": of.version, "updated": of.updated}
     if by == "owner":
         key, priority = f"{key}#{uuid4()}", OWNERS_PRIORITY
     else:
@@ -90,17 +90,23 @@ async def submit_find(unit: WriteUnit, paper_id: str, of: Identity, *, by: Found
     return await work.submit(unit, FIND, key, scope=scope | {"by": by}, priority=priority)
 
 
+def _answered(answer: Any) -> bool:
+    return isinstance(answer, dict) and isinstance(answer.get("links"), int)
+
+
 async def finds(unit: ReadUnit, paper_id: str) -> list[Find]:
-    """The paper's finds, oldest first. A find answered once its answer is recorded (`links.record`
-    keeps it as the item's result in the unit that writes the links), before the Work gate ends
-    its item in a commit of its own."""
+    """The paper's finds, oldest first. A find answered once its answer is recorded: while its
+    item is open, by the result `links.record` keeps with it in the unit that writes the links;
+    once the Work gate ends the item, in a commit of its own, by the item's own `result`, the
+    answer's durable record (an ended item's `work_results` may be pruned)."""
     rows = await (
         await unit.execute(
-            "SELECT w.id, w.state, w.outcome, w.error, w.scope, a.body IS NOT NULL AS answered, "
-            "(a.body ->> 'links')::int AS links, "
+            "SELECT w.id, w.state, w.outcome, w.error, w.scope, "
+            "CASE WHEN w.state = 'ended' THEN w.result ELSE a.body END AS answer, "
             "COALESCE(w.ended_at, w.started_at, w.not_before) AS at "
             "FROM work_items w LEFT JOIN LATERAL (SELECT body FROM work_results r "
-            "WHERE r.work_id = w.id AND r.body ? 'links' ORDER BY r.id DESC LIMIT 1) a ON true "
+            "WHERE w.state <> 'ended' AND r.work_id = w.id AND r.body ? 'links' "
+            "ORDER BY r.id DESC LIMIT 1) a ON true "
             "WHERE w.kind = %s AND w.scope ->> 'paper_id' = %s ORDER BY w.id",
             (FIND, paper_id),
         )
@@ -112,8 +118,8 @@ async def finds(unit: ReadUnit, paper_id: str) -> list[Find]:
             of=Identity.of(r["scope"]),
             state=r["state"],
             outcome=r["outcome"],
-            answered=bool(r["answered"]),
-            links=r["links"] if r["answered"] else None,
+            answered=_answered(r["answer"]),
+            links=r["answer"]["links"] if _answered(r["answer"]) else None,
             error=r["error"],
             at=r["at"],
         )

@@ -10,15 +10,15 @@ owner's or the finder's, or an automatic find of it is open, or `FIND_TRIES` of 
 failed one is tried again by a later trigger, and by `retry` in the nightly. The owner's "find
 links" runs a fresh one each time (`request`), unless one of theirs of the same identity is open.
 
-Each is worked by `worker.FindWorker`. Before it pays (`check`), and again with its answer
-(`record`), in a unit holding the paper's locks: a find of a dropped paper ends `SKIPPED`; one of
-what the paper no longer is ends `SUPERSEDED` and hands over (`hand_over`): the owner's is asked
-again of the paper as it is, an automatic one is due again; an automatic find whose identity
-another find answered meanwhile ends `ANSWERED` without paying. An answer replaces the paper's
-links and is recorded with its item's result in one unit, so an item tried again after that
-commit ends without asking again. A placeholder link is checked again a week later, four times
-at most, each check its own item, by a plain request to its host's API (`worker.RecheckWorker`,
-`adapter`); no other link is."""
+Each is worked by `worker.FindWorker`. Before it pays (`check`), and again as it ends (`record`,
+its answer or its failure alike), in a unit holding the paper's locks: a find of a dropped
+paper ends `SKIPPED`; one of what the paper no longer is ends `SUPERSEDED` and hands over
+(`hand_over`): the owner's is asked again of the paper as it is, an automatic one is due again;
+an automatic find whose identity another find answered meanwhile ends `ANSWERED` without
+paying. An answer replaces the paper's links and is recorded with its item's result in one
+unit, so an item tried again after that commit ends without asking again. A placeholder link
+is checked again a week later, four times at most, each check its own item, by a plain request
+to its host's API (`worker.RecheckWorker`, `adapter`); no other link is."""
 
 from __future__ import annotations
 
@@ -152,16 +152,20 @@ async def check(unit: WriteUnit, item: WorkItem) -> dict[str, Any] | None:
 
 
 async def record(
-    unit: WriteUnit, item: WorkItem, answer: contract.LinksAnswer, result: dict[str, Any]
+    unit: WriteUnit, item: WorkItem, answer: contract.LinksAnswer | None, result: dict[str, Any]
 ) -> dict[str, Any]:
-    """The find's answer, in its item's unit holding the paper's locks: unless the find ends
-    otherwise (`_ends`), the paper's links replaced by the answer, each placeholder's first
-    re-check submitted, and `result` kept as the item's, by which a try of the item after this
-    commits ends at once. Returns what the item ends with."""
+    """How the find ended, its `answer` or its failure (None) alike, in its item's unit holding
+    the paper's locks: unless the find ends otherwise (`_ends`: dropped, or superseded and
+    handed over), the paper's links replaced by an answer, each placeholder's first re-check
+    submitted, and `result` (the answer's count, or the failure) kept as the item's, by which a
+    try of the item after this commits ends as it did. Returns what the item ends with."""
     now, ended = await _ends(unit, item)
     if ended is not None:
         return ended
     assert now is not None
+    if answer is None:
+        await work.put_result(unit, item, result)
+        return result
     found_by: FoundBy = "owner" if item.scope["by"] == "owner" else "finder"
     paper_id = item.scope["paper_id"]
     for link in await store.replace(unit, paper_id, now.of.version, answer.links, found_by):

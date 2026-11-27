@@ -9,8 +9,10 @@
  *   file beside the filler; a repository with neither is a placeholder. A 401 or 404 is missing (it answers 401 for a
  *   repository it does not have).
  * - GitHub: for code, a file beside the filler in its contents is public; for weights, a weight file in its tree or a
- *   release asset with a weight file's name; anything else a placeholder. A 404 is missing. A redirect (a renamed
- *   repository) is followed within its API.
+ *   release asset with a weight file's name; anything else a placeholder. A 404 is missing.
+ *
+ * A redirect (a renamed repository: GitHub answers 301, Hugging Face 307) is followed over HTTPS on the same host, as
+ * the re-check follows it; one that ends elsewhere says nothing.
  */
 
 import type { LinksAnswer } from "./contracts.ts";
@@ -65,7 +67,8 @@ async function json(get: Get, url: string, host: string): Promise<{ status: numb
   const got = await get(url);
   if (got === null) return null;
   try {
-    if (new URL(got.url).hostname !== host) return null;
+    const at = new URL(got.url);
+    if (at.protocol !== "https:" || at.hostname !== host) return null; // redirected elsewhere: it says nothing
   } catch {
     return null;
   }

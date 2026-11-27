@@ -10,7 +10,10 @@ check as the finder's in deep (`deep/src/hostcheck.ts`), one table of fixture re
   or 404 is missing (it answers 401 for a repository it does not have).
 - GitHub: for code, a file beside the filler in its contents is public; for weights, a weight
   file in its tree or a release asset with a weight file's name; anything else a placeholder. A
-  404 is missing. Its redirects (a renamed repository) are followed within its API.
+  404 is missing.
+
+A redirect (a renamed repository: GitHub answers 301, Hugging Face 307) is followed, `REDIRECTS`
+at most, over HTTPS on the same host, as deep's fetch is; one elsewhere is not, and says nothing.
 
 An Adapter over today's HTTP client until the Fetch gate (A5)."""
 
@@ -41,7 +44,7 @@ _WEIGHTS = re.compile(
     r"\.(safetensors|bin|pt|pth|ckpt|gguf|onnx|h5|msgpack|npz)(\.part\d+(of\d+)?)?$",
     re.IGNORECASE,
 )
-# How many of GitHub's redirects a re-check follows.
+# How many redirects a re-check follows.
 REDIRECTS = 3
 
 type Checked = tuple[State, str | None]  # its state, and its license when the host gives one
@@ -122,21 +125,21 @@ async def check(url: str, kind: Kind) -> Checked | None:
         return None
 
 
-async def _github_get(http: httpx.AsyncClient, url: str) -> httpx.Response:
-    """GET `url`, following GitHub's redirects within its API, `REDIRECTS` at most."""
+async def _get(http: httpx.AsyncClient, url: str) -> httpx.Response:
+    """GET `url`, following its redirects over HTTPS on its own host, `REDIRECTS` at most."""
     resp = await http.get(url)
     for _ in range(REDIRECTS):
         if not resp.is_redirect or "location" not in resp.headers:
             break
         moved = resp.url.join(resp.headers["location"])
-        if moved.scheme != "https" or moved.host != GITHUB_API:
+        if moved.scheme != "https" or moved.host != resp.url.host:
             break
         resp = await http.get(moved)
     return resp
 
 
 async def _github(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked | None:
-    repo = await _github_get(http, api)
+    repo = await _get(http, api)
     if repo.status_code == 404:
         return "missing", None
     if repo.status_code != 200:
@@ -145,20 +148,20 @@ async def _github(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked | No
     license = _github_license(found)
     named = f"https://{GITHUB_API}/repos/{found['full_name']}"  # as GitHub now names it
     if kind == "code":
-        contents = await _github_get(http, f"{named}/contents")
+        contents = await _get(http, f"{named}/contents")
         if contents.status_code == 404:  # a repository with no commit has no contents
             return "placeholder", license
         if contents.status_code != 200:
             return None
         return ("placeholder" if _filler(_strings(contents.json(), "path")) else "public"), license
     branch = found.get("default_branch") if isinstance(found.get("default_branch"), str) else "HEAD"
-    tree = await _github_get(http, f"{named}/git/trees/{quote(branch, safe='')}?recursive=1")
+    tree = await _get(http, f"{named}/git/trees/{quote(branch, safe='')}?recursive=1")
     if tree.status_code == 200:
         if any(_WEIGHTS.search(p) for p in _strings(tree.json().get("tree"), "path")):
             return "public", license
     elif tree.status_code not in (404, 409):  # 404, 409: no commit yet
         return None
-    releases = await _github_get(http, f"{named}/releases?per_page=100")
+    releases = await _get(http, f"{named}/releases?per_page=100")
     if releases.status_code != 200:
         return None
     body = releases.json()
@@ -167,7 +170,7 @@ async def _github(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked | No
 
 
 async def _huggingface(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked | None:
-    resp = await http.get(api)
+    resp = await _get(http, api)
     if resp.status_code in (401, 404):  # Hugging Face answers 401 for a repository it has not
         return "missing", None
     if resp.status_code != 200:

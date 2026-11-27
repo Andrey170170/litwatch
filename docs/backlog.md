@@ -210,6 +210,18 @@ Built between milestones, on whatever structure exists then.
   links are found (A2's spec, "Not in A2"). The Notion export's contract changes with it, so the PI's view is
   checked first.
 
+- **The release-link finder's judgement,** once the finder has run long enough to show where it goes wrong. A2
+  handles the finder's data; how well it judges a link is this. From P6's round-3 review:
+  - a candidate it could not confirm is dropped, so the answer turns into "none found" and replaces stored links;
+  - a GitHub repository with a README and `assets/` counts as code;
+  - on other hosts, the evidence for a state, and a redirect's final URL standing for the link;
+  - provenance: a URL the paper never gave, accepted on a host's 404 or on an unrelated repository;
+  - a GitHub API check that says nothing (a 403) falls back to the model's state, and a license the API did not
+    give is kept;
+  - the newest observation of a resource should win over an older one in the same find.
+
+  *Needs shaping.*
+
 - **Frontend polish and speed** (review, project 2): elements jumping when a topic tab or paper loads the first
   time; windowed rendering with scroll restoration and paper order kept; lean shelf pages; mutations with their own
   effects; integration Retry's stacked refreshes; Settings split out of the main chunk.

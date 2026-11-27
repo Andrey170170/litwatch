@@ -3,8 +3,10 @@
 -- them. `version` is the arXiv version that find was for (null when unknown); `checked_at` when the
 -- link was last fetched; `found_by` what set its state: the finder (an automatic find), the owner's
 -- action, or a re-check. `rechecks` counts the re-checks a placeholder has had, which stop at four.
--- The finds themselves are work items of kind `links`, keyed by paper and version (an automatic
--- one, held for good) or fresh (the owner's), their paper in `scope`; the index finds a paper's.
+-- The finds themselves are work items of kind `links`, their paper and what it was then (its
+-- version, or its update when none is known) in `scope`: an automatic one keyed by those, one
+-- open at a time, its key free again once it ends; the owner's fresh each time. The index finds
+-- a paper's.
 -- Additive: the image before ignores it.
 CREATE TABLE release_links (
     id          bigserial PRIMARY KEY,

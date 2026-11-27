@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -22,7 +23,7 @@ from litwatch.api import integrations as integrations_api
 from litwatch.api import mcp
 from litwatch.api import schemas as s
 from litwatch.archive import ArchiveClient
-from litwatch.config import Config, Schedule
+from litwatch.config import Schedule
 from litwatch.core.contracts import deep as contract
 from litwatch.core.links import RECHECK_EVERY, RECHECKS, Identity, ReleaseLink, recheck_key
 from litwatch.core.work import WorkItem
@@ -31,7 +32,7 @@ from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Done, Later
 from litwatch.intake import batch
 from litwatch.integrations.deep import Deep, DeepClient
-from litwatch.jobs import nightly
+from litwatch.jobs import commands, nightly
 from litwatch.jobs.context import model_run
 from litwatch.links import adapter
 from litwatch.links import worker as worker_module
@@ -164,10 +165,40 @@ def key(version: int | None, updated: str | None = None, paper_id: str = A.id) -
     return Identity(version, updated).key(paper_id)
 
 
-async def night(db: DatabaseGate, models: Scripted, config: Config = SERVED) -> None:
-    """The nightly, as it runs (`nightly.run`), without fetching or digests."""
-    await nightly.run(
-        db, config, fetch=False, models=models.gate(config), with_digests=False, night=None
+async def night(db: DatabaseGate, conn: Session) -> None:
+    """The nightly as `litwatch nightly` runs it, without fetching or digests: an item
+    (`jobs.commands`) the test's `serve` works, through to its end."""
+    name = str(uuid4())
+    scope = {"fetch": False, "days": None, "limit": None, "digests": False}
+    async with db.write("litwatch nightly") as unit:
+        item = await queue.submit(unit, commands.kind("nightly"), name, scope=scope, admission=name)
+
+    async def ended() -> bool:
+        return (await state_of(conn, item.id))["state"] == "ended"
+
+    await until(ended, "the nightly ends")
+    assert (await state_of(conn, item.id))["outcome"] == "done"
+
+
+async def state_of(conn: Session, item_id: int) -> dict[str, Any]:
+    found = await (
+        await conn.execute(
+            "SELECT state, outcome, error, cost, attempts FROM work_items WHERE id = %s",
+            (item_id,),
+        )
+    ).fetchone()
+    assert found is not None
+    return found
+
+
+async def died_running(conn: Session, item_id: int) -> None:
+    """The item as a process that died working it leaves it: running, its lease lapsed, so a
+    `serve`'s Work gate takes it back."""
+    await conn.execute(
+        "UPDATE work_items SET state = 'running', attempts = attempts + 1, started_at = now(), "
+        "lease_token = gen_random_uuid(), lease_until = now() - interval '1 second' "
+        "WHERE id = %s",
+        (item_id,),
     )
 
 
@@ -205,7 +236,7 @@ async def test_finds_run_once_per_version_after_the_nightly_s_analysis_and_after
     async with served(
         db, SERVED, models=models.gate(SERVED), integrations=[deep(finder)], archive=client
     ):
-        await night(db, models)
+        await night(db, held)
         await until(all_ended(held, 1), "the find of v1 ends")
         assert await urls(held) == ["https://github.com/o/probes"]
         # arXiv's second version, its abstract rewritten: no analysis of it yet, so no find
@@ -214,12 +245,14 @@ async def test_finds_run_once_per_version_after_the_nightly_s_analysis_and_after
         v2 = A.model_copy(update={"version": 2, "abstract": "Linear probes, read anew."})
         await batch.store(db, [v2], source="oai", rules=rules)
         assert len(await finds(held)) == 1
-        await night(db, models)
+        await night(db, held)
         await until(all_ended(held, 2), "the find of v2 ends")
-        # Another trigger of v2 (its analysis recorded again, the nightly's): its answer holds.
+        # Another trigger of v2 (its analysis recorded again, the nightly's): its answer holds,
+        # its item's results pruned too (P7's cleanup), the ended item's own record standing.
+        await held.execute("DELETE FROM work_results")
         async with db.write("analysed again", taxonomy="shared", papers=[A.id]) as unit:
             await links.due(unit, [A.id])
-        await night(db, models)
+        await night(db, held)
         assert len(await finds(held)) == 2
     assert finder.started == 2
     ended = await finds(held)
@@ -240,7 +273,7 @@ async def test_with_automatic_reads_off_links_are_still_found(held: Session, db:
     async with served(
         db, off, models=models.gate(off), integrations=[deep(finder)], archive=client
     ):
-        await night(db, models, off)
+        await night(db, held)
         await until(all_ended(held, 1), "the find ends")
     assert finder.started == 1
     assert settling.configured(SERVED.model_copy(update={"integrations": {}})).find_links is False
@@ -265,12 +298,13 @@ async def test_a_failed_find_fails_its_item_with_its_cost_and_the_next_nightly_f
     async with served(
         db, SERVED, models=models.gate(SERVED), integrations=[deep(finder)], archive=client
     ):
-        await night(db, models)
+        await night(db, held)
         await until(all_ended(held, 1), "the find fails")
         (failed,) = await finds(held)
-        assert (failed["outcome"], failed["error"]) == (
+        assert (failed["outcome"], failed["error"], failed["cost"]) == (
             "failed",
             "FindError: the deep service broke",
+            Decimal("0.01"),  # its item's cost, as a find that answered has it
         )
         (kept,) = await in_read(held, queue.results, failed["id"])
         assert kept[1]["failed"] == "the deep service broke"
@@ -281,7 +315,7 @@ async def test_a_failed_find_fails_its_item_with_its_cost_and_the_next_nightly_f
             async with model_run(db, "job", models=models.gate(SERVED)) as run:
                 await nightly.analyse(db, SERVED, run, ids=["2601.99999"])
         assert len(await finds(held)) == 1
-        await night(db, models)
+        await night(db, held)
         await until(all_ended(held, 2), "the second find ends")
     first, second = await finds(held)
     assert first["key"] == second["key"] == key(1)
@@ -314,28 +348,85 @@ async def test_a_find_whose_answer_was_lost_follows_the_same_find(held: Session,
     assert finder.started == 1 and len(finder.sent) == 2  # sent twice, one find
 
 
-async def test_a_find_tried_again_after_its_end_committed_does_not_ask_again(
+async def test_a_find_taken_back_after_its_end_committed_does_not_ask_again(
     held: Session, db: DatabaseGate
 ):
-    """Its try ended after the answer, or the failure, was recorded and before the item's end
-    committed (the process died): the next try of the same item ends as it did."""
+    """Its process died after the answer, or the failure, was recorded and before the item's
+    end committed: `serve`'s gate takes the item back, and its next try ends as it did, by
+    the same find on deep, with its cost."""
     await seed.analyse(held, A, code=True)
     async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
         await links.due(unit, [A.id])
     item = await item_of(held, key(1))
     finder = Finder({"result": {"links": [found("https://github.com/o/probes", "public")]}})
-    worker = FindWorker(db, archive()[0], deep(finder))
-    first, second = await worker(item), await worker(item)
-    assert isinstance(first, Done) and first == second and first.cost == Decimal("0.01")
-    assert finder.started == 1 and len(finder.sent) == 1
-    assert await urls(held) == ["https://github.com/o/probes"]
-    mine = await owners(db)
+    assert isinstance(await FindWorker(db, archive()[0], deep(finder))(item), Done)
     failing = Finder({"error": "the finder stopped without answering", "failure": "paper"})
-    worker = FindWorker(db, archive()[0], deep(failing))
-    for _ in range(2):
-        with pytest.raises(FindError, match="the finder stopped without answering"):
-            await worker(mine)
-    assert failing.started == 1 and len(failing.sent) == 1
+    client, _ = archive()
+
+    async def taken_back(dead: WorkItem, n: int) -> None:
+        await died_running(held, dead.id)  # one of a kind runs at a time: one, then the other
+        async with served(
+            db, SERVED, models=Scripted().gate(SERVED), integrations=[deep(finder)], archive=client
+        ):
+            await until(all_ended(held, n), "it is taken back and ends")
+
+    await taken_back(item, 1)
+    mine = await owners(db)
+    with pytest.raises(FindError, match="the finder stopped without answering"):
+        await FindWorker(db, archive()[0], deep(failing))(mine)
+    await taken_back(mine, 2)
+    answered, failed = await state_of(held, item.id), await state_of(held, mine.id)
+    assert (answered["outcome"], answered["cost"], answered["attempts"]) == (
+        "done",
+        Decimal("0.01"),
+        2,
+    )
+    assert (failed["outcome"], failed["error"], failed["cost"]) == (
+        "failed",
+        "FindError: the finder stopped without answering",
+        Decimal("0.01"),
+    )
+    assert (finder.started, len(finder.sent), failing.started) == (1, 1, 1)  # neither asked again
+    assert await urls(held) == ["https://github.com/o/probes"]
+
+
+async def test_the_owners_find_that_fails_for_an_older_version_hands_over_with_its_cost(
+    held: Session, db, monkeypatch
+):
+    """Through the app: the owner asks of v1, v2 is stored while deep works it, and deep's find
+    fails for good. It ends superseded with what it spent, and the owner's is asked of v2."""
+    await seed.analyse(held, A, code=False)  # no automatic find
+    rules = settling.configured(SERVED)
+    finder = Finder(
+        {"error": "the finder stopped without answering", "failure": "paper"},
+        {"result": {"links": [found("https://github.com/o/v2", "public")]}},
+    )
+    client, fake = archive()
+    fake.texts[A.id] = (2, BODY)
+    service = deep(finder)
+    follow = service.client.follow_find
+
+    async def v2_meanwhile(find_id: str) -> Any:
+        if finder.started == 1:
+            await batch.store(db, [A.model_copy(update={"version": 2})], source="oai", rules=rules)
+        return await follow(find_id)
+
+    monkeypatch.setattr(service.client, "follow_find", v2_meanwhile)
+    async with (
+        served(
+            db, SERVED, models=Scripted().gate(SERVED), integrations=[service], archive=client
+        ) as app,
+        app_client(app) as http,
+    ):
+        assert (await http.post(f"/api/papers/{A.id}/links")).status_code == 202
+        await until(all_ended(held, 2), "v1's find and v2's end")
+        page = (await http.get(f"/api/papers/{A.id}")).json()
+    v1, v2 = await finds(held)
+    assert (v1["scope"]["version"], v1["outcome"], v1["cost"]) == (1, "done", Decimal("0.01"))
+    assert v1["result"]["superseded"] and v1["result"]["usage"]["list_cost"] == 0.01
+    assert (v2["scope"]["by"], v2["scope"]["version"], v2["outcome"]) == ("owner", 2, "done")
+    assert page["owner_find"]["state"] == "done" and page["owner_find"]["links"] == 1
+    assert await urls(held) == ["https://github.com/o/v2"] and finder.started == 2
 
 
 async def test_a_find_of_what_the_paper_no_longer_is_hands_over_and_replaces_nothing(
@@ -704,11 +795,11 @@ async def test_a_placeholder_is_checked_again_weekly_four_times_then_left(
     assert [r["state"] for r in ended] == ["ended"] * RECHECKS  # left after the fourth
 
 
-async def test_a_re_check_tried_again_after_its_write_committed_asks_nothing(
+async def test_a_re_check_taken_back_after_its_write_committed_asks_nothing(
     held: Session, db, monkeypatch
 ):
-    """Its try ended after its count and the next check committed, before the item's end did
-    (the process died): the next try of the same item ends at once."""
+    """Its process died after its count and the next check committed, before the item's end
+    did: `serve`'s gate takes the item back, and its next try ends at once."""
     github = GitHub("README.md")
     hosting(monkeypatch, github.handle)
     await seed.analyse(held, A, code=True)
@@ -716,14 +807,24 @@ async def test_a_re_check_tried_again_after_its_write_committed_asks_nothing(
         await links.due(unit, [A.id])
     item = await item_of(held, key(1))
     await FindWorker(db, archive()[0], deep(Finder({"result": {"links": PLACEHOLDER}})))(item)
+    await ended_by_the_gate(held, item, {"links": 2})
     (first,) = await rechecks(held)
     check = await in_read(held, queue.find, store.RECHECK, first["key"])
     assert check is not None
-    worker = RecheckWorker(db)
-    await worker(check)
+    await RecheckWorker(db)(check)  # its count and the next check committed, then it died
+    await died_running(held, check.id)
     asked = github.asked
-    await worker(check)
+    client, _ = archive()
+    async with served(
+        db, SERVED, models=Scripted().gate(SERVED), integrations=[deep(Finder())], archive=client
+    ):
+
+        async def taken_back() -> bool:
+            return (await state_of(held, check.id))["state"] == "ended"
+
+        await until(taken_back, "the re-check is taken back and ends")
     assert github.asked == asked  # the host is not asked again
+    assert (await state_of(held, check.id))["attempts"] == 2
     (link,) = [k for k in await in_read(held, store.of_paper, A.id) if k.state == "placeholder"]
     assert link.rechecks == 1
     assert [r["key"] for r in await rechecks(held)] == [

@@ -453,6 +453,58 @@
    }
   },
   {
+   "name": "a renamed Hugging Face repository is followed (307) to its weights",
+   "url": "https://huggingface.co/o/old",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/old": {
+     "status": 307,
+     "location": "/api/models/o/new"
+    },
+    "https://huggingface.co/api/models/o/new": {
+     "status": 200,
+     "json": {
+      "id": "o/new",
+      "siblings": [
+       {
+        "rfilename": "README.md"
+       },
+       {
+        "rfilename": "model.safetensors"
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "public"
+   }
+  },
+  {
+   "name": "a redirect off Hugging Face is not followed",
+   "url": "https://huggingface.co/o/away",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/away": {
+     "status": 307,
+     "location": "https://elsewhere.test/api/models/o/away"
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a redirect to plain HTTP is not followed",
+   "url": "https://huggingface.co/o/plain",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/plain": {
+     "status": 307,
+     "location": "http://huggingface.co/api/models/o/plain"
+    }
+   },
+   "expect": null
+  },
+  {
    "name": "a Hugging Face repository it does not have is missing",
    "url": "https://huggingface.co/o/gone",
    "kind": "weights",

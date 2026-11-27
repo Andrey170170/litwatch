@@ -62,7 +62,7 @@ const tableGet =
       const got = answers[at];
       if (!got) return { status: 404, url: at, text: "" };
       if (!got.location) return { status: got.status, url: at, text: got.json === undefined ? "" : JSON.stringify(got.json) };
-      at = got.location;
+      at = new URL(got.location, at).href;
     }
     return null;
   };

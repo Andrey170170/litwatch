@@ -299,7 +299,8 @@ Found while building, owned by the stage named.
   admission=, lasting=)` in the caller's unit; `WorkGate(db).run({kind: worker})` serves until cancelled, and a
   cancelled gate gives back each claim it still owns once its Worker has stopped. A Worker returns `Done(cost)`
   (or None) or `Later(at)`, which puts the item back to pending until `at` (a pass claimed by another owner, the
-  run lock taken, text awaited). Raising fails the item; only a lost database (a dropped connection, a server
+  run lock taken, text awaited). Raising fails the item, with the cost a `TerminalError` carries (P6: a find
+  that failed after deep charged for it); only a lost database (a dropped connection, a server
   shutting down or ending the session, an empty pool) or a lost deadlock or serialization conflict
   (`gates.work.conflicted`) gives it back to try again. Settling needs a live lease.
   `LeaseLostError` from a write unit means the item is no longer the task's.
@@ -389,8 +390,8 @@ Found while building, owned by the stage named.
 - **P7 (from P6): release links keep nothing for rollback.** Migration 0052 (`release_links`, the `work_items_finds`
   index) is additive; the image before serves neither `links` nor `link check`, so their items wait for this one. A
   find's `work_results` row, its answer or its failure, is what a retried find reads to end without asking deep again
-  (`links.record`): needed only while its item is open, so P7's cleanup may prune it with the ended item's other
-  results.
+  (`links.record`), and what says the find answered while its item is open; once the item ends, its own `result` says
+  so (`store.links.finds`), so P7's cleanup may prune the row with the ended item's other results.
 - **Rolling back P6 turns automatic Deep reads back on.** The image before P6 ignores `[integrations.deep]
   automatic`: rolled back with `automatic = false` installed, it writes automatic Deep reads wherever deep is
   configured. The rollback step is a choice: keep deep configured and accept the automatic reads until the image is
