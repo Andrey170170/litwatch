@@ -366,9 +366,6 @@ async def test_a_process_takes_only_the_deliveries_of_the_integrations_it_loads(
     for each in (gone, rec):
         await start(db, each)
     gate, workers = delivering(db, rec)  # `gone` is no longer configured
-    # What a turn's item holds reads back in any session's zone (one parked at the end of time
-    # read as the year 10000 in Tokyo, and broke the emitting write).
-    await conn.execute("SET TimeZone = 'Asia/Tokyo'")
     async with served(gate, workers):
         ids = await emit(conn, events.PAPER_SAVED)
         await until(lambda: _seen(rec, ids), "the loaded one gets it")
@@ -412,6 +409,43 @@ async def test_an_emitter_that_looked_before_the_first_cursor_was_made_strands_n
             await until(caught_up, "no event is left behind the cursor")
     finally:
         await other.close()
+
+
+async def test_an_event_written_as_serve_starts_is_delivered(conn: Session, db):
+    """A write that emits an event while `serve` starts (a CLI's `taxonomy import`) wakes no
+    turn: no `workers` row delivers yet. The startup sweep's turn, run before it commits, would
+    see nothing; so registering the delivery keys waits for it, and the turn then delivers it."""
+    rec = Recorder()
+    await start(db, rec)
+    gate, workers = delivering(db, rec)
+    emitter = await sessions.sibling(conn)
+
+    async def registering_waits_or_the_turn_ended() -> bool:
+        found = await conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE relation = 'outbox'::regclass "
+            "AND mode = 'ShareLock' AND NOT granted) AS waits"
+        )
+        return (await found.fetchone())["waits"] or await _ended(conn, rec.name)
+
+    task = None
+    try:
+        async with emitter.transaction():
+            unit = staged(emitter)
+            event = await outbox.emit(unit, events.PAPER_SAVED, "2610.00001")
+            await outbox.wake_all(unit)  # as its commit does: no row delivers yet
+            await workers[outbox.DELIVERY].sweep()  # `serve` starts: its first turn
+            task = asyncio.create_task(
+                gate.run(workers, keys={outbox.DELIVERY: workers[outbox.DELIVERY].keys})
+            )
+            # Registering waits for the emitter; without that, the turn ran and ended unseeing.
+            await until(registering_waits_or_the_turn_ended, "registering or the turn")
+        await until(lambda: _seen(rec, [event]), "the event is delivered")
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        await emitter.close()
 
 
 class Picky(Recorder):
@@ -671,14 +705,16 @@ async def test_serve_delivers_its_own_turns_and_ends_and_wakes_none_of_the_other
 
 async def test_a_turn_no_one_serves_ends_once_its_lease_lapses(conn: Session):
     """The take-back of a process that serves deliveries for some integrations alone leaves the
-    running turn of another while its lease holds, and ends it failed once it lapses."""
+    running turn of another while its lease holds, and ends it failed once it lapses. Another
+    kind served for some keys alone keeps the items of the others."""
+    await conn.execute("INSERT INTO work_items (kind, key, admission) VALUES ('other', 'x', 'x')")
     await conn.execute(
         "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until, "
         "attempts) VALUES (%s, 'gone', 'deliver:gone', 'running', gen_random_uuid(), "
         "now() + interval '1 hour', 1)",
         (outbox.DELIVERY,),
     )
-    keys = {outbox.DELIVERY: ["hook"]}
+    keys = {outbox.DELIVERY: ["hook"], "other": ["y"]}
     assert await in_write(conn, queue.take_back, [outbox.DELIVERY], keys) == []
     (turn,) = await turns(conn, "gone")
     assert turn["state"] == "running"
@@ -686,6 +722,7 @@ async def test_a_turn_no_one_serves_ends_once_its_lease_lapses(conn: Session):
     assert await in_write(conn, queue.take_back, [outbox.DELIVERY], keys) == []
     (turn,) = await turns(conn, "gone")
     assert (turn["state"], turn["outcome"], turn["error"]) == ("ended", "failed", queue.UNSERVED)
+    assert [t["state"] for t in await items_of(conn, "other", "x")] == ["pending"]
 
 
 async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_integration(

@@ -59,8 +59,8 @@ Each stage runs in production before the next starts.
   `runs.start` and the job SQL (`claim`, `progress`, `wait`, `finish`) take as a parameter; `ALIVE` and `take_back`
   are unchanged. A presence opened again has a new identity, so the claims made under the old one are taken back,
   and the worker then closes its open runs and claims afresh.
-  Transitional: A2's Work gate replaces it with leases and heartbeats (`docs/backlog.md`, A2, "Leases replace the
-  presence session"). Rejected: a dedicated connection per run or claim (one per open job, for as long as a re-run
+  Transitional: A2's Work gate replaces it with leases and heartbeats (`docs/specs/architecture/a2-work-gate.md`,
+  "Leases"). Rejected: a dedicated connection per run or claim (one per open job, for as long as a re-run
   waits on its text), keeping the runs and the worker on lent connections (P4's loops would stay off the pool), and
   leases now (A2's design, ahead of it).
 - **Settling takes its inputs explicitly:** `settle_many(unit, ids, cause, rules)`.
@@ -178,11 +178,12 @@ Found while building, owned by the stage named.
   that holds the lock without a run.
 - **A2: the presence session's reconnect.** `db.identity()` checks the presence with a `SELECT 1` each time it is
   asked (a run's start, each worker step) and opens it again when it dropped; between asks a drop goes unseen until
-  the next. Leases replace it (`docs/backlog.md`, A2).
+  the next. Leases replace it (`docs/specs/architecture/a2-work-gate.md`, "Leases").
 - **A2: work is not fenced when its ownership is lost.** Ownership lives on side sessions (the session locks' and
   the presence) that the pooled work never watches, so a block goes on after its lock's or the presence's session
-  dropped, and a run whose last close fails stays alive. The cases and A2's acceptance are in `docs/backlog.md`, A2,
-  "Work fenced when its ownership is lost".
+  dropped, and a run whose last close fails stays alive. A2 fences work once its lease is lost
+  (`docs/specs/architecture/a2-work-gate.md`, "Leases"); the run lock's case stays open until A3 removes that lock
+  (`docs/specs/architecture.md`, "Milestones").
 - **P3: an owner action that may only answer is not a `change`.** `api/jobs.process` and
   `api/integrations.request_card` return early when the work is already under way, and a `change` would settle
   the paper on that path too. They open `db.write(..., taxonomy="shared", papers=[id])` themselves and call

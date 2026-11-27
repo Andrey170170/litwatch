@@ -5,8 +5,9 @@ own. Only events whose transaction is older than every transaction still running
 (`_SETTLED`), so an event that commits late can never land behind a position already passed.
 
 Each integration with a cursor is delivered to by work items of its own (docs/plans/a2-work-gate.md,
-P2), one turn each, keyed and admitted by its name (`wake`): an event wakes every one of them as
-it commits (`wake_all`), as the owner's retry or skip wakes theirs.
+P2), one turn each, keyed and admitted by its name (`wake`): an event wakes, as it commits, those
+of the integrations a process's `workers` row says it delivers to (`wake_all`), as the owner's
+retry or skip wakes theirs.
 
 The cursor's row serializes when its delivery runs: every write that schedules a turn (an
 event's wake, the owner's retry or skip, a turn arranging the next) locks the cursor's row
@@ -29,7 +30,7 @@ from litwatch.store import work
 from litwatch.store.text import stored
 
 # The kind of the deliveries' work items.
-DELIVERY = "deliver"
+DELIVERY = work.DELIVERY
 
 _EVENT = "xid::text::bigint AS xid, id, type, paper_id, payload, created_at"
 # Every transaction below the snapshot's xmin has finished: its events are all there is.
@@ -92,8 +93,8 @@ def _cursor(row: dict) -> Cursor:
 
 async def emit(unit: WriteUnit, type: str, paper_id: str | None = None, **payload: Any) -> int:
     """Record an event of `type` (`core.events`), in the unit that writes what it describes, and
-    wake every integration's delivery as the unit commits (`wake_all`). Returns the event's
-    id."""
+    wake, as the unit commits, the delivery of every integration a process delivers to
+    (`wake_all`). Returns the event's id."""
     row = await (
         await unit.execute(
             "INSERT INTO outbox (type, paper_id, payload) VALUES (%s, %s, %s) RETURNING id",

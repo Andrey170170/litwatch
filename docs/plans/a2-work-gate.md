@@ -355,7 +355,9 @@ Found while building, owned by the stage named.
   keys alone; `serve` gives it the integrations that react to events (none, when none does), so a process takes,
   takes back and waits on only its own deliveries. Its `workers` row records those keys (`workers.keys`, migration
   0054), and an event's commit wakes only the cursors a row delivers to (`store.outbox.wake_all`), whatever its
-  heartbeat: one `serve`'s row, or a killed one's until its replacement registers. Each take-back ends failed
+  heartbeat: one `serve`'s row, or a killed one's until its replacement registers. Registering the keys first
+  waits for every unit still writing an event (`outbox` locked `SHARE`), whose wake saw no row: its event commits
+  before the startup sweep's turn is taken, so that turn delivers it. Each take-back ends failed
   (`store.work.UNSERVED`) the turns of every other integration, pending or with their lease lapsed; one under a
   live lease is left until it lapses. A cursor no one delivers to keeps its position and backoff, and a `serve`
   that loads it again sweeps its first turn. Built for one `serve` (D4): a second one, loading other integrations,

@@ -35,8 +35,10 @@ RESULTS = "litwatch_work_results"
 # follow or cancel from the CLI, and those tried once (`once`).
 COMMANDS = "command:%"
 CANCELLED = "cancelled by the owner"
-# How an item of a kind served for some keys alone ends when its key is none of them
-# (`_retire_unserved`): today only deliveries are served so, keyed by integration.
+# The kind of an integration's delivery turns, keyed by its name (`store.outbox`, which names
+# it too): the one kind a process serves for some keys alone, the integrations it delivers to.
+DELIVERY = "deliver"
+# How a delivery turn ends when no process delivers to its integration (`_retire_unserved`).
 UNSERVED = "no delivery worker for this integration"
 # How a command's item ends when its one attempt could not finish: `serve` stopped, or lost
 # the database, while it ran. The command submits it again (`litwatch.cli`).
@@ -319,8 +321,8 @@ async def take_back(
     back.
 
     A command's item whose lease expired ends failed instead, whatever admission it holds
-    (`_retire_commands`): it is not tried again. So does an item of a kind in `keys` whose key
-    is none of them, pending or with its lease expired (`_retire_unserved`)."""
+    (`_retire_commands`): it is not tried again. So does a delivery turn, pending or with its
+    lease expired, for an integration none of the delivery `keys` names (`_retire_unserved`)."""
     params = _serving(kinds, keys)
     await _retire_commands(unit)
     await _retire_unserved(unit, keys or {})
@@ -339,20 +341,22 @@ async def take_back(
 
 
 async def _retire_unserved(unit: WriteUnit, keys: Mapping[str, Collection[str]]) -> None:
-    """End failed (`UNSERVED`) the items of each kind in `keys` whose key is none of its keys:
-    pending, or running with its lease expired. Under D4 this process is the one `serve`, so no
-    one would take them: a delivery for an integration it does not deliver to (no longer
-    configured, or reacting to no event), left by an earlier image or configuration. One
-    running under a live lease is left until it lapses; one a unit holds, for a later call."""
-    for kind in sorted(keys):
-        await unit.execute(
-            "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
-            "error = %(error)s, lease_token = NULL, lease_until = NULL, resubmitted = false "
-            "WHERE id IN (SELECT id FROM work_items WHERE kind = %(kind)s "
-            "AND key <> ALL(%(keys)s) AND (state = 'pending' "
-            "OR (state = 'running' AND lease_until < now())) FOR UPDATE SKIP LOCKED)",
-            {"kind": kind, "keys": sorted(keys[kind]), "error": UNSERVED},
-        )
+    """End failed (`UNSERVED`) the delivery turns, when `keys` names the integrations delivered
+    to, of every other integration: pending, or running with its lease expired. Under D4 this
+    process is the one `serve`, so no one would take them: a turn for an integration it does
+    not deliver to (no longer configured, or reacting to no event), left by an earlier image
+    or configuration. One running under a live lease is left until it lapses; one a unit
+    holds, for a later call."""
+    if DELIVERY not in keys:
+        return
+    await unit.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
+        "error = %(error)s, lease_token = NULL, lease_until = NULL, resubmitted = false "
+        "WHERE id IN (SELECT id FROM work_items WHERE kind = %(kind)s "
+        "AND key <> ALL(%(keys)s) AND (state = 'pending' "
+        "OR (state = 'running' AND lease_until < now())) FOR UPDATE SKIP LOCKED)",
+        {"kind": DELIVERY, "keys": sorted(keys[DELIVERY]), "error": UNSERVED},
+    )
 
 
 async def _retire_commands(unit: WriteUnit) -> None:
@@ -682,7 +686,15 @@ async def register(
     (which an event's wake reads, `store.outbox.wake_all`); returns its row's id. With `supersede`
     (`serve`'s), every earlier row goes in the same unit: under D4 one `serve` serves, and one
     killed leaves its row, which would advertise what it served until its heartbeat aged a
-    lease, whatever host name its replacement runs under."""
+    lease, whatever host name its replacement runs under.
+
+    A row that names the integrations it delivers to waits first for every unit still writing
+    an event (`LOCK outbox IN SHARE MODE`): such a unit woke the turns of the rows it saw
+    (`store.outbox.wake_all`), so one that ran before this row commits would wake none of its
+    own, and a delivery turn run meanwhile would not see its event yet. Its event is
+    committed, then, before this process takes any turn."""
+    if keys is not None and DELIVERY in keys:
+        await unit.execute("LOCK TABLE outbox IN SHARE MODE")
     if supersede:
         await unit.execute("DELETE FROM workers")
     row = await (
