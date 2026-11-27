@@ -54,6 +54,12 @@ async def items(conn: Session, name: str) -> list[dict]:
     )
 
 
+# A ping item `serve` stopped under, which a resumed submission goes on after.
+STOPPED_PING = WorkItem(
+    1, "command:ping", "k", "k", ItemState.ENDED, datetime.now(UTC), 1, error=queue.STOPPED
+)
+
+
 class Held:
     """A provider whose calls wait until `release` is set, answering 17 + 25; `started` (across
     threads: the command runs in one) set as the first call waits, `cancelled` its calls cut
@@ -779,7 +785,7 @@ async def test_a_replacement_submission_that_lost_the_database_before_its_commit
     )
     async with served(db, Config(), models=ModelGate(PING, {"anthropic": Held(free=1)})):
         await asyncio.to_thread(
-            cli._submit, "ping", {"role": "brief"}, command="ping", resumed=True
+            cli._submit, "ping", {"role": "brief"}, command="ping", resumed=STOPPED_PING
         )
     (item,) = await items(conn, "ping")
     assert item["outcome"] == "done" and lost == [1]
@@ -860,7 +866,7 @@ async def test_a_replacement_whose_commit_rolled_back_is_made_again(
     )
     async with served(db, Config(), models=ModelGate(PING, {"anthropic": Held(free=1)})):
         await asyncio.to_thread(
-            cli._submit, "ping", {"role": "brief"}, command="ping", resumed=True
+            cli._submit, "ping", {"role": "brief"}, command="ping", resumed=STOPPED_PING
         )
     (item,) = await items(conn, "ping")
     assert item["outcome"] == "done" and timed_out == [1]
@@ -902,3 +908,56 @@ async def test_an_evaluation_with_no_serve_still_drains_what_its_items_answered(
     assert result.exit_code == 0, result.output
     assert "nothing left to ask" in result.output
     assert [json.loads(x)["paper_id"] for x in jsonl.lines(path)] == [pid]
+
+
+async def test_ladders_with_no_serve_and_the_archive_down_still_drains_what_its_item_spent(
+    conn: Session, tmp_path, monkeypatch
+):
+    """With `serve` stopped and the archive unavailable, `eval ladders` whose output names an
+    ended item that answered one call: that call's reservation and its record reach their files
+    before the requests are built again, which the archive's outage then fails."""
+    from litwatch.archive import ArchiveUnavailable  # noqa: PLC0415
+    from litwatch.quality import ladders  # noqa: PLC0415
+
+    class Down:
+        async def record(self, paper_id: str) -> None:
+            raise ArchiveUnavailable("archive transport unavailable")
+
+        async def aclose(self) -> None:
+            pass
+
+    monkeypatch.setattr(archive_integration, "source", lambda cfg: Down())
+    await settling.save_tree(conn, TREE)
+    (tmp_path / "ladders.toml").write_text(
+        '[judge]\noutput_tokens = 100\n[[judge.candidates]]\nname = "own"\n'
+        'price = [1.0, 1.0]\nprice_max = [1.0, 1.0]\nprovider = "anthropic"\nmodel = "a/own"\n'
+    )
+    (tmp_path / "cases.csv").write_text(
+        "set,role,paper,subject\nquality,judge,2610.09999,cot-faithfulness\n"
+    )
+    out = (tmp_path / "runs").resolve()
+    case = "judge/2610.09999/cot-faithfulness"
+    reserved = {"attempt": "a1", "case": case, "candidate": "own", "reserved": 0.5}
+    row = ladders.Row(set="quality", role="judge", case=case, paper="2610.09999",
+                      candidate="own", model="anthropic:a/own", request="r", outcome="answered",
+                      cost=0.2, reserved=0.5, attempt="a1")  # fmt: skip
+    item = await in_write(conn, queue.submit, "command:ladders", "old")
+    for to, line in (
+        (ladders.PENDING, json.dumps(reserved)),
+        ("judge.jsonl", row.model_dump_json()),
+    ):
+        await conn.execute(
+            "INSERT INTO work_results (work_id, body) VALUES (%s, %s)",
+            (item.id, json.dumps({"to": str(out / to), "line": line})),
+        )
+    await conn.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', error = 'x' WHERE id = %s",
+        (item.id,),
+    )
+    cli._owned([cli._sidecar(out, directory=True)], "command:ladders", "old")
+    argv = ("eval", "ladders", "--candidates", str(tmp_path / "ladders.toml"),
+            "--cases", str(tmp_path / "cases.csv"), "--out", str(out), "--yes")  # fmt: skip
+    result = await command(conn, tmp_path, monkeypatch, *argv)
+    assert isinstance(result.exception, ArchiveUnavailable)  # no request is built
+    assert ladders.reservations(out) == {"a1": 0.5}
+    assert [r.attempt for r in ladders.rows(out)] == ["a1"]

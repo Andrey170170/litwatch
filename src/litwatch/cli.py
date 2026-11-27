@@ -31,7 +31,7 @@ from litwatch.gates.database import (
     ReadUnit,
     WriteUnit,
 )
-from litwatch.gates.work import LEASE, retryable
+from litwatch.gates.work import LEASE, conflicted, retryable
 from litwatch.jobs import commands
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -141,7 +141,7 @@ def _submit(
     opening: Opening | None = None,
     sidecars: Collection[Path] = (),
     again: Again | None = None,
-    resumed: bool = False,
+    resumed: WorkItem | None = None,
 ) -> None:
     """Submit the command `name`'s work item (`jobs.commands`) with `scope`, under `key` (by
     default a fresh one; a function of the scope, for a replay's), admitted by `admission` (by
@@ -155,9 +155,10 @@ def _submit(
     An item `serve` stopped under ends failed (`STOPPED`): the command says so, waits until a
     `serve` runs its kind again, and submits a fresh item, which goes on from what the first
     committed: of the same scope, or of what `again` makes of it (an evaluation's, from what its
-    files now hold; None when nothing is left). One `resumed` goes on after an item it
-    reattached to ended so (`_caught_up`, `_following_replay`): it enters the same loop at the
-    same step, waiting for a `serve` before it submits. A submission made after a stop that
+    files now hold; None when nothing is left), said only when something is. One `resumed` goes
+    on after the item it reattached to ended so (`_caught_up`, `_following_replay`), its
+    command having found work left: it enters the same loop at the same step, waiting for a
+    `serve` before it submits. A submission made after a stop that
     loses the database before its commit is tried (opening its unit, reading the `workers`
     row), or whose commit is known to have rolled back (`_rolled_back`), is made again; one
     whose commit is uncertain is D4's. Ctrl-C asks whether to cancel the
@@ -191,7 +192,9 @@ def _submit(
         return item
 
     async def main(db: DatabaseGate) -> WorkItem | None:
-        current, first, waits = scope, True, resumed
+        current, first, waits = scope, True, resumed is not None
+        if resumed is not None:
+            _resubmitting(resumed)
         while True:
             if waits:
                 await _until_served(db, work_kind)
@@ -209,11 +212,11 @@ def _submit(
             ended = await _follow(db, item.id, followed)
             if not _stopped(ended):
                 return ended
-            _resubmitting(ended)
             current, first, waits = (again(ended.scope) if again else ended.scope), False, True
             if current is None:
                 console.print("nothing left to do")
                 return None
+            _resubmitting(ended)
 
     try:
         ended = _run(main, name=command, migrate=False)
@@ -224,9 +227,9 @@ def _submit(
 
 def _rolled_back(exc: BaseException) -> bool:
     """Whether the error says its transaction rolled back, its commit not made: the session
-    ended by a timeout, or a lost conflict (SQLSTATE 25P03, 25P04, class 40)."""
-    state = getattr(exc, "sqlstate", None) or ""
-    return state in ("25P03", "25P04") or state.startswith("40")
+    ended by a timeout (SQLSTATE 25P03, 25P04), or a lost conflict (`conflicted`: 40001,
+    40P01). Not the rest of class 40: 40003 says the statement's completion is unknown."""
+    return conflicted(exc) or getattr(exc, "sqlstate", None) in ("25P03", "25P04")
 
 
 def _unserved(kind: str) -> str:
@@ -544,19 +547,19 @@ def _owned(sidecars: Collection[Path], kind: str, key: str) -> None:
         fresh.replace(path)
 
 
-def _caught_up(sidecars: Collection[Path], command: str) -> bool:
+def _caught_up(sidecars: Collection[Path], command: str) -> WorkItem | None:
     """`_replayed`, and each item that still writes into the outputs followed to its end first,
     so no second item writes beside it: the command then asks what its own arguments still
-    need, which an older item, of fewer papers or candidates, may have left. Whether one ended
-    as `serve` stopped under it: the command's submission is then `resumed` (`_submit`)."""
-    stopped = False
+    need, which an older item, of fewer papers or candidates, may have left. The last that
+    ended as `serve` stopped under it, if one did: the command's submission is then `resumed`
+    by it (`_submit`)."""
+    stopped = None
     for still in _replayed(sidecars, command):
         console.print(f"item {still.id} still writes into these outputs: following it first")
         ended = _follow_again(still.id, command)
         console.print(f"item {ended.id} ended {ended.outcome}: {ended.error or 'done'}")
         if _stopped(ended):
-            stopped = True
-            _resubmitting(ended)
+            stopped = ended
     return stopped
 
 
@@ -983,12 +986,12 @@ def eval_replay(
     from litwatch.quality import replay  # noqa: PLC0415
 
     _preflight("replay", "eval replay")
-    resumed = False
+    resumed = None
     if resume is not None and (ended := _following_replay(resume)) is not None:
         if not _stopped(ended):
             _ended(ended)
             return
-        resumed = True
+        resumed = ended
     cfg = configuration.load(config)
     sample = _counts(negatives or [], "--negatives")
     if unknown := (set(cohort or []) | set(sample)) - set(replay.COHORTS):
@@ -1049,7 +1052,7 @@ def eval_replay(
 def _following_replay(eval_run_id: int) -> WorkItem | None:
     """Follow the replay `eval_run_id`'s open item to its end, if it has one, as the item
     writing into it (as `_caught_up` follows one): the item, ended; None when none was open.
-    One that ended as `serve` stopped under it leaves the command to go on, `resumed`."""
+    One that ended as `serve` stopped under it leaves the command to go on, `resumed` by it."""
 
     async def found(db: DatabaseGate) -> WorkItem | None:
         async with db.read("replay: its item") as unit:
@@ -1059,10 +1062,7 @@ def _following_replay(eval_run_id: int) -> WorkItem | None:
     if still is None or still.state == ItemState.ENDED:
         return None
     console.print(f"item {still.id} still runs replay {eval_run_id}: following it")
-    ended = _follow_again(still.id, "eval replay")
-    if _stopped(ended):
-        _resubmitting(ended)
-    return ended
+    return _follow_again(still.id, "eval replay")
 
 
 @eval_app.command("report")
@@ -1299,16 +1299,18 @@ def eval_ladders(
 
     command = "eval ladders"
     _preflight("ladders", command)
-    built = _run(prepare, name=command, migrate=False)
-    for key, why in built.items():
-        if isinstance(why, str):
-            console.print(f"[yellow]left out: {key}: {why}[/yellow]")
     path = out.resolve()
     try:
         # Held while `serve` makes the calls and this command writes their records.
         with ladders.locked(path):
             sidecars = [_sidecar(path, directory=True)]
             resumed = _caught_up(sidecars, command)
+            # Built after the drain: what earlier items spent is in the files though the
+            # requests cannot be built (the archive down).
+            built = _run(prepare, name=command, migrate=False)
+            for key, why in built.items():
+                if isinstance(why, str):
+                    console.print(f"[yellow]left out: {key}: {why}[/yellow]")
             done = ladders.recorded(path)
             work = ladders.todo(chosen, found, built, done, only)
             by = Counter((t.case.role, t.candidate.name) for t in work)
