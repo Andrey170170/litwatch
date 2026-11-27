@@ -342,7 +342,12 @@ async def paper(paper_id: str, request: Request, db: Db) -> s.Paper:
     st = request.app.state
     try:
         found = await paper_page(
-            db, paper_id, st.archive, st.integrations, jobs_run=st.config.schedule.enabled
+            db,
+            paper_id,
+            st.archive,
+            st.integrations,
+            jobs_run=st.config.schedule.enabled,
+            finds_links=integrations_api.link_finder(st) is not None,
         )
     except ArchiveDownError as exc:
         raise HTTPException(status_code=503, detail=ARCHIVE_DOWN) from exc
@@ -363,18 +368,26 @@ async def paper_page(
     integrations: list[Integration],
     *,
     jobs_run: bool = False,
+    finds_links: bool = False,
 ) -> s.Paper | None:
     """The paper's page, as /api and /mcp both show it; for a paper litwatch has not fetched,
     the archive's record of it (`unfetched`), asked once the unit has closed; None when neither
-    has it. `jobs_run`: a jobs worker runs (`[schedule] enabled`), so Process can queue a job.
-    Raises `ArchiveDownError`."""
+    has it. `jobs_run`: a jobs worker runs (`[schedule] enabled`), so Process can queue a job;
+    `finds_links`: finds of release links run (`integrations.link_finder`). Raises
+    `ArchiveDownError`."""
     async with db.read("paper page") as unit:
-        found = await _stored_page(unit, paper_id, integrations, jobs_run)
-    return found if found is not None else await unfetched(archive, paper_id, integrations)
+        found = await _stored_page(unit, paper_id, integrations, jobs_run, finds_links)
+    if found is not None:
+        return found
+    return await unfetched(archive, paper_id, integrations, finds_links=finds_links)
 
 
 async def _stored_page(
-    c: ReadUnit, paper_id: str, integrations: list[Integration], jobs_run: bool
+    c: ReadUnit,
+    paper_id: str,
+    integrations: list[Integration],
+    jobs_run: bool,
+    finds_links: bool,
 ) -> s.Paper | None:
     """The page of a paper litwatch holds, read in one snapshot, so the Process job and the
     paper agree and the page polls until it shows the job's results; None when it holds none."""
@@ -435,8 +448,8 @@ async def _stored_page(
     )
     published = await publications_store.get(c, paper_id)
     card, card_pass, card_requestable = await integrations_api.card(c, paper_id, integrations)
-    links, link_find, links_findable = await integrations_api.release_links(
-        c, paper_id, integrations, processed=not found["dropped"]
+    release = await integrations_api.release_links(
+        c, paper_id, finds=finds_links, processed=not found["dropped"]
     )
     unattached = next((r for r in found["reactions"] if r["topic"] is None), None)
     waits = any(f["failed_runs"] >= FAILED_RUNS for f in found["failures"])  # on the owner
@@ -482,9 +495,7 @@ async def _stored_page(
         card=card,
         card_pass=card_pass,
         card_requestable=card_requestable and not found["dropped"],
-        links=links,
-        link_find=link_find,
-        links_findable=links_findable,
+        **release,
         process=s.ProcessJob(
             id=job["id"],
             state=job["state"],
@@ -502,11 +513,16 @@ async def _stored_page(
 
 
 async def unfetched(
-    archive: ArchiveClient | None, paper_id: str, integrations: list[Integration]
+    archive: ArchiveClient | None,
+    paper_id: str,
+    integrations: list[Integration],
+    *,
+    finds_links: bool = False,
 ) -> s.Paper | None:
-    """An archive paper litwatch has not fetched: its metadata, Process, Deep read (which
-    fetches it first) and Report as a miss. None without an archive or when the archive lacks
-    it; `ArchiveDownError` when the archive cannot answer within `ARCHIVE_PAGE_BUDGET`."""
+    """An archive paper litwatch has not fetched: its metadata, Process, Deep read and Find
+    links (each fetches it first) and Report as a miss. None without an archive or when the
+    archive lacks it; `ArchiveDownError` when the archive cannot answer within
+    `ARCHIVE_PAGE_BUDGET`."""
     try:
         async with asyncio.timeout(ARCHIVE_PAGE_BUDGET):
             found = await archive.paper(paper_id) if archive is not None else None
@@ -532,6 +548,7 @@ async def unfetched(
         topics=[],
         # A withdrawn paper gets no card (the request would fetch it, then refuse it).
         card_requestable=at is None and integrations_api.answers_card_requests(integrations),
+        links_findable=at is None and finds_links,
     )
 
 
@@ -927,7 +944,7 @@ async def report_miss(body: s.MissIn, db: Db, rules: Rules) -> s.Ack:
         name, topic = await _topic(change.unit, body.topic)
         if topic.depth != Depth.FOCUS:
             raise HTTPException(status_code=409, detail="not a Focus topic")
-        await misses.keep(change.unit, paper_id, fetched)
+        await misses.keep(change.unit, paper_id, fetched, rules)
         _, new = await misses.report(change.unit, paper_id, body.topic, body.fit)
     settled = change.settled[paper_id]
     if not new:

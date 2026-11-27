@@ -156,10 +156,11 @@ the finder on the Work gate, its first kind of work built for the gate rather th
   contracts (below).
 - **Its model is a setting of its own** (Q14), by default `gpt-6.2-sol` at medium effort: it is a lookup, not
   writing.
-- **Re-checks stay bounded** (Q12). The agent runs once per paper version, besides the owner's action. A placeholder
-  link is checked again weekly for four weeks by a plain request to GitHub's or Hugging Face's API, not by the agent,
-  then left. A paper with no link found gets the agent again only with a new arXiv version, which is when links
-  usually appear. Public links are not re-checked.
+- **Re-checks stay bounded** (Q12). The agent runs once per paper version (per update, for a paper of no known
+  version) to an answer, besides the owner's action; a find that failed is tried again by a later trigger, three
+  failures at most. A placeholder link is checked again weekly for four weeks by a plain request to GitHub's or
+  Hugging Face's API, not by the agent, then left. A paper with no link found gets the agent again only with a new
+  arXiv version, which is when links usually appear. Public links are not re-checked.
 - **Where it shows** (Q13): the paper's page and the API, so the MCP server's `get_paper` carries the links. Not the
   digests or the Notion export, whose contract stays as it is.
 - **Deep's switches are separated.** Today the deep integration, once configured, both serves the owner's Deep reads

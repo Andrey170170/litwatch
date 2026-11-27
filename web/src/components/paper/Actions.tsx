@@ -105,14 +105,18 @@ export function ReleaseChip({ link, name }: { link: ReleaseLink; name: string })
   );
 }
 
-/** Why a kind the analysis announces has no link: none is known yet, or the paper's last find found none. */
-export function noLinkTitle(paper: Paper, kind: "code" | "weights") {
+/** Why a kind has no link: none is known yet, or the paper's last find found none; `announced` when the analysis says
+ * the paper releases it. */
+export function noLinkTitle(paper: Paper, kind: "code" | "weights", announced = true) {
   const f = paper.link_find;
-  return f?.state === "done" ? `The abstract announces ${kind}; no link was found (${fullDate(f.at)})` : `The abstract announces ${kind}; no link is known yet`;
+  const said = announced ? `The abstract announces ${kind}; ` : "";
+  const none = f?.state === "done" ? `no link was found (${fullDate(f.at)})` : "no link is known yet";
+  return said ? said + none : none.charAt(0).toUpperCase() + none.slice(1);
 }
 
-/** The links as cells: arXiv, PDF, LaTeX, Code and Weights (the first release link of each, by state, else where
- * the analysis or the Deep card knows them), BibTeX. */
+/** The links as cells: arXiv, PDF, LaTeX, Code and Weights, BibTeX. Code and Weights are always there, so a find never
+ * moves a cell: the first release link of each, by state; else the Deep card's Code link; else the analysis's word,
+ * or an empty quiet cell. */
 export function linkCells(paper: Paper, keys: ("arxiv" | "pdf" | "latex" | "code" | "weights" | "bib" | "id")[]) {
   const card = paper.card?.card as { code_url?: string } | undefined;
   const code = paper.links?.find((l) => l.kind === "code");
@@ -121,28 +125,35 @@ export function linkCells(paper: Paper, keys: ("arxiv" | "pdf" | "latex" | "code
     arxiv: ext(paper.arxiv_url, "arXiv"),
     pdf: ext(paper.pdf_url, "PDF"),
     latex: ext(paper.source_url, "LaTeX"),
-    code: code ? <ReleaseChip link={code} name="Code" /> : paper.facets?.releases_code ? card?.code_url ? ext(card.code_url, "Code") : <span title={noLinkTitle(paper, "code")}>⟨/⟩ Code</span> : null,
-    weights: weights ? <ReleaseChip link={weights} name="Weights" /> : paper.facets?.releases_weights ? <span title={noLinkTitle(paper, "weights")}>◆ Weights</span> : null,
+    code: code ? <ReleaseChip link={code} name="Code" /> : card?.code_url ? ext(card.code_url, "Code") : <NoLink paper={paper} kind="code" />,
+    weights: weights ? <ReleaseChip link={weights} name="Weights" /> : <NoLink paper={paper} kind="weights" />,
     bib: <button onClick={() => void copyBibtex(paper)}>BibTeX <CopyMark /></button>,
     id: <button onClick={() => void copyId(paper.id)}>arXiv id <CopyMark /></button>,
   };
   return keys.map((k) => cells[k] && <Fragment key={k}>{cells[k]}</Fragment>);
 }
 
-/** The owner's find of the paper's links is open (queued or running). */
-const findingLinks = (paper: Paper) => paper.link_find?.by === "owner" && (paper.link_find.state === "queued" || paper.link_find.state === "running");
+/** A kind's cell with no link: the analysis's word where it announces the kind, else empty and quiet. */
+function NoLink({ paper, kind }: { paper: Paper; kind: "code" | "weights" }) {
+  const announced = kind === "code" ? paper.facets?.releases_code : paper.facets?.releases_weights;
+  return (
+    <span className={announced ? undefined : "quiet"} title={noLinkTitle(paper, kind, !!announced)}>
+      {KIND_MARK[kind]} {kind === "code" ? "Code" : "Weights"}
+    </span>
+  );
+}
 
 /** Find links asks the deep service for the paper's release links afresh; while the owner's find is open the cell
  * says so. It comes last in its grid, so the cells before it keep their places. */
 export function FindLinksCell({ paper }: { paper: Paper }) {
   const find = useFindLinks(paper.id);
-  const open = findingLinks(paper);
+  const open = paper.owner_find;
   if (!paper.links_findable && !open) return null;
   const f = paper.link_find;
   const failed = f?.by === "owner" && f.state === "failed" ? `The last find failed: ${f.error ?? "no reason given"}` : undefined;
   return (
-    <button className="wide" onClick={() => find.mutate(undefined)} disabled={find.isPending || open} title={failed}>
-      {open ? `Find links · ${f?.state === "running" ? "finding" : "queued"}` : "Find links"}
+    <button className="wide" onClick={() => find.mutate(undefined)} disabled={find.isPending || !!open} title={failed}>
+      {open ? `Find links · ${open.state === "running" ? "finding" : "queued"}` : "Find links"}
     </button>
   );
 }

@@ -528,9 +528,9 @@ class ReleaseLink(BaseModel):
 
 
 class LinkFind(BaseModel):
-    """The paper's newest find of release links: queued, running, done (its links, none
-    included, are the paper's) or failed; the finder's or the owner's; when it ended, started or
-    is due."""
+    """A find of the paper's release links: queued, running, done (its links, none included,
+    are the paper's, unless a newer version's find was under way) or failed; the finder's or
+    the owner's; when it ended, started or is due."""
 
     state: Literal["queued", "running", "done", "failed"]
     by: Literal["finder", "owner"]
@@ -605,9 +605,11 @@ class Paper(BaseModel):
     # again" under a card.
     card_requestable: bool = False
     links: list[ReleaseLink] = Field(default_factory=list)  # code first, then weights
-    link_find: LinkFind | None = None  # the newest find, when the paper has had one
-    # A card provider is loaded, the paper is held and processed, and no find of the owner's is
-    # open: "Find links".
+    link_find: LinkFind | None = None  # the find that ended last, when one has
+    owner_find: LinkFind | None = None  # the owner's find, while it is queued or running
+    finding_links: bool = False  # a find of the paper is queued or running, the owner's or not
+    # Finds run here (the schedule on, the archive, a card provider), the paper is not dropped,
+    # and no find of the owner's is open: "Find links".
     links_findable: bool = False
     process: ProcessJob | None = None  # the paper's newest Process job, when it has one
     # A paper litwatch holds, outside the collection: Process would queue its job now, since the

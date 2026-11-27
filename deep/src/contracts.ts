@@ -158,15 +158,19 @@ const LinkState = enumOf(
     "placeholder, a repository with nothing but a README; missing, a link the paper gives that leads nowhere.",
 );
 /** A link as the finder gives it: `ReleaseLinkSchema` but when it was checked, which the service adds. */
+/** An absolute http(s) URL, and a time in UTC as RFC 3339 writes it (`2026-11-26T03:00:00Z`, fractions allowed). */
+export const WEB_URL = "^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#]+[^\\s]*$";
+export const UTC_TIME = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$";
+
 export const LINK_FIELDS = {
-  url: Type.String({ minLength: 1, description: "The repository's or model's page, an absolute http(s) URL." }),
+  url: Type.String({ pattern: WEB_URL, description: "The repository's or model's page, an absolute http(s) URL." }),
   kind: LinkKind,
   state: LinkState,
   license: nullable(Type.String({ minLength: 1, description: "Its license as the host states it (an SPDX id where it gives one); left out when it is not cheap to see." })),
 };
 
 export const ReleaseLinkSchema = Type.Object(
-  { ...LINK_FIELDS, checked_at: Type.String({ description: "When the service last fetched it, an ISO 8601 time in UTC." }) },
+  { ...LINK_FIELDS, checked_at: Type.String({ pattern: UTC_TIME, description: "When the service last fetched it, an RFC 3339 time in UTC." }) },
   { additionalProperties: false, description: "A link to a paper's released code or weights, with its access state." },
 );
 

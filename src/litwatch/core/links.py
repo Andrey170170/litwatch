@@ -17,6 +17,9 @@ FoundBy = Literal["finder", "owner", "recheck"]
 # A placeholder is checked again this often, this many times, then left alone; no other state is.
 RECHECK_EVERY = timedelta(days=7)
 RECHECKS = 4
+# An automatic find of one version that failed is tried again, by a later trigger, until this
+# many have failed.
+FIND_TRIES = 3
 
 
 class ReleaseLink(BaseModel):
@@ -41,15 +44,20 @@ def wants_find(releases_code: bool, releases_weights: bool) -> bool:
     return releases_code or releases_weights
 
 
-def find_key(paper_id: str, version: int | None) -> str:
-    """The key of the automatic find of the paper's arXiv `version`, held for good: one find per
-    paper and version, whatever it found. An unknown version is a version of its own."""
-    return f"{paper_id}@v{'?' if version is None else version}"
+def find_key(paper_id: str, version: int | None, updated: str | None) -> str:
+    """What a find is of: the paper at its arXiv `version`; at its last update (`updated`, as
+    arXiv's record gives it) when no version is known, so each update is a find of its own."""
+    return f"{paper_id}@v{version}" if version is not None else f"{paper_id}@{updated or '?'}"
 
 
 def rechecked_again(state: State, rechecks: int) -> bool:
     """Whether a link, `rechecks` re-checks done, is checked again: a placeholder, four times."""
     return state == "placeholder" and rechecks < RECHECKS
+
+
+def recheck_key(link_id: int, check: int) -> str:
+    """The key of the link's `check`th re-check (1 to `RECHECKS`): each its own work item."""
+    return f"{link_id}#{check}"
 
 
 def next_check(checked: datetime) -> datetime:

@@ -839,8 +839,8 @@ def _links_lines(p: s.Paper) -> list[str]:
         for link in p.links
     ]
     f = p.link_find
-    if f is not None and f.state in ("queued", "running"):
-        out.append(f"(A find of its links is {f.state}.)")
+    if p.finding_links:
+        out.append("(A find of its links is under way.)")
     elif not out and f is not None and f.state == "done":
         out.append(f"None found ({_day(f.at)}).")
     return out

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, Query, Request
+from starlette.datastructures import State
 
 from litwatch import events, links
 from litwatch.api import schemas as s
@@ -61,6 +62,16 @@ def card_maker(integrations: list[events.Integration]) -> Deep | None:
 
 def answers_card_requests(integrations: list[events.Integration]) -> bool:
     return card_maker(integrations) is not None
+
+
+def link_finder(state: State) -> Deep | None:
+    """The card provider that finds release links in this process, if one does: with the
+    schedule on, an archive to read papers' texts from and a card provider loaded. `app.serve`
+    registers the find's Worker by it, and "Find links" is offered and taken by it, so no find
+    is asked for that no Worker would run."""
+    if not state.config.schedule.enabled or state.archive is None:
+        return None
+    return card_maker(state.integrations)
 
 
 # -- Settings → Integrations -----------------------------------------------------------------------
@@ -251,7 +262,7 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
             return s.CardRequested(pass_id=open_pass["id"])
         # Only a record fetched can revise the paper; with none, `keep` reads it as it stands.
         held = await papers_store.get(unit, paper_id) if fetched is not None else None
-        kept, _ = await misses.keep(unit, paper_id, fetched)
+        kept, _ = await misses.keep(unit, paper_id, fetched, rules)
         rewritten = held is not None and held.revision != kept.revision
         pass_id = await deep_passes.request(unit, paper_id)
         if pass_id is None:
@@ -301,23 +312,41 @@ async def card(
 
 
 LINKS_REFUSED: dict[int | str, dict[str, Any]] = {
-    404: {"description": "litwatch does not hold the paper"},
-    409: {"description": "no card provider is configured, or the paper is no longer processed"},
+    404: {"description": "No such paper"},
+    409: {
+        "description": "No find of links runs here (it needs the schedule on, the archive and a "
+        "card provider), or the paper is dismissed or withdrawn"
+    },
+    503: {"description": "arXiv did not answer in time; nothing was stored"},
 }
+NO_FINDER = "no find of links runs here: it needs the schedule on, the archive and a card provider"
 
 
 @router.post("/papers/{paper_id:path}/links", status_code=202, responses=LINKS_REFUSED)
-async def find_links(paper_id: str, request: Request, db: Db) -> s.LinksRequested:
+async def find_links(paper_id: str, request: Request, db: Db, rules: Rules) -> s.LinksRequested:
     """Find where this paper's code and weights are released, afresh, whatever its analysis
     says and whatever a find before found: the deep service's finder, first in line. Asking
-    again while one of the owner's is open changes nothing. Only a paper litwatch holds."""
-    if not answers_card_requests(loaded(request)):
-        raise HTTPException(status_code=409, detail="no card provider is configured")
-    # Under the paper's lock, as an automatic find is submitted (`store.links`).
+    again while one of the owner's is open changes nothing. A paper litwatch lacks is fetched
+    and stored first, as a Deep read's request stores it."""
+    if link_finder(request.app.state) is None:
+        raise HTTPException(status_code=409, detail=NO_FINDER)
+    try:
+        paper_id, fetched = await misses.resolve(db, paper_id)
+    except misses.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="no such paper") from exc
+    except NoAnswerError as exc:
+        raise HTTPException(status_code=503, detail=misses.SILENT) from exc
+    # Under the paper's locks, as an automatic find is submitted (`store.links`); a paper
+    # stored here is the owner's change of it, settled by hand (`request_card`).
     async with db.write("find links", taxonomy="shared", papers=[paper_id]) as unit:
-        if not await papers_store.held(unit, [paper_id]):
-            raise HTTPException(status_code=404, detail="no such paper")
+        held = await papers_store.get(unit, paper_id) if fetched is not None else None
+        kept, _ = await misses.keep(unit, paper_id, fetched, rules)
         item = await links.request(unit, paper_id)
+        if fetched is not None:
+            rewritten = held is not None and held.revision != kept.revision
+            await word.settle_many(
+                unit, [paper_id], cause=Cause.OWNER, rules=rules, steps=rewritten
+            )
     if item is None:
         raise HTTPException(status_code=409, detail=DROPPED)
     return s.LinksRequested(find_id=item.id)
@@ -331,30 +360,36 @@ _FIND_STATES: dict[tuple[str, str | None], Any] = {
 }
 
 
+def _find(row: dict[str, Any] | None) -> s.LinkFind | None:
+    if row is None:
+        return None
+    return s.LinkFind(
+        state=_FIND_STATES[(row["state"], row["outcome"])],
+        by="owner" if row["by"] == "owner" else "finder",
+        at=row["at"],
+        error=row["error"],
+    )
+
+
 async def release_links(
-    c: ReadUnit, paper_id: str, integrations: list[events.Integration], *, processed: bool
-) -> tuple[list[s.ReleaseLink], s.LinkFind | None, bool]:
-    """The paper page's release links: those stored, shown whatever is loaded, its newest find,
-    and whether "Find links" applies: a card provider is loaded, the paper is `processed` (not
-    dropped), and no find of the owner's is open."""
+    c: ReadUnit, paper_id: str, *, finds: bool, processed: bool
+) -> dict[str, Any]:
+    """The paper page's release links (`s.Paper`'s fields): those stored, shown whatever is
+    loaded; the find that ended last; the owner's open find and whether any is open; and
+    whether "Find links" applies: finds run here (`finds`, `link_finder`), the paper is
+    `processed` (not dropped), and no find of the owner's is open."""
     stored = [
         s.ReleaseLink(**link.model_dump()) for link in await links_store.of_paper(c, paper_id)
     ]
-    newest = await links_store.latest_find(c, paper_id)
-    find = None
-    if newest is not None:
-        find = s.LinkFind(
-            state=_FIND_STATES[(newest["state"], newest["outcome"])],
-            by="owner" if newest["by"] == "owner" else "finder",
-            at=newest["at"],
-            error=newest["error"],
-        )
-    findable = (
-        processed
-        and answers_card_requests(integrations)
-        and await links_store.owners_find(c, paper_id) is None
-    )
-    return stored, find, findable
+    open_finds = await links_store.open_finds(c, paper_id)
+    owners = next((f for f in open_finds if f["by"] == "owner"), None)
+    return {
+        "links": stored,
+        "link_find": _find(await links_store.last_finished(c, paper_id)),
+        "owner_find": _find(owners),
+        "finding_links": bool(open_finds),
+        "links_findable": finds and processed and owners is None,
+    }
 
 
 def _among(entry: dict[str, Any], mark: dict[str, Any] | None) -> s.AmongRow:

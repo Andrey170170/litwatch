@@ -612,12 +612,29 @@ describe("a paper's release links", () => {
     expect(cells).toEqual(["arXiv ↗", "PDF ↗", "LaTeX ↗", "⟨/⟩ Code ↗", "◆ Weights · placeholder ↗"]);
   });
 
-  it("leave the Deep card's Code link where no release link is known, and say when a find found none", async () => {
+  it("keep every phone cell in its place when a find adds a kind the abstract never announced", async () => {
+    viewport(false);
+    const grid = async (body: object) => {
+      scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": body });
+      const { unmount } = renderApp("/paper/2610.00002");
+      await screen.findByRole("heading", { name: "Epic one" });
+      await userEvent.click(screen.getByRole("button", { name: "More" }));
+      const cells = [...screen.getByRole("button", { name: /BibTeX/ }).parentElement!.children].map((c) => c.textContent);
+      unmount();
+      return cells;
+    };
+    const before = await grid({ ...paper, facets: { ...paper.facets, releases_code: false, releases_weights: false } });
+    const after = await grid({ ...paper, facets: { ...paper.facets, releases_code: false, releases_weights: false }, links: [link("weights", "public", "https://huggingface.co/o/m")] });
+    expect(before.slice(0, 6)).toEqual(["arXiv ↗", "PDF ↗", "LaTeX ↗", "⟨/⟩ Code", "◆ Weights", "BibTeX "]);
+    expect(after.slice(0, 6)).toEqual(["arXiv ↗", "PDF ↗", "LaTeX ↗", "⟨/⟩ Code", "◆ Weights ↗", "BibTeX "]);
+  });
+
+  it("leave the Deep card's Code link where no release link is known, whatever the abstract says, and say when a find found none", async () => {
     viewport(true);
     const card = { card: { code_url: "https://github.com/card/code" }, among: [] };
     scriptFetch({
       "GET /api/topics": [],
-      "GET /api/papers/2610.00002": { ...paper, card, facets: { ...paper.facets, releases_code: true, releases_weights: true }, link_find: done },
+      "GET /api/papers/2610.00002": { ...paper, card, facets: { ...paper.facets, releases_code: false, releases_weights: true }, link_find: done },
     });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
@@ -630,7 +647,7 @@ describe("a paper's release links", () => {
     let reads = 0;
     const calls = scriptFetch({
       "GET /api/topics": [],
-      "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, links_findable: true } : { ...paper, links_findable: false, link_find: { state: "queued", by: "owner", at: "2026-11-26T10:00:00Z" } }),
+      "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, links_findable: true } : { ...paper, links_findable: false, finding_links: true, owner_find: { state: "queued", by: "owner", at: "2026-11-26T10:00:00Z" } }),
       "POST /api/papers/2610.00002/links": { find_id: 5 },
     });
     renderApp("/paper/2610.00002");
@@ -642,6 +659,14 @@ describe("a paper's release links", () => {
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/papers/2610.00002/links"]);
   });
 
+  it("offer Find links while only an automatic find is open", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, links_findable: true, finding_links: true } });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByRole("button", { name: "Find links" })).toBeEnabled();
+  });
+
   it("offer no Find links where none can be asked for", async () => {
     viewport(true);
     scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
@@ -650,12 +675,10 @@ describe("a paper's release links", () => {
     expect(screen.queryByRole("button", { name: /Find links/ })).toBeNull();
   });
 
-  it("poll while a find is queued or running", () => {
-    const at = (state: string) => pollEvery({ ...paper, states: [], link_find: { state, by: "finder", at: "2026-11-26T10:00:00Z" } } as unknown as Paper, false);
-    expect(at("queued")).toBe(15_000);
-    expect(at("running")).toBe(15_000);
-    expect(at("done")).toBe(false);
-    expect(at("failed")).toBe(false);
+  it("poll while any find is queued or running, whatever the find that ended last", () => {
+    const at = (finding: boolean) => pollEvery({ ...paper, states: [], finding_links: finding, link_find: { state: "done", by: "owner", at: "2026-11-26T10:00:00Z" } } as unknown as Paper, false);
+    expect(at(true)).toBe(15_000);
+    expect(at(false)).toBe(false);
   });
 });
 

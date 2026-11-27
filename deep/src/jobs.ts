@@ -54,12 +54,15 @@ export abstract class Queue<I, J extends Kept> {
   private readonly queue: string[] = [];
   private running: string | null = null;
   private readonly keep: number;
+  private readonly keepMs: number;
 
   protected abstract run(job: J, input: I): Promise<void>;
   protected abstract readonly heavy: readonly (keyof J)[];
 
-  constructor(keep = 50) {
+  /** `keep` finished jobs at most, but none finished less than `keepMs` ago. */
+  constructor(keep = 50, keepMs = 0) {
     this.keep = keep;
+    this.keepMs = keepMs;
   }
 
   /** The fields every new job starts with, for a queue's `submit` to build its job on. */
@@ -135,7 +138,9 @@ export abstract class Queue<I, J extends Kept> {
 
   private prune(): void {
     const finished = [...this.jobs.values()].filter((j) => j.status === "done" || j.status === "error");
+    const before = Date.now() - this.keepMs;
     for (const j of finished.slice(0, Math.max(0, finished.length - this.keep))) {
+      if (j.finished_at !== undefined && Date.parse(j.finished_at) > before) break; // kept, as those after it
       this.jobs.delete(j.id);
       if (j.key !== undefined) this.keys.delete(j.key);
     }

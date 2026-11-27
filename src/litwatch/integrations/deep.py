@@ -232,18 +232,18 @@ class DeepClient:
         return _job_ref(resp).id
 
     async def follow_find(self, find_id: str) -> Found:
-        """Poll a find until it ends, or until `FIND_WAIT` from now: then it is `still_running`,
-        to be followed again (a find sent again by its key is the same find). A failed poll
-        raises. A find the service no longer has, or one ended in what is not the contract's, is
-        the service's failure."""
+        """Poll a find until it ends. Its end is `unsettled` past `FIND_WAIT` from now, or when
+        the service no longer has it (restarted): the find is sent again by its key, which is
+        the same find while the service keeps it, and a fresh one once it does not. A failed
+        poll raises. A find ended in what is not the contract's is the service's failure, with
+        the usage it reported."""
         deadline = datetime.now(UTC) + FIND_WAIT
         while True:
             await asyncio.sleep(self.poll_seconds)
             resp = await self.http.get(f"{self.base_url}/links/{find_id}")
             if resp.status_code == 404:
-                return Found(
-                    None, error="the deep service lost the find (restarted?)", failure="service"
-                )
+                error = "the deep service lost the find (restarted?)"
+                return Found(None, error=error, failure="service", unsettled=True)
             resp.raise_for_status()
             try:
                 raw = resp.json()
@@ -256,7 +256,8 @@ class DeepClient:
             except ValidationError as exc:
                 if isinstance(raw, dict) and raw.get("status") in ("done", "error"):
                     error = f"the deep service returned a find litwatch cannot read: {_errors(exc)}"
-                    return Found(None, error=error, failure="service")
+                    usage = raw.get("stats") if isinstance(raw.get("stats"), dict) else None
+                    return Found(None, str(raw.get("model") or ""), usage, error, "service")
                 error = f"the find is not one: {_errors(exc)}"
                 raise httpx.DecodingError(error, request=resp.request) from exc
             if job.status in ("done", "error"):
@@ -266,7 +267,7 @@ class DeepClient:
                 return Found(answer, job.model or "", job.stats.model_dump(), error, failure)
             if datetime.now(UTC) > deadline:
                 error = "litwatch stopped waiting for the find, to follow it again"
-                return Found(None, error=error, failure="service", still_running=True)
+                return Found(None, error=error, failure="service", unsettled=True)
 
     async def job_for(self, key: str) -> str | None:
         """The job a submission with `key` started, if the service still has it."""
@@ -335,14 +336,15 @@ class DeepClient:
 @dataclass
 class Found:
     """How a find ended: its `answer`, with the `model` and `usage` the service reported; or
-    its `error` and whose `failure` it was, `still_running` when litwatch stopped waiting."""
+    its `error` and whose `failure` it was. `unsettled`: its end is not known (litwatch stopped
+    waiting, or the service lost it), so it is followed again by its key; else it is final."""
 
     answer: contract.LinksAnswer | None
     model: str = ""
     usage: dict[str, Any] | None = None
     error: str | None = None
     failure: Literal["paper", "service"] | None = None
-    still_running: bool = False
+    unsettled: bool = False
 
 
 class Deep:

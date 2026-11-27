@@ -77,8 +77,7 @@ function Rail({ paper, topics, gistAway, asked, missOpen }: { paper: Paper; topi
 export function pollEvery(p: Paper | undefined, asked: boolean): number | false {
   const owner = new Set((p?.states ?? []).map((s) => s.pass_id));
   const passes = [p?.text_pass, p?.card_pass].filter((x): x is NonNullable<typeof x> => x != null && !owner.has(x.id));
-  const finding = p?.link_find?.state === "queued" || p?.link_find?.state === "running";
-  if (asked || finding || processing(p?.process) || passes.some((x) => x.state === "ready" || x.state === "running")) return 15_000;
+  if (asked || p?.finding_links || processing(p?.process) || passes.some((x) => x.state === "ready" || x.state === "running")) return 15_000;
   return passes.some((x) => x.state === "awaiting_text") ? 60_000 : false;
 }
 

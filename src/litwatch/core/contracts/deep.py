@@ -235,16 +235,18 @@ class ReleaseLink(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    url: Annotated[str, Field(min_length=1)]
+    url: Annotated[str, Field(pattern="^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#]+[^\\s]*$")]
     """
     The repository's or model's page, an absolute http(s) URL.
     """
     kind: LinkKind
     state: LinkState
     license: License | None = None
-    checked_at: str
+    checked_at: Annotated[
+        str, Field(pattern="^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$")
+    ]
     """
-    When the service last fetched it, an ISO 8601 time in UTC.
+    When the service last fetched it, an RFC 3339 time in UTC.
     """
 
 

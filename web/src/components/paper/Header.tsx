@@ -28,7 +28,7 @@ export function Header({ paper }: { paper: Paper }) {
   const awaiting = (paper.states ?? []).some((s) => s.kind === "awaiting_classification");
   const authors = all ? { shown: paper.authors, more: 0 } : authorsShort(paper.authors);
   const card = paper.card?.card as { code_url?: string } | undefined;
-  // Release links show by state where a find gave them; else the analysis's word, with the Deep card's Code link.
+  // Release links show by state where a find gave them; else the Deep card's Code link; else the analysis's word.
   const code = (paper.links ?? []).filter((l) => l.kind === "code");
   const weights = (paper.links ?? []).filter((l) => l.kind === "weights");
   const versions = paper.versions ?? [];
@@ -76,14 +76,13 @@ export function Header({ paper }: { paper: Paper }) {
         )}
         {code.length
           ? code.map((l) => <ReleaseChip key={l.url} link={l} name="code" />)
-          : paper.facets?.releases_code &&
-            (card?.code_url ? (
+          : card?.code_url ? (
               <a className="lnk" href={card.code_url} target="_blank" rel="noopener">
                 ⟨/⟩ code ↗
               </a>
             ) : (
-              <span title={noLinkTitle(paper, "code")}>⟨/⟩ code</span>
-            ))}
+              paper.facets?.releases_code && <span title={noLinkTitle(paper, "code")}>⟨/⟩ code</span>
+            )}
         {weights.length
           ? weights.map((l) => <ReleaseChip key={l.url} link={l} name="weights" />)
           : paper.facets?.releases_weights && <span title={noLinkTitle(paper, "weights")}>◆ weights</span>}

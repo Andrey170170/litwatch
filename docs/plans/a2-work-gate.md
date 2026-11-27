@@ -388,8 +388,14 @@ Found while building, owned by the stage named.
 
 - **P7 (from P6): release links keep nothing for rollback.** Migration 0052 (`release_links`, the `work_items_finds`
   index) is additive; the image before serves neither `links` nor `link check`, so their items wait for this one. A
-  find's `work_results` row is what a retried find reads to end without asking deep again (`links.record`): needed
-  only while its item is open, so P7's cleanup may prune it with the ended item's other results.
+  find's `work_results` row, its answer or its failure, is what a retried find reads to end without asking deep again
+  (`links.record`): needed only while its item is open, so P7's cleanup may prune it with the ended item's other
+  results.
+- **Rolling back P6 turns automatic Deep reads back on.** The image before P6 ignores `[integrations.deep]
+  automatic`: rolled back with `automatic = false` installed, it writes automatic Deep reads wherever deep is
+  configured. The rollback step is a choice: keep deep configured and accept the automatic reads until the image is
+  upgraded again, or disable `[integrations.deep]`, the only way the previous image stops them, which also pauses
+  the owner's Deep read requests until deep is enabled again.
 
 ## Evidence
 

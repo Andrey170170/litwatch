@@ -1,8 +1,10 @@
 """The re-check of a placeholder link, by a plain request to its host's API, not by the agent: a
 GitHub repository (`api.github.com/repos/<owner>/<repo>` and its contents) or a Hugging Face
 model, dataset or space (`huggingface.co/api/<kind>s/<owner>/<name>`). A link on any other host
-is not checked again (`checkable`). An Adapter over today's HTTP client until the Fetch gate
-(A5)."""
+is not checked again (`checkable`). GitHub's redirects (a renamed repository) are followed within
+its API. A Hugging Face weights link holds its weights only when the repository lists a weight
+file; a README and a config alone are a placeholder. An Adapter over today's HTTP client until
+the Fetch gate (A5)."""
 
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from litwatch.core.links import State
+from litwatch.core.links import Kind, State
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +26,15 @@ _FILLER = re.compile(
     r"^(readme|licen[cs]e|copying|citation|notice)(\.\w+)?$|^\.git(ignore|attributes|hub)?$",
     re.IGNORECASE,
 )
+
+# A file of weights, whole or one shard of them (`model-00001-of-00004.safetensors`,
+# `model.gguf.part1of2`).
+_WEIGHTS = re.compile(
+    r"\.(safetensors|bin|pt|pth|ckpt|gguf|onnx|h5|msgpack|npz)(\.part\d+(of\d+)?)?$",
+    re.IGNORECASE,
+)
+# How many of GitHub's redirects a re-check follows.
+REDIRECTS = 3
 
 type Checked = tuple[State, str | None]  # its state, and its license when the host gives one
 
@@ -69,33 +80,56 @@ def _hf_license(model: dict[str, Any]) -> str | None:
     return tags[0].removeprefix("license:") if tags else None
 
 
-async def check(url: str, http: httpx.AsyncClient | None = None) -> Checked | None:
-    """What the link holds now: missing (the host has no such repository), a placeholder
-    (nothing but a README beside its filler), gated (Hugging Face's gate), or public; None when
-    the host could not say (it is not checked here, did not answer, refused, or was rate
-    limited)."""
+def client() -> httpx.AsyncClient:
+    """The client a re-check asks its host with (tests stand a fake host in for it)."""
+    return httpx.AsyncClient(timeout=TIMEOUT, headers={"user-agent": "litwatch"})
+
+
+async def check(url: str, kind: Kind) -> Checked | None:
+    """What the `kind` link holds now: missing (the host has no such repository), a placeholder
+    (code: nothing but a README beside its filler; weights: no weight file), gated (Hugging
+    Face's gate), or public; None when the host could not say (it is not checked here, did not
+    answer, refused, or was rate limited)."""
     target = _target(url)
     if target is None:
         return None
     api, host = target
     try:
-        if http is not None:
-            return await (_github if host == "github" else _huggingface)(http, api)
-        async with httpx.AsyncClient(timeout=TIMEOUT, headers={"user-agent": "litwatch"}) as own:
-            return await (_github if host == "github" else _huggingface)(own, api)
-    except (httpx.HTTPError, ValueError) as exc:
+        async with client() as http:
+            if host == "github":
+                return await _github(http, api)
+            return await _huggingface(http, api, kind)
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         log.warning("re-checking %s: %s could not say: %s", url, host, exc)
         return None
 
 
+async def _github_get(http: httpx.AsyncClient, url: str) -> httpx.Response:
+    """GET `url`, following GitHub's redirects (a renamed or moved repository) within its API,
+    `REDIRECTS` at most."""
+    resp = await http.get(url)
+    for _ in range(REDIRECTS):
+        if not resp.is_redirect or "location" not in resp.headers:
+            break
+        moved = resp.url.join(resp.headers["location"])
+        if moved.scheme != "https" or moved.host != "api.github.com":
+            break
+        resp = await http.get(moved)
+    return resp
+
+
 async def _github(http: httpx.AsyncClient, api: str) -> Checked | None:
-    repo = await http.get(api)
+    repo = await _github_get(http, api)
     if repo.status_code == 404:
         return "missing", None
     if repo.status_code != 200:
         return None
-    license = _github_license(repo.json())
-    contents = await http.get(f"{api}/contents")
+    found = repo.json()
+    license = _github_license(found)
+    # Its contents, at the repository as GitHub now names it.
+    contents = await _github_get(
+        http, f"https://api.github.com/repos/{found['full_name']}/contents"
+    )
     if contents.status_code == 404:  # a repository with no commit has no contents
         return "placeholder", license
     if contents.status_code != 200:
@@ -104,7 +138,7 @@ async def _github(http: httpx.AsyncClient, api: str) -> Checked | None:
     return ("placeholder" if _filler(names) else "public"), license
 
 
-async def _huggingface(http: httpx.AsyncClient, api: str) -> Checked | None:
+async def _huggingface(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked | None:
     resp = await http.get(api)
     if resp.status_code in (401, 404):  # Hugging Face answers 401 for a repository it has not
         return "missing", None
@@ -113,6 +147,7 @@ async def _huggingface(http: httpx.AsyncClient, api: str) -> Checked | None:
     found = resp.json()
     license = _hf_license(found)
     names = [s.get("rfilename", "") for s in found.get("siblings") or []]
-    if _filler(names):
+    held = any(_WEIGHTS.search(n) for n in names) if kind == "weights" else not _filler(names)
+    if not held:
         return "placeholder", license
     return ("gated" if found.get("gated") else "public"), license

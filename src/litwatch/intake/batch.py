@@ -34,7 +34,7 @@ async def store(
     text, so its grades fall back to solid until the new text is analysed, and a new arXiv
     version queues the passes that read the text again, and a paper brought back has its open
     passes run again (`store.fulltext.submit_restored`), and a new version's release links are
-    found again (`links.due`). A paper fetched inside a change of it
+    found again (`links.stored`). A paper fetched inside a change of it
     is stored there with `store.papers.upsert` instead, and that change settles it."""
     total = papers_store.Upserted()
     for start in range(0, len(papers), PAGE):
@@ -45,8 +45,7 @@ async def store(
             settled = list(dict.fromkeys(stored.rewritten + stored.withdrawn))
             await word.settle_many(unit, settled, cause=Cause.VERDICT, rules=rules)
             await fulltext_store.submit_restored(unit, stored.withdrawn)
-            if rules.find_links:
-                await links.due(unit, stored.versioned)
+            await links.stored(unit, stored, find_links=rules.find_links)
         total.inserted += stored.inserted
         total.updated += stored.updated
         total.rewritten += stored.rewritten

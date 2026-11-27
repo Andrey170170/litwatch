@@ -160,8 +160,8 @@ topic badges; the title; the authors (the first three and "+3", which expands); 
 with ⧉ to copy it), the date, the version ("v2 of 2"), the kind (Analysis, Method…), the published venue when DBLP
 knows one, and its release links. Each link is a chip, "⟨/⟩ code ↗" or "◆ weights ↗", in the colour of its access
 state: public `--cy`, gated `--warn`, a placeholder `--fg3` and dashed, missing `--sig`; the state follows the kind
-unless public ("◆ weights · gated ↗"), and its license and last check show on hover. Where no link is known, the
-analysis's word, quiet ("⟨/⟩ code", "◆ weights"), with the Deep card's Code link where it has one; after a find that
+unless public ("◆ weights · gated ↗"), and its license and last check show on hover. Where no link of a kind is known, the
+Deep card's Code link where it has one, else the analysis's word, quiet ("⟨/⟩ code", "◆ weights"); after a find that
 found none, the hover says so. A paper outside the collection says "Not in the collection" in place of a rarity.
 
 **Withdrawn.** A paper arXiv withdrew ([pipeline.md](pipeline.md), section 8) has, under the header, a status panel as
@@ -225,8 +225,9 @@ strip of section chips sticks under the top bar, the current one outlined and sc
 its section; diagrams and wide tables scroll sideways. The bottom bar: ☆ Save, 👍,
 the paper's place in its list ("3/22"), 👎, and ⋯. ⋯ opens the paper sheet: a label per topic (the topic's name, its
 grade and whose Fit it shows, then the Fit control; in the rail's order and fold), the actions and links as the same grid (arXiv, PDF, LaTeX, Code,
-Weights, BibTeX, then Deep read and Find links; Code and Weights are the first release link of each, in its state's
-colour with a 3 px left edge), then versions, published version and classes, and Done. A swipe steps to the previous or next paper
+Weights, BibTeX, then Deep read and Find links; Code and Weights are always there, so a find moves no cell: the first
+release link of each, in its state's colour with a 3 px left edge, else as the header has it, else empty, dashed and
+quiet), then versions, published version and classes, and Done. A swipe steps to the previous or next paper
 of the list it was opened from.
 
 A paper outside the collection on the phone: the header and the Abstract (no Gist or Brief), and a bottom bar of

@@ -126,7 +126,8 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         if maker := integrations_api.card_maker(app.state.integrations):
             deep = workers[fulltext_store.DEEP_WORK] = DeepPassWorker(db, config, archive, maker)
             swept.append(deep.sweep)
-            workers[links_store.FIND] = FindWorker(db, archive, maker)
+    if finder := integrations_api.link_finder(app.state):
+        workers[links_store.FIND] = FindWorker(db, app.state.archive, finder)
     serving = commands.Serving(
         db,
         config,

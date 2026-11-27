@@ -831,7 +831,7 @@
       "properties": {
         "url": {
           "type": "string",
-          "minLength": 1,
+          "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#]+[^\\s]*$",
           "description": "The repository's or model's page, an absolute http(s) URL."
         },
         "kind": {
@@ -854,7 +854,8 @@
         },
         "checked_at": {
           "type": "string",
-          "description": "When the service last fetched it, an ISO 8601 time in UTC."
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$",
+          "description": "When the service last fetched it, an RFC 3339 time in UTC."
         }
       },
       "additionalProperties": false,

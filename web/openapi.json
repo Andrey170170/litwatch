@@ -2704,7 +2704,7 @@
     "/api/papers/{paper_id}/links": {
       "post": {
         "summary": "Find Links",
-        "description": "Find where this paper's code and weights are released, afresh, whatever its analysis\nsays and whatever a find before found: the deep service's finder, first in line. Asking\nagain while one of the owner's is open changes nothing. Only a paper litwatch holds.",
+        "description": "Find where this paper's code and weights are released, afresh, whatever its analysis\nsays and whatever a find before found: the deep service's finder, first in line. Asking\nagain while one of the owner's is open changes nothing. A paper litwatch lacks is fetched\nand stored first, as a Deep read's request stores it.",
         "operationId": "find_links_api_papers__paper_id__links_post",
         "parameters": [
           {
@@ -2735,10 +2735,13 @@
             "description": "The read token, outside reading papers"
           },
           "404": {
-            "description": "litwatch does not hold the paper"
+            "description": "No such paper"
           },
           "409": {
-            "description": "no card provider is configured, or the paper is no longer processed"
+            "description": "No find of links runs here (it needs the schedule on, the archive and a card provider), or the paper is dismissed or withdrawn"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
           },
           "422": {
             "description": "Validation Error",
@@ -6000,7 +6003,7 @@
           "at"
         ],
         "title": "LinkFind",
-        "description": "The paper's newest find of release links: queued, running, done (its links, none\nincluded, are the paper's) or failed; the finder's or the owner's; when it ended, started or\nis due."
+        "description": "A find of the paper's release links: queued, running, done (its links, none included,\nare the paper's, unless a newer version's find was under way) or failed; the finder's or\nthe owner's; when it ended, started or is due."
       },
       "LinksRequested": {
         "properties": {
@@ -6783,6 +6786,21 @@
                 "type": "null"
               }
             ]
+          },
+          "owner_find": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkFind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finding_links": {
+            "type": "boolean",
+            "title": "Finding Links",
+            "default": false
           },
           "links_findable": {
             "type": "boolean",

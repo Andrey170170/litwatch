@@ -74,7 +74,8 @@ async def analyse(
     """Analyse every paper whose current text is classified and not analysed, up to `limit`, of
     `ids` when given. A paper whose answers were unusable `FAILED_RUNS` runs in a row is left for
     the owner, who can have it tried again. A paper whose analysis says it releases code or
-    weights has its links found, once per arXiv version (`links.due`)."""
+    weights has its links found, once per arXiv version (`links.due`); then the automatic finds
+    that failed lately are tried again (`links.retry`)."""
     async with db.read("analyse: due") as unit:
         papers = await analyses_store.due(unit, FAILED_RUNS, limit, ids)
     rules = word.rules(config)
@@ -88,6 +89,8 @@ async def analyse(
                     await links.due(done.unit, [a.paper.id])
             if recorded:
                 run.add("analysed" if a.error is None else "analysis_failed")
+    if rules.find_links:  # the automatic finds that failed lately, tried again
+        await links.retry(db)
 
 
 async def grade(

@@ -9,6 +9,7 @@ import contextlib
 import json
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 
 from litwatch import events
@@ -76,10 +77,11 @@ from tests.conftest import (
 from tests.deep_service import CARD, DONE, USAGE, Q, make
 from tests.digesting import MON, TUE, Writer, area, day, listed, week
 from tests.fakes_http import FakeArchive, FakeDeep, mock
+from tests.scripted import Scripted
 from tests.seed import analyse, classify
 from tests.seed import grade as verdict
 from tests.sessions import Bridge, Session, in_read, in_write
-from tests.working import items_of, job_of, serving, until
+from tests.working import QUIET, items_of, job_of, served, serving, until
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=2)
 BODY = "\\section{Method} We read hidden steps off the residual stream. " * 40
@@ -1756,24 +1758,38 @@ async def test_a_requested_card_runs_as_its_passs_work_item_while_the_gate_serve
 
 
 async def test_with_automatic_reads_off_a_must_read_queues_none_and_the_owners_request_runs(
-    db: Session, gate
+    db: Session, gate, monkeypatch
 ):
-    """`[integrations.deep] automatic = false`, as production sets it: settling a must read
-    queues no Deep pass, and the owner's request is worked on deep as ever."""
-    off = Config(integrations={"deep": {"url": "http://deep.test", "automatic": False}})
-    rules = settling.configured(off)
+    """`[integrations.deep] automatic = false`, as production sets it, in `serve` on the
+    configuration's own rules: settling a must read queues no Deep pass, and the owner's
+    request is worked on deep by `serve`'s own Deep worker."""
+    monkeypatch.setattr(word, "rules", settling.configured)
+    deep = {"url": "http://deep.test", "automatic": False}
+    off = Config(schedule=QUIET, integrations={"deep": deep})
     verdict = Verdict(
         paper_id=P.id, topic=FAITH.slug, topic_version="v", fit=Fit.CENTRAL, reason="r", opinions={}
     )
     await in_write(db, verdicts.add, verdict)
-    await settling.settle(db, P.id, cause=Cause.VERDICT, rules=rules)
+    await settling.settle(db, P.id, cause=Cause.VERDICT, rules=word.rules(off))
     grades = await in_read(db, word_store.effective_for, P.id)
     assert grades[FAITH.slug].grade == Grade.MUST_READ  # one an automatic Deep read is for
     assert await deep_rows(db) == []
-    workers = {"deep": DeepPassWorker(gate, off, archive(with_text(P)), make(FakeDeep(DONE)))}
-    async with serving(WorkGate(gate), workers):
-        async with settling.change(db, P.id, cause=Cause.OWNER, rules=rules) as change:
-            pass_id = await deep_passes.request(change.unit, P.id)
+    integrations = [make(FakeDeep(DONE))]
+    async with served(
+        gate,
+        off,
+        models=Scripted().gate(off),
+        integrations=integrations,
+        archive=archive(with_text(P)),
+    ) as app:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://t",
+            headers={"Authorization": "Bearer test"},
+        ) as http:
+            asked = await http.post(f"/api/papers/{P.id}/card")
+        assert asked.status_code == 202
+        pass_id = asked.json()["pass_id"]
 
         async def ended() -> bool:
             return [i["state"] for i in await items_of(db, "deep", str(pass_id))] == ["ended"]

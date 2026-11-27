@@ -31,7 +31,8 @@ class Upserted:
     rewritten: list[str] = field(default_factory=list)
     # Ids withdrawn, or brought back by a later version: dropped or not from now on.
     withdrawn: list[str] = field(default_factory=list)
-    # Stored ids whose arXiv version changed: their release links are found again.
+    # Stored ids whose arXiv version changed, or, of no known version, whose update did: what a
+    # find of their release links is of (`core.links.find_key`).
     versioned: list[str] = field(default_factory=list)
 
 
@@ -160,7 +161,8 @@ async def upsert(
         r["id"]: r
         for r in await (
             await unit.execute(
-                "SELECT id, title, abstract, version, withdrawn_at FROM papers WHERE id = ANY(%s)",
+                "SELECT id, title, abstract, version, updated, withdrawn_at FROM papers "
+                "WHERE id = ANY(%s)",
                 ([p.id for p in papers],),
             )
         ).fetchall()
@@ -199,7 +201,7 @@ async def upsert(
                        OR (papers.version IS NULL AND EXCLUDED.version IS NOT NULL)
                        OR (EXCLUDED.version = papers.version
                            AND EXCLUDED.updated::date > papers.updated::date))
-                RETURNING (xmax = 0) AS inserted, version, title, abstract, withdrawn_at
+                RETURNING (xmax = 0) AS inserted, version, updated, title, abstract, withdrawn_at
                 """,
                 {
                     **p.model_dump(),
@@ -235,7 +237,9 @@ async def upsert(
                 )
             if (row["withdrawn_at"] is None) != (old["withdrawn_at"] is None):
                 result.withdrawn.append(p.id)
-            if row["version"] != old["version"]:
+            if row["version"] != old["version"] or (
+                row["version"] is None and row["updated"] != old["updated"]
+            ):
                 result.versioned.append(p.id)
             if changed or row["version"] != old["version"]:
                 await outbox.emit(

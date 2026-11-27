@@ -973,7 +973,8 @@ export interface paths {
          * Find Links
          * @description Find where this paper's code and weights are released, afresh, whatever its analysis
          *     says and whatever a find before found: the deep service's finder, first in line. Asking
-         *     again while one of the owner's is open changes nothing. Only a paper litwatch holds.
+         *     again while one of the owner's is open changes nothing. A paper litwatch lacks is fetched
+         *     and stored first, as a Deep read's request stores it.
          */
         post: operations["find_links_api_papers__paper_id__links_post"];
         delete?: never;
@@ -2313,9 +2314,9 @@ export interface components {
         };
         /**
          * LinkFind
-         * @description The paper's newest find of release links: queued, running, done (its links, none
-         *     included, are the paper's) or failed; the finder's or the owner's; when it ended, started or
-         *     is due.
+         * @description A find of the paper's release links: queued, running, done (its links, none included,
+         *     are the paper's, unless a newer version's find was under way) or failed; the finder's or
+         *     the owner's; when it ended, started or is due.
          */
         LinkFind: {
             /**
@@ -2620,6 +2621,12 @@ export interface components {
             /** Links */
             links?: components["schemas"]["ReleaseLink"][];
             link_find?: components["schemas"]["LinkFind"] | null;
+            owner_find?: components["schemas"]["LinkFind"] | null;
+            /**
+             * Finding Links
+             * @default false
+             */
+            finding_links: boolean;
             /**
              * Links Findable
              * @default false
@@ -6436,14 +6443,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description litwatch does not hold the paper */
+            /** @description No such paper */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description no card provider is configured, or the paper is no longer processed */
+            /** @description No find of links runs here (it needs the schedule on, the archive and a card provider), or the paper is dismissed or withdrawn */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6458,6 +6465,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+            /** @description arXiv did not answer in time; nothing was stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

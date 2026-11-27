@@ -313,14 +313,23 @@ asked for, or arXiv's PDF of it. Everything else answers it 403.
 
 The service also finds where a paper's code and weights are released (`POST /links`, followed at
 `GET /links/<id>`, the same key protocol as a read; `deep/README.md`). A find is a work item of
-kind `links` (`litwatch.links`): an automatic one when the paper's analysis says it releases code
-or weights, once per paper and arXiv version for good, "none found" included, and found again
-for a new version; the owner's "Find links" (`POST /api/papers/<id>/links`) always runs a fresh
-one. Its answer replaces the paper's links (`release_links`: url, kind, access state, license,
-when checked, what set it), in the unit that ends its item. A placeholder link on GitHub or
-Hugging Face is checked again by a plain request to their API (`links.adapter`), a week apart,
-four times, then left alone; no other link is. The paper page shows each link as a chip coloured
-by its state, and `get_paper` lists them. Digests and the Notion export do not show them yet.
+kind `links` (`litwatch.links`), worked only by a `serve` with the schedule on and an archive to
+read papers from. An automatic one runs when the paper's analysis says it releases code or
+weights, of the paper as it is: at its arXiv version, or at its update when no version is known.
+It is keyed by that, and only an answer, "none found" included, holds it for good: a failed one
+ends failed with its error and cost, and a later trigger (an analysis again, the nightly's
+retries of the last week, three failures at most) submits a fresh one. A new version, or update,
+is found again, wherever it is stored (intake, or an owner's action fetching the paper). The
+owner's "Find links" (`POST /api/papers/<id>/links`) always runs a fresh one, on a paper only in
+the archive too, which it stores first. A find of what the paper no longer is (a newer version
+stored meanwhile) ends without asking deep, or with its answer dropped. Its answer replaces the
+paper's links (`release_links`: url, kind, access state, license, when checked, what set it), in
+the unit that ends its item; deep confirms each link by a fetch of it, or of its repository's API
+page, that shows its state. A placeholder link on GitHub or Hugging Face is checked again by a
+plain request to their API (`links.adapter`), a week apart, four times, each check its own work
+item, then left alone; no other link is. A Hugging Face weights link holds its weights only when
+the repository lists a weight file. The paper page shows each link as a chip coloured by its
+state, and `get_paper` lists them. Digests and the Notion export do not show them yet.
 
 ### The Notion export
 
