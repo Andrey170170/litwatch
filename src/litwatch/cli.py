@@ -8,7 +8,7 @@ import json
 import math
 import uuid
 from collections import Counter
-from collections.abc import Awaitable, Callable, Collection, Iterator
+from collections.abc import Awaitable, Callable, Collection, Generator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
@@ -31,7 +31,7 @@ from litwatch.gates.database import (
     ReadUnit,
     WriteUnit,
 )
-from litwatch.gates.work import LEASE
+from litwatch.gates.work import LEASE, retryable
 from litwatch.jobs import commands
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
@@ -215,12 +215,26 @@ def _stopped(item: WorkItem) -> bool:
 
 
 async def _until_served(db: DatabaseGate, kind: str) -> None:
-    """Wait until a `serve` runs `kind`, looking every `FOLLOW_SECONDS`."""
+    """Wait until a `serve` runs `kind`, looking every `FOLLOW_SECONDS`, a lost database waited
+    out."""
     while True:
-        async with db.read("is it served") as unit:
-            if await queue.serving(unit, kind, LEASE):
-                return
+        with _lost_waited_out():
+            async with db.read("is it served") as unit:
+                if await queue.serving(unit, kind, LEASE):
+                    return
         await asyncio.sleep(FOLLOW_SECONDS)
+
+
+@contextlib.contextmanager
+def _lost_waited_out() -> Generator[None]:
+    """A follower's read that lost the database is skipped: the caller looks again, from where it
+    was, after its pause. Any other error is raised."""
+    try:
+        yield
+    except Exception as exc:
+        if not retryable(exc):
+            raise
+        console.print(f"[yellow]the database was lost ({exc}); looking again[/yellow]")
 
 
 def _ended(item: WorkItem | None) -> None:
@@ -241,14 +255,20 @@ async def _follow(db: DatabaseGate, item_id: int, followed: _Followed | None = N
     try:
         while True:
             wake.clear()
-            async with db.read("follow") as unit:
-                item = await queue.get(unit, item_id)
-                if item is None or not queue.once(item.kind):
-                    raise SystemExit(f"no command's work item {item_id}")
-                found = await queue.results(unit, item_id, followed.last.get(item_id, 0))
-                served = await queue.serving(unit, item.kind, LEASE)
+            read = None
+            with _lost_waited_out():
+                async with db.read("follow") as unit:
+                    item = await queue.get(unit, item_id)
+                    if item is None or not queue.once(item.kind):
+                        raise SystemExit(f"no command's work item {item_id}")
+                    found = await queue.results(unit, item_id, followed.last.get(item_id, 0))
+                    read = (item, found, await queue.serving(unit, item.kind, LEASE))
+            if read is None:  # the database was lost: looked at again after the pause
+                await asyncio.sleep(FOLLOW_SECONDS)
+                continue
+            item, found, served = read
             for last, body in found:
-                shown.show(body)
+                shown.show(body, last)
                 followed.last[item_id] = last
             if item.state == ItemState.ENDED:
                 for body in item.result or []:
@@ -283,34 +303,51 @@ async def _woken(db: DatabaseGate, wake: asyncio.Event) -> None:
 
 class _Shown:
     """An item's results as the command shows them (`jobs.commands`): text and data printed,
-    lines appended to their files once each, whoever followed the item before (a line the file
-    holds is not written again). A record cut off at a file's end, by a kill mid-write, is cut
-    off, in bytes, before the file is first read (`jsonl.mend`)."""
+    lines appended to their files once each, whoever followed the item before. A line carries
+    its result's id (`result_id`, its `work_results` row's), by which a file that holds it,
+    plain or packed (`<file>.gz`), is not written it again: two results of the same text are
+    two lines. A record cut off at a file's end, by a kill mid-write, is cut off, in bytes,
+    before the file is first read (`jsonl.mend`)."""
 
     def __init__(self) -> None:
-        self.files: dict[str, set[str]] = {}
+        self.files: dict[str, set[int]] = {}
 
-    def show(self, body: dict[str, Any]) -> None:
+    def show(self, body: dict[str, Any], result_id: int | None = None) -> None:
         if "say" in body:
             console.print(body["say"], markup=False)
         elif "data" in body:
             console.print_json(data=body["data"])
         elif "to" in body:
-            self.line(Path(body["to"]), body["line"])
+            assert result_id is not None  # a file's line is a result, never a completion's
+            self.line(Path(body["to"]), body["line"], result_id)
 
-    def line(self, path: Path, line: str) -> None:
+    def line(self, path: Path, line: str, result_id: int) -> None:
         from litwatch.quality import jsonl  # noqa: PLC0415
 
         held = self.files.get(str(path))
         if held is None:
             jsonl.mend(path)
-            held = self.files[str(path)] = set(jsonl.lines(path))
-        if line in held:
+            held = self.files[str(path)] = _result_ids(path)
+        if result_id in held:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
+        record = json.loads(line) | {"result_id": result_id}
         with path.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-        held.add(line)
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        held.add(result_id)
+
+
+def _result_ids(path: Path) -> set[int]:
+    """The results' ids the file's records carry, its packed records' (`<file>.gz`) included."""
+    import gzip  # noqa: PLC0415
+
+    from litwatch.quality import jsonl  # noqa: PLC0415
+
+    found = jsonl.lines(path)
+    packed = path.with_name(path.name + ".gz")
+    if packed.exists():
+        found += jsonl.records(gzip.decompress(packed.read_bytes()), whole=True)
+    return {i for x in found if (i := json.loads(x).get("result_id")) is not None}
 
 
 def _interrupted(followed: _Followed, command: str) -> NoReturn:
@@ -361,6 +398,9 @@ def _stop(item: WorkItem, command: str, followed: _Followed) -> NoReturn:
             return await _follow(db, item.id, followed)
 
         item = _run(cancelled, name=command, migrate=False)
+        if item.outcome == Outcome.DONE:  # it ended done before the cancel reached it
+            console.print(f"item {item.id} ended done before the cancel reached it")
+            raise typer.Exit(0)
         raise SystemExit(f"item {item.id} ended {item.outcome}: {item.error or 'done'}")
     item = _run(lambda db: _follow(db, item.id, followed), name=command, migrate=False)
     _ended(item)
@@ -404,11 +444,11 @@ def _sidecar(output: Path, *, directory: bool = False) -> Path:
     return output / "item.json" if directory else output.with_name(output.name + ".item")
 
 
-def _replayed(sidecars: Collection[Path], command: str) -> WorkItem | None:
+def _replayed(sidecars: Collection[Path], command: str) -> list[WorkItem]:
     """Before an evaluation decides what is left to ask: the results of the items named in
     `sidecars` (the last to write each output) written into their files (`_Shown`, once each),
     so what they spent while no command followed them counts: their answers, their
-    reservations. Returns the one still open, if one is."""
+    reservations. Returns those still open."""
     named = {
         (found["kind"], found["key"])
         for path in sidecars
@@ -416,24 +456,24 @@ def _replayed(sidecars: Collection[Path], command: str) -> WorkItem | None:
         for found in [json.loads(path.read_text(encoding="utf-8"))]
     }
     if not named:
-        return None
+        return []
 
-    async def read(db: DatabaseGate) -> list[tuple[WorkItem, list[dict[str, Any]]]]:
+    async def read(db: DatabaseGate) -> list[tuple[WorkItem, list[tuple[int, dict[str, Any]]]]]:
         found = []
         async with db.read("evaluation: earlier items") as unit:
             for kind, key in sorted(named):
                 if (item := await queue.find(unit, kind, key)) is not None:
-                    found.append((item, [b for _, b in await queue.results(unit, item.id)]))
+                    found.append((item, await queue.results(unit, item.id)))
         return found
 
-    shown, open_ = _Shown(), None
-    for item, bodies in _run(read, name=command, migrate=False):
-        for body in bodies:
+    shown, still = _Shown(), []
+    for item, results in _run(read, name=command, migrate=False):
+        for result_id, body in results:
             if "to" in body:
-                shown.show(body)
+                shown.show(body, result_id)
         if item.state != ItemState.ENDED:
-            open_ = item
-    return open_
+            still.append(item)
+    return still
 
 
 def _owned(sidecars: Collection[Path], kind: str, key: str) -> None:
@@ -447,19 +487,14 @@ def _owned(sidecars: Collection[Path], kind: str, key: str) -> None:
         fresh.replace(path)
 
 
-def _resumed(sidecars: Collection[Path], command: str) -> bool:
-    """`_replayed`, and when an item still writes into the outputs, follow it to its end first,
-    so no second item writes beside it. True when the command is done with it: the item ended
-    but for `serve` stopping under it, after which the command goes on to what is left."""
-    if (still := _replayed(sidecars, command)) is None:
-        return False
-    console.print(f"item {still.id} still writes into these outputs: following it")
-    ended = _follow_again(still.id, command)
-    if _stopped(ended):
-        console.print(f"item {ended.id}: {ended.error}; going on from what it did")
-        return False
-    _ended(ended)
-    return True
+def _caught_up(sidecars: Collection[Path], command: str) -> None:
+    """`_replayed`, and each item that still writes into the outputs followed to its end first,
+    so no second item writes beside it: the command then asks what its own arguments still
+    need, which an older item, of fewer papers or candidates, may have left."""
+    for still in _replayed(sidecars, command):
+        console.print(f"item {still.id} still writes into these outputs: following it first")
+        ended = _follow_again(still.id, command)
+        console.print(f"item {ended.id} ended {ended.outcome}: {ended.error or 'done'}")
 
 
 async def _migrate(db: DatabaseGate) -> list[str]:
@@ -782,7 +817,8 @@ def eval_classify(
     it stopped, asking only what `out` does not hold, and so does an item `serve` stopped under,
     submitted again. Each candidate's file names the item that last wrote it
     (`<candidate>.jsonl.item`): a run first writes in what that item answered while no command
-    followed it, and follows it first while it still runs."""
+    followed it, and follows it to its end first while it still runs; then it asks what
+    its own arguments still need."""
     import tomllib  # noqa: PLC0415
 
     from litwatch.config import Models, RoleConfig  # noqa: PLC0415
@@ -794,8 +830,7 @@ def eval_classify(
         raise typer.BadParameter(f"no candidate {', '.join(sorted(unknown))} in {candidates}")
     paths = {name: (out / f"{name}.jsonl").resolve() for name in candidate}
     sidecars = [_sidecar(path) for path in paths.values()]
-    if _resumed(sidecars, command):
-        return
+    _caught_up(sidecars, command)
     tree, evaluation = seeds.taxonomy(), classify.load(labels)
     ids = evaluation.papers[:limit]
     found = {p.id for p in _run(lambda db: _papers(db, ids), name=command, migrate=False)}
@@ -943,7 +978,7 @@ def eval_replay(
 
 def _following_replay(eval_run_id: int) -> bool:
     """Follow the replay `eval_run_id`'s open item to its end, if it has one, as the item
-    writing into it (`_resumed`): True when the command is done with it."""
+    writing into it (as `_caught_up` follows one): True when the command is done with it."""
 
     async def found(db: DatabaseGate) -> WorkItem | None:
         async with db.read("replay: its item") as unit:
@@ -1055,7 +1090,8 @@ def eval_briefs(
     estimates leave them out, and only `eval replay`'s estimate reads them. A run resumes where
     it stopped, and so does an item `serve` stopped under, submitted again. `out` names the item
     that last wrote it (`<out>.item`): a run first writes in what that item answered while no
-    command followed it, and follows it first while it still runs."""
+    command followed it, and follows it to its end first while it still runs; then it asks what
+    its own arguments still need."""
     from litwatch.quality import briefs, jsonl  # noqa: PLC0415
 
     command = "eval briefs"
@@ -1064,8 +1100,7 @@ def eval_briefs(
         raise SystemExit(f"--text is one of {', '.join(briefs.TEXTS)}")
     path = out.resolve()
     sidecars = [_sidecar(path)]
-    if _resumed(sidecars, command):
-        return
+    _caught_up(sidecars, command)
     entries = briefs.load(preferences)
     found = _run(lambda db: _papers(db, [e.id for e in entries]), name=command, migrate=False)
     by_id = {p.id: p for p in found}
@@ -1160,7 +1195,8 @@ def eval_ladders(
     refuses any that is not the one approved. An item `serve` stopped under is submitted again,
     for what of the approved calls its records do not settle. `out` names the item that last
     wrote it (`item.json`): a run first writes in what that item answered and reserved while no
-    command followed it, and follows it first while it still runs."""
+    command followed it, and follows it to its end first while it still runs; then it asks what
+    its own arguments still need."""
     if not (math.isfinite(ceiling) and ceiling > 0):
         raise typer.BadParameter("--ceiling is a positive amount")
     from litwatch.fulltext import archive_for  # noqa: PLC0415
@@ -1201,8 +1237,7 @@ def eval_ladders(
         # Held while `serve` makes the calls and this command writes their records.
         with ladders.locked(path):
             sidecars = [_sidecar(path, directory=True)]
-            if _resumed(sidecars, command):
-                return
+            _caught_up(sidecars, command)
             done = ladders.recorded(path)
             work = ladders.todo(chosen, found, built, done, only)
             by = Counter((t.case.role, t.candidate.name) for t in work)
@@ -1218,22 +1253,17 @@ def eval_ladders(
             )
             if not work or (not yes and not typer.confirm("Spend it?")):
                 return
-            approved = {(t.case.key, t.candidate.name) for t in work}
 
-            def calls(work: list[Any], spent: float) -> dict[str, Any]:
+            def calls(these: list[Any], spent: float) -> dict[str, Any]:
                 # Each call with the fingerprint of its request, as estimated and approved.
                 todo = [(t.case.key, t.candidate.name, ladders.asked(t.candidate, t.request))
-                        for t in work]  # fmt: skip
+                        for t in these]  # fmt: skip
                 return {"todo": todo, "spent": spent}
 
             def again(scope: dict[str, Any]) -> dict[str, Any] | None:
                 """The approved calls the records do not settle, and what the records spent."""
                 done = ladders.recorded(path)
-                left = [
-                    t
-                    for t in ladders.todo(chosen, found, built, done, only)
-                    if (t.case.key, t.candidate.name) in approved
-                ]
+                left = ladders.left(work, done)
                 spent = ladders.spent(done, ladders.reservations(path))
                 return scope | calls(left, spent) if left else None
 

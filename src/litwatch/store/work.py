@@ -338,7 +338,8 @@ async def take_back(
 
 async def _retire_commands(unit: WriteUnit) -> None:
     """End failed the CLI commands' items whose lease expired, which no process runs again: a
-    command's (`once`), its `serve` gone (`STOPPED`), and one of the P3 image's (kind `command`,
+    command's (`once`), its `serve` gone (`STOPPED`, or `CANCELLED` when its owner's cancel was
+    asked first), and one of the P3 image's (kind `command`,
     which ran in the command's own process), left by a command killed as this image took over.
     Either holds its admission (`deep`, `publications`) until then. P7 removes the P3 kind's
     with the old liveness columns."""
@@ -346,12 +347,13 @@ async def _retire_commands(unit: WriteUnit) -> None:
         await unit.execute(
             "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
             "error = CASE WHEN kind = %(command)s THEN 'its process stopped' "
-            "ELSE %(stopped)s END, lease_token = NULL, lease_until = NULL, resubmitted = false "
+            "WHEN cancel_asked IS NOT NULL THEN %(cancelled)s ELSE %(stopped)s END, "
+            "lease_token = NULL, lease_until = NULL, resubmitted = false "
             "WHERE id IN (SELECT id FROM work_items c "
             "WHERE (c.kind = %(command)s OR c.kind LIKE %(commands)s) "
             "AND c.state = 'running' AND c.lease_until < now() FOR UPDATE SKIP LOCKED) "
             "RETURNING kind",
-            {"command": COMMAND, "commands": COMMANDS, "stopped": STOPPED},
+            {"command": COMMAND, "commands": COMMANDS, "stopped": STOPPED, "cancelled": CANCELLED},
         )
     ).fetchall()
     for kind in sorted({r["kind"] for r in retired}):
@@ -412,7 +414,7 @@ async def _held(unit: WriteUnit, item_id: int, token: UUID, *, live: bool) -> di
     await unit.execute("SELECT 1 FROM work_items WHERE id = %s FOR UPDATE", (item_id,))
     row = await (
         await unit.execute(
-            "SELECT c.at, w.resubmitted, "
+            "SELECT c.at, w.resubmitted, w.cancel_asked, "
             "COALESCE(w.lease_token = %s AND (NOT %s OR w.lease_until > c.at), false) AS held "
             "FROM work_items w, (SELECT clock_timestamp() AS at) c WHERE w.id = %s",
             (token, live, item_id),
@@ -447,13 +449,17 @@ async def end(
     """End the item held under its lease, with `outcome` (and `result`, a command's outcome,
     which its command shows). The lease must be unexpired but without `live`, which is for an
     item whose Worker has stopped (a command's, which the gate ends rather than give back as it
-    stops). One resubmitted while it ran ends as itself, its record kept, and a fresh pending
-    item takes its key, with its scope and admission, wanted when the resubmission asked. False
-    when the lease is no longer held: the item is not this worker's to settle."""
+    stops). An item ended as stopped (`STOPPED`) whose owner's cancel was asked first ends
+    `CANCELLED`, so its command does not submit it again. One resubmitted while it ran ends as
+    itself, its record kept, and a fresh pending item takes its key, with its scope and
+    admission, wanted when the resubmission asked. False when the lease is no longer held: the
+    item is not this worker's to settle."""
     assert item.lease_token is not None  # a taken item has its lease
     held = await _held(unit, item.id, item.lease_token, live=live)
     if held is None:
         return False
+    if held["cancel_asked"] is not None and (error or "").startswith(STOPPED):
+        error = CANCELLED  # the owner's cancel, committed first, is what ended it
     kept = None if result is None else Jsonb(result)
     await unit.execute(
         "UPDATE work_items SET state = 'ended', outcome = %s, error = %s, cost = %s, "
@@ -681,7 +687,10 @@ async def serving(unit: ReadUnit, kind: str, within: timedelta) -> bool:
 async def served_here(unit: WriteUnit, kind: str, within: timedelta) -> bool:
     """`serving`, in the unit that submits a command's item, the rows found locked to its end:
     a `serve` retiring its row (`retire`) waits for the submission, which its gate then leaves
-    pending for the next `serve`, or the submission sees the row gone and is refused."""
+    pending for the next `serve`, or the submission sees the row gone and is refused. A blank
+    database, never migrated, has no `serve` either."""
+    if not await _migrated(unit):
+        return False
     rows = await (
         await unit.execute(
             "SELECT id FROM workers WHERE %s = ANY(kinds) AND heartbeat_at > now() - %s FOR SHARE",
@@ -689,3 +698,13 @@ async def served_here(unit: WriteUnit, kind: str, within: timedelta) -> bool:
         )
     ).fetchall()
     return bool(rows)
+
+
+async def _migrated(unit: ReadUnit) -> bool:
+    """Whether the database has the work queue at all: a blank one, never migrated (no `serve`
+    has started on it), has none."""
+    row = await (
+        await unit.execute("SELECT to_regclass('workers') IS NOT NULL AS found")
+    ).fetchone()
+    assert row is not None  # a SELECT of a value has its row
+    return row["found"]

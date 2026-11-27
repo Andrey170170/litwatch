@@ -1267,3 +1267,39 @@ async def test_a_submission_and_a_retirement_have_an_order_and_serve_supersedes_
 async def other_retire(other: Session, worker_id: int) -> None:
     async with other.transaction():
         await other.execute("DELETE FROM workers WHERE id = %s", (worker_id,))
+
+
+async def test_a_cancel_committed_first_holds_however_the_item_stops(conn: Session, db):
+    """The owner's cancel committed before the gate read it: the item, stopped with its gate or
+    its lease lapsed and taken back, ends `CANCELLED`, not `STOPPED`, so its command does not
+    submit it again. A Worker that finished keeps its outcome."""
+    started = asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    async def asked(item_id: int) -> None:  # committed, its notification not yet acted on
+        await conn.execute("UPDATE work_items SET cancel_asked = now() WHERE id = %s", (item_id,))
+
+    stopped = await submit(db, "command:test", "stopped")
+    async with serving(WorkGate(db, lease=LONG, poll=60), {"command:test": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+        await asked(stopped.id)
+    assert (await item(conn, stopped.id)).error == queue.CANCELLED
+
+    lapsed = await submit(db, "command:test", "lapsed")
+    assert await take(WorkGate(db, lease=SHORT), ["command:test"]) is not None  # and it dies
+    await asked(lapsed.id)
+    async with serving(WorkGate(db, lease=SHORT, poll=0.5), {"command:test": worker}):
+        await until(state_is(conn, lapsed.id, ItemState.ENDED), "the lapsed item ended")
+    assert (await item(conn, lapsed.id)).error == queue.CANCELLED
+
+    done = await submit(db, "command:test", "done")
+    held = await take(WorkGate(db, lease=LONG), ["command:test"])
+    assert held is not None
+    await asked(done.id)
+    async with db.write("test: it finished") as unit:
+        assert await queue.end(unit, held, Outcome.DONE)
+    assert (await item(conn, done.id)).outcome == Outcome.DONE

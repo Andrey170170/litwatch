@@ -142,18 +142,22 @@ Found in a survey of the code at 548857e3:
   pending Deep pass. Chosen over a row shape the image before does not count (the shared admission in a column of
   its own): kept race-free between a command and `serve`, the admission index must cover that column, and then it
   fails the image before's claim on the same stale row.
-- **Rolling back from P5: the commands' items, ended by hand.** P5's command items are of kinds
-  `command:<name>`, which the image before neither serves nor takes back; one left running holds its admission
-  (`deep`, `publications`) there for good, and one pending never runs. So the switch is made with no command
-  waiting, and the step above ends them with `WHERE kind LIKE 'command%' AND state <> 'ended'` in place of
-  `kind = 'command'`. Their `work_results` rows and their items' `result` and `cancel_asked`
-  (migration 0051) the image before ignores.
+- **Rolling back from P5: the commands' items, ended by hand.** P5's command items are of kinds `command:<name>`,
+  which the image before neither serves nor takes back; one left running holds its admission (`deep`, `publications`)
+  there for good, and one pending never runs. So the switch is made with no command waiting, and the step above ends
+  them with `WHERE kind LIKE 'command%' AND state <> 'ended'` in place of `kind = 'command'`. Their `work_results`
+  rows and their items' `result` and `cancel_asked` (migration 0051) the image before ignores. Before the switch, each
+  open evaluation item is followed to its end (`litwatch work follow ID`, on the host that holds its outputs), so its
+  results reach its files: a detached ladders run's results otherwise sit only in `work_results`, which the image
+  before never reads, and its calls would be paid for again.
 - **Rolling back from P5: the evaluations' calls count in P4's reuse and estimates.** P5 journals an evaluation's
-  calls on its run, of kind `eval`, which its production reads leave out (`store.calls`); the image before has
-  no such filter, so after a rollback it reuses an answer an evaluation got for an identical request and counts
-  evaluation calls in its price estimates. Accepted as P4 caveats: an evaluation asks the request production
-  would, so a reused answer is one the same role gave, validated as production validates it; and an estimate is
-  a mean the next nights' calls dilute. A filter that P4 alone would read was not worth a step of its own.
+  calls on its run, of kind `eval`, which its production reads leave out (`store.calls`); the image before has no such
+  filter, so after a rollback it reuses an answer an evaluation got for an identical request, counts an evaluation's
+  refusals when it asks whether every model of a role refused a question (`refused_throughout`), and counts evaluation
+  calls in its price estimates. Accepted as P4 caveats: an evaluation asks the request production would, so a reused
+  answer is one the same role gave, validated as production validates it, and a refusal is one the same model gave the
+  same question, which production would only ask again to be refused; and an estimate is a mean the next nights' calls
+  dilute. A filter that P4 alone would read was not worth a step of its own.
 - **Rolling back from P4: a reservation the image before does not count.** P4 counts a call's unknown charge at its
   reservation (`inference_calls.reserved`, migration 0050) against its job's ceiling; the image before counts it as
   nothing. So after a rollback, a job whose runs have an unknown charge can spend past its ceiling by that charge's

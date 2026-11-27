@@ -63,7 +63,7 @@ Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.m
 
 ### Model gate hardening
 
-Found in A2 P4's last review round and fix checks, each reachable only in unusual cases, and deferred once its review cap was reached.
+Found in A2 P4's last review round and fix checks, and in P5's review, each reachable only in unusual cases, and deferred once its review cap was reached.
 
 - **Shutdown waits on a blocked journal write.** `Gateway._journalled` (`llm/gateway.py`) waits through every
   cancellation with no bound, so a write blocked inside Postgres (on a lock another transaction holds) holds up
@@ -74,6 +74,9 @@ Found in A2 P4's last review round and fix checks, each reachable only in unusua
   row keeps a null batch id and cost, startup recovers nothing (`ModelGate.recover`), and the same request is sent and
   paid for again. Let post-send batch writes finish within the bounded drain above, while provider polling stays
   cancellable (`Batcher.close`).
+- **Cancelling the only waiter during an upload still creates the batch.** A call cancelled while the batch it waits
+  on is being uploaded (`llm/batches.py`) leaves the upload to finish: the batch is created and paid for with no one
+  left to read its replies. Cancel the creation, or mark the batch for recovery, when its last waiter goes.
 - **A reservation outlives a cancelled call.** A call cancelled after its row commits and before it is sent
   (`Gateway._complete`, `opened`) leaves that row's reservation (`inference_calls.reserved`) counted, so the job's
   ceiling is overcounted by that one reservation: a conservative error.

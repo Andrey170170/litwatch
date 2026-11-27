@@ -530,6 +530,7 @@ class DatabaseGate:
         lock = LOCKS.get(name)
         if lock is None or lock.scope != "startup":
             raise ValueError(f"{name!r} is not a startup lock")
+        attributed_call(f"the {name} startup lock")
         async with self._session_lock(lock, wait=True) as (_, conn):
             yield conn
 
@@ -540,6 +541,7 @@ class DatabaseGate:
         sent when the transaction that sent it commits, never when it rolls back. When the
         connection drops, iterating raises `psycopg.OperationalError`."""
         outside_unit(f"listening on {channel!r}")
+        attributed_call(f"listening on {channel!r}")
         conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
         try:
             for each in (channel, *more):
@@ -591,6 +593,7 @@ class DatabaseGate:
         lock = LOCKS[name]
         if name not in HELD_ACROSS_CALLS:
             raise ValueError(f"{name!r} is not a session lock held across calls")
+        attributed_call(f"the {name} lock's holders read")
         # Our keys fit in the low half of the one-key form: classid 0, the key in objid.
         query = (
             "SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_database d ON d.oid = l.database "

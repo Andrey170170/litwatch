@@ -40,14 +40,14 @@ from litwatch.core.work import WorkItem
 from litwatch.feedback import word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.gates.database import BusyError, DatabaseGate
-from litwatch.gates.work import Done, Later, Worker
+from litwatch.gates.work import Done, Later, Worker, retryable
 from litwatch.integrations import archive as archive_integration
 from litwatch.integrations.deep import Deep
 from litwatch.jobs import digests as digests_job
 from litwatch.jobs import intake as intake_job
 from litwatch.jobs import nightly as nightly_job
 from litwatch.jobs import publications as lookups
-from litwatch.jobs.context import run_record
+from litwatch.jobs.context import UnclosedError, run_record
 from litwatch.llm import ModelGate, Request
 from litwatch.publications import PublicationSource
 from litwatch.store import papers as papers_store
@@ -163,12 +163,19 @@ async def _ran(db: DatabaseGate, run_id: int, *bodies: dict[str, Any]) -> Done:
 
 
 async def _nightly(s: Serving, item: WorkItem, out: Output) -> Done:
-    """`litwatch nightly`. A run that did not close fails the item: its command says so."""
+    """`litwatch nightly`. A run that did not close fails the item: its command says so; one
+    whose close lost the database ends as stopped (the lost database raised), so its command
+    submits it again."""
     o = item.scope
-    run_id = await nightly_job.run(
-        s.db, s.config, models=s.models, fetch=o["fetch"], days=o["days"],
-        limit=o["limit"], with_digests=o["digests"],
-    )  # fmt: skip
+    try:
+        run_id = await nightly_job.run(
+            s.db, s.config, models=s.models, fetch=o["fetch"], days=o["days"],
+            limit=o["limit"], with_digests=o["digests"],
+        )  # fmt: skip
+    except UnclosedError as exc:
+        if exc.__cause__ is not None and retryable(exc.__cause__):
+            raise exc.__cause__ from exc
+        raise
     return await _ran(s.db, run_id)
 
 
@@ -245,10 +252,15 @@ async def _deep(s: Serving, item: WorkItem, out: Output) -> Done:
     """`litwatch fulltext --deep`: the Deep passes due, one at a time, under the `deep`
     admission its item has (one Deep job at a time, the passes' own items' included). Its
     `--limit` counts the Deep jobs that ended (a card written or failed), so a pass claimed while
-    it awaits its text is claimed again on the next look."""
+    it awaits its text is claimed again on the next look. Stopped while a Deep job runs, it
+    says that job goes on, followed by the pass's next claim (`fulltext.deep.work`)."""
     assert s.archive is not None and s.deep is not None  # served only with both
     limit, wait = item.scope["limit"], item.scope["wait"]
     total: Counter[str] = Counter()
+
+    async def left(paper_id: str) -> None:  # its job goes on after this item
+        await out.say(f"{paper_id}: its Deep job goes on; the pass's next claim follows it")
+
     deadline = asyncio.get_running_loop().time() + wait
     while True:
         worked = total["cards_written"] + total["card_failed"]
@@ -257,6 +269,7 @@ async def _deep(s: Serving, item: WorkItem, out: Output) -> Done:
         found = await deep_passes.work(
             s.db, s.archive, s.deep, rules=word.rules(s.config),
             limit=None if limit is None else limit - worked, fires=s.config.schedule.enabled,
+            left=left,
         )  # fmt: skip
         await out.data(dict(found))
         total.update(found)

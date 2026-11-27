@@ -9,6 +9,7 @@ real Postgres, the models fake."""
 import asyncio
 import contextlib
 import functools
+import io
 import json
 import threading
 from collections import Counter
@@ -17,11 +18,13 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from rich.console import Console
+from typer.testing import CliRunner
 
 from litwatch import cli
 from litwatch.api import app as app_module
 from litwatch.config import Config, Models, RoleConfig
-from litwatch.core.work import ItemState, WorkItem
+from litwatch.core.work import ItemState, Outcome, WorkItem
 from litwatch.gates.work import WorkGate
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import commands
@@ -35,7 +38,7 @@ from tests.conftest import TREE, paper
 from tests.fakes import ScriptedProvider
 from tests.scripted import CLASSIFY, CONFIG, ROLES, A, B, Scripted, decision
 from tests.sessions import Session, in_write
-from tests.working import command, served, until
+from tests.working import CONFIG_TOML, command, served, until
 
 PING = Models(brief=RoleConfig(provider="anthropic", model="test-brief"))
 LABELS = Path(__file__).parent.parent / "evals" / "labels"
@@ -499,7 +502,7 @@ async def test_a_deep_limit_counts_the_jobs_ended_not_the_passes_awaiting_text(m
     looks: list[int | None] = []
     found = [Counter(awaiting_text=1), Counter(cards_written=1)]
 
-    async def work(db, archive, deep, *, rules, limit, fires):
+    async def work(db, archive, deep, *, rules, limit, fires, left):
         looks.append(limit)
         return found[len(looks) - 1]
 
@@ -535,3 +538,157 @@ def test_the_name_of_an_outputs_item_is_replaced_whole(tmp_path, monkeypatch):
     cli._owned([path], "command:classify", "new")
     assert json.loads(path.read_text())["key"] == "new"
     assert [p.name for p in tmp_path.iterdir()] == [path.name]
+
+
+@pytest.mark.usefixtures("short_leases")
+async def test_an_evaluation_rerun_asking_more_follows_the_open_item_then_asks_the_rest(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """Run again with --limit 12 while the item of --limit 10 still runs: the command follows
+    that item to its end first, then submits what its own arguments still need, the 2 papers
+    more, not stopping at what the older item covered."""
+    held = Held(json.dumps(decision()), free=4)
+    held.name = "openrouter"
+    async with served(db, Config(), models=ModelGate(Models(), {"openrouter": held})):
+        ids, argv, path = await _classify_left_running(conn, db, tmp_path, monkeypatch, held)
+        more = classify.load(LABELS).papers[:12]
+        await in_write(conn, papers_store.upsert, [paper(i, title=f"Paper {i}") for i in more])
+        wider = (*argv[:-1], "12")
+        again = asyncio.create_task(command(conn, tmp_path, monkeypatch, *wider))
+        await asyncio.sleep(0.5)
+        held.release.set()
+        result = await asyncio.wait_for(again, 20)
+    assert result.exit_code == 0, result.output
+    first, second = await items(conn, "classify")
+    assert f"item {first['id']} still writes into these outputs" in result.output
+    (candidate,) = second["scope"]["candidates"]
+    assert set(candidate["papers"]) == set(more) - set(ids)
+    assert sorted(json.loads(x)["paper_id"] for x in jsonl.lines(path)) == sorted(more)
+
+
+def test_a_result_is_written_once_by_its_id_whatever_its_text(tmp_path):
+    """Two results of the same text are two lines (a charge counted twice is spent twice); one
+    the file holds already, plain or packed, is not written again."""
+    import gzip  # noqa: PLC0415
+
+    path, line = tmp_path / "brief.jsonl", '{"paper_id": "1", "cost": 0.2}'
+    shown = cli._Shown()
+    for result_id in (1, 2, 2):
+        shown.show({"to": str(path), "line": line}, result_id)
+    assert [json.loads(x)["result_id"] for x in jsonl.lines(path)] == [1, 2]
+    path.with_name(path.name + ".gz").write_bytes(gzip.compress(path.read_bytes()))
+    path.write_text("")
+    cli._Shown().show({"to": str(path), "line": line}, 1)  # a follower afresh: it is packed
+    assert jsonl.lines(path) == []
+
+
+async def test_a_follower_waits_out_a_lost_database_from_where_it_was(
+    conn: Session, db, monkeypatch
+):
+    """The database lost under a follower's read: it looks again after its pause, showing each
+    result once, and so does the wait for a `serve`."""
+    import psycopg  # noqa: PLC0415
+
+    submitted = await in_write(conn, queue.submit, "command:ping", "k")
+    for text in ("one", "two"):
+        await conn.execute(
+            "INSERT INTO work_results (work_id, body) VALUES (%s, %s)",
+            (submitted.id, json.dumps({"say": text})),
+        )
+    await conn.execute("UPDATE work_items SET state = 'ended', outcome = 'done' WHERE id = %s",
+                       (submitted.id,))  # fmt: skip
+    real_results, real_serving, lost = queue.results, queue.serving, []
+
+    async def results(*args, **kwargs):
+        if not lost:
+            lost.append(1)
+            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+        return await real_results(*args, **kwargs)
+
+    async def serving(*args, **kwargs):
+        if len(lost) < 2:
+            lost.append(2)
+            raise psycopg.OperationalError("the server closed the connection unexpectedly")
+        return await real_serving(*args, **kwargs)
+
+    printed = io.StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=printed))
+    monkeypatch.setattr(cli, "FOLLOW_SECONDS", 0.01)
+    monkeypatch.setattr(queue, "results", results)
+    ended = await cli._follow(db, submitted.id)
+    assert ended.outcome == Outcome.DONE
+    out = printed.getvalue()
+    assert out.count("one") == 1 and out.count("two") == 1 and "database was lost" in out
+    async with served(db, Config()):
+        monkeypatch.setattr(queue, "serving", serving)
+        await cli._until_served(db, "command:ping")
+    assert lost == [1, 2]
+
+
+async def test_a_nightly_whose_close_lost_the_database_ends_as_stopped():
+    """The nightly's close lost the database (`UnclosedError` from a lost connection): the item
+    ends as `serve` stopped under it, so its command submits it again; any other failure to close
+    fails it."""
+    import psycopg  # noqa: PLC0415
+
+    from litwatch.gates.work import retryable  # noqa: PLC0415
+    from litwatch.jobs.context import UnclosedError  # noqa: PLC0415
+
+    item = WorkItem(1, "command:nightly", "k", "k", ItemState.RUNNING, datetime.now(UTC), 1,
+                    {"fetch": False, "days": None, "limit": 5, "digests": False})  # fmt: skip
+    s = commands.Serving(cast(Any, None), Config(), cast(Any, None))
+    for cause, stops in ((psycopg.OperationalError("lost"), True), (ValueError("bad"), False)):
+
+        async def run(*args, cause=cause, **kwargs):
+            raise UnclosedError(7, None) from cause
+
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr(commands.nightly_job, "run", run)
+            with pytest.raises(Exception) as raised:
+                await commands._nightly(s, item, cast(Any, None))
+        assert retryable(raised.value) == stops
+        assert isinstance(raised.value, UnclosedError) != stops
+
+
+async def test_a_command_on_a_blank_database_says_to_start_serve(
+    conn: Session, tmp_path, monkeypatch
+):
+    """A database never migrated, no `serve` ever started on it: the command is refused as with
+    no `serve`, not with an undefined table."""
+    await conn.execute("CREATE SCHEMA blank_p5")
+    try:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv(
+            "LITWATCH_DATABASE_URL", f"{conn.test_dsn}?options=-csearch_path%3Dblank_p5"
+        )
+        (tmp_path / "litwatch.toml").write_text(CONFIG_TOML)
+        monkeypatch.setenv("LITWATCH_CONFIG", str(tmp_path / "litwatch.toml"))
+        for argv in (["ping", "brief"], ["nightly", "--limit", "5"]):
+            ran = await asyncio.to_thread(CliRunner().invoke, cli.app, argv)
+            assert ran.exit_code != 0 and "no `litwatch serve` runs" in ran.output, ran.output
+    finally:
+        await conn.execute("DROP SCHEMA blank_p5 CASCADE")
+
+
+async def test_yes_to_cancel_an_item_that_ended_done_meanwhile_exits_as_it_ended(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """Ctrl-C, then yes to cancel, but the ping's item ended done before the cancel reached it:
+    the command shows its answer and exits 0."""
+    held, loop = Held(), asyncio.get_running_loop()
+    interrupted(monkeypatch, held.started)
+
+    def confirm(*args, **kwargs) -> bool:  # the item ends while the owner reads the question
+        loop.call_soon_threadsafe(held.release.set)
+        while (
+            asyncio.run_coroutine_threadsafe(items(conn, "ping"), loop).result()[0]["state"]
+            != "ended"
+        ):
+            threading.Event().wait(0.05)
+        return True
+
+    monkeypatch.setattr(cli.typer, "confirm", confirm)
+    async with served(db, Config(), models=ModelGate(PING, {"anthropic": held})):
+        result = await command(conn, tmp_path, monkeypatch, "ping", "brief")
+    assert result.exit_code == 0, result.output
+    assert "test-brief -> 42" in result.output and "ended done before the cancel" in result.output

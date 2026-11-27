@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -85,12 +86,14 @@ async def work(
     rules: word.Rules,
     limit: int | None = None,
     fires: bool = True,
+    left: Callable[[str], Awaitable[None]] | None = None,
 ) -> Counter[str]:
     """Work the Deep passes that are due, one at a time, up to `limit` claimed (`litwatch
     fulltext --deep`); their papers are settled by `rules`. A re-run's (background) passes
     wait while a nightly run is running or due (pipeline.md, section 10): a scheduled fire
     counts with `fires`, the configured schedule on (`store.jobs.nightly_waits`). Returns how
-    the tries ended."""
+    the tries ended. Stopped (the command's item ended under it), it lets go of the pass it
+    works (`_let_go`), telling `left` of one whose job goes on."""
     counts: Counter[str] = Counter()
     tried: set[int] = set()
     while limit is None or len(tried) < limit:
@@ -109,10 +112,36 @@ async def work(
             break
         (c,) = claimed
         tried.add(c.id)
-        why = await work_one(db, archive, deep, c, attempt, rules)
+        try:
+            why = await work_one(db, archive, deep, c, attempt, rules)
+        except BaseException:
+            await _let_go(db, c, left)
+            raise
         if why != "lost":
             counts[why] += 1
     return counts
+
+
+async def _let_go(
+    db: DatabaseGate, c: Claimed, left: Callable[[str], Awaitable[None]] | None
+) -> None:
+    """A pass cut off as its command stopped: one with no job submitted is given back unworked
+    (`store.fulltext.release`), for the next claim at once. One with an attempt open has a job
+    that goes on: its lease ends now (`store.fulltext.let_go`), so its next claim, its own work
+    item's or the command's next item's, follows the job by its key, never paying for it
+    twice; `left` is told of it. A failure is logged: the pass then waits out its lease."""
+    try:
+        async with db.write("deep pass: let go") as unit:
+            attempt = await cards.open_attempt(unit, c.id)
+            if attempt is None:
+                await store_.release(unit, c)
+            else:
+                stopped = "its command stopped while its deep job ran"
+                await store_.let_go(unit, c, stopped, datetime.now(UTC))
+        if attempt is not None and left is not None:
+            await left(c.paper.id)
+    except Exception:
+        log.warning("%s: could not let go of its deep pass", c.paper.id, exc_info=True)
 
 
 async def paused(db: DatabaseGate) -> datetime | None:

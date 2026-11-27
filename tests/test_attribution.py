@@ -40,8 +40,9 @@ def unattributed(coro):
 
 
 def entries(db) -> dict[str, Callable[[], Awaitable[object]]]:
-    """Each gate entry point that checks its attribution: the Database gate's units and held
-    lock, the Model gate's call, ask and journal read."""
+    """Each gate entry point that checks its attribution: the Database gate's startup lock, its
+    listening, its run-lock read, its units and held lock; the Model gate's call, ask and
+    journal read."""
     gate = scripted_gate(lambda role, request: '{"answer": "yes"}', CONFIG)
     request = Request(system="s", user="u", output=Answer)
 
@@ -53,7 +54,18 @@ def entries(db) -> dict[str, Callable[[], Awaitable[object]]]:
         async with db.held("run"):
             return 1
 
+    async def startup() -> object:
+        async with db.startup("migration"):
+            return 1
+
+    async def listen() -> object:
+        async with db.listen("unattributed"):
+            return 1
+
     return {
+        "startup": startup,
+        "listen": listen,
+        "held_elsewhere": lambda: db.held_elsewhere("run"),
         "read": lambda: unit(db.read),
         "write": lambda: unit(db.write),
         "held": held,
@@ -65,7 +77,18 @@ def entries(db) -> dict[str, Callable[[], Awaitable[object]]]:
 
 @pytest.mark.parametrize("strict", [True, False], ids=["strict", "lenient"])
 @pytest.mark.parametrize(
-    "entry", ["read", "write", "held", "complete", "ask", "refused_throughout"]
+    "entry",
+    [
+        "startup",
+        "listen",
+        "held_elsewhere",
+        "read",
+        "write",
+        "held",
+        "complete",
+        "ask",
+        "refused_throughout",
+    ],  # fmt: skip
 )
 async def test_a_gate_call_with_no_attribution_raises_strict_and_is_logged_otherwise(
     db, monkeypatch, caplog, entry, strict
@@ -147,7 +170,11 @@ async def test_a_cli_command_attributes_its_gate_calls_to_itself_by_name(
 ):
     ran = await unattributed(command(conn, tmp_path, monkeypatch, "eval", "report", config=None))
     assert "no such replay" in ran.output, ran.output  # read, attributed
-    assert {a for _, a in seen} == {Attribution.request("cli eval report")}
+    # Its migrations are startup work, the system's (`startup: migrations`).
+    assert {a for _, a in seen} == {
+        Attribution.request("cli eval report"),
+        Attribution.system("startup: migrations"),
+    }
 
 
 async def test_serves_own_entry_attributes_its_startup_requests_and_items_not_itself(

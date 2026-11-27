@@ -131,8 +131,11 @@ gate's limits are the global ones.
 - Ctrl-C asks whether to cancel the item. Otherwise the command stops waiting, prints the item's id, and a command
   can follow it later.
 - **An evaluation's submission carries its inputs and candidate settings,** and its results come back to the command,
-  which writes the output files and keeps their resume contract as today. Its item writes nothing production reads:
-  no verdicts, no outbox events, no provider observations.
+  which writes the output files and keeps their resume contract as today. Its item writes nothing production's pipeline
+  reads: no verdicts, no outbox events, no provider observations. Its charges are real spend, so the month-to-date
+  budget counts them.
+- **One command runs in the command itself:** `intake archive --here`, for a database no `serve` works from (a fresh
+  sandbox's build). It calls no model.
 - Commands that only read or edit (taxonomy import and export, migrations, `openapi`) stay Entries that open their
   own units.
 
