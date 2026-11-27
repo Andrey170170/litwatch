@@ -63,7 +63,7 @@ Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.m
 
 ### Model gate hardening
 
-Found in A2 P4's last review round and fix checks, each reachable only in unusual cases, and deferred once its review cap was reached.
+Found in A2 P4's last review round and fix checks, and in P5's review, each reachable only in unusual cases, and deferred once its review cap was reached.
 
 - **Shutdown waits on a blocked journal write.** `Gateway._journalled` (`llm/gateway.py`) waits through every
   cancellation with no bound, so a write blocked inside Postgres (on a lock another transaction holds) holds up
@@ -74,6 +74,9 @@ Found in A2 P4's last review round and fix checks, each reachable only in unusua
   row keeps a null batch id and cost, startup recovers nothing (`ModelGate.recover`), and the same request is sent and
   paid for again. Let post-send batch writes finish within the bounded drain above, while provider polling stays
   cancellable (`Batcher.close`).
+- **Cancelling the only waiter during an upload still creates the batch.** A call cancelled while the batch it waits
+  on is being uploaded (`llm/batches.py`) leaves the upload to finish: the batch is created and paid for with no one
+  left to read its replies. Cancel the creation, or mark the batch for recovery, when its last waiter goes.
 - **A reservation outlives a cancelled call.** A call cancelled after its row commits and before it is sent
   (`Gateway._complete`, `opened`) leaves that row's reservation (`inference_calls.reserved`) counted, so the job's
   ceiling is overcounted by that one reservation: a conservative error.
@@ -90,6 +93,8 @@ Found in A2 P4's last review round and fix checks, each reachable only in unusua
   no deadline sends a second paid request.
 - **A nightly's call can be released past its drain** (`Batcher._follow`, `llm/batches.py`), by up to one poll
   interval plus the status and results reads' budgets (`POLL_SECONDS`, `OPERATION_SECONDS`).
+- **A replay can spend past its confirmed estimate.** A replay run by `serve` (`jobs/commands.py`) regrades papers
+  whose text changed after its estimate was confirmed, without asking again (found in #190's review).
 - **The cleanup that removes this class.** Several places decide whether a batched request's answer is already known
   or paid for: `CallJournal.in_batch`, `Gateway._batched` and its cache recheck in `_ask`, and `Batcher.attach` and
   `_taken`. One owner per batch in the gate, holding its waiters and its final result in one map, would take that
@@ -170,7 +175,17 @@ Its own project on top of A6: the labelled query set and goals first, then work 
     restart in between leaves a committed result out of the job's counts (a re-run's Brief, a replay result whose
     acknowledgement is lost). Counts only; one fix closes both: derive a job's progress from its committed results;
   - a normal call's `record` (`store/calls.py`) tried again after its commit acknowledgement was lost stamps a new
-    `responded_at`, and can move the provider's `replied_at` past another call's account error.
+    `responded_at`, and can move the provider's `replied_at` past another call's account error;
+  - two commands following one evaluation's item at once (`litwatch work follow` beside the command, or twice)
+    can each append a line after reading the same file, so it is written twice, and `work follow` of a ladders
+    run does not take its directory's lock (`quality.ladders.locked`): one follower per output, and the lock,
+    for each;
+  - a submission whose commit acknowledgement is lost leaves its item committed and running while the command
+    exits without its id: its output's `.item` names it, so a rerun finds it, but a command with no output
+    (`nightly`, `fulltext`) has nothing to find it by but `work_items`;
+  - a CLI nightly submitted while a scheduled fire or chunk is admitted: an extra wait or run, the run lock still
+    serializing;
+  - overlapping `serve` processes can delete each other's live `workers` row (a registration supersedes every row).
 
 - **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
   `evals/` and homelab specifics out of the repository (the image ships `evals/labels/` for Run replay: they move

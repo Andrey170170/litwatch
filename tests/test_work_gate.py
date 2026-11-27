@@ -942,7 +942,7 @@ async def test_an_item_runs_under_its_lease_and_attribution(conn: Session, db):
     assert [(i, a) for i, _, a in seen] == [(submitted.id, Attribution.work(submitted.id))] * 2
     assert seen[0][1] != seen[1][1]  # a lease of its own each time
     assert (await (await conn.execute("SELECT count(*) AS n FROM workers")).fetchone())["n"] == 0
-    assert current_work() is None and attribution() is None
+    assert current_work() is None and attribution() == Attribution.system("test")  # the test's
 
 
 async def test_a_worker_that_waits_runs_again_no_sooner_than_it_asked(conn: Session, db):
@@ -1067,3 +1067,285 @@ async def test_the_poll_takes_over_after_the_listener_drops(conn: Session, db, m
         await submit(db, "fulltext", "1")
         async with asyncio.timeout(WAIT):
             await ran.wait()
+
+
+async def test_a_cancelled_command_finishes_its_run_cleanup_under_its_claim_then_ends(
+    conn: Session, db
+):
+    """The owner cancels a running command's item (`store.work.cancel`, at Ctrl-C): a request,
+    which wakes the gate owning it. The gate stops its Worker, whose cleanup (its run closed,
+    in a unit fenced on the item's lease) commits under the claim it still holds, and only then
+    ends the item failed."""
+    from litwatch.jobs.context import run_record  # noqa: PLC0415
+
+    started = asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        async with run_record(db, "intake"):
+            started.set()
+            await asyncio.Event().wait()
+
+    submitted = await submit(db, "command:test", "1")
+    async with serving(WorkGate(db, lease=LONG, poll=60), {"command:test": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+        async with db.write("test: cancel") as unit:
+            asked = await queue.cancel(unit, submitted.id)
+        assert asked is not None and asked.state == ItemState.RUNNING and asked.cancel_asked
+        await until(state_is(conn, submitted.id, ItemState.ENDED), "the cancelled item to end")
+    ended = await item(conn, submitted.id)
+    assert (ended.outcome, ended.error) == (Outcome.FAILED, queue.CANCELLED)
+    (run,) = await (
+        await conn.execute("SELECT * FROM runs WHERE work_id = %s", (submitted.id,))
+    ).fetchall()
+    # Closed by its Worker, under the claim, with why it stopped.
+    assert run["finished_at"] is not None and run["error"] == queue.CANCELLED
+
+
+async def test_only_a_commands_item_is_cancelled_and_a_pending_one_at_once(conn: Session, db):
+    other = await submit(db, "fulltext", "1")
+    pending = await submit(db, "command:test", "2")
+    async with db.write("test: cancel") as unit:
+        assert await queue.cancel(unit, other.id) is None  # no command's: `serve`'s own
+        ended = await queue.cancel(unit, pending.id)
+    assert ended is not None and (ended.state, ended.error) == (ItemState.ENDED, queue.CANCELLED)
+    assert (await item(conn, other.id)).state == ItemState.PENDING
+
+
+async def test_a_stopping_gate_retires_its_worker_row_before_its_items_drain(conn: Session, db):
+    """As the gate stops, it takes no more work: its `workers` row goes first, so no command is
+    accepted for a kind no one will run while its items finish their cleanup."""
+    started, rows = asyncio.Event(), []
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            found = await (await conn.execute("SELECT count(*) AS n FROM workers")).fetchone()
+            rows.append(found["n"])
+            raise
+
+    await submit(db, "command:test", "1")
+    async with serving(WorkGate(db, lease=LONG, poll=60), {"command:test": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+        assert (await (await conn.execute("SELECT count(*) AS n FROM workers")).fetchone())["n"]
+    assert rows == [0]
+
+
+# -- a command's one attempt -----------------------------------------------------------------------
+
+
+async def test_a_commands_item_gets_one_attempt_however_its_serve_stops(conn: Session, db):
+    """A command's item is never run again (`store.work.once`): stopped with its gate, its
+    lease lapsed and taken back, or cut off by a lost database, it ends failed saying `serve`
+    stopped (`STOPPED`), where `serve`'s own items are given back or tried again. Its command
+    submits a fresh one."""
+    started = asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    stopped = await submit(db, "command:test", "stopped")
+    async with serving(WorkGate(db, lease=LONG, poll=60), {"command:test": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+    found = await item(conn, stopped.id)
+    assert (found.state, found.outcome, found.error) == (
+        ItemState.ENDED, Outcome.FAILED, queue.STOPPED
+    )  # fmt: skip
+
+    lapsed = await submit(db, "command:test", "lapsed")
+    assert await take(WorkGate(db, lease=SHORT), ["command:test"]) is not None  # and it dies
+    async with serving(WorkGate(db, lease=SHORT, poll=0.5), {"command:test": worker}):
+        await until(state_is(conn, lapsed.id, ItemState.ENDED), "the lapsed item ended")
+    found = await item(conn, lapsed.id)
+    assert (found.outcome, found.error, found.attempts) == (Outcome.FAILED, queue.STOPPED, 1)
+
+    async def cut_off(item: WorkItem) -> None:
+        raise psycopg.OperationalError("the connection is lost")
+
+    lost = await submit(db, "command:test", "lost")
+    async with serving(WorkGate(db, poll=60), {"command:test": cut_off}):
+        await until(state_is(conn, lost.id, ItemState.ENDED), "the cut-off item ended")
+    found = await item(conn, lost.id)
+    assert found.attempts == 1 and found.error is not None
+    assert found.error.startswith(f"{queue.STOPPED}: OperationalError")
+
+
+async def test_a_gate_stopping_while_a_cancel_cleans_up_lets_the_cleanup_finish(
+    conn: Session, db, monkeypatch
+):
+    """The owner cancels a command's item and `serve` stops while its cleanup runs: the Worker is
+    not cancelled a second time, so its cleanup ends (its run closed) and the item ends as the
+    owner asked (`CANCELLED`), not given back."""
+    from litwatch.jobs.context import run_record  # noqa: PLC0415
+
+    started, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    cleaned: list[bool] = []
+
+    async def worker(item: WorkItem) -> None:
+        async with run_record(db, "intake"):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleaning.set()
+                await release.wait()  # a second cancel would cut it off here
+                cleaned.append(True)
+                raise
+
+    submitted = await submit(db, "command:test", "1")
+    gate = WorkGate(db, lease=LONG, poll=60)
+    running = asyncio.create_task(gate.run({"command:test": worker}))
+    async with asyncio.timeout(WAIT):
+        await started.wait()
+    async with db.write("test: cancel") as unit:
+        await queue.cancel(unit, submitted.id)
+    async with asyncio.timeout(WAIT):
+        await cleaning.wait()
+    from litwatch.gates import work as work_gate  # noqa: PLC0415
+
+    real, stopping = work_gate._stop, asyncio.Event()
+
+    def stop(handler: asyncio.Task, why: str) -> None:
+        real(handler, why)
+        if why == queue.STOPPED:
+            stopping.set()  # the supervisor has handled the gate's stop
+
+    monkeypatch.setattr(work_gate, "_stop", stop)
+    running.cancel()  # `serve` stops
+    async with asyncio.timeout(WAIT):
+        await stopping.wait()
+    release.set()
+    with contextlib.suppress(asyncio.CancelledError):
+        async with asyncio.timeout(WAIT):
+            await running
+    assert cleaned == [True]
+    ended = await item(conn, submitted.id)
+    assert (ended.outcome, ended.error) == (Outcome.FAILED, queue.CANCELLED)
+    (run,) = await (
+        await conn.execute("SELECT * FROM runs WHERE work_id = %s", (submitted.id,))
+    ).fetchall()
+    assert run["finished_at"] is not None
+
+
+async def test_a_submission_and_a_retirement_have_an_order_and_serve_supersedes_every_row(
+    conn: Session, db, other
+):
+    """The serving check is made in the submit unit on the `workers` row, locked: a `serve`
+    retiring its row waits for a submission that saw it, and one that comes after is refused.
+    A `serve` registering replaces every earlier row (D4: one `serve`), a killed one's among
+    them, whatever host name it ran under (a container recreated)."""
+    async with db.write("test: a killed serve, under another host name") as unit:
+        dead = await queue.register(unit, "old-container:1", ["command:deep"])
+    async with db.write("test: its replacement") as unit:
+        await queue.register(unit, "new-container:1", ["fulltext"], supersede=True)
+    found = await (await conn.execute("SELECT name FROM workers ORDER BY name")).fetchall()
+    assert [r["name"] for r in found] == ["new-container:1"]
+    async with db.write("test: is deep served") as unit:
+        assert not await queue.served_here(unit, "command:deep", LONG)
+
+    async with db.write("test: one serving") as unit:
+        live = await queue.register(unit, "host:1", ["command:test"])
+    async with db.write("test: a submission") as unit:
+        assert await queue.served_here(unit, "command:test", LONG)
+        retiring = asyncio.create_task(other_retire(other, live))
+        await until(
+            lambda: waiting_on_a_lock(conn, "DELETE FROM workers"), "the retirement to wait"
+        )
+        assert not retiring.done()
+        await queue.submit(unit, "command:test", "1")
+    await retiring
+    async with db.write("test: after it retired") as unit:
+        assert not await queue.served_here(unit, "command:test", LONG)
+    assert dead != live
+
+
+async def other_retire(other: Session, worker_id: int) -> None:
+    async with other.transaction():
+        await other.execute("DELETE FROM workers WHERE id = %s", (worker_id,))
+
+
+async def test_a_cancel_committed_first_holds_however_the_item_stops(conn: Session, db):
+    """The owner's cancel committed before the gate read it: the item, stopped with its gate or
+    its lease lapsed and taken back, ends `CANCELLED`, not `STOPPED`, so its command does not
+    submit it again. A Worker that finished keeps its outcome."""
+    started = asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    async def asked(item_id: int) -> None:  # committed, its notification not yet acted on
+        await conn.execute("UPDATE work_items SET cancel_asked = now() WHERE id = %s", (item_id,))
+
+    stopped = await submit(db, "command:test", "stopped")
+    async with serving(WorkGate(db, lease=LONG, poll=60), {"command:test": worker}):
+        async with asyncio.timeout(WAIT):
+            await started.wait()
+        await asked(stopped.id)
+    assert (await item(conn, stopped.id)).error == queue.CANCELLED
+
+    lapsed = await submit(db, "command:test", "lapsed")
+    assert await take(WorkGate(db, lease=SHORT), ["command:test"]) is not None  # and it dies
+    await asked(lapsed.id)
+    async with serving(WorkGate(db, lease=SHORT, poll=0.5), {"command:test": worker}):
+        await until(state_is(conn, lapsed.id, ItemState.ENDED), "the lapsed item ended")
+    assert (await item(conn, lapsed.id)).error == queue.CANCELLED
+
+    done = await submit(db, "command:test", "done")
+    held = await take(WorkGate(db, lease=LONG), ["command:test"])
+    assert held is not None
+    await asked(done.id)
+    async with db.write("test: it finished") as unit:
+        assert await queue.end(unit, held, Outcome.DONE)
+    assert (await item(conn, done.id)).outcome == Outcome.DONE
+
+
+async def test_a_command_that_waits_after_its_owner_cancelled_it_ends_cancelled(conn: Session, db):
+    """A command's item that waits (`Later`, the run lock taken) while its owner's cancel has
+    committed ends `CANCELLED` as it settles, not parked as pending work."""
+
+    async def worker(item: WorkItem) -> Later:
+        await conn.execute("UPDATE work_items SET cancel_asked = now() WHERE id = %s", (item.id,))
+        return Later(datetime.now(UTC) + timedelta(seconds=30))
+
+    submitted = await submit(db, "command:test", "1")
+    async with serving(WorkGate(db, lease=LONG, poll=60), {"command:test": worker}):
+        await until(state_is(conn, submitted.id, ItemState.ENDED), "the item ended")
+    found = await item(conn, submitted.id)
+    assert (found.outcome, found.error) == (Outcome.FAILED, queue.CANCELLED)
+
+
+async def test_a_stopping_gate_does_not_wait_on_a_submission_holding_its_row(
+    conn: Session, db, other, monkeypatch
+):
+    """A command's submit unit holds the `workers` row (`served_here`, FOR SHARE) as `serve`
+    stops: retiring the row waits for it at most `RETIRE_WAIT`, so the supervisors are still
+    cancelled and the running command ends `STOPPED`; the row stays, to age out."""
+    from litwatch.gates import work as work_gate  # noqa: PLC0415
+
+    monkeypatch.setattr(work_gate, "RETIRE_WAIT", timedelta(milliseconds=200))
+    started = asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    submitted = await submit(db, "command:test", "1")
+    gate = WorkGate(db, lease=LONG, poll=60)
+    running = asyncio.create_task(gate.run({"command:test": worker}))
+    async with asyncio.timeout(WAIT):
+        await started.wait()
+    async with other.transaction():
+        await other.execute("SELECT id FROM workers FOR SHARE")
+        running.cancel()  # `serve` stops while the submission holds its row
+        with contextlib.suppress(asyncio.CancelledError):
+            async with asyncio.timeout(WAIT):
+                await running
+        ended = await item(conn, submitted.id)
+        assert (ended.outcome, ended.error) == (Outcome.FAILED, queue.STOPPED)
+    assert len(await (await conn.execute("SELECT id FROM workers")).fetchall()) == 1

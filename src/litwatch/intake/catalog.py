@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from litwatch.archive import ArchiveClient
 from litwatch.gates.database import DatabaseGate
+from litwatch.gates.work import retryable
 from litwatch.intake import oai
 from litwatch.intake.http import SourceError, XmlClient
 from litwatch.intake.source import PaperSource
@@ -46,17 +47,18 @@ async def run(
     client: XmlClient,
     *,
     source: PaperSource = oai,
-    report: Callable[[dict[str, Any]], None] | None = None,
+    report: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
-    """Harvest from the checkpoint (from `since` the first time) to today, window by window,
-    and return what was done; never raises but for a cancellation, as a failed pass must not
-    fail intake. The checkpoint moves after each complete window, its harvests and its
-    registrations all done: to the window's last day, or for the open window that reaches
+    """Harvest from the checkpoint (from `since` the first time) to today, window by window, and
+    return what was done; never raises but for a cancellation (and see `report`), as a failed
+    pass must not fail intake. The checkpoint moves after each complete window, its harvests and
+    its registrations all done: to the window's last day, or for the open window that reaches
     today, to the day of the OAI response. A window that does not complete (over the harvest's
-    budget, or with revisions it could not resolve) is halved, down to one day; a day that
-    still does not complete stops the pass, to be harvested again from the checkpoint.
-    `open_archive` gives the client it registers with, closed at the end; `report` is called
-    with the outcome after each window."""
+    budget, or with revisions it could not resolve) is halved, down to one day; a day that still
+    does not complete stops the pass, to be harvested again from the checkpoint. `open_archive`
+    gives the client it registers with, closed at the end; `report` is called with the outcome
+    after each window, and with it a lost database is raised, not returned, so the command's
+    item is tried again: `lower` keeps the checkpoint, so it goes on from there."""
     skip = set(categories)
     async with db.write("catalog pass: start") as unit:
         start = await checkpoints.start(unit, oai.ALL, since)
@@ -109,12 +111,14 @@ async def run(
             info["registered"] += len(outside)
             info["through"] = through.isoformat()
             if report:
-                report(info)
+                await report(info)
             if until is None:
                 info["complete"] = True
                 return info
             start = until + timedelta(days=1)
     except Exception as exc:
+        if report is not None and retryable(exc):
+            raise  # a command's item: tried again, from the checkpoint the pass left
         info["error"] = f"{type(exc).__name__}: {exc}"
         log.warning("catalog pass stopped from %s: %s", start, info["error"])
         return info

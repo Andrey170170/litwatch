@@ -1831,3 +1831,53 @@ async def test_a_deep_pass_tried_again_after_an_error_keeps_its_priority(
 async def _waits_until(conn: Session, pass_id: int | None, at: datetime) -> bool:
     items = await items_of(conn, "deep", str(pass_id))
     return bool(items) and items[-1]["state"] == "pending" and items[-1]["not_before"] == at
+
+
+async def test_a_command_stopped_mid_job_leaves_the_job_to_the_next_claim(db: Session):
+    """`fulltext --deep` stopped while its Deep job runs: the job goes on, the pass's lease ends
+    at once, and the command is told; the next claim follows that job, never submitting it
+    again. Stopped before any job was submitted, the pass is given back unworked."""
+    await grade(db, Fit.CENTRAL)
+    fake = FakeDeep(DONE)
+    fake.hold, d, told = True, make(fake), []
+
+    async def left(paper_id: str) -> None:
+        told.append(paper_id)
+
+    running = asyncio.create_task(work(db, with_text(P), d, left=left))
+
+    async def submitted() -> bool:
+        return fake.started == 1
+
+    await until(submitted, "the deep job submitted")
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    (row,) = await deep_rows(db)
+    lapsed = await (await db.execute("SELECT now() >= %s AS ok", (row["lease_until"],))).fetchone()
+    assert row["state"] == "running" and lapsed["ok"] and told == [P.id]
+    fake.hold = False
+    assert await work(db, with_text(P), d) == {"cards_written": 1}
+    assert fake.started == 1  # followed by its key, not paid for again
+
+
+async def test_a_command_stopped_before_its_deep_job_gives_the_pass_back(db: Session, monkeypatch):
+    await grade(db, Fit.CENTRAL)
+    reading, told = asyncio.Event(), []
+
+    async def read(archive, c):
+        reading.set()
+        await asyncio.Event().wait()
+
+    async def left(paper_id: str) -> None:
+        told.append(paper_id)
+
+    monkeypatch.setattr(deep_passes, "read", read)
+    running = asyncio.create_task(work(db, with_text(P), make(FakeDeep(DONE)), left=left))
+    async with asyncio.timeout(10):
+        await reading.wait()
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    (row,) = await deep_rows(db)
+    assert (row["state"], row["lease_until"], told) == ("awaiting_text", None, [])

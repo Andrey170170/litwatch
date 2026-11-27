@@ -149,15 +149,21 @@ async def models(conn: Session):
     return Scripted()
 
 
-async def test_the_cli_replay_that_loses_the_database_as_it_starts_ends_failed_once(
+async def test_the_cli_replay_that_loses_the_database_as_it_starts_submits_nothing(
     conn: Session, models, tmp_path, monkeypatch
 ):
-    """`litwatch eval replay`: the database is lost as its start commits, so that start is
-    rolled back; the command is not tried again in process: it fails with a message to run it
-    again, nothing ran, and its item is ended failed."""
+    """`litwatch eval replay`: the database is lost as its start commits, in the unit that
+    submits the replay's item, so both are rolled back and nothing runs."""
     import psycopg  # noqa: PLC0415
 
+    from litwatch.store import work as queue  # noqa: PLC0415
     from tests.working import command  # noqa: PLC0415
+
+    async def served(unit, kind, within):  # as if a `serve` ran the replay
+        return True
+
+    monkeypatch.setattr(queue, "served_here", served)
+    monkeypatch.setattr(queue, "serving", served)  # its preflight's look
 
     labels = tmp_path / "labels"
     labels.mkdir()
@@ -172,18 +178,12 @@ async def test_the_cli_replay_that_loses_the_database_as_it_starts_ends_failed_o
         ran.append("started")
         raise psycopg.OperationalError("the server closed the connection unexpectedly")
 
-    async def runs_it(db, config, r, **kwargs):
-        ran.append(r.eval_run_id)
-        return {}
-
     monkeypatch.setattr(replay, "start", lost)
-    monkeypatch.setattr(replay, "run", runs_it)
     argv = ("eval", "replay", "--labels", str(labels), "--yes")
     result = await command(conn, tmp_path, monkeypatch, *argv)
-    assert result.exit_code != 0 and "run it again" in result.output, result.output
+    assert result.exit_code != 0, result.output
     assert ran == ["started"] and await rows(conn, "SELECT id FROM eval_runs") == []
-    (item,) = await rows(conn, "SELECT * FROM work_items WHERE kind = 'command'")
-    assert (item["state"], item["outcome"], item["attempts"]) == ("ended", "failed", 1)
+    assert await rows(conn, "SELECT * FROM work_items") == []
 
 
 async def start(conn: Session, models, labels=LABELLED, config=CONFIG) -> replay.Replay:

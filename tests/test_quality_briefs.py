@@ -36,6 +36,19 @@ GIST_IN_VOICE = (
 )
 
 
+async def run(gate: ModelGate, tree, papers, archive, out, **kwargs) -> list[briefs.Result]:
+    """`eval briefs` as the command and `serve` share it: the papers `out` does not answer
+    asked with the gate's `brief` role, each answer appended to `out` as it arrives."""
+    role = gate.models.role(briefs.brief.ROLE)
+    left = briefs.left(out, briefs.fingerprint(role, kwargs.get("text", "pass")), papers)
+
+    async def keep(r: briefs.Result) -> None:
+        with out.open("a", encoding="utf-8") as f:
+            f.write(r.model_dump_json() + "\n")
+
+    return await briefs.ask(gate, role, tree, left, archive, keep, **kwargs)
+
+
 def gateway(asked: list[str]) -> ModelGate:
     def respond(role, request):
         asked.append(request.user)
@@ -54,7 +67,7 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     archive = ArchiveClient("http://archive.test", "archive-token", http=mock(fake.handle))
     out, asked = tmp_path / "brief.jsonl", []
     pairs = list(zip([P, Q], entries(), strict=True))
-    first = await briefs.run(gateway(asked), seeds.taxonomy(), pairs, archive, out, wait_seconds=0)
+    first = await run(gateway(asked), seeds.taxonomy(), pairs, archive, out, wait_seconds=0)
     assert sorted((r.paper_id, r.error) for r in first) == [  # by paper, whatever came first
         (P.id, None),
         (Q.id, f"{Q.id}: no arXiv version known and no LaTeX text"),
@@ -66,13 +79,13 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     assert answered.output.weight == "solid"
 
     fake.texts[Q.id] = (None, "\\section{Setup} Monitors. " * 20)
-    second = await briefs.run(gateway(asked), seeds.taxonomy(), pairs, archive, out, wait_seconds=0)
+    second = await run(gateway(asked), seeds.taxonomy(), pairs, archive, out, wait_seconds=0)
     assert [r.paper_id for r in second] == [Q.id] and second[0].version is None
     assert set(briefs.results(out)) == {P.id, Q.id}
 
     # A paper whose area changed is answered again; the rest are kept.
     moved = [(P, entries()[0].model_copy(update={"area": "cot-monitoring"})), pairs[1]]
-    third = await briefs.run(gateway(asked), seeds.taxonomy(), moved, archive, out, wait_seconds=0)
+    third = await run(gateway(asked), seeds.taxonomy(), moved, archive, out, wait_seconds=0)
     assert [r.paper_id for r in third] == [P.id]
     assert "Area: Chain-of-thought monitoring" in asked[-1]
 
@@ -83,9 +96,13 @@ async def test_a_run_reads_each_text_from_the_archive_and_resumes_what_had_none(
     assert sum(briefs.spent(out)) == pytest.approx(0.203 + third[0].cost)
     assert briefs.results(out)[P.id].output is not None
 
+    # A paper answered before but no longer asked (its entry gone, or no longer in the
+    # database) is no reason to fail: what is asked now is left as before.
+    assert briefs.left(out, briefs.fingerprint(ROLE, "pass"), [pairs[1]]) == []
+
     other = ModelGate(Models(brief=ROLE.model_copy(update={"model": "another"})), {})
     with pytest.raises(ValueError, match="another request"):
-        await briefs.run(other, seeds.taxonomy(), pairs, archive, out)
+        await run(other, seeds.taxonomy(), pairs, archive, out)
 
 
 async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_path):
@@ -108,11 +125,11 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
     }
     out = tmp_path / "brief.jsonl"
     pair = [(P, entries()[0])]
-    (result,) = await briefs.run(ModelGate(models, providers), seeds.taxonomy(), pair, archive, out)
+    (result,) = await run(ModelGate(models, providers), seeds.taxonomy(), pair, archive, out)
     assert result.output is not None and result.cost == pytest.approx(0.07)
     # A charge the provider did not report leaves the paper's cost unknown, not a subtotal.
     charge[0] = None
-    (unknown,) = await briefs.run(
+    (unknown,) = await run(
         ModelGate(models, providers), seeds.taxonomy(), pair, archive, tmp_path / "unknown.jsonl"
     )
     assert unknown.output is not None and unknown.cost is None
@@ -123,13 +140,13 @@ async def test_a_refusal_the_fallback_answered_counts_in_its_papers_cost(tmp_pat
 
     providers["openrouter"] = ScriptedProvider("openrouter", down)
     gw = ModelGate(models, providers, retry_delays=())
-    (failed,) = await briefs.run(gw, seeds.taxonomy(), pair, archive, tmp_path / "down.jsonl")
+    (failed,) = await run(gw, seeds.taxonomy(), pair, archive, tmp_path / "down.jsonl")
     assert failed.error and failed.cost is None
     # Another fallback is another configuration: the run is not resumed into the same file.
     another = OTHER.model_copy(update={"model": "lab/another"})
     other = Models(brief=models.brief.model_copy(update={"fallbacks": (another,)}))
     with pytest.raises(ValueError, match="another request"):
-        await briefs.run(ModelGate(other, providers), seeds.taxonomy(), pair, archive, out)
+        await run(ModelGate(other, providers), seeds.taxonomy(), pair, archive, out)
 
 
 def test_the_report_checks_lengths_and_voice_and_shows_the_owners_read():

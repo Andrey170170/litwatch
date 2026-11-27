@@ -1,8 +1,10 @@
 """The Brief harness (docs/agents/verification.md): the `brief` role over the preference set's
 papers, each read from an archive as a full-text pass reads it, and a report that puts each
 paper's abstract beside its overstatement line, Brief and Gists for the owner to read. It writes
-nothing to the database. Scoring is the rule checks and the owner's recorded judgments; the
-judge model and the comparison with approved outputs join once the preference set has some."""
+nothing production reads: its calls go in an evaluation run's journal, which nothing reuses.
+`left` is what a run resumes with, and `ask` writes the Briefs. Scoring is the rule checks and
+the owner's recorded judgments; the judge model and the comparison with approved outputs join
+once the preference set has some."""
 
 from __future__ import annotations
 
@@ -10,7 +12,7 @@ import asyncio
 import hashlib
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import yaml
@@ -24,10 +26,13 @@ from litwatch.archive import (
     PaperText,
     read_text,
 )
+from litwatch.config import Models, RoleConfig
 from litwatch.core import Paper, Taxonomy
 from litwatch.core.budget import CallStart
 from litwatch.fulltext import brief, trim
-from litwatch.llm import CallError, Gateway, ModelGate, Usage
+from litwatch.llm import CallError, ModelGate, Usage
+from litwatch.llm.gateway import Journal
+from litwatch.quality import jsonl
 
 # The Brief asked for, and the Gist's hard limit (`brief.SYSTEM`, `brief.Output`).
 ASKED_BRIEF_WORDS = (120, 200)
@@ -77,23 +82,14 @@ class Result(BaseModel):
 
 
 def results(path: Path) -> dict[str, Result]:
-    if not path.exists():
-        return {}
-    found = (
-        Result.model_validate_json(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line
-    )
+    found = (Result.model_validate_json(line) for line in jsonl.lines(path))
     return {r.paper_id: r for r in found}
 
 
 def spent(path: Path) -> list[float | None]:
     """What each call of the run cost, failed ones and those answered again included; None
     where the charge is unknown."""
-    if not path.exists():
-        return []
-    lines = (line for line in path.read_text(encoding="utf-8").splitlines() if line)
-    return [Result.model_validate_json(line).cost for line in lines]
+    return [Result.model_validate_json(line).cost for line in jsonl.lines(path)]
 
 
 def dollars(costs: list[float | None]) -> str:
@@ -120,41 +116,47 @@ TEXTS: dict[str, Callable[[str, str], str]] = {
 }
 
 
-def fingerprint(gateway: Gateway, text: str = "pass") -> str:
+def fingerprint(role: RoleConfig, text: str = "pass") -> str:
     """The role's configuration, its fallbacks included, its instructions and the text variant,
     hashed."""
-    configured = gateway.models.role(brief.ROLE).model_dump_json()
+    configured = role.model_dump_json()
     return hashlib.sha256(f"{configured}\n{brief.SYSTEM}\n{text}".encode()).hexdigest()[:12]
 
 
 class _Spent:
-    """A journal that only adds up each paper's charges, so a refusal the fallback answered
-    counts in what its paper cost; a call with no known charge (none reported, or none
-    recorded, as after a timeout) makes the total unknown. Nothing is reused: an evaluation
-    asks afresh, and nothing batches (`observes`)."""
+    """The calls' journal (`journal`, an evaluation run's, when given), which adds up each
+    paper's charges as it goes, so a refusal the fallback answered counts in what its paper
+    cost; a call with no known charge (none reported, or none recorded, as after a timeout)
+    makes the total unknown. Nothing is reused: an evaluation asks afresh, and nothing batches
+    (`observes`)."""
 
-    run_id: int | None = 0  # no run: the rows are its own
     observes: bool = False
 
-    def __init__(self) -> None:
-        self.calls: list[tuple[str | None, float | None]] = []  # paper, charge, by call id
+    def __init__(self, journal: Journal | None = None) -> None:
+        self.journal = journal
+        self.run_id: int | None = journal.run_id if journal else 0  # no journal: rows of its own
+        self.calls: dict[int, tuple[str | None, float | None]] = {}  # paper, charge, by call id
 
     def cost(self, paper_id: str) -> float | None:
-        charges = [cost for paper, cost in self.calls if paper == paper_id]
+        charges = [cost for paper, cost in self.calls.values() if paper == paper_id]
         return None if None in charges else sum(charges)  # type: ignore[arg-type]
 
     async def cached(self, key: str) -> None:
         return None
 
     async def start(self, call: CallStart) -> int:
-        self.calls.append((call.paper_id, None))
-        return len(self.calls) - 1
+        call_id = await self.journal.start(call) if self.journal else len(self.calls)
+        self.calls[call_id] = (call.paper_id, None)
+        return call_id
 
     async def record(self, call_id: int, usage: Usage) -> None:
+        if self.journal:
+            await self.journal.record(call_id, usage)
         self.calls[call_id] = (self.calls[call_id][0], usage.cost)
 
     async def accept(self, call_id: int, output: dict) -> None:
-        return None
+        if self.journal:
+            await self.journal.accept(call_id, output)
 
     async def reject(
         self,
@@ -165,6 +167,8 @@ class _Spent:
         account: str | None = None,
         usage: Usage | None = None,
     ) -> None:
+        if self.journal:
+            await self.journal.reject(call_id, error, reply, account=account, usage=usage)
         if usage is not None:
             self.calls[call_id] = (self.calls[call_id][0], usage.cost)
 
@@ -204,43 +208,53 @@ async def _text(
         await asyncio.sleep(poll)
 
 
-async def run(
+def left(out: Path, asked: str, papers: list[tuple[Paper, Entry]]) -> list[tuple[Paper, Entry]]:
+    """The papers not yet answered in `out`, to resume a run: a paper whose title, abstract,
+    version, update or area changed since its answer is written again. Refuses to resume a run
+    made with another configuration of the role or text variant (another `fingerprint`,
+    `asked`)."""
+    found = results(out)
+    if other := {r.request for r in found.values()} - {asked}:
+        raise ValueError(
+            f"{out} holds answers to another request ({sorted(other)}); use a new file"
+        )
+    current = {p.id: inputs(p, e) for p, e in papers}  # an answer to a paper not asked now waits
+    done = {pid for pid, r in found.items() if r.output and r.inputs == current.get(pid)}
+    return [(p, e) for p, e in papers if p.id not in done]
+
+
+async def ask(
     models: ModelGate,
+    role: RoleConfig,
     tree: Taxonomy,
     papers: list[tuple[Paper, Entry]],
     archive: ArchiveClient,
-    out: Path,
+    keep: Callable[[Result], Awaitable[None]],
     *,
+    journal: Journal | None = None,
     concurrency: int = 4,
     text: str = "pass",
     wait_seconds: float = 20 * 60,
     poll: float = 20.0,
-    progress: Callable[[Result], None] | None = None,
 ) -> list[Result]:
-    """Write the Brief of every paper not yet answered in `out` through `models`, appending each
-    answer as it arrives with what its calls were charged; a paper whose text could not be had
-    is left to the next run. Refuses to resume a run made with another configuration of the
-    role or text variant (`TEXTS`); a paper whose title, abstract, version, update or area
-    changed since its answer is written again."""
-    spent = _Spent()
-    gateway = models.on(spent)
-    asked = fingerprint(gateway, text)
+    """Write the Brief of every paper through `models`, as the `brief` role configured `role`,
+    each answer kept (`keep`) as it arrives with what its calls were charged, its calls in
+    `journal` when given; a paper whose text could not be had is answered with why, and left to
+    the next run. One that fails to be kept stops the rest."""
+    spent = _Spent(journal)
+    gateway = models.on(spent, models=Models().model_copy(update={brief.ROLE: role}))
+    asked = fingerprint(role, text)
     prepare = TEXTS[text]
-    now = {p.id: inputs(p, e) for p, e in papers}
-    done = {pid for pid, r in results(out).items() if r.output and r.inputs == now.get(pid)}
-    if other := {r.request for r in results(out).values()} - {asked}:
-        raise ValueError(
-            f"{out} holds answers to another request ({sorted(other)}); use a new file"
-        )
     gate = asyncio.Semaphore(concurrency)
     found: list[Result] = []
 
     async def one(paper: Paper, entry: Entry) -> None:
         area = tree.get(entry.area) if entry.area else None
+        given = inputs(paper, entry)
         read = await _text(archive, paper, wait_seconds, poll)
         if isinstance(read, str):
             result = Result(  # no call, so nothing charged
-                paper_id=paper.id, error=read, cost=0.0, request=asked, inputs=now[paper.id]
+                paper_id=paper.id, error=read, cost=0.0, request=asked, inputs=given
             )
         else:
             async with gate:
@@ -257,7 +271,7 @@ async def run(
                         error=str(exc),
                         **_usage(exc.usage),
                         request=asked,
-                        inputs=now[paper.id],
+                        inputs=given,
                     )
                 else:
                     result = Result(
@@ -266,20 +280,18 @@ async def run(
                         model=answer.model,
                         **_usage(answer.usage),
                         request=asked,
-                        inputs=now[paper.id],
+                        inputs=given,
                     )
                 result.seconds = round(time.monotonic() - started, 2)
                 result.cost = spent.cost(paper.id)
             result.version, result.source = read.version, read.source
             result.chars = len(prepare(read.body, read.source))
-        with out.open("a", encoding="utf-8") as f:
-            f.write(result.model_dump_json() + "\n")
+        await keep(result)
         found.append(result)
-        if progress:
-            progress(result)
 
-    out.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.gather(*(one(p, e) for p, e in papers if p.id not in done))
+    async with asyncio.TaskGroup() as group:
+        for p, e in papers:
+            group.create_task(one(p, e))
     return found
 
 

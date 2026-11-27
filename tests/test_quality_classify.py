@@ -7,7 +7,6 @@ import pytest
 
 from litwatch import seeds
 from litwatch.quality import classify
-from tests.fakes import door
 
 LABELS = Path(__file__).parent.parent / "evals" / "labels"
 TREE = seeds.taxonomy()
@@ -51,19 +50,20 @@ def test_a_failed_paper_reaches_a_focus_class_by_keyword_alone():
     assert classify.members(TREE, failed) == set()
 
 
-async def test_a_run_refuses_to_resume_answers_to_another_request(tmp_path):
+def test_a_run_refuses_to_resume_answers_to_another_request(tmp_path):
     from litwatch.config import Models, RoleConfig
 
     out = tmp_path / "jev.jsonl"
     out.write_text(classify.Result(paper_id="1", request="older").model_dump_json() + "\n")
     role = RoleConfig(provider="openrouter", model="typesafe/jev-1.13", decisions=True)
-    gateway = door(Models(classify=role), {})
+    models = Models(classify=role)
     with pytest.raises(ValueError, match="another request"):
-        await classify.run(gateway, TREE, [], out)
+        classify.left(out, classify.fingerprint(models, TREE), ["1", "2"])
+    assert classify.left(out, "older", ["1", "2"]) == ["2"]  # what it holds is not asked again
     # The keyword check is part of the request: new patterns are another request.
     patterns = TREE.model_copy(deep=True)
     patterns.topics[0].keywords = [*patterns.topics[0].keywords, "new pattern"]
-    assert classify.fingerprint(gateway, patterns) != classify.fingerprint(gateway, TREE)
+    assert classify.fingerprint(models, patterns) != classify.fingerprint(models, TREE)
 
 
 def test_a_resumed_run_reads_its_archived_answers_and_the_new_ones(tmp_path):
@@ -72,3 +72,15 @@ def test_a_resumed_run_reads_its_archived_answers_and_the_new_ones(tmp_path):
     (tmp_path / "jev.jsonl.gz").write_bytes(gzip.compress(older.model_dump_json().encode()))
     out.write_text(newer.model_dump_json() + "\n")
     assert set(classify.results(out)) == {"1", "2"}
+
+
+def test_a_record_holding_a_line_separator_is_one_record_packed_or_appended(tmp_path):
+    """JSON escapes no U+2028 (nor U+0085, U+2029): records split on the LF byte alone."""
+    out = tmp_path / "jev.jsonl"
+    older = classify.Result(paper_id="1", error="cut off\u0085here")
+    newer = classify.Result(paper_id="2", error="and there")
+    assert " " in older.model_dump_json()  # written raw, not escaped
+    (tmp_path / "jev.jsonl.gz").write_bytes(gzip.compress(older.model_dump_json().encode()))
+    out.write_text(newer.model_dump_json() + "\n", encoding="utf-8")
+    found = classify.results(out)
+    assert set(found) == {"1", "2"} and found["1"].error == older.error

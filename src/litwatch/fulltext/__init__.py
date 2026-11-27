@@ -20,7 +20,7 @@ import contextlib
 import logging
 import time
 from collections import Counter
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -285,7 +285,9 @@ async def work(
     """Try every pass that is due once, up to `limit`, `BATCH` at a time: read its text, and
     write from it. No batch starts after `deadline` (`time.monotonic()`); those left are the
     worker's. The calls go on `run`, or on a run of kind `fulltext` opened through `models`
-    only when some text arrived. Returns how the tries ended.
+    only when some text arrived. Returns how the tries ended. Stopped without a run (a
+    command's item, which `serve` stopping ends), it lets go of the passes it still holds, so the
+    command's next item takes them at once, not once their lease lapses.
 
     A `run` (a nightly) leaves the owner's passes to their work items; batching, it claims all
     the automatic ones due at once, held until its batches' deadline. Without a run, while
@@ -312,8 +314,25 @@ async def work(
         if not claimed:
             break
         tried.update(c.id for c in claimed)
-        counts += await wave(db, config, archive, claimed, run=run, models=models)
+        try:
+            counts += await wave(db, config, archive, claimed, run=run, models=models)
+        except BaseException:
+            if run is None:
+                await _let_go(db, claimed)
+            raise
     return counts
+
+
+async def _let_go(db: DatabaseGate, claimed: list[Claimed]) -> None:
+    """Give back unworked those of `claimed` still held (`store.fulltext.release`): a wave cut
+    off, its recorded passes kept as they are. A failure is logged: the rest lapse with their
+    lease."""
+    try:
+        async with db.write("text passes: let go") as unit:
+            for c in sorted(claimed, key=lambda c: c.id):
+                await store_.release(unit, c)
+    except Exception:
+        log.warning("text passes: could not let go of %s claimed", len(claimed), exc_info=True)
 
 
 async def wave(
@@ -375,7 +394,7 @@ async def work_waiting(
     limit: int | None = None,
     wait: float = 0,
     models: ModelGate,
-    report: Callable[[Counter[str]], None] | None = None,
+    report: Callable[[Counter[str]], Awaitable[None]] | None = None,
 ) -> Counter[str]:
     """`work`, and again every `TICK_SECONDS` for at most `wait` seconds while some passes await
     their text (`litwatch fulltext --wait`), reporting each round. `limit` caps the passes
@@ -389,7 +408,7 @@ async def work_waiting(
         done = await work(db, config, archive, models=models, limit=allowance)
         total.update(done)
         if report:
-            report(done)
+            await report(done)
         left = deadline - asyncio.get_running_loop().time()
         if not done["awaiting_text"] or left <= 0:
             return total

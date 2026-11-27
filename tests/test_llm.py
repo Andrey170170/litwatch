@@ -877,6 +877,7 @@ def test_every_command_sees_dotenv_on_entry(tmp_path, monkeypatch, args):
 
     monkeypatch.setattr(cli.configuration, "load_dotenv", load_dotenv)
     monkeypatch.setattr(cli.configuration, "load", entered)
+    monkeypatch.setattr(cli.configuration, "database_url", entered)  # a command `serve` runs
     monkeypatch.setattr(cli.seeds, "taxonomy", entered)
     result = CliRunner().invoke(cli.app, args)
     assert result.exit_code == 0, result.output

@@ -4,7 +4,7 @@ or read a window's papers from the archive."""
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
@@ -66,7 +66,7 @@ async def catalog_from(
     db: DatabaseGate,
     config: Config,
     since: date,
-    report: Callable[[dict[str, Any]], None] | None = None,
+    report: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Run only the catalog pass (`intake.catalog`), from `since` at the latest, and record the
     run, under the run lock; its outcome is under `catalog` in the run's intake details."""

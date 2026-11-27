@@ -553,7 +553,7 @@ async def test_serve_stopping_mid_nightly_closes_its_run_and_the_next_serve_runs
     async with served(db, config, models=models.gate(config)):
         await asyncio.wait_for(in_steps.wait(), 10)
     (night,) = await (await conn.execute("SELECT * FROM runs WHERE kind = 'nightly'")).fetchall()
-    assert night["finished_at"] is not None and "CancelledError" in night["error"]
+    assert night["finished_at"] is not None and night["error"] == work.STOPPED
     (item,) = await (
         await conn.execute("SELECT * FROM work_items WHERE kind = 'nightly'")
     ).fetchall()

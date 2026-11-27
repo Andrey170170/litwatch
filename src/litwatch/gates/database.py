@@ -11,7 +11,8 @@ A unit is one short transaction on one connection, and speaks the connection's l
 takes `db` is a boundary and opens its own units; one that takes a unit runs inside it and never
 commits. Units do not nest: opening one while another is open on the task, or calling another
 gate meanwhile (`outside_unit`), raises with `LITWATCH_STRICT_GATES=1` and is logged as an error
-without it.
+without it. So does a unit, a session lock or a model call that knows nothing of whom it serves
+(`attributed_call`: no `gates.context.attributed` around it).
 
 A write unit names its locks when it opens and the gate takes them in one order: the taxonomy,
 then papers by id, then the other locks as `REGISTRY` lists them. The session locks held across
@@ -55,7 +56,7 @@ from psycopg.abc import Params
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from litwatch.gates.context import Work, current_work
+from litwatch.gates.context import Work, attribution, current_work
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +78,10 @@ SLOW_UNIT_SECONDS = 5.0
 
 class NestingError(RuntimeError):
     """A unit was opened, or another gate called, while a unit was open on the task."""
+
+
+class AttributionError(RuntimeError):
+    """A gate was called with no attribution: nothing says whom the call serves."""
 
 
 class LateLockError(RuntimeError):
@@ -213,6 +218,19 @@ def outside_unit(where: str) -> None:
     if os.environ.get(STRICT_ENV) == "1":
         raise NestingError(message)
     log.error("gate nesting: %s", message)
+
+
+def attributed_call(where: str) -> None:
+    """Check that the task says whom its gate calls serve (`gates.context.attributed`): a work
+    item, a request or the system. Every gate calls it before its work, naming what it is about
+    to do (`where`). A call with none raises `AttributionError` with `LITWATCH_STRICT_GATES=1`,
+    and is logged as an error without it."""
+    if attribution() is not None:
+        return
+    message = f"{where} with no attribution"
+    if os.environ.get(STRICT_ENV) == "1":
+        raise AttributionError(message)
+    log.error("gate attribution: %s", message)
 
 
 @asynccontextmanager
@@ -446,6 +464,7 @@ class DatabaseGate:
         """A read unit: a repeatable-read, read-only transaction, so every read in it sees one
         snapshot and Postgres refuses a write. It takes no advisory lock."""
         outside_unit(f"opening unit {name!r}")
+        attributed_call(f"unit {name!r}")
         async with self._connection(name) as conn:
             unit = ReadUnit(name, conn)
             async with _entered(unit), conn.transaction():
@@ -478,6 +497,7 @@ class DatabaseGate:
             raise ValueError(f"unit {name!r} names papers without the taxonomy lock")
         others = _named(locks)
         outside_unit(f"opening unit {name!r}")
+        attributed_call(f"unit {name!r}")
         work = current_work()
         async with self._connection(name) as conn:
             unit = WriteUnit(name, conn, taxonomy)
@@ -496,6 +516,7 @@ class DatabaseGate:
         `Hold`, which `held_elsewhere` takes to leave the holder's own hold out."""
         if name not in HELD_ACROSS_CALLS:
             raise ValueError(f"{name!r} is not a session lock held across calls")
+        attributed_call(f"the {name} lock")
         async with self._session_lock(LOCKS[name], wait=False) as (hold, _):
             yield hold
 
@@ -509,19 +530,22 @@ class DatabaseGate:
         lock = LOCKS.get(name)
         if lock is None or lock.scope != "startup":
             raise ValueError(f"{name!r} is not a startup lock")
+        attributed_call(f"the {name} startup lock")
         async with self._session_lock(lock, wait=True) as (_, conn):
             yield conn
 
     @asynccontextmanager
-    async def listen(self, channel: str) -> AsyncGenerator[AsyncIterator[str]]:
-        """LISTEN on `channel` for the block, on a connection of its own outside the pool.
-        Yields the payloads of its notifications as they arrive: a notification is sent when
-        the transaction that sent it commits, never when it rolls back. When the connection
-        drops, iterating raises `psycopg.OperationalError`."""
+    async def listen(self, channel: str, *more: str) -> AsyncGenerator[AsyncIterator[str]]:
+        """LISTEN on `channel` (and `more`) for the block, on a connection of its own outside
+        the pool. Yields the payloads of its notifications as they arrive: a notification is
+        sent when the transaction that sent it commits, never when it rolls back. When the
+        connection drops, iterating raises `psycopg.OperationalError`."""
         outside_unit(f"listening on {channel!r}")
+        attributed_call(f"listening on {channel!r}")
         conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
         try:
-            await conn.execute(sql.SQL("LISTEN {}").format(sql.Identifier(channel)))
+            for each in (channel, *more):
+                await conn.execute(sql.SQL("LISTEN {}").format(sql.Identifier(each)))
             yield (note.payload async for note in conn.notifies())
         finally:
             await conn.close()
@@ -569,6 +593,7 @@ class DatabaseGate:
         lock = LOCKS[name]
         if name not in HELD_ACROSS_CALLS:
             raise ValueError(f"{name!r} is not a session lock held across calls")
+        attributed_call(f"the {name} lock's holders read")
         # Our keys fit in the low half of the one-key form: classid 0, the key in objid.
         query = (
             "SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_database d ON d.oid = l.database "

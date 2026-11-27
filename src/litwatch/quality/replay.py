@@ -276,12 +276,14 @@ async def resume(unit: ReadUnit, config: Config, eval_run_id: int) -> Replay:
 
 async def estimate(unit: ReadUnit, config: Config, r: Replay) -> dict[str, float]:
     """What what is left would cost, by step: the latest calls of each role under its current
-    configuration (provider, model, effort) in the journal, or `FALLBACK_COST` where it has
-    none. Reused replies would cost less."""
+    configuration (provider, model, effort) in the journal, evaluations' included, or
+    `FALLBACK_COST` where it has none. Reused replies would cost less."""
     per_call = {}
     for role in ROLES:
         served = config.models.role(role)
-        mean = await calls.mean_cost(unit, role, served.provider, served.model, served.effort)
+        mean = await calls.mean_cost(
+            unit, role, served.provider, served.model, served.effort, evaluations=True
+        )
         per_call[role] = FALLBACK_COST[role] if mean is None else mean
     return {
         "classification": len(r.to_classify) * per_call[classification.ROLE],

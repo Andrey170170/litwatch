@@ -746,6 +746,24 @@ async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(
     assert done["briefs_written"] == 2 and len(writer.asked) == 2
 
 
+async def test_a_commands_wave_cut_off_lets_go_of_the_passes_it_claimed(
+    db: Session, gate, monkeypatch
+):
+    """A command's passes (no run) cut off mid-wave, as `serve` stopping cuts its item off: the
+    passes it claimed are given back at once, for the command's next item, not left to their
+    lease."""
+    await graded(db, "central")
+
+    async def cut_off(*args, **kwargs):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(fulltext, "wave", cut_off)
+    with pytest.raises(asyncio.CancelledError):
+        await fulltext.work(gate, CONFIG, archive(FakeArchive()), models=Writer().gate(CONFIG))
+    found = await (await db.execute("SELECT state, lease_until FROM fulltext_passes")).fetchall()
+    assert found and {(r["state"], r["lease_until"]) for r in found} == {("awaiting_text", None)}
+
+
 # -- passes as work items (docs/plans/a2-work-gate.md, P2) -----------------------------------------
 
 
@@ -1529,20 +1547,3 @@ def test_a_pass_sends_latex_without_its_bibliography_and_pdf_text_as_read():
 def test_a_text_without_a_bibliography_is_sent_as_read():
     for source in ("latex", "pdf"):
         assert trim.without_references(BODY, source) == BODY
-
-
-def test_the_fulltext_command_finds_an_archive_kept_in_dotenv(tmp_path, monkeypatch):
-    from typer.testing import CliRunner  # noqa: PLC0415
-
-    from litwatch import cli  # noqa: PLC0415
-
-    for name in ("LITWATCH_ARCHIVE_URL", "LITWATCH_ARCHIVE_TOKEN", "LITWATCH_CONFIG"):
-        monkeypatch.setenv(name, "")  # recorded, so the undo removes what .env sets
-        monkeypatch.delenv(name)
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".env").write_text(
-        "LITWATCH_ARCHIVE_URL=http://127.0.0.1:9\nLITWATCH_ARCHIVE_TOKEN=t\n"
-    )
-    monkeypatch.setattr(cli, "_run", lambda work, **_: {})  # no database: only the archive matters
-    result = CliRunner().invoke(cli.app, ["fulltext"])
-    assert result.exit_code == 0, result.output

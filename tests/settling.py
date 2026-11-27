@@ -10,6 +10,7 @@ from datetime import date
 
 from litwatch.core import Cause, Fit, Hand, Label, Paper, Reaction, Taxonomy
 from litwatch.feedback import misses, word
+from litwatch.gates.context import Attribution, attributed
 from litwatch.gates.database import Connection
 from litwatch.intake import batch
 from litwatch.store import papers as papers_store
@@ -35,9 +36,14 @@ def change(
 
 
 def apart[T](work: Coroutine[None, None, T]) -> asyncio.Task[T]:
-    """Start `work` as another request's: a task started inside a unit counts as inside it (the
-    nesting check), and this one does not, wherever it is started from."""
-    return asyncio.create_task(work, context=contextvars.Context())
+    """Start `work` as another request's, attributed as one: a task started inside a unit counts
+    as inside it (the nesting check), and this one does not, wherever it is started from."""
+
+    async def requested() -> T:
+        with attributed(Attribution.request("test: another request")):
+            return await work
+
+    return asyncio.create_task(requested(), context=contextvars.Context())
 
 
 @asynccontextmanager

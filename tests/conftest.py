@@ -18,6 +18,7 @@ import pytest
 from litwatch.core import Depth, Paper, Taxonomy, TaxonomyClass, Topic
 from litwatch.events import dispatch
 from litwatch.feedback import word
+from litwatch.gates.context import Attribution, attributed
 from litwatch.gates.database import STRICT_ENV, DatabaseGate
 from litwatch.store import runs
 from litwatch.store.calls import CallJournal
@@ -36,9 +37,19 @@ def automatic_deep(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def strict_gates(monkeypatch):
-    """A unit opened inside a unit, or a gate called inside one, raises (`gates.database`); a
-    test of the lenient way, as production runs, removes the variable."""
+    """A unit opened inside a unit, a gate called inside one, or a gate call with no
+    attribution raises (`gates.database`); a test of the lenient way, as production runs,
+    removes the variable."""
     monkeypatch.setenv(STRICT_ENV, "1")
+
+
+@pytest.fixture(autouse=True)
+def attributed_to_the_test():
+    """A test's own gate calls are the system's, `test`; what it runs through an Entry (the
+    API, MCP, the CLI, `serve`) or a Work gate is attributed there. A test of a call with none
+    runs it in an empty context (`contextvars.Context()`)."""
+    with attributed(Attribution.system("test")):
+        yield
 
 
 # A small tree with one topic at each depth: Focus under its Area, a Field beside them.

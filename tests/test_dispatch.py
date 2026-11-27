@@ -661,9 +661,10 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
     recorder.aclose = aclose
     served, given = {}, {}
 
-    async def run(gate, workers, *, keys=None):
+    async def run(gate, workers, *, keys=None, supersede=False):
         served.update(workers)
         given.update(keys or {})
+        gate.registered.set()  # as its `workers` row is written
         await asyncio.Event().wait()
 
     async def sweep(worker):
@@ -677,7 +678,8 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
     app.state.db = contextlib.nullcontext()  # no database: the gate the lifespan opens
     async with app.router.lifespan_context(app):
         await asyncio.sleep(0)
-    assert list(served) == [outbox.DELIVERY]
+    # Deliveries, and the commands every `serve` runs.
+    assert [k for k in served if not k.startswith("command:")] == [outbox.DELIVERY]
     assert list(served[outbox.DELIVERY].loaded.values()) == [recorder]
     assert given == {outbox.DELIVERY: [recorder.name]}  # its own integrations' turns alone
     assert deep.client.http.is_closed and closed == ["recorder"]

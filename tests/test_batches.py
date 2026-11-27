@@ -2535,7 +2535,7 @@ async def test_a_normal_calls_charge_is_recorded_though_its_item_is_cancelled_me
     """A normal call's reply came; writing its charge lost the connection, and the write waits
     to be tried again when the item is cancelled (`serve` stopping), then cancelled again (its
     lease renewal failing): the write is finished first, so the charge the provider made is on
-    its row, and the item is cancelled after."""
+    its row, and the item is cancelled after, with why it was first."""
     journal = CallJournal(db, await started(conn, "nightly"))
     gw, anthropic, _, _ = batching(journal)
     gw.gate.journal_delays = (0.3,)
@@ -2550,10 +2550,10 @@ async def test_a_normal_calls_charge_is_recorded_though_its_item_is_cancelled_me
     monkeypatch.setattr(journal, "record", flaky)
     asked = asyncio.create_task(Tonight(gw.gate, journal, deadline=None).ask("brief", ask(1)))
     await asyncio.wait_for(failing.wait(), 3)
-    asked.cancel()
+    asked.cancel("serve stopped while it ran")
     await asyncio.sleep(0.05)
     asked.cancel()  # again, as the write waits to be tried again
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(asyncio.CancelledError, match="serve stopped while it ran"):
         await asyncio.wait_for(asked, 3)
     assert [c["cost"] for c in await calls(conn)] == [0.001] and len(anthropic.calls) == 1
     await gw.close()

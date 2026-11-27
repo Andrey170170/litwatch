@@ -9,6 +9,7 @@ from litwatch import intake
 from litwatch.archive import ArchiveClient
 from litwatch.config import Config
 from litwatch.core import Paper
+from litwatch.gates.database import PoolTimeoutError
 from litwatch.intake import atom, catalog, oai
 from litwatch.intake.http import SourceError, XmlClient
 from litwatch.integrations import IntegrationError
@@ -154,6 +155,36 @@ async def test_a_backfill_walks_weeks_and_moves_the_checkpoint_after_each(conn: 
     ]
     assert done["complete"] and done["registered"] == 17 == len(fake.records)
     assert await checkpoint(conn) == TODAY
+
+
+async def test_a_commands_pass_raises_a_lost_database_and_goes_on_from_its_checkpoint(
+    conn: Session,
+):
+    """With a `report` (a command's item), a lost database is raised, not kept as the pass's
+    error, so the item is tried again: from the checkpoint its last complete window left."""
+    start = TODAY - timedelta(days=16)
+    days = {start + timedelta(days=i): [paper(f"2609.{i:05d}", ["cs.CV"])] for i in range(17)}
+    arxiv, fake, reported = Arxiv(days=days), FakeArchive(), []
+    await catalog.lower(Bridge(conn), start)
+
+    async def report(done):
+        reported.append(done["through"])
+        if len(reported) == 1:
+            raise PoolTimeoutError("the pool had no connection to give")
+
+    async def walked():
+        run_id = await started(conn, "intake", SINCE, NOW)
+        with XmlClient() as client:
+            return await catalog.run(
+                Bridge(conn), lambda: archive(fake), ("cs.CL",), start, run_id, client,
+                source=arxiv, report=report,
+            )  # fmt: skip
+
+    with pytest.raises(PoolTimeoutError):
+        await walked()
+    assert await checkpoint(conn) == start + timedelta(days=6)
+    done = await walked()
+    assert done["complete"] and arxiv.windows[1][0] == start + timedelta(days=6)  # its checkpoint
 
 
 async def test_a_failed_registration_keeps_its_window_open(conn: Session):

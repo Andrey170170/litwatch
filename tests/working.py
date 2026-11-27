@@ -1,8 +1,8 @@
 """A Work gate in a test: waiting on what must happen (`until`), serving a gate's Workers for a
 block (`serving`), reading a key's work items back (`items_of`), and running the jobs' chunks
 through a gate (`chunks`, `step`, `work_out`), or killed in one (`killed`), beside a scheduled
-nightly (`nightly_due`); `litwatch serve`'s app with its Work gate running (`served`); and a
-`litwatch` command through its real CLI (`command`)."""
+nightly (`nightly_due`); work run as a work item (`in_an_item`); `litwatch serve`'s app with
+its Work gate running (`served`); and a `litwatch` command through its real CLI (`command`)."""
 
 import asyncio
 import contextlib
@@ -19,10 +19,12 @@ from typer.testing import Result as Ran
 from litwatch.api import create_app
 from litwatch.config import Config, Schedule
 from litwatch.core.work import WorkItem
+from litwatch.gates import work as work_gate
 from litwatch.gates.database import DatabaseGate, LeaseLostError
 from litwatch.gates.work import Result, Worker, WorkGate
 from litwatch.jobs.worker import JobWorker
 from litwatch.store import jobs as jobs_store
+from litwatch.store import work as queue
 from tests.sessions import Bridge, Session, in_read
 
 WAIT = 10.0  # how long a test waits on something that must happen
@@ -78,6 +80,40 @@ async def serving(
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+class StoppedError(Exception):
+    """The item `in_an_item` ran was stopped: its lease was lost."""
+
+
+async def in_an_item[T](
+    db: DatabaseGate, name: str, work: Callable[[], Awaitable[T]], *, admission: str | None = None
+) -> T:
+    """`work` run as `serve` runs a work item: the item `test:<name>` (key `name`, admitted by
+    `admission`, by default its key) on a Work gate of its own, which renews its lease; what
+    `work` returns or raises; `StoppedError` when the gate stopped it."""
+    kind = f"test:{name}"
+    ended: asyncio.Future[T] = asyncio.get_running_loop().create_future()
+
+    async def worker(_: WorkItem) -> None:
+        try:
+            found = await work()
+        except (asyncio.CancelledError, LeaseLostError):  # stopped, then its fenced writes fail
+            if not ended.done():
+                ended.set_exception(StoppedError(f"{kind} was stopped"))
+            raise
+        except BaseException as exc:
+            if not ended.done():
+                ended.set_exception(exc)
+            raise
+        ended.set_result(found)
+
+    async with db.write("test: the item") as unit:
+        await queue.submit(unit, kind, name, admission=admission or name)
+    # Its lease the module's as it is now: a test may shorten it.
+    gate = WorkGate(db, lease=work_gate.LEASE)
+    async with serving(gate, {kind: worker}, keys={kind: [name]}):
+        return await ended
 
 
 async def items_of(conn: Session, kind: str, key: str) -> list[dict[str, Any]]:
@@ -234,8 +270,9 @@ async def nightly_done(conn: Session) -> None:
 @contextlib.asynccontextmanager
 async def served(db: DatabaseGate, config: Config, **kwargs: Any) -> AsyncGenerator[FastAPI]:
     """`litwatch serve`'s app on `db` (open, the caller's) for the block, its lifespan running:
-    the sweeps, then one Work gate with the Workers `config` enables; stopped at the end, as
-    `serve` stops. `kwargs` go to `create_app` (`gateway`, `publications`, `archive`)."""
+    the sweeps, then one Work gate with the Workers `config` enables, registered (a command
+    finds it serves) as the startup ends; stopped at the end, as `serve` stops. `kwargs` go to
+    `create_app` (`models`, `publications`, `archive`)."""
     app = create_app("postgresql://unused", TOKEN, config, db=db, **kwargs)
     async with app.router.lifespan_context(app):
         yield app
@@ -247,11 +284,11 @@ CONFIG_TOML = '[schedule]\ntimezone = "UTC"\n'
 
 async def command(
     conn: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *argv: str,
-    config: str | None = CONFIG_TOML,
+    config: str | None = CONFIG_TOML, input: str | None = None,
 ) -> Ran:  # fmt: skip
     """The `litwatch` command `argv` through its real CLI, in a thread of its own (it runs its
-    own event loop), on the test's schema, with a configuration file of `config` (None: a
-    command that takes none): in `tmp_path`, as every command loads ./.env."""
+    own event loop), on the test's schema, with a configuration file of `config` (None: none),
+    as $LITWATCH_CONFIG, and `input` its answers: in `tmp_path`, as every command loads ./.env."""
     from litwatch import cli  # noqa: PLC0415
 
     monkeypatch.chdir(tmp_path)
@@ -261,5 +298,5 @@ async def command(
     if config is not None:
         path = tmp_path / "litwatch.toml"
         path.write_text(config)
-        argv = (*argv, "--config", str(path))
-    return await asyncio.to_thread(CliRunner().invoke, cli.app, list(argv))
+        monkeypatch.setenv("LITWATCH_CONFIG", str(path))
+    return await asyncio.to_thread(CliRunner().invoke, cli.app, list(argv), input=input)
