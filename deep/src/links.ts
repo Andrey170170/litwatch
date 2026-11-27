@@ -23,7 +23,7 @@ import { Queue } from "./jobs.ts";
 import { headings } from "./paper.ts";
 import { Repl, type HostFn } from "./repl.ts";
 import { schemaErrors } from "./schema.ts";
-import { apiGet, hostState, type Get, type HostState } from "./hostcheck.ts";
+import { apiGet, apiTarget, hostState, type Get, type HostState } from "./hostcheck.ts";
 import type { Static } from "typebox";
 
 /** The finder's budget: it looks a few things up, it writes nothing long. */
@@ -121,7 +121,8 @@ export type Check = (url: string, kind: Link["kind"]) => Promise<HostState | nul
  * where the host gives one) from the host's API, whatever the draft says; one the host could not say of, and a link
  * elsewhere, must be fetched in the session, by its own URL, with an answer that shows its state (`shows`). A link
  * given only a page that answered, with no quote of what it holds, is dropped; a link given twice (by `normal` URL
- * and kind) is kept once. `notes` say what was replaced or dropped. */
+ * and kind) is kept once, the first given that is kept. A GitHub or Hugging Face link is answered by its repository's
+ * own page (`apiTarget`), as litwatch's re-check knows it. `notes` say what was replaced or dropped. */
 export async function answered(
   draft: unknown,
   fetched: readonly Fetched[],
@@ -139,14 +140,17 @@ export async function answered(
       errors.push(`/links/${i}/url: must be an absolute http(s) URL with a host`);
       continue;
     }
-    if (seen.has(`${link.kind} ${url}`)) continue; // given twice, kept once
-    seen.add(`${link.kind} ${url}`);
-    const { license, evidence, ...rest } = link;
+    const page = apiTarget(link.url)?.page;
+    const key = `${link.kind} ${page ?? url}`;
+    if (seen.has(key)) continue; // given twice, kept once
+    const { license, evidence, ...given } = link;
+    const rest = { ...given, url: page ?? link.url };
     const host = await check(link.url, link.kind);
     if (host) {
       if (host.state !== link.state) notes.push(`${link.url}: ${host.state} by its host's API (answered ${host.status}), not ${link.state}`);
       const kept = host.license ?? license ?? undefined;
       out.push({ ...rest, state: host.state, ...(kept ? { license: kept } : {}), checked_at: new Date().toISOString() });
+      seen.add(key); // only a link kept: one dropped stands in for no later one
       continue;
     }
     const by = fetched.filter((f) => confirms(link.url, f.asked) || (f.answered !== undefined && confirms(link.url, f.answered)));
@@ -166,6 +170,7 @@ export async function answered(
       continue;
     }
     out.push({ ...rest, ...(license ? { license } : {}), checked_at: shown.at(-1)!.at });
+    seen.add(key);
   }
   return errors.length ? { errors } : { answer: { links: out, ...(note ? { note } : {}) }, notes };
 }

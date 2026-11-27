@@ -6,6 +6,7 @@ is replaces nothing, and the re-checks of a placeholder: weekly, four times, eac
 left. Through `serve` with its Workers running and the configuration's own rules, on a fake
 deep service, a fake archive, a fake GitHub and Hugging Face."""
 
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import replace
@@ -70,7 +71,8 @@ class Finder:
     is that find, and `GET /links/keys/<key>` finds it. `lose` submissions are answered 502
     after the find started, as a proxy losing the answer would; with `refuse`, every
     submission is turned down with that status; with `lookup_fails`, every lookup by key
-    answers 503. `sent` is what each submission sent, `lookups` counts the lookups."""
+    answers 503; while `hold`, every find answers that it is still running. `sent` is what each
+    submission sent, `lookups` counts the lookups."""
 
     def __init__(
         self,
@@ -84,6 +86,7 @@ class Finder:
         self.refuse = refuse
         self.lookup_fails = lookup_fails
         self.lookups = 0
+        self.hold = False
         self.keys: dict[str, str] = {}
         self.finds: dict[str, dict[str, Any]] = {}
         self.sent: list[dict[str, Any]] = []
@@ -115,7 +118,7 @@ class Finder:
             return httpx.Response(202, json={"id": self.keys[key], "status": "queued"})
         find_id = req.url.path.removeprefix("/links/")
         if req.method == "GET" and find_id in self.finds:
-            end = self.finds[find_id]
+            end = {"status": "running"} if self.hold else self.finds[find_id]
             job = {
                 "id": find_id,
                 "paper_id": self.sent[-1]["paper"]["id"],
@@ -737,8 +740,10 @@ async def test_the_owners_find_links_runs_a_fresh_find_each_time(held: Session, 
         ) as app,
         app_client(app) as http,
     ):
+        finder.hold = True  # the first find is open until the second ask has its answer
         first = await http.post(f"/api/papers/{A.id}/links")
         again = await http.post(f"/api/papers/{A.id}/links")
+        finder.hold = False
         await until(all_ended(held, 1), "the first find ends")
         asked = await http.post(f"/api/papers/{A.id}/links")
         await until(all_ended(held, 2), "the second find ends")
@@ -1043,7 +1048,11 @@ HOST_CHECKS = json.loads(
 
 @pytest.mark.parametrize("case", HOST_CHECKS, ids=[c["name"] for c in HOST_CHECKS])
 async def test_a_hosts_api_says_what_a_link_holds_as_the_shared_table_says(monkeypatch, case):
+    """Of the link as deep answers it (`page`), each request on the API's host, over HTTPS."""
+    asked: list[httpx.URL] = []
+
     def handle(req: httpx.Request) -> httpx.Response:
+        asked.append(req.url)
         answer = case["answers"].get(str(req.url))
         if answer is None:
             return httpx.Response(404)
@@ -1054,23 +1063,27 @@ async def test_a_hosts_api_says_what_a_link_holds_as_the_shared_table_says(monke
         return httpx.Response(answer["status"])
 
     hosting(monkeypatch, handle)
-    if not adapter.checkable(case["url"]):
+    url = case.get("page", case["url"])
+    if not adapter.checkable(url):
         said: Any = "unsupported"
     else:
-        checked = await adapter.check(case["url"], case["kind"])
+        checked = await adapter.check(url, case["kind"])
         said = (
             None
             if checked is None
             else {"state": checked[0]} | ({"license": checked[1]} if checked[1] else {})
         )
     assert said == case["expect"]
+    target = adapter._target(url)
+    api = httpx.URL(target[0]).host if target else None
+    assert all(u.scheme == "https" and u.host == api for u in asked), asked  # none off its host
 
 
 async def test_a_hosts_api_answer_is_read_whole_up_to_the_bound_deeps_check_takes_too(
     monkeypatch,
 ):
-    tree = [{"path": f"src/module_{i}/file_{i}.py"} for i in range(10_000)]
-    tree.append({"path": "ckpt/model.safetensors"})
+    tree = [{"path": f"src/module_{i}/file_{i}.py", "type": "blob"} for i in range(10_000)]
+    tree.append({"path": "ckpt/model.safetensors", "type": "blob"})
     big = json.dumps({"tree": tree}).encode()
     assert len(big) > 300_000
 
@@ -1089,6 +1102,22 @@ async def test_a_hosts_api_answer_is_read_whole_up_to_the_bound_deeps_check_take
     assert await adapter.check("https://github.com/o/huge", "code") is None
 
 
+async def test_a_re_check_past_its_deadline_says_nothing(monkeypatch):
+    """A host that answers each request in time but the check not, redirects and later
+    requests included: the check says nothing, so the re-check counts it and checks later."""
+
+    async def slow(req: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.05)
+        if req.url.path == "/repos/o/r":
+            return httpx.Response(200, json={"full_name": "o/r", "default_branch": "main"})
+        return httpx.Response(200, json=[{"path": "train.py"}])
+
+    monkeypatch.setattr(adapter, "client", lambda: mock(slow))
+    assert await adapter.check("https://github.com/o/r", "code") == ("public", None)
+    monkeypatch.setattr(adapter, "DEADLINE", 0.08)  # past the first request, short of both
+    assert await adapter.check("https://github.com/o/r", "code") is None
+
+
 async def test_a_paper_dropped_during_its_find_keeps_its_links(held: Session, db):
     await seed.analyse(held, A, code=True)
     async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
@@ -1102,3 +1131,31 @@ async def test_a_paper_dropped_during_its_find_keeps_its_links(held: Session, db
     async with db.write("asked", taxonomy="shared", papers=[A.id]) as unit:
         assert await links.request(unit, A.id) is None
     assert await in_read(held, papers_store.held, [A.id]) == {A.id}
+
+
+async def test_a_paper_dropped_after_deep_took_its_find_keeps_its_links(
+    held: Session, db, monkeypatch
+):
+    """The owner asks of a paper with a link; deep takes the find, and the paper is dismissed
+    while deep works it. Deep's answer, another link, ends the find dropped, with its cost, and
+    the paper keeps the link it had."""
+    await seed.analyse(held, A, code=True)
+    async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
+        await links.due(unit, [A.id])
+    finder = Finder(
+        {"result": {"links": [found("https://github.com/o/probes", "public")]}},
+        {"result": {"links": [found("https://github.com/o/other", "public")]}},
+    )
+    service = deep(finder)
+    worker = FindWorker(db, archive()[0], service)
+    assert isinstance(await worker(await item_of(held, key(1))), Done)
+    follow = service.client.follow_find
+
+    async def dismissed_meanwhile(find_id: str) -> Any:
+        await held.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (A.id,))
+        return await follow(find_id)
+
+    monkeypatch.setattr(service.client, "follow_find", dismissed_meanwhile)
+    late = await done(worker, await owners(db))
+    assert late.cost == Decimal("0.01") and late.result["skipped"]
+    assert finder.started == 2 and await urls(held) == ["https://github.com/o/probes"]

@@ -1,5 +1,5 @@
 {
- "about": "The host checks' table (deep/src/hostcheck.ts, src/litwatch/links/adapter.py): each case's link and kind, what each API URL answers (absent: 404), and what the check says: a state and license, null when the host cannot say, \"unsupported\" for a link it does not check.",
+ "about": "The host checks' table (deep/src/hostcheck.ts, src/litwatch/links/adapter.py): each case's link and kind, what each API URL answers (absent: 404), the repository's own page the finder answers for it (`page`, when the link names it otherwise; litwatch re-checks that), and what the check says: a state and license, null when the host cannot say, \"unsupported\" for a link it does not check.",
  "cases": [
   {
    "name": "a GitHub repository that does not exist is missing",
@@ -67,6 +67,40 @@
     "state": "public",
     "license": "MIT"
    }
+  },
+  {
+   "name": "a repository's page named by a winding path is checked, and answered, as its own page",
+   "url": "https://github.com/o/archive/../r",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/contents": {
+     "status": 200,
+     "json": [
+      {
+       "path": "README.md"
+      },
+      {
+       "path": "train.py"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "state": "public",
+    "license": "MIT"
+   },
+   "page": "https://github.com/o/r"
   },
   {
    "name": "GitHub code with only a README and a licence is a placeholder",
@@ -258,10 +292,12 @@
      "json": {
       "tree": [
        {
-        "path": "README.md"
+        "path": "README.md",
+        "type": "blob"
        },
        {
-        "path": "train.py"
+        "path": "train.py",
+        "type": "blob"
        }
       ]
      }
@@ -305,7 +341,8 @@
      "json": {
       "tree": [
        {
-        "path": "ckpt/model.pt"
+        "path": "ckpt/model.pt",
+        "type": "blob"
        }
       ]
      }
@@ -337,7 +374,8 @@
      "json": {
       "tree": [
        {
-        "path": "README.md"
+        "path": "README.md",
+        "type": "blob"
        }
       ]
      }
@@ -386,6 +424,174 @@
    },
    "expect": {
     "state": "placeholder",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "a folder named like a weight file is not one",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "README.md",
+        "type": "blob"
+       },
+       {
+        "path": "model.pt",
+        "type": "tree"
+       }
+      ]
+     }
+    },
+    "https://api.github.com/repos/o/r/releases?per_page=100": {
+     "status": 200,
+     "json": []
+    }
+   },
+   "expect": {
+    "state": "placeholder",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "a truncated GitHub tree with no weights in it or its releases says nothing",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "README.md",
+        "type": "blob"
+       },
+       {
+        "path": "train.py",
+        "type": "blob"
+       }
+      ],
+      "truncated": true
+     }
+    },
+    "https://api.github.com/repos/o/r/releases?per_page=100": {
+     "status": 200,
+     "json": [
+      {
+       "assets": [
+        {
+         "name": "paper.pdf"
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a truncated GitHub tree with a weight file in it is public",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "ckpt/model.safetensors",
+        "type": "blob"
+       }
+      ],
+      "truncated": true
+     }
+    }
+   },
+   "expect": {
+    "state": "public",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "a truncated GitHub tree with weights as a release asset is public",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "train.py",
+        "type": "blob"
+       }
+      ],
+      "truncated": true
+     }
+    },
+    "https://api.github.com/repos/o/r/releases?per_page=100": {
+     "status": 200,
+     "json": [
+      {
+       "assets": [
+        {
+         "name": "model.safetensors"
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "expect": {
+    "state": "public",
     "license": "MIT"
    }
   },

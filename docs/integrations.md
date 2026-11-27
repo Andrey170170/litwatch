@@ -324,6 +324,8 @@ so should it fail the automatic one still runs. A failed automatic find ends fai
 error and cost, and a later trigger (an analysis again, or the nightly's retries of the last
 week, run after its analyses; three failures at most) submits a fresh one. A new version, or
 update, is found again, wherever it is stored (intake, or an owner's action fetching the paper).
+Automatic finds start from the analyses and versions recorded once P6 is deployed: a paper
+analysed before gets none (no backfill is built), and the owner's "Find links" covers it.
 The owner's "Find links" (`POST /api/papers/<id>/links`) runs a fresh find of the paper as it is,
 unless one of theirs of the same is open, on a paper only in the archive too, which it stores
 first. Right before a find pays, after any wait for the archive's text, and again with its answer,

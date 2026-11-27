@@ -702,6 +702,26 @@ describe("a paper's release links", () => {
     expect([...failed.parentElement!.children].at(-1)).toBe(failed); // last: the cells before it keep their places
   });
 
+  it("poll after Find links is accepted though the read after it failed, until a read sees the find end", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => void vi.useRealTimers());
+    viewport(true);
+    let reads = 0;
+    scriptFetch({
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, links_findable: true } : reads === 2 ? json({ detail: "down" }, 500) : { ...paper, link_answer: answer(0) }),
+      "POST /api/papers/2610.00002/links": { find_id: 5 },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await userEvent.click(screen.getByRole("button", { name: "Find links" }));
+    await waitFor(() => expect(reads).toBe(2)); // the refresh after the POST fails
+    await vi.advanceTimersByTimeAsync(15_000);
+    await waitFor(() => expect(reads).toBe(3));
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(reads).toBe(3);
+  });
+
   it("poll while a find is open, and stop once the page sees it end", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     onTestFinished(() => void vi.useRealTimers());

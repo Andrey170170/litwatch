@@ -218,7 +218,8 @@ Built between milestones, on whatever structure exists then.
   handles the finder's data; how well it judges a link is this. From P6's round-3 review:
   - a candidate it could not confirm is dropped, so the answer turns into "none found" and replaces stored links;
   - a GitHub repository with a README and `assets/` counts as code: PMS-SR (2611.03390), a README and a folder of
-    PNG figures, is stored as public;
+    PNG figures, is stored as public; so does a root listing with any other folder beside the filler (`docs/`);
+  - a GitHub repository's releases are read from their first page only (100);
   - on other hosts, the evidence for a state, and a redirect's final URL standing for the link;
   - provenance: a URL the paper never gave, accepted on a host's 404 or on an unrelated repository;
   - a GitHub API check that says nothing (a 403) falls back to the model's state, and a license the API did not

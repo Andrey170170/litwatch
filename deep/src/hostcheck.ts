@@ -8,8 +8,9 @@
  * - Hugging Face: its `gated` flag (`true`, "auto", "manual"; `false` or absent is not; anything else says nothing) is
  *   gated; else, for weights, a listed weight file is public; for code, a listed file beside the filler; a repository
  *   with neither is a placeholder. A 401 or 404 is missing (it answers 401 for a repository it does not have).
- * - GitHub: for code, a file beside the filler in its contents is public; for weights, a weight file in its tree or a
- *   release asset with a weight file's name; anything else a placeholder. A 404 is missing.
+ * - GitHub: for code, a file beside the filler in its contents is public; for weights, a weight file (a blob, not a
+ *   folder) in its tree or a release asset with a weight file's name; anything else a placeholder, but when GitHub
+ *   truncated the tree and no release asset shows weights, it says nothing. A 404 is missing.
  *
  * The API is asked by a plain GET of its own (`apiGet`), not the model's fetch: its JSON whole, `MAX_BYTES` at most (a
  * large GitHub tree fits), and a redirect (a renamed repository: GitHub answers 301, Hugging Face 307) followed
@@ -108,9 +109,10 @@ export const WEIGHTS = /\.(safetensors|bin|pt|pth|ckpt|gguf|onnx|h5|msgpack|npz)
 const base = (path: string) => path.split("/").at(-1) ?? "";
 const filler = (names: string[]) => names.every((n) => FILLER.test(base(n)));
 
-/** The API page a supported link is checked at, and its host; null for a link on another host, or not a
+/** The API page a supported link is checked at, its host, and the repository's own page as the link names it
+ * (`page`, what the finder answers, so litwatch's re-check knows it); null for a link on another host, or not a
  * repository's own page (a file or folder in one). */
-export function apiTarget(link: string): { api: string; host: "github" | "huggingface" } | null {
+export function apiTarget(link: string): { api: string; host: "github" | "huggingface"; page: string } | null {
   let u: URL;
   try {
     u = new URL(link);
@@ -120,10 +122,15 @@ export function apiTarget(link: string): { api: string; host: "github" | "huggin
   const host = u.hostname.replace(/^www\./, "");
   const parts = u.pathname.split("/").filter(Boolean);
   if (u.search) return null;
-  if (host === "github.com" && parts.length === 2) return { api: `https://api.github.com/repos/${parts[0]}/${parts[1]!.replace(/\.git$/, "")}`, host: "github" };
+  if (host === "github.com" && parts.length === 2) {
+    const [owner, repo] = [parts[0]!, parts[1]!.replace(/\.git$/, "")];
+    return { api: `https://api.github.com/repos/${owner}/${repo}`, host: "github", page: `https://github.com/${owner}/${repo}` };
+  }
   if (host !== "huggingface.co") return null;
   const [kind, owner, name, ...rest] = parts[0] === "datasets" || parts[0] === "spaces" ? parts : ["models", ...parts];
-  return owner && name && !rest.length ? { api: `https://huggingface.co/api/${kind}/${owner}/${name}`, host: "huggingface" } : null;
+  if (!owner || !name || rest.length) return null;
+  const page = `https://huggingface.co/${kind === "models" ? "" : `${kind}/`}${owner}/${name}`;
+  return { api: `https://huggingface.co/api/${kind}/${owner}/${name}`, host: "huggingface", page };
 }
 
 /** A GET that answered on `host` with JSON; null when it went elsewhere or its body is not JSON. */
@@ -182,15 +189,19 @@ async function github(api: string, kind: Link["kind"], get: Get): Promise<HostSt
   const branch = typeof found.default_branch === "string" ? found.default_branch : "HEAD";
   const tree = await json(get, `${named}/git/trees/${encodeURIComponent(branch)}?recursive=1`, host);
   if (tree === null || (tree.status !== 200 && tree.status !== 404 && tree.status !== 409)) return null; // 404, 409: no commit yet
+  let truncated = false; // GitHub listed only part of the tree: what it left out may hold the weights
   if (tree.status === 200) {
-    const listed = object(tree.body) ? (tree.body as { tree?: unknown }).tree : undefined;
-    if (!Array.isArray(listed)) return null;
-    if (strings(listed, "path").some((p) => WEIGHTS.test(p))) return at("public");
+    const listed = object(tree.body) ? (tree.body as { tree?: unknown; truncated?: unknown }) : {};
+    if (!Array.isArray(listed.tree)) return null;
+    const files = listed.tree.filter((e) => object(e) && e.type === "blob");
+    if (strings(files, "path").some((p) => WEIGHTS.test(p))) return at("public");
+    truncated = listed.truncated === true;
   }
   const releases = await json(get, `${named}/releases?per_page=100`, host);
   if (releases === null || releases.status !== 200 || !Array.isArray(releases.body)) return null;
   const assets = releases.body.flatMap((r) => (object(r) ? strings((r as { assets?: unknown }).assets, "name") : []));
-  return at(assets.some((a) => WEIGHTS.test(a)) ? "public" : "placeholder");
+  if (assets.some((a) => WEIGHTS.test(a))) return at("public");
+  return truncated ? null : at("placeholder");
 }
 
 async function huggingface(api: string, kind: Link["kind"], get: Get): Promise<HostState | null> {

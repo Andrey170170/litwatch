@@ -303,6 +303,8 @@ export function useFindLinks(paperId: string) {
     },
     (qc, id) => {
       toast("Finding links");
+      // the page polls while a find is open: so too when the read after this fails, until a read reconciles it
+      qc.setQueryData<Schemas["Paper"]>(["paper", id], (p) => p && { ...p, finding_links: true });
       return settled(qc, id);
     },
   );

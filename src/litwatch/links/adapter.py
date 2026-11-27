@@ -10,18 +10,21 @@ check as the finder's in deep (`deep/src/hostcheck.ts`), one table of fixture re
   for code, a listed file beside the filler; a repository with neither is a placeholder. A 401
   or 404 is missing (it answers 401 for a repository it does not have).
 - GitHub: for code, a file beside the filler in its contents is public; for weights, a weight
-  file in its tree or a release asset with a weight file's name; anything else a placeholder. A
-  404 is missing.
+  file (a blob, not a folder) in its tree or a release asset with a weight file's name; anything
+  else a placeholder, but when GitHub truncated the tree and no release asset shows weights, it
+  says nothing. A 404 is missing.
 
 A redirect (a renamed repository: GitHub answers 301, Hugging Face 307) is followed, `REDIRECTS`
 at most, each hop over HTTPS on the host asked, as deep's check follows it; a hop elsewhere is
 not, and says nothing. An answer that is not the API's (not JSON, past `MAX_BYTES`, not the
-shape the API gives) says nothing either: the re-check counts it, and checks again later.
+shape the API gives) says nothing either, as does a check not done within `DEADLINE`, its
+redirects and later requests included: the re-check counts it, and checks again later.
 
 An Adapter over today's HTTP client until the Fetch gate (A5)."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -35,7 +38,8 @@ from litwatch.core.links import Kind, State
 
 log = logging.getLogger(__name__)
 
-TIMEOUT = 30.0
+TIMEOUT = 30.0  # each request
+DEADLINE = 60.0  # a whole check
 GITHUB_API = "api.github.com"
 # What a repository holds beside its code when it holds no code yet: a README, a licence, its
 # git and GitHub files, a citation.
@@ -128,12 +132,14 @@ async def check(url: str, kind: Kind) -> Checked | None:
         return None
     api, host = target
     try:
-        async with client() as http:
+        async with asyncio.timeout(DEADLINE), client() as http:
             if host == "github":
                 return await _github(http, api, kind)
             return await _huggingface(http, api, kind)
-    except httpx.HTTPError as exc:
-        log.warning("re-checking %s: %s could not say: %s", url, host, exc)
+    except (httpx.HTTPError, TimeoutError) as exc:
+        log.warning(
+            "re-checking %s: %s could not say: %s", url, host, str(exc) or "past the deadline"
+        )
         return None
 
 
@@ -195,18 +201,23 @@ async def _github(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked | No
     tree = await _get(http, f"{named}/git/trees/{quote(branch, safe='')}?recursive=1")
     if tree is None or tree.status not in (200, 404, 409):  # 404, 409: no commit yet
         return None
+    truncated = False  # GitHub listed only part of the tree: what it left out may hold weights
     if tree.status == 200:
         if not isinstance(tree.body, dict) or not isinstance(tree.body.get("tree"), list):
             return None
-        if any(_WEIGHTS.search(p) for p in _strings(tree.body["tree"], "path")):
+        files = [e for e in tree.body["tree"] if isinstance(e, dict) and e.get("type") == "blob"]
+        if any(_WEIGHTS.search(p) for p in _strings(files, "path")):
             return "public", license
+        truncated = tree.body.get("truncated") is True
     releases = await _get(http, f"{named}/releases?per_page=100")
     if releases is None or releases.status != 200 or not isinstance(releases.body, list):
         return None
     assets = [
         a for r in releases.body if isinstance(r, dict) for a in _strings(r.get("assets"), "name")
     ]
-    return ("public" if any(_WEIGHTS.search(a) for a in assets) else "placeholder"), license
+    if any(_WEIGHTS.search(a) for a in assets):
+        return "public", license
+    return None if truncated else ("placeholder", license)
 
 
 async def _huggingface(http: httpx.AsyncClient, api: str, kind: Kind) -> Checked | None:

@@ -147,7 +147,9 @@ the finder on the Work gate, its first kind of work built for the gate rather th
 
 - **Trigger** (Q11): a paper whose analysis says it releases code or weights, about 70 a night, when it is analysed
   and again when a new arXiv version arrives; and a "find links" action on the paper's page, which always runs a
-  fresh find and shows its result whatever the analysis says.
+  fresh find and shows its result whatever the analysis says. Automatic finds start from the analyses and versions
+  recorded once the finder is deployed (P6): a paper analysed before gets none, and the owner's "find links" covers
+  it. No backfill is built.
 - **The find** runs on the deep service, as an agent with a narrow task and a small structured answer: start from the
   abstract, the arXiv comments and the paper's text, go to the open web only when those say nothing, and confirm each
   link. Per link: its kind (code or weights), its access state (public; gated, behind a request form; placeholder, a
@@ -160,7 +162,8 @@ the finder on the Work gate, its first kind of work built for the gate rather th
   version) to an answer, besides the owner's action; a find that failed is tried again by a later trigger, three
   failures at most. A placeholder link is checked again weekly for four weeks by a plain request to GitHub's or
   Hugging Face's API, not by the agent, then left. A paper with no link found gets the agent again only with a new
-  arXiv version, which is when links usually appear. Public links are not re-checked.
+  arXiv version, which is when links usually appear, with two exceptions: an update to a paper of no known version
+  (above), and the owner's "find links". Public links are not re-checked.
 - **Where it shows** (Q13): the paper's page and the API, so the MCP server's `get_paper` carries the links. Not the
   digests or the Notion export, whose contract stays as it is.
 - **Deep's switches are separated.** Today the deep integration, once configured, both serves the owner's Deep reads
