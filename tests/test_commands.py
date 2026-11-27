@@ -742,12 +742,15 @@ async def test_a_reattached_evaluation_whose_item_stops_waits_for_serve_and_goes
         await asyncio.sleep(0.5)  # it follows the item left running
     (first,) = await items(conn, "classify")
     assert first["error"] == queue.STOPPED and not again.done()
+    (cut,) = await rows(conn, "SELECT error FROM runs WHERE work_id = %s", first["id"])
+    assert cut["error"] == queue.STOPPED  # its run says why, not an empty cancellation
     await asyncio.sleep(2.5)  # no `serve`: it waits
     assert not again.done()
     async with served(db, Config(), models=models):
         held.release.set()
         result = await asyncio.wait_for(again, 20)
     assert result.exit_code == 0, result.output
+    assert f"item {first['id']}: {queue.STOPPED}; submitted again" in result.output
     _, second = await items(conn, "classify")
     assert second["outcome"] == "done"
     assert sorted(json.loads(x)["paper_id"] for x in jsonl.lines(path)) == sorted(ids)
@@ -813,3 +816,89 @@ async def test_an_evaluation_on_a_blank_database_is_refused_before_it_prepares(
         assert tables[0]["n"] == 0
     finally:
         await conn.execute("DROP SCHEMA blank_p5e CASCADE")
+
+
+async def test_serves_startup_fails_when_its_gate_cannot_register_in_time(db, monkeypatch):
+    """The database lost for good after the sweeps: registration tries again without end, so
+    the startup fails once `REGISTER_SECONDS` have passed, and its cleanup cancels the gate."""
+    import psycopg  # noqa: PLC0415
+
+    from litwatch.gates import work as work_gate  # noqa: PLC0415
+
+    async def lost(*args, **kwargs):
+        raise psycopg.OperationalError("the server closed the connection unexpectedly")
+
+    monkeypatch.setattr(queue, "register", lost)
+    monkeypatch.setattr(work_gate, "RETRY_SECONDS", 0.05)
+    monkeypatch.setattr(app_module, "REGISTER_SECONDS", 0.5)
+    with pytest.raises(TimeoutError, match="did not register"):
+        async with asyncio.timeout(10), served(db, Config()):
+            pass
+
+
+async def test_a_replacement_whose_commit_rolled_back_is_made_again(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """A submission after a stop whose session the server ended before its commit (the idle
+    transaction timed out, SQLSTATE 25P03): the transaction is known to have rolled back, so
+    the submission is made again, once."""
+    real, timed_out = queue.submit, []
+
+    async def submit(unit, *args, **kwargs):
+        item = await real(unit, *args, **kwargs)
+        if not timed_out:
+            timed_out.append(1)
+            await unit.execute("SET LOCAL idle_in_transaction_session_timeout = '10ms'")
+            await asyncio.sleep(0.3)  # the server ends the session before the commit
+        return item
+
+    monkeypatch.setattr(queue, "submit", submit)
+    monkeypatch.setattr(cli, "FOLLOW_SECONDS", 0.05)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        "LITWATCH_DATABASE_URL", f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    )
+    async with served(db, Config(), models=ModelGate(PING, {"anthropic": Held(free=1)})):
+        await asyncio.to_thread(
+            cli._submit, "ping", {"role": "brief"}, command="ping", resumed=True
+        )
+    (item,) = await items(conn, "ping")
+    assert item["outcome"] == "done" and timed_out == [1]
+
+
+async def test_an_evaluation_with_no_serve_still_drains_what_its_items_answered(
+    conn: Session, tmp_path, monkeypatch
+):
+    """With `serve` stopped, `eval classify` whose output names a failed item that answered
+    its one paper: the answer is written into the file, nothing is left to ask, and no `serve`
+    is needed for that (a rollback's drain)."""
+    from litwatch.config import RoleConfig as Role  # noqa: PLC0415
+    from litwatch.seeds import taxonomy  # noqa: PLC0415
+
+    (pid,) = classify.load(LABELS).papers[:1]
+    await in_write(conn, papers_store.upsert, [paper(pid, title="Paper")])
+    (tmp_path / "candidates.toml").write_text(
+        f'[decider]\nprovider = "openrouter"\nmodel = "{CLASSIFY.model}"\n'
+    )
+    asked = classify.fingerprint(
+        Models(classify=Role(provider="openrouter", model=CLASSIFY.model)), taxonomy()
+    )
+    out = tmp_path / "runs"
+    path = out / "decider.jsonl"
+    item = await in_write(conn, queue.submit, "command:classify", "old")
+    answer = classify.Result(paper_id=pid, request=asked).model_dump_json()
+    await conn.execute(
+        "INSERT INTO work_results (work_id, body) VALUES (%s, %s)",
+        (item.id, json.dumps({"to": str(path.resolve()), "line": answer})),
+    )
+    await conn.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', error = 'x' WHERE id = %s",
+        (item.id,),
+    )
+    cli._owned([cli._sidecar(path.resolve())], "command:classify", "old")
+    argv = ("eval", "classify", "decider", "--candidates", str(tmp_path / "candidates.toml"),
+            "--labels", str(LABELS), "--out", str(out), "--limit", "1")  # fmt: skip
+    result = await command(conn, tmp_path, monkeypatch, *argv)
+    assert result.exit_code == 0, result.output
+    assert "nothing left to ask" in result.output
+    assert [json.loads(x)["paper_id"] for x in jsonl.lines(path)] == [pid]

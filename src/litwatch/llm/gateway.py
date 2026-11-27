@@ -695,20 +695,20 @@ class Gateway:
         task = asyncio.create_task(
             journalled(what, write, self.gate.journal_delays), context=contextvars.Context()
         )
-        cancelled = False
+        cancelled: asyncio.CancelledError | None = None
         while not task.done():
             try:
                 await asyncio.shield(task)
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as exc:
                 if task.cancelled():  # the write's own (the loop closing), not the item's
                     raise
-                cancelled = True
+                cancelled = cancelled or exc  # its message, why the item stopped, kept
             except Exception:
                 break  # the write's failure, raised below
-        if cancelled:
+        if cancelled is not None:
             if (exc := task.exception()) is not None:
                 log.error("journal: %s failed as its call was cancelled: %r", what, exc)
-            raise asyncio.CancelledError
+            raise cancelled
         task.result()
 
     def _call(

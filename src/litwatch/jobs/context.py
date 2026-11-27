@@ -3,6 +3,7 @@ door to the process's one Model gate (`llm.ModelGate`, built by `model_gate`).""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
@@ -80,7 +81,7 @@ async def run_record(
         yield record
     except BaseException as exc:
         failure = exc
-        record.fields["error"] = f"{type(exc).__name__}: {exc}"
+        record.fields["error"] = _error(exc)
         raise
     finally:
         try:
@@ -93,6 +94,14 @@ async def run_record(
             if failure is None:
                 raise
             log.exception("run %s: closing it failed after the job did", record.run_id)
+
+
+def _error(exc: BaseException) -> str:
+    """The error a run records: a cancellation's own message when it has one (the Work gate's
+    reason, `serve` stopping or the owner's cancel), else the exception's type and text."""
+    if isinstance(exc, asyncio.CancelledError) and str(exc):
+        return str(exc)
+    return f"{type(exc).__name__}: {exc}"
 
 
 async def _finish(

@@ -159,7 +159,8 @@ def _submit(
     reattached to ended so (`_caught_up`, `_following_replay`): it enters the same loop at the
     same step, waiting for a `serve` before it submits. A submission made after a stop that
     loses the database before its commit is tried (opening its unit, reading the `workers`
-    row) is made again; one whose commit was tried is D4's. Ctrl-C asks whether to cancel the
+    row), or whose commit is known to have rolled back (`_rolled_back`), is made again; one
+    whose commit is uncertain is D4's. Ctrl-C asks whether to cancel the
     item or leave it to run (`_interrupted`). A failed item fails the command with its error."""
     work_kind, followed = commands.kind(name), _Followed()
     followed.kind = work_kind
@@ -199,7 +200,7 @@ def _submit(
             except _UnservedError:
                 continue
             except Exception as exc:
-                if not waits or committing or not retryable(exc):
+                if not waits or not retryable(exc) or committing and not _rolled_back(exc):
                     raise
                 console.print(f"[yellow]the database was lost ({exc}); submitting again[/yellow]")
                 await asyncio.sleep(FOLLOW_SECONDS)
@@ -208,10 +209,7 @@ def _submit(
             ended = await _follow(db, item.id, followed)
             if not _stopped(ended):
                 return ended
-            console.print(
-                f"item {ended.id}: {ended.error}; submitted again, to go on from what it did, "
-                f"once a `litwatch serve` runs {work_kind}"
-            )
+            _resubmitting(ended)
             current, first, waits = (again(ended.scope) if again else ended.scope), False, True
             if current is None:
                 console.print("nothing left to do")
@@ -224,6 +222,13 @@ def _submit(
     _ended(ended)
 
 
+def _rolled_back(exc: BaseException) -> bool:
+    """Whether the error says its transaction rolled back, its commit not made: the session
+    ended by a timeout, or a lost conflict (SQLSTATE 25P03, 25P04, class 40)."""
+    state = getattr(exc, "sqlstate", None) or ""
+    return state in ("25P03", "25P04") or state.startswith("40")
+
+
 def _unserved(kind: str) -> str:
     """What a command refused for want of a `serve` says."""
     return (
@@ -233,17 +238,25 @@ def _unserved(kind: str) -> str:
 
 
 def _preflight(name: str, command: str) -> None:
-    """Before an evaluation prepares anything: refused, read-only, when the database has no
-    work queue (blank, never migrated) or no `serve` runs the command's kind. The check that
-    counts is still the submit unit's (`_submit`)."""
-    kind = commands.kind(name)
+    """Before an evaluation drains its earlier items or prepares anything: refused, read-only,
+    when the database has no work queue (blank, never migrated). A live `serve` is asked for
+    only to submit new work, in the submit unit (`_submit`), so the results of items already
+    run reach their files with no `serve` (a rollback's drain)."""
 
-    async def served(db: DatabaseGate) -> bool:
-        async with db.read("is it served") as unit:
-            return await queue.migrated(unit) and await queue.serving(unit, kind, LEASE)
+    async def migrated(db: DatabaseGate) -> bool:
+        async with db.read("is it migrated") as unit:
+            return await queue.migrated(unit)
 
-    if not _run(served, name=command, migrate=False):
-        raise SystemExit(_unserved(kind))
+    if not _run(migrated, name=command, migrate=False):
+        raise SystemExit(_unserved(commands.kind(name)))
+
+
+def _resubmitting(ended: WorkItem) -> None:
+    """Say that `serve` stopped under `ended` and that its command waits to submit it again."""
+    console.print(
+        f"item {ended.id}: {ended.error}; submitted again, to go on from what it did, "
+        f"once a `litwatch serve` runs {ended.kind}"
+    )
 
 
 def _stopped(item: WorkItem) -> bool:
@@ -541,7 +554,9 @@ def _caught_up(sidecars: Collection[Path], command: str) -> bool:
         console.print(f"item {still.id} still writes into these outputs: following it first")
         ended = _follow_again(still.id, command)
         console.print(f"item {ended.id} ended {ended.outcome}: {ended.error or 'done'}")
-        stopped = stopped or _stopped(ended)
+        if _stopped(ended):
+            stopped = True
+            _resubmitting(ended)
     return stopped
 
 
@@ -1046,7 +1061,7 @@ def _following_replay(eval_run_id: int) -> WorkItem | None:
     console.print(f"item {still.id} still runs replay {eval_run_id}: following it")
     ended = _follow_again(still.id, "eval replay")
     if _stopped(ended):
-        console.print(f"item {ended.id}: {ended.error}; going on from what it recorded")
+        _resubmitting(ended)
     return ended
 
 

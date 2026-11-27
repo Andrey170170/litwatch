@@ -153,17 +153,18 @@ async def _finished[T](task: asyncio.Task[T]) -> None:
         pass  # the task's own error is its owner's to read
 
 
-def _stop(handler: asyncio.Task) -> None:
+def _stop(handler: asyncio.Task, why: str) -> None:
     """Cancel `handler` unless it was cancelled already: a second cancel would cut its cleanup
-    (its run's close, its claims' release) short."""
+    (its run's close, its claims' release) short. `why` is the cancellation's message, which a
+    run it cuts off records as its error (`jobs.context.run_record`)."""
     if not handler.cancelling():
-        handler.cancel()
+        handler.cancel(why)
 
 
 async def _stop_when(cancelling: asyncio.Event, handler: asyncio.Task) -> None:
     """Cancel `handler` once its owner asked to cancel its item."""
     await cancelling.wait()
-    _stop(handler)
+    _stop(handler, queue.CANCELLED)
 
 
 def _cancelled(unit: WriteUnit, item: WorkItem) -> Awaitable[bool]:
@@ -358,7 +359,7 @@ class WorkGate:
             try:
                 await asyncio.wait({handler})
             except asyncio.CancelledError:
-                _stop(handler)  # unless the heartbeat or the cancel did: cleanup runs once
+                _stop(handler, queue.STOPPED)  # unless the heartbeat or the cancel did
                 await asyncio.wait({handler})
                 _reap(item, handler)
                 if cancelling.is_set():
@@ -484,7 +485,7 @@ class WorkGate:
                 break
             since = asked
         lost.set()
-        _stop(handler)
+        _stop(handler, "its lease was lost")
 
     @asynccontextmanager
     async def _serving(self, kinds: list[str], *, supersede: bool) -> AsyncGenerator[None]:

@@ -43,6 +43,9 @@ log = logging.getLogger(__name__)
 
 # What `serve` itself does as it starts and stops: its sweeps, closing its jobs' runs.
 SERVE = Attribution.system("serve")
+# How long `serve`'s startup waits for its Work gate to register (it tries again while the
+# database is lost) before it fails, and its cleanup cancels the gate.
+REGISTER_SECONDS = 120.0
 # The built web app (`web/`, `pnpm build`), shipped inside the package.
 WEB = Path(str(resources.files("litwatch.api").joinpath("web")))
 
@@ -58,14 +61,21 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 async def _registered(work_gate: WorkGate, gate: asyncio.Task[None]) -> None:
     """Wait until the Work gate has written its `workers` row, so a command finds `serve` once
-    its startup is over; a gate that failed first raises its error here."""
+    its startup is over; a gate that failed first raises its error here, and one that has not
+    registered within `REGISTER_SECONDS` (the database lost for that long) fails the
+    startup."""
     registered = asyncio.create_task(work_gate.registered.wait())
     try:
-        await asyncio.wait({registered, gate}, return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait(
+            {registered, gate}, timeout=REGISTER_SECONDS, return_when=asyncio.FIRST_COMPLETED
+        )
     finally:
         registered.cancel()
-    if not work_gate.registered.is_set():
+    if work_gate.registered.is_set():
+        return
+    if gate.done():
         await gate  # it ended before registering: its failure is raised
+    raise TimeoutError(f"the Work gate did not register within {REGISTER_SECONDS:.0f}s")
 
 
 @asynccontextmanager

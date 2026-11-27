@@ -1098,7 +1098,8 @@ async def test_a_cancelled_command_finishes_its_run_cleanup_under_its_claim_then
     (run,) = await (
         await conn.execute("SELECT * FROM runs WHERE work_id = %s", (submitted.id,))
     ).fetchall()
-    assert run["finished_at"] is not None  # closed by its Worker, under the claim
+    # Closed by its Worker, under the claim, with why it stopped.
+    assert run["finished_at"] is not None and run["error"] == queue.CANCELLED
 
 
 async def test_only_a_commands_item_is_cancelled_and_a_pending_one_at_once(conn: Session, db):
