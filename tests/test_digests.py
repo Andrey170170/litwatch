@@ -1108,6 +1108,20 @@ async def test_a_failed_digest_keeps_its_papers_due_and_the_next_run_writes_it(d
     assert await in_read(db, store_.count_failed) == 0
 
 
+async def test_a_failed_digests_error_is_stored_as_a_text_column_takes_it(db: Session):
+    """A provider's error with a lone surrogate, which the database's encoding refuses, and
+    longer than a text column keeps: the failed digest is still recorded."""
+    w = Writer()
+    w.failures = [ProviderError("down \ud800 here " + "x" * 3000)]
+    await focus(db, P, "central")
+    await listed(db, TUE, P)
+    await day(db, w, TUE)
+    found = await db.execute("SELECT state, error FROM digests WHERE topic = %s", (FAITH.slug,))
+    row = await found.fetchone()
+    assert row["state"] == "failed"
+    assert "down ? here" in row["error"] and len(row["error"]) == 2000
+
+
 async def test_a_window_writes_a_failed_digest_again_before_its_days(db: Session, gate):
     """A failed Tuesday digest is written again before a recovery window's Wednesday, so
     Wednesday's does not take its paper."""

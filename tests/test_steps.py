@@ -313,6 +313,16 @@ async def test_a_model_that_did_not_answer_is_retried_without_counting(
     assert await in_read(conn, failures.stuck, table, FAILED_RUNS) == []
 
 
+async def test_a_failure_whose_text_the_database_refuses_is_recorded_cut(conn: Session, models):
+    """A provider's error with a lone surrogate, which the database's encoding refuses, and
+    longer than a text column keeps: the failure is stored as a text column takes it."""
+    said = "AuthenticationError: bad \ud800 key " + "x" * 3000
+    models.decisions[A.title] = ProviderError(said)
+    await night(conn, models)
+    (failure,) = await rows(conn, "SELECT * FROM step_failures WHERE paper_id = %s", A.id)
+    assert "bad ? key" in failure["last_error"] and len(failure["last_error"]) == 2000
+
+
 async def test_a_retry_that_did_not_count_still_comes_after_new_papers(conn: Session, models):
     # A is older than B by id; a failure that adds no failed run still sends it to the back.
     await in_write(conn, failures.failed, A, "classification", "timeout: x", counts=False)

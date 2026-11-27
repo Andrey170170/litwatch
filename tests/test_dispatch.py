@@ -602,9 +602,11 @@ async def test_the_idle_hook_is_called_while_a_failure_waits_out_its_backoff(
     assert rec.seen == []
 
 
-async def test_serve_takes_back_and_delivers_its_own_turns_and_leaves_another_processs(
+async def test_serve_takes_back_and_delivers_its_turns_and_ends_those_of_integrations_gone(
     conn: Session, db, monkeypatch
 ):
+    """`serve` takes back the turn of an integration it loads and delivers it; the turns of
+    one it no longer loads, running or pending, end failed as it starts, never to be taken."""
     posted: list[int] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
@@ -614,7 +616,7 @@ async def test_serve_takes_back_and_delivers_its_own_turns_and_leaves_another_pr
     hook = Webhook(
         "http://hook.test", http=httpx.AsyncClient(transport=httpx.MockTransport(answer))
     )
-    gone = Recorder("gone")  # loaded by another process, now dead
+    gone = Recorder("gone")  # configured before, no longer
     for each in (hook, gone):
         await start(db, each)
     # A turn of each whose process died with it running, its lease lapsed.
@@ -625,6 +627,7 @@ async def test_serve_takes_back_and_delivers_its_own_turns_and_leaves_another_pr
             "now() - interval '1 minute', 1)",
             (outbox.DELIVERY, name, f"deliver:{name}"),
         )
+    await in_write(conn, queue.submit, outbox.DELIVERY, "dropped", admission="deliver:dropped")
     ids = await emit(conn, events.PAPER_SAVED)
     waits: list[float | None] = []
     wait_seconds = queue.wait_seconds
@@ -644,8 +647,13 @@ async def test_serve_takes_back_and_delivers_its_own_turns_and_leaves_another_pr
         await until(delivered, "the webhook is posted the event, and the gate sleeps")
     first, *_ = await turns(conn, hook.name)
     assert first["attempts"] == 2  # taken back from the dead process, and run again
-    left = [(t["state"], t["attempts"]) for t in await turns(conn, gone.name)]
-    assert left == [("running", 1)]  # not this process's to take back
+    for name in (gone.name, "dropped"):
+        (left,) = await turns(conn, name)
+        assert (left["state"], left["outcome"], left["error"]) == (
+            "ended",
+            "failed",
+            delivery_worker.UNLOADED,
+        )
 
 
 async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_integration(
@@ -670,8 +678,12 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
     async def sweep(worker):
         pass  # no database here
 
+    async def end_unloaded(db, loaded):
+        pass
+
     monkeypatch.setattr(WorkGate, "run", run)
     monkeypatch.setattr(DeliveryWorker, "sweep", sweep)
+    monkeypatch.setattr(delivery_worker, "end_unloaded", end_unloaded)
     # No database, and so no Model gate's journal: no batches to recover.
     models = ModelGate(Models(), {})
     app = create_app("postgresql://unused", "t", models=models, integrations=[deep, recorder])
@@ -700,7 +712,11 @@ async def test_a_sweep_that_fails_as_the_app_starts_still_closes_every_integrati
     async def sweep(worker):
         raise psycopg.OperationalError("the connection dropped")
 
+    async def end_unloaded(db, loaded):
+        pass  # no database here
+
     monkeypatch.setattr(DeliveryWorker, "sweep", sweep)
+    monkeypatch.setattr(delivery_worker, "end_unloaded", end_unloaded)
     # No database, and so no Model gate's journal: no batches to recover.
     models = ModelGate(Models(), {})
     app = create_app("postgresql://unused", "t", models=models, integrations=[deep, recorder])

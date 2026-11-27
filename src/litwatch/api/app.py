@@ -25,6 +25,7 @@ from litwatch.core import (
     SEARCH_TIMEOUT_SECONDS,
 )
 from litwatch.events import Integration
+from litwatch.events import worker as delivery_worker
 from litwatch.events.worker import DeliveryWorker
 from litwatch.fulltext.worker import DeepPassWorker, TextPassWorker
 from litwatch.gates.context import Attribution, attributed, bookkeeping
@@ -88,9 +89,10 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     have the archive fetch, so, like the schedule, they wait for cutover), Deep passes and finds
     of release links when a card provider is loaded as well;
     and deliveries when any integration that reacts to events is loaded. Each kind is swept for
-    what waits before the gate starts. And the MCP server (its session manager and PDF executor)
-    while `/mcp` is served. Once the gate has stopped, the jobs' open runs are closed, then
-    every integration, also when a sweep failed.
+    what waits before the gate starts, and the deliveries of the integrations not loaded end.
+    And the MCP server (its session manager and PDF executor) while `/mcp` is served. Once the
+    gate has stopped, the jobs' open runs are closed, then every integration, also when a sweep
+    failed.
 
     Every model call of the process goes through one Model gate (`app.state.models`): the one
     given to `create_app`, else one built here on the app's Database gate and closed once
@@ -138,7 +140,9 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     )
     workers |= commands.CommandWorker(serving).kinds()
     keys: dict[str, list[str]] = {}
-    if reacting := events.reacting(app.state.integrations):
+    reacting = events.reacting(app.state.integrations)
+    swept.append(lambda: delivery_worker.end_unloaded(db, sorted(i.name for i in reacting)))
+    if reacting:
         delivery = workers[outbox.DELIVERY] = DeliveryWorker(db, reacting)
         keys[outbox.DELIVERY] = delivery.keys  # another process's integrations are not ours
         swept.append(delivery.sweep)

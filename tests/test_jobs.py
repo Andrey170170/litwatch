@@ -604,8 +604,7 @@ async def test_scheduling_a_chunk_takes_its_jobs_row_before_its_item(conn: Sessi
 async def test_a_running_job_is_alive_while_its_chunk_holds_its_lease(
     conn: Session, db, models, monkeypatch
 ):
-    """The job's run reads alive by its chunk's item's lease, and dead once the lease lapses;
-    the session columns the image before the Work gate reads are written still (rollback)."""
+    """The job's run reads alive by its chunk's item's lease, and dead once the lease lapses."""
     job = await queued(conn, A.id)
     started_, hold = asyncio.Event(), asyncio.Event()
     classify = nightly.classify
@@ -630,8 +629,6 @@ async def test_a_running_job_is_alive_while_its_chunk_holds_its_lease(
     await asyncio.wait_for(started_.wait(), 10)
     (run,) = await rows(conn, "SELECT * FROM runs WHERE job_id = %s", job)
     assert await alive(run["id"])
-    claimed = await job_of(conn, job)
-    assert claimed["backend_pid"] is not None and claimed["backend_start"] is not None
     await lease("-")
     assert not await alive(run["id"])
     await lease("+")

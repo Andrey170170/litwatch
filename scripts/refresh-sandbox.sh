@@ -123,7 +123,7 @@ DELETE FROM workers;
 UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(),
     error = 'sandbox: copied from production, not run', lease_token = NULL, lease_until = NULL,
     resubmitted = false
-    WHERE (kind = 'command' OR kind LIKE 'command:%') AND state <> 'ended';
+    WHERE kind LIKE 'command:%' AND state <> 'ended';
 SQL
 else
   # No `serve` works from the new database: the window is read in this process (`--here`).

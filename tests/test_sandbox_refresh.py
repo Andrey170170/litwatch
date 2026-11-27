@@ -22,8 +22,7 @@ async def test_a_production_copy_keeps_no_live_command_state(conn: Session):
     await conn.execute("INSERT INTO workers (name, kinds) VALUES ('prod:1', '{command:ping}')")
     await conn.execute(
         "INSERT INTO work_items (kind, key, admission, state) VALUES "
-        "('command:digests', 'a', 'a', 'pending'), ('command', 'c', 'c', 'pending'), "
-        "('fulltext', '1', 'fulltext:1', 'pending')"
+        "('command:digests', 'a', 'a', 'pending'), ('fulltext', '1', 'fulltext:1', 'pending')"
     )
     await conn.execute(
         "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until) "
@@ -43,6 +42,5 @@ async def test_a_production_copy_keeps_no_live_command_state(conn: Session):
         ("1", "pending", None),
         ("a", "ended", "failed"),
         ("b", "ended", "failed"),
-        ("c", "ended", "failed"),
         ("d", "ended", "done"),
     ]

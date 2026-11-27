@@ -28,9 +28,6 @@ from litwatch.store.text import stored
 # The channel a submission, and an item's settling, notify the Work gates on; the payload is the
 # item's kind.
 CHANNEL = "litwatch_work"
-# The kind of a CLI command's work as the P3 image ran it, in the command's own process: none is
-# made any more, and one left running is ended once its lease lapses (`_retire_commands`).
-COMMAND = "command"
 # The channel a command's results are notified on (`put_result`), its payload the item's id:
 # the command following the item listens on it, the Work gates do not.
 RESULTS = "litwatch_work_results"
@@ -266,6 +263,20 @@ async def forget_resubmission(unit: WriteUnit, item: WorkItem) -> None:
     )
 
 
+async def end_unserved(unit: WriteUnit, kind: str, keys: Collection[str], error: str) -> None:
+    """End failed, with `error`, the open items of `kind` whose key is none of `keys`: work no
+    process will take (a delivery for an integration no longer configured, as `serve` starts).
+    One running is ended whatever its lease, its rows locked in key order, as submitters lock
+    them; none is submitted again."""
+    await unit.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
+        "error = %(error)s, lease_token = NULL, lease_until = NULL, resubmitted = false "
+        "WHERE id IN (SELECT id FROM work_items WHERE kind = %(kind)s AND state <> 'ended' "
+        "AND key <> ALL(%(keys)s) ORDER BY key FOR UPDATE)",
+        {"kind": kind, "keys": list(keys), "error": stored(error)},
+    )
+
+
 async def done_elsewhere(
     unit: WriteUnit, kind: str, key: str, *, besides: int | None = None
 ) -> None:
@@ -318,8 +329,8 @@ async def take_back(
     a unit holds (one fenced on it, or a settling) is left for a later call. Returns those taken
     back.
 
-    A command's item whose lease expired ends failed, whatever admission it holds, as does one
-    of the P3 image's CLI commands (`_retire_commands`): neither is tried again."""
+    A command's item whose lease expired ends failed instead, whatever admission it holds
+    (`_retire_commands`): it is not tried again."""
     params = _serving(kinds, keys)
     await _retire_commands(unit)
     rows = await (
@@ -327,33 +338,28 @@ async def take_back(
             "UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
             "not_before = LEAST(not_before, now()), resubmitted = false "
             f"WHERE id IN (SELECT id FROM work_items w WHERE {_served('w')} "
-            "AND w.kind <> %(command)s AND w.kind NOT LIKE %(commands)s "
+            "AND w.kind NOT LIKE %(commands)s "
             "AND state = 'running' AND lease_until < now() FOR UPDATE SKIP LOCKED) "
             f"RETURNING {_COLUMNS}",
-            params | {"command": COMMAND, "commands": COMMANDS},
+            params | {"commands": COMMANDS},
         )
     ).fetchall()
     return [_item(r) for r in rows]
 
 
 async def _retire_commands(unit: WriteUnit) -> None:
-    """End failed the CLI commands' items whose lease expired, which no process runs again: a
-    command's (`once`), its `serve` gone (`STOPPED`, or `CANCELLED` when its owner's cancel was
-    asked first), and one of the P3 image's (kind `command`,
-    which ran in the command's own process), left by a command killed as this image took over.
-    Either holds its admission (`deep`, `publications`) until then. P7 removes the P3 kind's
-    with the old liveness columns."""
+    """End failed the CLI commands' items (`once`) whose lease expired, which no process runs
+    again: their `serve` is gone (`STOPPED`, or `CANCELLED` when the owner's cancel was asked
+    first). Each holds its admission (`deep`, `publications`) until then."""
     retired = await (
         await unit.execute(
             "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
-            "error = CASE WHEN kind = %(command)s THEN 'its process stopped' "
-            "WHEN cancel_asked IS NOT NULL THEN %(cancelled)s ELSE %(stopped)s END, "
+            "error = CASE WHEN cancel_asked IS NOT NULL THEN %(cancelled)s ELSE %(stopped)s END, "
             "lease_token = NULL, lease_until = NULL, resubmitted = false "
-            "WHERE id IN (SELECT id FROM work_items c "
-            "WHERE (c.kind = %(command)s OR c.kind LIKE %(commands)s) "
+            "WHERE id IN (SELECT id FROM work_items c WHERE c.kind LIKE %(commands)s "
             "AND c.state = 'running' AND c.lease_until < now() FOR UPDATE SKIP LOCKED) "
             "RETURNING kind",
-            {"command": COMMAND, "commands": COMMANDS, "stopped": STOPPED, "cancelled": CANCELLED},
+            {"commands": COMMANDS, "stopped": STOPPED, "cancelled": CANCELLED},
         )
     ).fetchall()
     for kind in sorted({r["kind"] for r in retired}):
