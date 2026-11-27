@@ -121,9 +121,11 @@ class Result(BaseModel):
 def results(path: Path) -> dict[str, Result]:
     """A run's answers: those kept gzipped (`<candidate>.jsonl.gz`) and those appended since."""
     packed = path.with_name(path.name + ".gz")
-    lines = gzip.decompress(packed.read_bytes()).decode().splitlines() if packed.exists() else []
+    lines = []
+    if packed.exists():
+        lines = jsonl.records(gzip.decompress(packed.read_bytes()), whole=True)
     lines += jsonl.lines(path)
-    return {r.paper_id: r for r in (Result.model_validate_json(x) for x in lines if x)}
+    return {r.paper_id: r for r in (Result.model_validate_json(x) for x in lines)}
 
 
 def fingerprint(models: Models, tree: Taxonomy) -> str:

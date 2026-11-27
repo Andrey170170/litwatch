@@ -54,16 +54,19 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
   env -u ANTHROPIC_BASE_URL uv run litwatch nightly --no-fetch --limit 5
   ```
 
-  With no `serve` on the database, the command refuses and writes nothing; a `serve` that stops while it waits
-  gives the item back, and the next one to start runs it again (never what it committed: a closed run is
-  reported, a `--limit` counts what was done) while the command keeps waiting. A `serve` killed outright leaves
-  its `workers` row for up to a lease (3 minutes), and a command submitted meanwhile waits for the next one.
+  With no `serve` on the database, the command refuses and writes nothing. A command's item gets one attempt:
+  a `serve` that stops while it runs it ends it failed, `serve stopped while it ran`, and the command says so,
+  waits until a `serve` runs that kind again and submits a fresh item with the same arguments, which goes on
+  from what committed (the nightly's steps, the passes, an evaluation's files and records). `--limit` holds per
+  item: a resubmission counts afresh. A `serve` killed outright leaves its `workers` row until the next `serve`
+  on the host replaces it, or for up to a lease (3 minutes); its item ends the same way once its lease runs out.
   Ctrl-C asks whether to cancel the item or leave it running: cancelled, `serve` stops it, lets it close its run,
   and the command says how it ended; `litwatch work follow ID` picks one left running back up, its output shown
   from the start and an evaluation's lines written once each. Run again, an evaluation first writes in what its
-  last item answered (named beside its output, `<file>.item`), and follows that item while it still runs. An
-  evaluation's out paths are read on this host, by the command, not by `serve`. `intake archive --here` alone
-  runs in the command, with no item, for a database no `serve` works from (a fresh sandbox's); it calls no model.
+  last item answered (named beside its output, `<file>.item`), and follows that item while it still runs; `eval
+  replay --resume ID` follows the replay's open item first. An evaluation's out paths are read on this host, by
+  the command, not by `serve`. `intake archive --here` alone runs in the command, with no item, for a database
+  no `serve` works from (a fresh sandbox's); it calls no model.
 - The sandbox: `scripts/refresh-sandbox.sh` rebuilds `sandbox` and replaces the old one only once the new one is
   complete. Its two sources:
   - `--production`: a copy of production's database (one read-only `pg_dump` in `litwatch-db`, a few seconds),

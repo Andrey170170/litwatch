@@ -12,7 +12,7 @@ import functools
 import json
 import threading
 from collections import Counter
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,8 +20,8 @@ import pytest
 
 from litwatch import cli
 from litwatch.api import app as app_module
-from litwatch.archive import ArchiveClient
 from litwatch.config import Config, Models, RoleConfig
+from litwatch.core.work import ItemState, WorkItem
 from litwatch.gates.work import WorkGate
 from litwatch.integrations import archive as archive_integration
 from litwatch.jobs import commands
@@ -30,9 +30,10 @@ from litwatch.llm import ModelGate, Reply, Stop, Usage
 from litwatch.quality import classify, jsonl
 from litwatch.store import papers as papers_store
 from litwatch.store import work as queue
-from tests.conftest import paper
-from tests.fakes_http import FakeArchive, mock
-from tests.scripted import CLASSIFY, Scripted, decision
+from tests import settling
+from tests.conftest import TREE, paper
+from tests.fakes import ScriptedProvider
+from tests.scripted import CLASSIFY, CONFIG, ROLES, A, B, Scripted, decision
 from tests.sessions import Session, in_write
 from tests.working import command, served, until
 
@@ -92,11 +93,11 @@ def interrupted(monkeypatch, when: threading.Event) -> None:
     a later one follows."""
     real, cut = cli._follow, []
 
-    async def follow(db, item_id):
+    async def follow(db, item_id, followed=None):
         if cut:
-            return await real(db, item_id)
+            return await real(db, item_id, followed)
         cut.append(item_id)
-        following = asyncio.create_task(real(db, item_id))
+        following = asyncio.create_task(real(db, item_id, followed))
         while not when.is_set():
             if following.done():
                 return following.result()
@@ -142,49 +143,68 @@ class _Replay:
     to_classify, to_grade = ["2610.00001"], []
 
 
-async def test_a_nightly_follows_its_item_across_a_serve_restart_and_is_done_once(
+class Pausing(ScriptedProvider):
+    """The scripted provider whose first `analyse` call never answers: `paused` (across
+    threads) set as it waits, until `serve` stops under it."""
+
+    def __init__(self, name: str, respond) -> None:
+        super().__init__(name, respond)
+        self.paused = threading.Event()
+
+    async def complete(self, role, request) -> Reply:
+        if role.model == ROLES["analyse"].model and not self.paused.is_set():
+            self.paused.set()
+            await asyncio.Event().wait()
+        return await super().complete(role, request)
+
+
+async def test_a_nightly_survives_a_serve_restart_and_does_nothing_committed_twice(
     conn: Session, db, tmp_path, monkeypatch
 ):
-    """`litwatch nightly --limit 5` writes its item and waits; `serve` runs it, and stops while
-    it runs (its claim given back); the command says no `serve` runs it, holds nothing, and
-    follows the same item when `serve` starts again and runs it to its end: one item, one run,
-    its record printed once."""
-    real, attempts = commands.nightly_job.run, []
-    running = threading.Event()
-
-    async def nightly(db_, cfg, **kwargs):
-        attempts.append(kwargs)
-        if len(attempts) == 1:
-            running.set()
-            await asyncio.Event().wait()  # until `serve` stops
-        return await real(db_, cfg, **kwargs)
-
-    monkeypatch.setattr(commands.nightly_job, "run", nightly)
+    """V6: `litwatch nightly --no-fetch --limit 5` on two papers, through the real pipeline;
+    `serve` stops once both classifications have committed, as the first analysis is asked.
+    The item ends saying `serve` stopped; the command says so, waits for the next `serve`, and
+    submits it again, which goes on from what committed: each paper classified once, its run
+    closed, then a second run to its end."""
+    await settling.save_tree(conn, TREE)
+    await in_write(conn, papers_store.upsert, [A, B])
     models = Scripted()
-    config = Config()
-    async with served(db, config, models=models.gate(config)):
+    pausing = Pausing("anthropic", models.respond)
+    providers = {"anthropic": pausing, "openrouter": ScriptedProvider("openrouter", models.respond)}
+
+    def gate() -> ModelGate:
+        return ModelGate(CONFIG.models, providers, retry_delays=(0.0,))
+
+    async with served(db, CONFIG, models=gate()):
         cli_task = asyncio.create_task(
             command(conn, tmp_path, monkeypatch, "nightly", "--no-fetch", "--limit", "5")
         )
 
-        async def runs() -> bool:
-            return running.is_set()
+        async def classified() -> bool:
+            n = await rows(conn, "SELECT count(*) AS n FROM classifications")
+            return pausing.paused.is_set() and n[0]["n"] == 2
 
-        await until(runs, "serve to run the nightly")
-    (item,) = await items(conn, "nightly")
-    assert item["state"] == "pending" and not cli_task.done()  # given back; the command waits
-    await asyncio.sleep(2.5)  # it looks again, finds no `serve`
-    async with served(db, config, models=models.gate(config)):
-        result = await asyncio.wait_for(cli_task, 20)
+        await until(classified, "both classifications committed, the first analysis asked")
+    first, *_ = await items(conn, "nightly")
+    assert (first["state"], first["outcome"], first["error"]) == (
+        "ended", "failed", queue.STOPPED
+    )  # fmt: skip
+    assert first["attempts"] == 1 and not cli_task.done()
+    async with served(db, CONFIG, models=gate()):
+        result = await asyncio.wait_for(cli_task, 30)
     assert result.exit_code == 0, result.output
-    assert f"item {item['id']}: command:nightly" in result.output
-    assert "no `litwatch serve` runs command:nightly now" in result.output
-    (item,) = await items(conn, "nightly")
-    assert (item["state"], item["outcome"], item["attempts"]) == ("ended", "done", 2)
-    assert [a["limit"] for a in attempts] == [5, 5]
-    (run,) = await rows(conn, "SELECT * FROM runs WHERE kind = 'nightly'")
-    assert run["work_id"] == item["id"] and run["finished_at"] is not None
-    assert result.output.count(f"run {run['id']}: cost") == 1
+    first, second = await items(conn, "nightly")
+    assert (second["outcome"], second["attempts"], second["scope"]) == (
+        "done", 1, first["scope"]
+    )  # fmt: skip
+    assert f"item {first['id']}: serve stopped while it ran; submitted again" in result.output
+    assert f"item {second['id']}: command:nightly" in result.output
+    classify = Counter(title for step, title in models.asked if step == "classify")
+    assert classify == {A.title: 1, B.title: 1}  # nothing committed done twice
+    found = await rows(conn, "SELECT * FROM runs WHERE kind = 'nightly' ORDER BY id")
+    assert [r["work_id"] for r in found] == [first["id"], second["id"]]
+    assert all(r["finished_at"] is not None for r in found)  # the first closed as it stopped
+    assert result.output.count(f"run {found[1]['id']}: cost") == 1
 
 
 @pytest.mark.usefixtures("short_leases")
@@ -315,79 +335,6 @@ async def test_intake_archive_here_runs_in_the_command_for_a_database_no_serve_w
     assert await rows(conn, "SELECT * FROM workers") == []
 
 
-async def test_a_nightly_whose_run_closed_is_not_run_again_when_serve_restarts(
-    conn: Session, db, tmp_path, monkeypatch
-):
-    """The nightly's run closed, then `serve` stopped before its item ended (given back): the
-    next attempt finds the run its item closed and returns that run's record. One run."""
-    real, attempts = commands.nightly_job.run, []
-    closed = threading.Event()
-
-    async def nightly(db_, cfg, **kwargs):
-        attempts.append(kwargs)
-        run_id = await real(db_, cfg, **kwargs)
-        closed.set()
-        await asyncio.Event().wait()  # until `serve` stops, its run closed
-        return run_id
-
-    monkeypatch.setattr(commands.nightly_job, "run", nightly)
-    models, config = Scripted(), Config()
-    async with served(db, config, models=models.gate(config)):
-        cli_task = asyncio.create_task(
-            command(conn, tmp_path, monkeypatch, "nightly", "--no-fetch", "--limit", "5")
-        )
-
-        async def ran() -> bool:
-            return closed.is_set()
-
-        await until(ran, "serve to close the nightly's run")
-    async with served(db, config, models=models.gate(config)):
-        result = await asyncio.wait_for(cli_task, 20)
-    assert result.exit_code == 0, result.output
-    (item,) = await items(conn, "nightly")
-    assert (item["outcome"], item["attempts"]) == ("done", 2)
-    (run,) = await rows(conn, "SELECT * FROM runs WHERE kind = 'nightly'")
-    assert len(attempts) == 1  # not run again
-    assert f"run {run['id']} closed in an earlier attempt" in result.output
-    assert result.output.count(f"run {run['id']}: cost") == 1
-
-
-async def test_a_fulltext_limit_counts_what_its_earlier_attempts_worked(
-    conn: Session, db, tmp_path, monkeypatch
-):
-    """`litwatch fulltext --limit 5`: its first attempt works 2 passes, counted in the unit
-    that records them, and `serve` stops; the next attempt works at most the 3 left."""
-    limits: list[int | None] = []
-    stopped = threading.Event()
-
-    async def work_waiting(db_, config, archive, *, limit, wait, models, report, counted):
-        limits.append(limit)
-        if len(limits) == 1:
-            async with db_.write("test: two passes recorded") as unit:
-                await counted(unit, 2)
-            stopped.set()
-            await asyncio.Event().wait()
-        return Counter(briefs_written=limit)
-
-    monkeypatch.setattr(commands.fulltext, "work_waiting", work_waiting)
-    archive = ArchiveClient("http://archive.test", "t", http=mock(FakeArchive().handle))
-    async with served(db, Config(), archive=archive):
-        cli_task = asyncio.create_task(
-            command(conn, tmp_path, monkeypatch, "fulltext", "--limit", "5")
-        )
-
-        async def worked() -> bool:
-            return stopped.is_set()
-
-        await until(worked, "serve to work two passes")
-    async with served(db, Config(), archive=archive):
-        result = await asyncio.wait_for(cli_task, 20)
-    assert result.exit_code == 0, result.output
-    assert limits == [5, 3]
-    (item,) = await items(conn, "fulltext")
-    assert item["progress"] == {"worked": 2}
-
-
 async def _classify_left_running(conn: Session, db, tmp_path, monkeypatch, held: Held):
     """`eval classify` of 10 labelled papers, `serve` answering 4 before it waits on `held`,
     left running at Ctrl-C; the command's arguments, its file, and what reads it."""
@@ -478,3 +425,113 @@ def test_serve_runs_each_intake_where_it_has_what_the_handler_needs():
     assert kinds(Config(), archive=object()) == {"command:intake", "command:intake-archive"}
     harvests = Config(integrations={"archive": {"harvest": True}})
     assert kinds(harvests) == {"command:intake", "command:intake-catalog"}
+
+
+async def test_ctrl_c_as_the_item_ends_shows_it_as_the_follower_does(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """Ctrl-C lands as the ping's item ends, before the follower showed its end: the command
+    asks nothing, and shows the item as the follower does, its completion record."""
+    held = Held(free=1)
+    real, cut = cli._follow, []
+
+    async def follow(db_, item_id, followed=None):
+        if cut:
+            return await real(db_, item_id, followed)
+        cut.append(item_id)
+        while True:
+            async with db_.read("test: has it ended") as unit:
+                found = await queue.get(unit, item_id)
+            if found is not None and found.state == ItemState.ENDED:
+                raise KeyboardInterrupt
+            await asyncio.sleep(0.02)
+
+    monkeypatch.setattr(cli, "_follow", follow)
+    async with served(db, Config(), models=ModelGate(PING, {"anthropic": held})):
+        result = await command(conn, tmp_path, monkeypatch, "ping", "brief")
+    assert result.exit_code == 0, result.output
+    assert "test-brief -> 42" in result.output and "Cancel item" not in result.output
+
+
+async def test_a_replay_resumed_follows_its_open_item_before_it_estimates(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """A replay has one item open, keyed by its run: `eval replay --resume` while it runs
+    (detached) follows it to its end, and neither estimates nor submits a second writer."""
+    from litwatch.quality import replay  # noqa: PLC0415
+
+    release, resumed = asyncio.Event(), []
+
+    async def handler(s, item, out):
+        await out.say(f"replaying {item.scope['eval_run_id']}")
+        await release.wait()
+        return commands.finished()
+
+    async def resume(*args, **kwargs):
+        resumed.append(args)
+
+    monkeypatch.setitem(cast(dict, commands.HANDLERS), "replay", (handler, lambda s: True))
+    monkeypatch.setattr(replay, "resume", resume)
+    async with served(db, Config()):
+        detached = await in_write(
+            conn, queue.submit, "command:replay", "41", scope={"eval_run_id": 41}
+        )
+
+        async def running() -> bool:
+            return (await items(conn, "replay"))[0]["state"] == "running"
+
+        await until(running, "serve to run the replay")
+        again = asyncio.create_task(
+            command(conn, tmp_path, monkeypatch, "eval", "replay", "--resume", "41", "--yes")
+        )
+        await asyncio.sleep(0.5)
+        release.set()
+        result = await asyncio.wait_for(again, 20)
+    assert result.exit_code == 0, result.output
+    assert f"item {detached.id} still runs replay 41: following it" in result.output
+    assert "replaying 41" in result.output
+    assert resumed == [] and len(await items(conn, "replay")) == 1
+
+
+async def test_a_deep_limit_counts_the_jobs_ended_not_the_passes_awaiting_text(monkeypatch):
+    """`fulltext --deep --limit 1 --wait 1`: a pass claimed while its text is still coming does
+    not use the limit up, so the next look submits its Deep job."""
+    looks: list[int | None] = []
+    found = [Counter(awaiting_text=1), Counter(cards_written=1)]
+
+    async def work(db, archive, deep, *, rules, limit, fires):
+        looks.append(limit)
+        return found[len(looks) - 1]
+
+    class Out:
+        async def data(self, data) -> None:
+            pass
+
+    monkeypatch.setattr(commands.deep_passes, "work", work)
+    monkeypatch.setattr(commands.fulltext, "TICK_SECONDS", 0)
+    s = commands.Serving(cast(Any, None), Config(), cast(Any, None), cast(Any, 1), cast(Any, 1))
+    item = WorkItem(1, "command:deep", "k", "deep", ItemState.RUNNING, datetime.now(UTC), 1,
+                    {"limit": 1, "wait": 1})  # fmt: skip
+    await commands._deep(s, item, cast(Any, Out()))
+    assert looks == [1, 1]
+
+
+def test_the_name_of_an_outputs_item_is_replaced_whole(tmp_path, monkeypatch):
+    """The sidecar naming an evaluation's item is written to a sibling and moved over it: a
+    write cut off leaves the old name whole."""
+    path = tmp_path / "decider.jsonl.item"
+    cli._owned([path], "command:classify", "old")
+    real = Path.write_text
+
+    def torn(self, text, *args, **kwargs):
+        real(self, text[:5], *args, **kwargs)
+        raise OSError("killed mid-write")
+
+    with monkeypatch.context() as m:
+        m.setattr(Path, "write_text", torn)
+        with pytest.raises(OSError, match="killed"):
+            cli._owned([path], "command:classify", "new")
+    assert json.loads(path.read_text())["key"] == "old"
+    cli._owned([path], "command:classify", "new")
+    assert json.loads(path.read_text())["key"] == "new"
+    assert [p.name for p in tmp_path.iterdir()] == [path.name]

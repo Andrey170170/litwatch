@@ -108,7 +108,9 @@ Found in a survey of the code at 548857e3:
   inputs and candidate settings go in the item's scope; each result is a row in `work_results`, which the command
   reads and writes to its jsonl as it arrives. Resuming works as today: the command skips what its files hold and
   submits the rest, and the replay keeps `--resume`. An evaluation's calls are journalled as evaluation calls, which
-  production's reuse and price estimates do not read. `docs/agents/dev-host.md` says how to run them.
+  production's reuse and price estimates do not read. `docs/agents/dev-host.md` says how to run them. One command
+  is the exception: `intake archive --here` runs in the command, with no item, for a database no `serve` works
+  from (a fresh sandbox's build); it calls no model.
 - **Until P5, the CLI's inline commands run as items in their own process.** P3 retires the presence session, so a
   command that still runs work inline (`nightly`, `digests write`, `fulltext`, …) does it as a work item through an
   in-process Worker, whose lease gives its run liveness. P5 sends the same items to `serve` instead.
@@ -144,7 +146,7 @@ Found in a survey of the code at 548857e3:
   `command:<name>`, which the image before neither serves nor takes back; one left running holds its admission
   (`deep`, `publications`) there for good, and one pending never runs. So the switch is made with no command
   waiting, and the step above ends them with `WHERE kind LIKE 'command%' AND state <> 'ended'` in place of
-  `kind = 'command'`. Their `work_results` rows and their items' `result`, `progress` and `cancel_asked`
+  `kind = 'command'`. Their `work_results` rows and their items' `result` and `cancel_asked`
   (migration 0051) the image before ignores.
 - **Rolling back from P5: the evaluations' calls count in P4's reuse and estimates.** P5 journals an evaluation's
   calls on its run, of kind `eval`, which its production reads leave out (`store.calls`); the image before has
@@ -265,7 +267,7 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
 | **V3** | The nightly runs as before, through the Worker. | On a sandbox built from the archive's papers, the same seeded nightly (`--no-fetch --limit 25`, `LITWATCH_STRICT_GATES=1`): at the base directly; after P3 and P4 as a scheduled item under a strict `serve`; after P5 submitted from the CLI to a strict `serve`. The run records' counts match, the work records are read back, and no check raises. At most $5 a run. |
 | **V4** | One Model gate per process. A ceiling holds across a job's chunks. Calls with the same provider and deadline share batches. A batch left by a killed worker is recovered once and credited to its original call, and a second item's call in a batch still settles after the first item's lease is lost. The OpenAI adapter's normal and batched replies parse and report their cost; through the gate, that cost is journalled on the original run and item. | pytest with fake providers (`tests/fakes.py`) and faked OpenAI SDK objects. At T2, one real normal call and one real Batch of 2 requests, parsed with their cost. At P4, the same calls' cost read back from the journal. |
 | **V5** | Every unit and model call is attributed, and a missing attribution is caught. | Tests that a Database or Model gate call with no attribution raises in strict mode and logs an error otherwise, and that startup and the gates' bookkeeping run under the system attribution. The suite in strict mode; V3's strict nightly logs no attribution error; the API tests and the stack smoke test pass. |
-| **V6** | The CLI submits and waits, refuses without a worker, survives a restart of `serve` while it waits, and an evaluation resumes from its files. | pytest with a worker in process. On the sandbox, with `serve` on its own port: `nightly --limit 5`, with `serve` restarted while the command waits, which follows the same item and writes nothing twice; `eval classify` on 10 labels, stopped and resumed; `ping`; the same with `serve` stopped, which must refuse. |
+| **V6** | The CLI submits and waits, refuses without a worker, survives a restart of `serve` while it waits: the command's item ends saying `serve` stopped, the CLI resubmits it, and nothing committed is done twice; and an evaluation resumes from its files. | pytest with a worker in process. On the sandbox, with `serve` on its own port: `nightly --limit 5`, with `serve` restarted while the command waits, whose item ends saying `serve` stopped, resubmitted, nothing committed done twice; `eval classify` on 10 labels, stopped and resumed; `ping`; the same with `serve` stopped, which must refuse. |
 | **V7** | Release links are found with the right access states and shown; triggers and re-checks follow their policy; automatic Deep reads stay off while the owner's Deep requests still work. | `npm test` with a fake model. pytest of the triggers (once per version, again on a new version, always on the owner's action) and of the re-check schedule, ending after four weeks. A real find on about 10 sandbox papers through a dev deep instance, covering public, gated, placeholder and none found, which the owner looks over. Re-checks against a real placeholder repository. On the sandbox with automatic reads off: an eligible paper queues no Deep read, and an owner's Deep request runs. The paper's page walked at 390 and 1440 px, dark and light. MCP `get_paper` shows the links. |
 | **V8** | Python and deep share generated contracts, one outline parser serves both, and deep runs on the newer Pi and model. | CI fails on a stale generated contract (shown once in the PR). Parser tests over the papers both parsers covered. `npm test`, `npm run typecheck`, the stack smoke test. One real Deep read on the sandbox with the new image pair, its resolved model and reviews recorded for the owner. |
 | **V9** | Production holds. | The first weekday night after the last deploy: its run record against the week's; the logs searched for attribution, nesting, fence, lease-lost, take-back and pool errors; no stuck items; integrations caught up; every eligible paper of the night has a find with an outcome, "none found" included. |
@@ -342,30 +344,36 @@ Found while building, owned by the stage named.
   `runs.work_id` and `work_items.run_id` stay as the history of which item ran what. A run opened outside any item
   reads dead at once: only the API's grade now (`api/settings.py`, kind `grading`), which P5 attributes as its
   request and leaves outside an item, as nothing reads its liveness.
-- **P6, P7 (from P5): the CLI's commands.** A command `serve` runs is an item of kind `command:<name>` with a
-  fresh uuid key, its inputs in the scope (`jobs.commands`), admitted by its key or by the kind whose work it does
-  (`deep`, `publications`); every `serve` serves them whatever its schedule (one without an archive or a deep
-  service not those that need it), under its own configuration, so the commands lost `--config` but for the
+- **P6, P7 (from P5): the CLI's commands.** A command `serve` runs is an item of kind `command:<name>` with a fresh
+  uuid key (a replay's, its run's id), its inputs in the scope (`jobs.commands`), admitted by its key or by the kind
+  whose work it does (`deep`, `publications`); every `serve` serves them whatever its schedule (one without an archive
+  or a deep service not those that need it), under its own configuration, so the commands lost `--config` but for the
   evaluations, which build their requests here. The command refuses when no `workers` row lists its kind and beat
-  within a lease, follows the item read-only (its row, `work_results` after the last id it showed, on `NOTIFY`
-  of both channels or every 2 s), and holds no claim. Its progress is the item's `work_results` (an evaluation's
-  answers and reservations, as lines of its files); what it returns is the item's completion record (`result`),
-  written in the unit that ends it. An attempt after a take-back never does again what an earlier one committed:
-  a command whose run closed returns that run's record, a `--limit` counts what earlier attempts did
-  (`progress`, counted in the unit each pass commits in), an evaluation leaves out what its results hold. A
-  cancel (`store.work.cancel`) is a request on the item (`cancel_asked`), notified: a pending item ends at once;
-  a running one's supervisor stops its Worker, lets its cleanup (its run closed) finish under the claim, then
-  ends it failed, so its admission is free only once it has stopped. Only a command's item is followed or
-  cancelled from the CLI. Each evaluation's output names the item writing it (`<file>.item`, a ladders
-  directory's `item.json`): a rerun first writes in that item's results, its reservations included, so a
-  follower that stopped loses nothing, and follows the item instead while it is open. `work_results` rows are
-  kept with their item; P7's cleanup may prune an ended item's. `intake archive --here` is no item: it runs in
-  the command, with no Work gate and no Model gate, for a database no `serve` works from (the sandbox's build).
-  A gate that stops retires its `workers` row first, before its items drain, so no command is accepted for a
-  kind no one will run; a `serve` killed leaves its row until its heartbeat is a lease old (3 minutes at the
-  default lease), and a command submitted meanwhile waits for the next `serve`. No CLI builds a Model gate any more:
-  P4's findings on a second gate meeting `serve`'s batches (`owner()` sees only its process) need no fix while
-  that holds, and `jobs.context.model_gate` serves `serve` alone.
+  within a lease, follows the item read-only (its row, `work_results` after the last id it showed, on `NOTIFY` of both
+  channels or every 2 s), and holds no claim. Its progress is the item's `work_results` (an evaluation's answers and
+  reservations, as lines of its files); what it returns is the item's completion record (`result`), written in the
+  unit that ends it. A command's item gets one attempt: a take-back, a give-back or a stop of `serve` ends it failed,
+  `serve stopped while it ran` (`store.work.STOPPED`), and the command, seeing that error, waits until a `serve` runs
+  the kind again and submits a fresh item with the same arguments (an evaluation's with what its files still lack).
+  Running again goes on from what committed: the nightly's steps, the passes, an evaluation's files and records.
+  `--limit` holds per item, so a resubmission counts afresh. A stopping attempt lets go of what it holds as P3's
+  shutdown does: its run is closed by the run's own cleanup, and a command's text passes, claimed outside a run, are
+  released as the wave is cut off. The serving check is made in the submit unit, on the `workers` row locked `FOR
+  SHARE`, so a retirement and a submission have a defined order; a `serve` that registers replaces its host's earlier
+  rows. A replay has one item open at a time, keyed by its run, and `--resume` follows the one still open before it
+  estimates or submits. A cancel (`store.work.cancel`) is a request on the item (`cancel_asked`), notified: a pending
+  item ends at once; a running one's supervisor stops its Worker once, lets its cleanup (its run closed) finish under
+  the claim, then ends it failed, so its admission is free only once it has stopped. Only a command's item has a
+  stopper, and only one is followed or cancelled from the CLI. Each evaluation's output names the item writing it
+  (`<file>.item`, a ladders directory's `item.json`): a rerun first writes in that item's results, its reservations
+  included, so a follower that stopped loses nothing, and follows the item first while it is open. `work_results` rows
+  are kept with their item; P7's cleanup may prune an ended item's. `intake archive --here` is no item: it runs in the
+  command, with no Work gate and no Model gate, for a database no `serve` works from (the sandbox's build). A gate
+  that stops retires its `workers` row first, before its items drain, so no command is accepted for a kind no one will
+  run; a `serve` killed leaves its row until the next `serve` on its host replaces it or its heartbeat is a lease old
+  (3 minutes at the default lease), and a command submitted meanwhile waits for the next `serve`. No CLI builds a
+  Model gate any more: P4's findings on a second gate meeting `serve`'s batches (`owner()` sees only its process) need
+  no fix while that holds, and `jobs.context.model_gate` serves `serve` alone.
 - **P7 (from P5): the P3 `command` kind.** `store.work._retire_commands` still ends an expired P3-image `command`
   item at every take-back; P7 drops it with the rollback steps.
 - **P7 (from P5): the nightly and the chunks.** No chunk starts while a nightly waits (`store.jobs.nightly_waits`,

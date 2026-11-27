@@ -7,6 +7,7 @@ starts, not under the test's own attribution."""
 import asyncio
 import contextvars
 import logging
+from collections.abc import Awaitable, Callable
 from typing import cast
 
 import httpx
@@ -26,7 +27,7 @@ from tests.fakes import scripted_gate
 from tests.mcp_client import call, mcp_app, serving
 from tests.scripted import CONFIG
 from tests.sessions import Session
-from tests.working import TOKEN, command, served, until
+from tests.working import QUIET, TOKEN, command, served, until
 
 
 class Answer(BaseModel):
@@ -38,25 +39,63 @@ def unattributed(coro):
     return asyncio.create_task(coro, context=contextvars.Context())
 
 
-async def test_a_gate_call_with_no_attribution_raises_strict_and_is_logged_otherwise(
-    db, monkeypatch, caplog
-):
-    async def read() -> int:
-        async with db.read("unattributed") as unit:
+def entries(db) -> dict[str, Callable[[], Awaitable[object]]]:
+    """Each gate entry point that checks its attribution: the Database gate's units and held
+    lock, the Model gate's call, ask and journal read."""
+    gate = scripted_gate(lambda role, request: '{"answer": "yes"}', CONFIG)
+    request = Request(system="s", user="u", output=Answer)
+
+    async def unit(opener) -> object:
+        async with opener("unattributed") as unit:
             return (await (await unit.execute("SELECT 1 AS one")).fetchone())["one"]
 
-    async def ask() -> object:
-        gate = scripted_gate(lambda role, request: '{"answer": "yes"}', CONFIG)
-        return await gate.on().ask("analyse", Request(system="s", user="u", output=Answer))
+    async def held() -> object:
+        async with db.held("run"):
+            return 1
 
-    with pytest.raises(AttributionError, match="unattributed"):
-        await unattributed(read())
-    with pytest.raises(AttributionError, match="role 'analyse'"):
-        await unattributed(ask())
+    return {
+        "read": lambda: unit(db.read),
+        "write": lambda: unit(db.write),
+        "held": held,
+        "complete": lambda: gate.on().complete("analyse", CONFIG.models.analyse, request),
+        "ask": lambda: gate.on().ask("analyse", request),
+        "refused_throughout": lambda: gate.on().refused_throughout("analyse", request),
+    }
+
+
+@pytest.mark.parametrize("strict", [True, False], ids=["strict", "lenient"])
+@pytest.mark.parametrize(
+    "entry", ["read", "write", "held", "complete", "ask", "refused_throughout"]
+)
+async def test_a_gate_call_with_no_attribution_raises_strict_and_is_logged_otherwise(
+    db, monkeypatch, caplog, entry, strict
+):
+    call = entries(db)[entry]
+    if strict:
+        with pytest.raises(AttributionError, match="with no attribution"):
+            await unattributed(call())
+        return
     monkeypatch.delenv(STRICT_ENV)
     with caplog.at_level(logging.ERROR):
-        assert await unattributed(read()) == 1
+        await unattributed(call())
     assert any("gate attribution:" in r.getMessage() for r in caplog.records)
+
+
+async def test_serves_startup_from_an_empty_context_sweeps_as_the_system(db, seen):
+    """`serve`'s startup with the schedule on, in an empty context as a process starts: its
+    sweeps are the system's (`serve`), before its Work gate runs."""
+
+    async def started() -> None:
+        async with served(
+            db, Config(schedule=QUIET), models=scripted_gate(lambda *_: "{}", CONFIG)
+        ):
+            pass
+
+    await unattributed(started())
+    sweeps = {
+        a for where, a in seen if where in ("unit 'schedule: the next fire'", "unit 'jobs: open'")
+    }
+    assert sweeps == {Attribution.system("serve")}
 
 
 async def test_serve_the_api_and_the_monitor_attribute_their_gate_calls(db):

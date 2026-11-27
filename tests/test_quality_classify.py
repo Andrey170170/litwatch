@@ -72,3 +72,15 @@ def test_a_resumed_run_reads_its_archived_answers_and_the_new_ones(tmp_path):
     (tmp_path / "jev.jsonl.gz").write_bytes(gzip.compress(older.model_dump_json().encode()))
     out.write_text(newer.model_dump_json() + "\n")
     assert set(classify.results(out)) == {"1", "2"}
+
+
+def test_a_record_holding_a_line_separator_is_one_record_packed_or_appended(tmp_path):
+    """JSON escapes no U+2028 (nor U+0085, U+2029): records split on the LF byte alone."""
+    out = tmp_path / "jev.jsonl"
+    older = classify.Result(paper_id="1", error="cut off\u0085here")
+    newer = classify.Result(paper_id="2", error="and there")
+    assert " " in older.model_dump_json()  # written raw, not escaped
+    (tmp_path / "jev.jsonl.gz").write_bytes(gzip.compress(older.model_dump_json().encode()))
+    out.write_text(newer.model_dump_json() + "\n", encoding="utf-8")
+    found = classify.results(out)
+    assert set(found) == {"1", "2"} and found["1"].error == older.error

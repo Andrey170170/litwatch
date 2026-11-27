@@ -497,13 +497,6 @@ def recorded(out: Path) -> list[Row]:
     return found
 
 
-@contextmanager
-def held(out: Path) -> Generator[list[Row]]:
-    """`out` held for one run, and the calls recorded in it (`locked`, `recorded`)."""
-    with locked(out):
-        yield recorded(out)
-
-
 def refuse(found: list[Row], where: str) -> None:
     """Refuse a run over calls the ceiling can't count: the rows are the evidence, each written
     as its call ends, before any record of why a run stopped, and a reservation recorded before

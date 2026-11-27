@@ -8,7 +8,7 @@ import json
 import math
 import uuid
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Collection, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
@@ -111,6 +111,24 @@ def _run[T](
 FOLLOW_SECONDS = 2.0
 
 type Opening = Callable[[WriteUnit], Awaitable[dict[str, Any]]]
+type Again = Callable[[dict[str, Any]], dict[str, Any] | None]
+
+
+class _Followed:
+    """What a command has shown of the items it followed: the last result shown of each, and
+    the lines its files hold (`_Shown`); and the item it submitted last (`kind`, `key`, and the
+    item once its submission returned), which Ctrl-C asks about."""
+
+    def __init__(self) -> None:
+        self.shown = _Shown()
+        self.last: dict[int, int] = {}
+        self.kind: str | None = None
+        self.key: str | None = None
+        self.item: WorkItem | None = None
+
+
+class _UnservedError(Exception):
+    """No `serve` runs the kind, as the submitting unit found it."""
 
 
 def _submit(
@@ -119,77 +137,126 @@ def _submit(
     *,
     command: str,
     admission: str | None = None,
-    key: str | None = None,
+    key: str | Callable[[dict[str, Any]], str] | None = None,
     opening: Opening | None = None,
+    sidecars: Collection[Path] = (),
+    again: Again | None = None,
 ) -> None:
     """Submit the command `name`'s work item (`jobs.commands`) with `scope`, under `key` (by
-    default a fresh one), admitted by `admission` (by default its key), and follow it to its
-    end (`_follow`), as the request `cli <command>`: the database is the one `serve` works from,
-    and `serve` runs it. Refuses, before it writes anything, when no `serve` runs its kind (a
-    live `workers` row): it never runs the work itself. `opening` writes what the item works
-    on, in the unit that submits it, and gives what it adds to the scope (a replay's record).
-    Ctrl-C asks whether to cancel the item or leave it to run (`_interrupted`). A failed item
-    fails the command with its error."""
-    work_kind, key = commands.kind(name), key or str(uuid.uuid4())
+    default a fresh one; a function of the scope, for a replay's), admitted by `admission` (by
+    default its key), and follow it to its end (`_follow`), as the request `cli <command>`: the
+    database is the one `serve` works from, and `serve` runs it. Refused, before anything is
+    written, when no `serve` runs its kind: a live `workers` row, read and locked in the unit
+    that submits (`store.work.served_here`). `opening` writes what the item works on in that
+    unit, and gives what it adds to the scope (a replay's record). `sidecars` name the item as
+    the one writing into an evaluation's outputs (`_owned`).
 
-    async def main(db: DatabaseGate) -> WorkItem:
-        async with db.read("is it served") as unit:
-            served = await queue.serving(unit, work_kind, LEASE)
-        if not served:
-            raise SystemExit(
-                f"no `litwatch serve` runs {work_kind} on this database: start one "
-                "(docs/agents/dev-host.md); a command never runs its work itself"
-            )
+    An item `serve` stopped under ends failed (`STOPPED`): the command says so, waits until a
+    `serve` runs its kind again, and submits a fresh item, which goes on from what the first
+    committed: of the same scope, or of what `again` makes of it (an evaluation's, from what its
+    files now hold; None when nothing is left). Ctrl-C asks whether to cancel the item or leave
+    it to run (`_interrupted`). A failed item fails the command with its error."""
+    work_kind, followed = commands.kind(name), _Followed()
+    followed.kind = work_kind
+
+    async def submitted(db: DatabaseGate, current: dict[str, Any], first: bool) -> WorkItem:
         async with db.write(f"{name}: submit") as unit:
-            added = await opening(unit) if opening is not None else {}
-            item = await queue.submit(
-                unit, work_kind, key, scope=scope | added, admission=admission or key
+            if not await queue.served_here(unit, work_kind, LEASE):
+                if first:
+                    raise SystemExit(
+                        f"no `litwatch serve` runs {work_kind} on this database: start one "
+                        "(docs/agents/dev-host.md); a command never runs its work itself"
+                    )
+                raise _UnservedError
+            if opening is not None and first:
+                current = current | await opening(unit)
+            if key is None or isinstance(key, str):
+                chosen = key if first and key else str(uuid.uuid4())
+            else:
+                chosen = key(current)
+            followed.key = chosen
+            _owned(sidecars, work_kind, chosen)
+            return await queue.submit(
+                unit, work_kind, chosen, scope=current, admission=admission or chosen
             )
-        console.print(f"item {item.id}: {work_kind} (Ctrl-C to cancel it or leave it running)")
-        return await _follow(db, item.id)
+
+    async def main(db: DatabaseGate) -> WorkItem | None:
+        current, first = scope, True
+        while True:
+            if not first:
+                await _until_served(db, work_kind)
+            try:
+                item = followed.item = await submitted(db, current, first)
+            except _UnservedError:
+                continue
+            console.print(f"item {item.id}: {work_kind} (Ctrl-C to cancel it or leave it running)")
+            ended = await _follow(db, item.id, followed)
+            if not _stopped(ended):
+                return ended
+            console.print(
+                f"item {ended.id}: {ended.error}; submitted again, to go on from what it did, "
+                f"once a `litwatch serve` runs {work_kind}"
+            )
+            current, first = (again(ended.scope) if again else ended.scope), False
+            if current is None:
+                console.print("nothing left to do")
+                return None
 
     try:
         ended = _run(main, name=command, migrate=False)
     except KeyboardInterrupt:
-        _interrupted(work_kind, key, command)
+        _interrupted(followed, command)
     _ended(ended)
 
 
-def _ended(item: WorkItem) -> None:
-    if item.outcome == Outcome.FAILED:
+def _stopped(item: WorkItem) -> bool:
+    """Whether the item ended as `serve` stopping under it ends it (`store.work.STOPPED`)."""
+    return item.outcome == Outcome.FAILED and (item.error or "").startswith(queue.STOPPED)
+
+
+async def _until_served(db: DatabaseGate, kind: str) -> None:
+    """Wait until a `serve` runs `kind`, looking every `FOLLOW_SECONDS`."""
+    while True:
+        async with db.read("is it served") as unit:
+            if await queue.serving(unit, kind, LEASE):
+                return
+        await asyncio.sleep(FOLLOW_SECONDS)
+
+
+def _ended(item: WorkItem | None) -> None:
+    if item is not None and item.outcome == Outcome.FAILED:
         raise SystemExit(f"item {item.id} failed: {item.error}")
 
 
-async def _follow(db: DatabaseGate, item_id: int) -> WorkItem:
-    """Follow the command item `item_id` to its end, showing its progress as it arrives and
-    then its completion record (`_Shown`): woken by a notification (its results', or any item's
-    settling) and else every `FOLLOW_SECONDS`. It only reads: the item is `serve`'s, which may
-    stop and start again meanwhile (the item goes back to pending and runs again). It says so
-    when no `serve` runs the item's kind while the item waits. Returns the item, ended."""
-    shown, wake = _Shown(), asyncio.Event()
+async def _follow(db: DatabaseGate, item_id: int, followed: _Followed | None = None) -> WorkItem:
+    """Follow the command item `item_id` to its end, showing its progress as it arrives, from
+    the last result `followed` showed of it, and then its completion record (`_Shown`): woken
+    by a notification (its results', or any item's settling) and else every `FOLLOW_SECONDS`. It
+    only reads: the item is `serve`'s. It says so when no `serve` runs the item's kind while the
+    item waits. Returns the item, ended."""
+    followed = followed or _Followed()
+    shown, wake = followed.shown, asyncio.Event()
     listening = asyncio.create_task(_woken(db, wake))
-    last, unserved = 0, False
-    was: ItemState | None = None
+    unserved, was = False, None
     try:
         while True:
             wake.clear()
             async with db.read("follow") as unit:
                 item = await queue.get(unit, item_id)
-                if item is None or not item.kind.startswith(commands.PREFIX):
+                if item is None or not queue.once(item.kind):
                     raise SystemExit(f"no command's work item {item_id}")
-                found = await queue.results(unit, item_id, last)
+                found = await queue.results(unit, item_id, followed.last.get(item_id, 0))
                 served = await queue.serving(unit, item.kind, LEASE)
-            for last, body in found:  # noqa: B007
+            for last, body in found:
                 shown.show(body)
+                followed.last[item_id] = last
             if item.state == ItemState.ENDED:
                 for body in item.result or []:
                     shown.show(body)
                 return item
             if item.state != was:
-                if item.state == ItemState.RUNNING and item.attempts > 1:
-                    console.print(f"item {item_id} runs again (attempt {item.attempts})")
-                elif item.state == ItemState.PENDING and was == ItemState.RUNNING:
-                    console.print(f"item {item_id} waits to run again")
+                if item.state == ItemState.PENDING and was == ItemState.RUNNING:
+                    console.print(f"item {item_id} waits to run (the run lock is taken)")
                 was = item.state
             if not served and not unserved:
                 console.print(f"no `litwatch serve` runs {item.kind} now: item {item_id} waits")
@@ -246,26 +313,30 @@ class _Shown:
         held.add(line)
 
 
-def _interrupted(work_kind: str, key: str, command: str) -> NoReturn:
-    """Ctrl-C while a command follows its item: ask whether to cancel the item or leave it to
-    run, which `litwatch work follow` picks back up. Its submission may or may not have
-    committed: the item is found by its key."""
+def _interrupted(followed: _Followed, command: str) -> NoReturn:
+    """Ctrl-C while a command follows its item, or waits to submit it again: ask whether to
+    cancel the item or leave it to run, which `litwatch work follow` picks back up. A submission
+    whose reply did not come may or may not have committed: the item is found by its key."""
 
     async def find(db: DatabaseGate) -> WorkItem | None:
         async with db.read("interrupted: the item") as unit:
-            return await queue.find(unit, work_kind, key)
+            if followed.item is not None:
+                return await queue.get(unit, followed.item.id)
+            if followed.kind is None or followed.key is None:
+                return None
+            return await queue.find(unit, followed.kind, followed.key)
 
     item = _run(find, name=command, migrate=False)
     if item is None:
         raise SystemExit("stopped before its work item was submitted")
-    _stop(item, command)
+    _stop(item, command, followed)
 
 
-def _stop(item: WorkItem, command: str) -> NoReturn:
+def _stop(item: WorkItem, command: str, followed: _Followed) -> NoReturn:
     """Ask the owner whether to cancel the item followed until Ctrl-C. Cancelled, the request is
     `serve`'s to act on (`store.work.cancel`): the command follows the item to its end, its
-    Worker stopped and its cleanup done, and says how it ended. Else it goes on."""
-    cancel = False
+    Worker stopped and its cleanup done, and says how it ended. Else it goes on. One that ended
+    meanwhile is shown as the follower shows it, to its completion record."""
     if item.state != ItemState.ENDED:
         try:
             cancel = typer.confirm(
@@ -275,28 +346,32 @@ def _stop(item: WorkItem, command: str) -> NoReturn:
             )
         except (typer.Abort, click.Abort):
             cancel = False
-    if item.state != ItemState.ENDED and cancel:
+        if not cancel:
+            console.print(
+                f"item {item.id} goes on: `litwatch work follow {item.id}` picks it back up"
+            )
+            raise typer.Exit(130)
 
         async def cancelled(db: DatabaseGate) -> WorkItem:
             async with db.write("cancel the item") as unit:
                 asked = await queue.cancel(unit, item.id)
             assert asked is not None  # a command's item, followed until now
-            if asked.state == ItemState.ENDED:
-                return asked
-            console.print(f"item {item.id}: cancel asked; `serve` stops it")
-            return await _follow(db, item.id)
+            if asked.state != ItemState.ENDED:
+                console.print(f"item {item.id}: cancel asked; `serve` stops it")
+            return await _follow(db, item.id, followed)
 
         item = _run(cancelled, name=command, migrate=False)
-    if item.state == ItemState.ENDED:
         raise SystemExit(f"item {item.id} ended {item.outcome}: {item.error or 'done'}")
-    console.print(f"item {item.id} goes on: `litwatch work follow {item.id}` picks it back up")
-    raise typer.Exit(130)
+    item = _run(lambda db: _follow(db, item.id, followed), name=command, migrate=False)
+    _ended(item)
+    raise typer.Exit(0)
 
 
-def _follow_again(item_id: int, command: str) -> None:
+def _follow_again(item_id: int, command: str) -> WorkItem:
     """Follow the command item `item_id`, submitted before, to its end; Ctrl-C as `_stop`."""
+    followed = _Followed()
     try:
-        ended = _run(lambda db: _follow(db, item_id), name=command, migrate=False)
+        return _run(lambda db: _follow(db, item_id, followed), name=command, migrate=False)
     except KeyboardInterrupt:
 
         async def found(db: DatabaseGate) -> WorkItem | None:
@@ -305,16 +380,19 @@ def _follow_again(item_id: int, command: str) -> None:
 
         item = _run(found, name=command, migrate=False)
         assert item is not None  # followed until now
-        _stop(item, command)
-    _ended(ended)
+        _stop(item, command, followed)
 
 
 @work_app.command("follow")
 def work_follow(item_id: Annotated[int, typer.Argument(help="The work item's id.")]) -> None:
     """Follow a command's work item to its end, as the command did before Ctrl-C left it to
     run: its output from the start, its files' lines written once each. Only a command's: the
-    other work items are `serve`'s own."""
-    _follow_again(item_id, "work follow")
+    other work items are `serve`'s own. One `serve` stopped under is not submitted again here:
+    run its command again, which goes on from what it did."""
+    ended = _follow_again(item_id, "work follow")
+    if _stopped(ended):
+        raise SystemExit(f"item {ended.id}: {ended.error}; run its command again to go on")
+    _ended(ended)
 
 
 # -- an evaluation's outputs: the item writing them, named beside them ----------------------------
@@ -326,12 +404,11 @@ def _sidecar(output: Path, *, directory: bool = False) -> Path:
     return output / "item.json" if directory else output.with_name(output.name + ".item")
 
 
-def _replayed(sidecars: list[Path], command: str) -> WorkItem | None:
+def _replayed(sidecars: Collection[Path], command: str) -> WorkItem | None:
     """Before an evaluation decides what is left to ask: the results of the items named in
     `sidecars` (the last to write each output) written into their files (`_Shown`, once each),
     so what they spent while no command followed them counts: their answers, their
-    reservations. Returns the one still open, if one is: the command follows it instead of
-    submitting another."""
+    reservations. Returns the one still open, if one is."""
     named = {
         (found["kind"], found["key"])
         for path in sidecars
@@ -359,21 +436,29 @@ def _replayed(sidecars: list[Path], command: str) -> WorkItem | None:
     return open_
 
 
-def _owned(sidecars: list[Path], kind: str, key: str) -> None:
+def _owned(sidecars: Collection[Path], kind: str, key: str) -> None:
     """Name the item about to be submitted (`kind`, `key`) as the one writing the outputs of
-    `sidecars`: written before it is, so no item writes unnamed."""
+    `sidecars`: written before it is, so no item writes unnamed, each through a sibling that
+    replaces it whole, so a kill leaves the old name or the new."""
     for path in sidecars:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"kind": kind, "key": key}) + "\n", encoding="utf-8")
+        fresh = path.with_name(path.name + ".tmp")
+        fresh.write_text(json.dumps({"kind": kind, "key": key}) + "\n", encoding="utf-8")
+        fresh.replace(path)
 
 
-def _resumed(sidecars: list[Path], command: str) -> bool:
-    """`_replayed`, and when an item still writes into the outputs, follow it to its end
-    instead (True): the owner runs the command again for what it leaves."""
+def _resumed(sidecars: Collection[Path], command: str) -> bool:
+    """`_replayed`, and when an item still writes into the outputs, follow it to its end first,
+    so no second item writes beside it. True when the command is done with it: the item ended
+    but for `serve` stopping under it, after which the command goes on to what is left."""
     if (still := _replayed(sidecars, command)) is None:
         return False
     console.print(f"item {still.id} still writes into these outputs: following it")
-    _follow_again(still.id, command)
+    ended = _follow_again(still.id, command)
+    if _stopped(ended):
+        console.print(f"item {ended.id}: {ended.error}; going on from what it did")
+        return False
+    _ended(ended)
     return True
 
 
@@ -470,7 +555,11 @@ def nightly(
     fetch: Annotated[bool, typer.Option(help="Harvest arXiv first.")] = True,
     days: Annotated[int | None, typer.Option(help="Look back this many days.")] = None,
     limit: Annotated[
-        int | None, typer.Option(help="At most this many papers per step (a trial run).")
+        int | None,
+        typer.Option(
+            help="At most this many papers per step (a trial run), per work item: one submitted "
+            "again after `serve` stops counts afresh."
+        ),
     ] = None,
     digests: Annotated[
         bool,
@@ -690,9 +779,10 @@ def eval_classify(
     titles and abstracts from the configured database and writes its answers only to `out`, as
     `serve` answers. Its calls are journalled on an evaluation run: production's reuse and price
     estimates leave them out, and only `eval replay`'s estimate reads them. A run resumes where
-    it stopped, asking only what `out` does not hold. Each candidate's file names the item that
-    last wrote it (`<candidate>.jsonl.item`): a run first writes in what that item answered
-    while no command followed it, and follows it instead while it still runs."""
+    it stopped, asking only what `out` does not hold, and so does an item `serve` stopped under,
+    submitted again. Each candidate's file names the item that last wrote it
+    (`<candidate>.jsonl.item`): a run first writes in what that item answered while no command
+    followed it, and follows it first while it still runs."""
     import tomllib  # noqa: PLC0415
 
     from litwatch.config import Models, RoleConfig  # noqa: PLC0415
@@ -711,25 +801,33 @@ def eval_classify(
     found = {p.id for p in _run(lambda db: _papers(db, ids), name=command, migrate=False)}
     if missing := len(ids) - len(found):
         console.print(f"[yellow]{missing} papers are not in the database and are left out[/yellow]")
-    chosen = []
-    for name, path in paths.items():
-        role = RoleConfig.model_validate(roles[name])
-        asked = classify.fingerprint(Models(classify=role), tree)
-        jsonl.mend(path)
-        try:
-            todo = classify.left(path, asked, [i for i in ids if i in found])
-        except ValueError as exc:
-            raise SystemExit(str(exc)) from exc
-        chosen.append(
-            {"name": name, "role": role.model_dump(mode="json"), "papers": todo, "out": str(path)}
-        )
-    if not any(c["papers"] for c in chosen):
+
+    def left() -> list[dict[str, Any]]:
+        """Each candidate's papers its file does not answer."""
+        chosen = []
+        for name, path in paths.items():
+            role = RoleConfig.model_validate(roles[name])
+            asked = classify.fingerprint(Models(classify=role), tree)
+            jsonl.mend(path)
+            try:
+                todo = classify.left(path, asked, [i for i in ids if i in found])
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
+            chosen.append(
+                {"name": name, "role": role.model_dump(mode="json"), "papers": todo,
+                 "out": str(path)}
+            )  # fmt: skip
+        return chosen
+
+    def again(scope: dict[str, Any]) -> dict[str, Any] | None:
+        chosen = left()
+        return scope | {"candidates": chosen} if any(c["papers"] for c in chosen) else None
+
+    scope = {"tree": tree.model_dump(mode="json"), "concurrency": concurrency}
+    if (first := again(scope)) is None:
         console.print("nothing left to ask: each file holds its answers")
         return
-    scope = {"tree": tree.model_dump(mode="json"), "concurrency": concurrency}
-    key = str(uuid.uuid4())
-    _owned(sidecars, commands.kind("classify"), key)
-    _submit("classify", scope | {"candidates": chosen}, command=command, key=key)
+    _submit("classify", first, command=command, sidecars=sidecars, again=again)
 
 
 @eval_app.command("classify-report")
@@ -780,9 +878,13 @@ def eval_replay(
     """Run the labelled and missed papers through the current classification, keyword check
     and grading (feedback.md, evaluation). A dry run: it writes to the evaluation tables only.
     Shows what it would cost and asks first; `serve` runs it, under its configuration, which
-    must be the one estimated with (--config); a run cut short goes on with --resume."""
+    must be the one estimated with (--config); a run cut short goes on with --resume. A replay
+    has one item open at a time (keyed by its run): --resume follows the one still open first,
+    and an item `serve` stopped under is submitted again, going on from what it recorded."""
     from litwatch.quality import replay  # noqa: PLC0415
 
+    if resume is not None and _following_replay(resume):
+        return
     cfg = configuration.load(config)
     sample = _counts(negatives or [], "--negatives")
     if unknown := (set(cohort or []) | set(sample)) - set(replay.COHORTS):
@@ -830,10 +932,33 @@ def eval_replay(
         params = {"cohorts": cohort, "negatives": sample, "seed": replay.SEED, "limit": limit}
         return {"eval_run_id": await replay.start(unit, cfg, r, params, note)}
 
+    def keyed(scope: dict[str, Any]) -> str:
+        return str(scope["eval_run_id"])  # one item open per replay: a second is the same
+
     if r.eval_run_id is None:
-        _submit("replay", {}, command="eval replay", opening=start)
+        _submit("replay", {}, command="eval replay", opening=start, key=keyed)
         return
-    _submit("replay", {"eval_run_id": r.eval_run_id}, command="eval replay")
+    _submit("replay", {"eval_run_id": r.eval_run_id}, command="eval replay", key=keyed)
+
+
+def _following_replay(eval_run_id: int) -> bool:
+    """Follow the replay `eval_run_id`'s open item to its end, if it has one, as the item
+    writing into it (`_resumed`): True when the command is done with it."""
+
+    async def found(db: DatabaseGate) -> WorkItem | None:
+        async with db.read("replay: its item") as unit:
+            return await queue.find(unit, commands.kind("replay"), str(eval_run_id))
+
+    still = _run(found, name="eval replay", migrate=False)
+    if still is None or still.state == ItemState.ENDED:
+        return False
+    console.print(f"item {still.id} still runs replay {eval_run_id}: following it")
+    ended = _follow_again(still.id, "eval replay")
+    if _stopped(ended):
+        console.print(f"item {ended.id}: {ended.error}; going on from what it recorded")
+        return False
+    _ended(ended)
+    return True
 
 
 @eval_app.command("report")
@@ -928,9 +1053,9 @@ def eval_briefs(
     it reads the papers from the configured database and writes its answers only to `out`, as
     `serve` answers. Its calls are journalled on an evaluation run: production's reuse and price
     estimates leave them out, and only `eval replay`'s estimate reads them. A run resumes where
-    it stopped. `out` names the item that last wrote it
-    (`<out>.item`): a run first writes in what that item answered while no command followed it,
-    and follows it instead while it still runs."""
+    it stopped, and so does an item `serve` stopped under, submitted again. `out` names the item
+    that last wrote it (`<out>.item`): a run first writes in what that item answered while no
+    command followed it, and follows it first while it still runs."""
     from litwatch.quality import briefs, jsonl  # noqa: PLC0415
 
     command = "eval briefs"
@@ -946,34 +1071,34 @@ def eval_briefs(
     by_id = {p.id: p for p in found}
     if missing := [e.id for e in entries if e.id not in by_id]:
         console.print(f"[yellow]not in the database, left out: {', '.join(missing)}[/yellow]")
-    jsonl.mend(path)
-    try:
-        todo = briefs.left(
-            path,
-            briefs.fingerprint(role, text),
-            [(by_id[e.id], e) for e in entries if e.id in by_id],
-        )
-    except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
-    if not todo:
-        console.print(f"nothing left to ask: {path} holds each answer")
-        return
-    key = str(uuid.uuid4())
-    _owned(sidecars, commands.kind("briefs"), key)
-    _submit(
-        "briefs",
+
+    def again(scope: dict[str, Any]) -> dict[str, Any] | None:
+        """The scope with the entries `out` does not answer; None when it answers them all."""
+        jsonl.mend(path)
+        try:
+            todo = briefs.left(
+                path,
+                briefs.fingerprint(role, text),
+                [(by_id[e.id], e) for e in entries if e.id in by_id],
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        return scope | {"entries": [e.model_dump(mode="json") for _, e in todo]} if todo else None
+
+    first = again(
         {
             "out": str(path),
-            "entries": [e.model_dump(mode="json") for _, e in todo],
             "role": role.model_dump(mode="json"),
             "tree": seeds.taxonomy().model_dump(mode="json"),
             "concurrency": concurrency,
             "text": text,
             "wait_seconds": wait_minutes * 60,
-        },
-        command=command,
-        key=key,
+        }
     )
+    if first is None:
+        console.print(f"nothing left to ask: {path} holds each answer")
+        return
+    _submit("briefs", first, command=command, sidecars=sidecars, again=again)
 
 
 @eval_app.command("briefs-report")
@@ -1032,9 +1157,10 @@ def eval_ladders(
     records only to `out`, as `serve` answers; its calls are journalled on an evaluation run, as
     `eval classify`'s are. A run resumes where it stopped. Shows what it would cost and asks
     first, and stops at the ceiling. `serve` builds the requests again with its archive, and
-    refuses any that is not the one approved. `out` names the item that last wrote it
-    (`item.json`): a run first writes in what that item answered and reserved while no command
-    followed it, and follows it instead while it still runs."""
+    refuses any that is not the one approved. An item `serve` stopped under is submitted again,
+    for what of the approved calls its records do not settle. `out` names the item that last
+    wrote it (`item.json`): a run first writes in what that item answered and reserved while no
+    command followed it, and follows it first while it still runs."""
     if not (math.isfinite(ceiling) and ceiling > 0):
         raise typer.BadParameter("--ceiling is a positive amount")
     from litwatch.fulltext import archive_for  # noqa: PLC0415
@@ -1092,22 +1218,33 @@ def eval_ladders(
             )
             if not work or (not yes and not typer.confirm("Spend it?")):
                 return
+            approved = {(t.case.key, t.candidate.name) for t in work}
+
+            def calls(work: list[Any], spent: float) -> dict[str, Any]:
+                # Each call with the fingerprint of its request, as estimated and approved.
+                todo = [(t.case.key, t.candidate.name, ladders.asked(t.candidate, t.request))
+                        for t in work]  # fmt: skip
+                return {"todo": todo, "spent": spent}
+
+            def again(scope: dict[str, Any]) -> dict[str, Any] | None:
+                """The approved calls the records do not settle, and what the records spent."""
+                done = ladders.recorded(path)
+                left = [
+                    t
+                    for t in ladders.todo(chosen, found, built, done, only)
+                    if (t.case.key, t.candidate.name) in approved
+                ]
+                spent = ladders.spent(done, ladders.reservations(path))
+                return scope | calls(left, spent) if left else None
+
             scope = {
                 "out": str(path),
                 "cases": [c.model_dump(mode="json") for c in chosen],
                 "ladders": {r: x.model_dump(mode="json") for r, x in found.items()},
-                # Each call with the fingerprint of its request, as estimated and approved.
-                "todo": [
-                    (t.case.key, t.candidate.name, ladders.asked(t.candidate, t.request))
-                    for t in work
-                ],
                 "ceiling": ceiling,
-                "spent": spent,
                 "concurrency": concurrency,
-            }
-            key = str(uuid.uuid4())
-            _owned(sidecars, commands.kind("ladders"), key)
-            _submit("ladders", scope, command=command, key=key)
+            } | calls(work, spent)
+            _submit("ladders", scope, command=command, sidecars=sidecars, again=again)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
@@ -1174,7 +1311,13 @@ def publications(
     paper: Annotated[
         str | None, typer.Option(help="Look up this one paper, whether saved or not.")
     ] = None,
-    limit: Annotated[int, typer.Option(help="At most this many library papers.")] = 200,
+    limit: Annotated[
+        int,
+        typer.Option(
+            help="At most this many library papers, per work item: one submitted again after "
+            "`serve` stops counts afresh."
+        ),
+    ] = 200,
 ) -> None:
     """Look up published versions on DBLP for the library papers that are due, as the
     scheduler does daily, or for one paper. `serve` runs it."""
@@ -1289,7 +1432,11 @@ def openapi(out: Annotated[Path, typer.Argument(help="Where to write the schema.
 @app.command("fulltext")
 def fulltext_queue(
     limit: Annotated[
-        int | None, typer.Option(help="At most this many passes written or failed.")
+        int | None,
+        typer.Option(
+            help="At most this many passes written or failed, per work item: one submitted "
+            "again after `serve` stops counts afresh."
+        ),
     ] = None,
     wait: Annotated[
         int, typer.Option(help="Keep trying, for at most this many seconds, while some await text.")

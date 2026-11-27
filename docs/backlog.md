@@ -177,7 +177,9 @@ Its own project on top of A6: the labelled query set and goals first, then work 
     for each;
   - a submission whose commit acknowledgement is lost leaves its item committed and running while the command
     exits without its id: its output's `.item` names it, so a rerun finds it, but a command with no output
-    (`nightly`, `fulltext`) has nothing to find it by but `work_items`.
+    (`nightly`, `fulltext`) has nothing to find it by but `work_items`;
+  - a CLI nightly submitted while a scheduled fire or chunk is admitted: an extra wait or run, the run lock still
+    serializing.
 
 - **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
   `evals/` and homelab specifics out of the repository (the image ships `evals/labels/` for Run replay: they move

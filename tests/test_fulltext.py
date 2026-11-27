@@ -746,6 +746,24 @@ async def test_waiting_for_texts_keeps_to_the_limit_over_every_round(
     assert done["briefs_written"] == 2 and len(writer.asked) == 2
 
 
+async def test_a_commands_wave_cut_off_lets_go_of_the_passes_it_claimed(
+    db: Session, gate, monkeypatch
+):
+    """A command's passes (no run) cut off mid-wave, as `serve` stopping cuts its item off: the
+    passes it claimed are given back at once, for the command's next item, not left to their
+    lease."""
+    await graded(db, "central")
+
+    async def cut_off(*args, **kwargs):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(fulltext, "wave", cut_off)
+    with pytest.raises(asyncio.CancelledError):
+        await fulltext.work(gate, CONFIG, archive(FakeArchive()), models=Writer().gate(CONFIG))
+    found = await (await db.execute("SELECT state, lease_until FROM fulltext_passes")).fetchall()
+    assert found and {(r["state"], r["lease_until"]) for r in found} == {("awaiting_text", None)}
+
+
 # -- passes as work items (docs/plans/a2-work-gate.md, P2) -----------------------------------------
 
 

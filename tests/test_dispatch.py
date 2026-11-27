@@ -661,7 +661,7 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
     recorder.aclose = aclose
     served, given = {}, {}
 
-    async def run(gate, workers, *, keys=None):
+    async def run(gate, workers, *, keys=None, supersede=False):
         served.update(workers)
         given.update(keys or {})
         await asyncio.Event().wait()

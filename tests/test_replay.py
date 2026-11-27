@@ -162,7 +162,7 @@ async def test_the_cli_replay_that_loses_the_database_as_it_starts_submits_nothi
     async def served(unit, kind, within):  # as if a `serve` ran the replay
         return True
 
-    monkeypatch.setattr(queue, "serving", served)
+    monkeypatch.setattr(queue, "served_here", served)
 
     labels = tmp_path / "labels"
     labels.mkdir()

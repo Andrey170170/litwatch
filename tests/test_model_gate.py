@@ -241,7 +241,7 @@ async def test_serve_closes_its_model_gate_though_its_work_gate_failed(db, monke
         def __init__(self, db) -> None:
             pass
 
-        async def run(self, workers, keys) -> None:
+        async def run(self, workers, keys, **_) -> None:
             raise RuntimeError("the work gate failed")
 
     def model_gate(database, config):

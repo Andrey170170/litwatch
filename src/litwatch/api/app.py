@@ -120,7 +120,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
             await _recover(models, config)
             for sweep in swept:
                 await sweep()
-            gate = asyncio.create_task(WorkGate(db).run(workers, keys=keys))
+            gate = asyncio.create_task(WorkGate(db).run(workers, keys=keys, supersede=True))
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield
     finally:

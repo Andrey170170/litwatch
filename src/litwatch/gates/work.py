@@ -153,10 +153,22 @@ async def _finished[T](task: asyncio.Task[T]) -> None:
         pass  # the task's own error is its owner's to read
 
 
+def _stop(handler: asyncio.Task) -> None:
+    """Cancel `handler` unless it was cancelled already: a second cancel would cut its cleanup
+    (its run's close, its claims' release) short."""
+    if not handler.cancelling():
+        handler.cancel()
+
+
 async def _stop_when(cancelling: asyncio.Event, handler: asyncio.Task) -> None:
     """Cancel `handler` once its owner asked to cancel its item."""
     await cancelling.wait()
-    handler.cancel()
+    _stop(handler)
+
+
+def _cancelled(unit: WriteUnit, item: WorkItem) -> Awaitable[bool]:
+    """End the item its owner cancelled, once its Worker has stopped, its lease live or not."""
+    return queue.end(unit, item, Outcome.FAILED, error=queue.CANCELLED, live=False)
 
 
 def _reap(item: WorkItem, handler: asyncio.Task) -> None:
@@ -228,17 +240,23 @@ class WorkGate:
         return taken
 
     async def run(
-        self, workers: Mapping[str, Worker], *, keys: Mapping[str, Collection[str]] | None = None
+        self,
+        workers: Mapping[str, Worker],
+        *,
+        keys: Mapping[str, Collection[str]] | None = None,
+        supersede: bool = False,
     ) -> None:
         """Serve the kinds of `workers`, each by its Worker, until cancelled; of a kind in
         `keys`, only the items of those keys (an integration's deliveries, which only a process
         that loads it can run). Cancelled, each claim's supervisor stops its Worker and gives
-        back the claim it still owns."""
+        back the claim it still owns; a command's, tried once, ends failed instead
+        (`store.work.once`). With `supersede` (`serve`'s gate), this process's `workers` row
+        replaces those of the processes before it on this host."""
         kinds = sorted(workers)
         self._keys = keys
         supervisors: set[asyncio.Task[None]] = set()
         with attributed(SYSTEM):
-            async with self._serving(kinds):
+            async with self._serving(kinds, supersede=supersede):
                 log.info("work gate on: %s", ", ".join(kinds))
                 try:
                     while True:
@@ -313,10 +331,7 @@ class WorkGate:
         """Own one committed claim to its settling: run its Worker under its lease, unless the
         lease ran out before it could start, or its owner cancelled it before."""
         if item.cancel_asked is not None:
-            await self._change(
-                "cancel",
-                lambda unit: queue.end(unit, item, Outcome.FAILED, error=queue.CANCELLED),
-            )
+            await self._change("cancel", lambda unit: _cancelled(unit, item))
             return
         if asyncio.get_running_loop().time() >= since + self.lease.total_seconds():
             # Its lease ran out before it could start: whoever runs next takes it.
@@ -326,22 +341,26 @@ class WorkGate:
         await self._run(item, worker, since)
 
     async def _run(self, item: WorkItem, worker: Worker, since: float) -> None:
-        """Run `item` by `worker` under its lease and settle it. Its owner's cancel stops the
-        Worker, which finishes its cleanup under the claim; the item then ends failed."""
+        """Run `item` by `worker` under its lease and settle it. The Worker is cancelled once at
+        most, so its cleanup runs to its end under the claim: by the gate stopping, its lease
+        lost, or (a command's) its owner's cancel, after which the item ends failed."""
         lost, cancelling = asyncio.Event(), asyncio.Event()
         handler = asyncio.create_task(self._handle(item, worker))
         beat = asyncio.create_task(self._heartbeat(item, handler, lost, since))
-        stopper = asyncio.create_task(_stop_when(cancelling, handler))
-        self._running[item.id] = cancelling
+        stopper = None
+        if queue.once(item.kind):  # only a command's owner cancels it
+            stopper = asyncio.create_task(_stop_when(cancelling, handler))
+            self._running[item.id] = cancelling
         try:
             try:
                 await asyncio.wait({handler})
             except asyncio.CancelledError:
-                if not lost.is_set():  # else the heartbeat did: a second cancel cuts its cleanup
-                    handler.cancel()
+                _stop(handler)  # unless the heartbeat or the cancel did: cleanup runs once
                 await asyncio.wait({handler})
                 _reap(item, handler)
-                if not lost.is_set():
+                if cancelling.is_set():
+                    await self._change("cancel", lambda unit: _cancelled(unit, item))
+                elif not lost.is_set():
                     await self._give_back(item)
                 raise
             if lost.is_set():
@@ -351,10 +370,7 @@ class WorkGate:
             if cancelling.is_set() and (handler.cancelled() or handler.exception() is not None):
                 log.warning("work: %s %s (item %s) cancelled by its owner", *_name(item))
                 _reap(item, handler)
-                await self._change(
-                    "cancel",
-                    lambda unit: queue.end(unit, item, Outcome.FAILED, error=queue.CANCELLED),
-                )
+                await self._change("cancel", lambda unit: _cancelled(unit, item))
                 return
             if handler.cancelled():  # by no one here: it stopped, so it is given back
                 await self._give_back(item)
@@ -362,7 +378,8 @@ class WorkGate:
             await self._settle(item, handler)
         finally:
             self._running.pop(item.id, None)
-            stopper.cancel()
+            if stopper is not None:
+                stopper.cancel()
             beat.cancel()
             try:
                 await asyncio.wait({beat})
@@ -380,6 +397,12 @@ class WorkGate:
         error = handler.exception()
         if isinstance(error, LeaseLostError):
             log.warning("work: %s %s (item %s) lost its lease", *_name(item))
+        elif error is not None and retryable(error) and queue.once(item.kind):
+            log.warning("work: %s %s (item %s) stopped: %s", *_name(item), error)
+            lost_db = f"{queue.STOPPED}: {_describe(error)}"
+            await self._change(
+                "fail", lambda unit: queue.end(unit, item, Outcome.FAILED, error=lost_db)
+            )
         elif error is not None and retryable(error):
             log.warning("work: %s %s (item %s) is tried again: %s", *_name(item), error)
             await self._change("try again", lambda unit: queue.again(unit, item))
@@ -400,7 +423,14 @@ class WorkGate:
 
     async def _give_back(self, item: WorkItem) -> None:
         """Give back a claim whose Worker has stopped (or never started), its lease live or not,
-        so whoever runs next takes it at once."""
+        so whoever runs next takes it at once; a command's ends failed instead (`STOPPED`), and
+        its command submits it again."""
+        if queue.once(item.kind):
+            await self._change(
+                "end",
+                lambda unit: queue.end(unit, item, Outcome.FAILED, error=queue.STOPPED, live=False),
+            )
+            return
         await self._change("give back", lambda unit: queue.again(unit, item, live=False))
 
     async def _change(self, what: str, change: Callable[[WriteUnit], Awaitable[bool]]) -> None:
@@ -451,15 +481,15 @@ class WorkGate:
                 break
             since = asked
         lost.set()
-        handler.cancel()
+        _stop(handler)
 
     @asynccontextmanager
-    async def _serving(self, kinds: list[str]) -> AsyncGenerator[None]:
+    async def _serving(self, kinds: list[str], *, supersede: bool) -> AsyncGenerator[None]:
         """This process's `workers` row, kept beating, and the listener, for the block. The row
         goes when the block ends, or sooner, as the gate stops taking work (`_retire`), so no
         command is accepted for a kind no one will run; a process killed leaves it until its
         heartbeat is a lease old."""
-        me = await self._register(kinds)
+        me = await self._register(kinds, supersede=supersede)
         tasks = [asyncio.create_task(self._listen()), asyncio.create_task(self._beat(me))]
         retired = False
 
@@ -484,13 +514,16 @@ class WorkGate:
             self._retire = None
             await retire()
 
-    async def _register(self, kinds: list[str]) -> int:
-        """Record this process as serving `kinds`, trying again while the database is lost."""
+    async def _register(self, kinds: list[str], *, supersede: bool) -> int:
+        """Record this process as serving `kinds` (superseding its host's earlier processes,
+        with `supersede`), trying again while the database is lost."""
+        host = socket.gethostname()
         while True:
             try:
                 async with self._write("register") as unit:
-                    name = f"{socket.gethostname()}:{os.getpid()}"
-                    return await queue.register(unit, name, kinds)
+                    return await queue.register(
+                        unit, f"{host}:{os.getpid()}", kinds, supersedes=host if supersede else None
+                    )
             except Exception as exc:
                 if not database_lost(exc):
                     raise

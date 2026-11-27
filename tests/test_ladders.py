@@ -30,7 +30,8 @@ async def run(work, models, out, ceiling, *, concurrency=8, progress=None) -> la
     """`eval ladders` as the command and `serve` share it: `out` held, the calls its records
     have not settled made, each record appended to its file as it comes (`progress` seeing
     each call's row)."""
-    with ladders.held(out) as done:
+    with ladders.locked(out):
+        done = ladders.recorded(out)
 
         async def keep(name: str, line: str) -> None:
             with (out / name).open("a", encoding="utf-8") as f:
@@ -511,15 +512,11 @@ def test_the_tables_compare_with_the_owner_and_the_own_model_over_what_both_answ
     assert P.id not in ladders.answers(found, refusals, failed, built)  # an error says nothing
 
 
-class Earlier:
-    """A command item's `Output` as `serve`'s ladders handler sees it: the lines its earlier
-    attempts kept, per file; what it writes now, kept."""
+class Written:
+    """A command item's `Output` as `serve`'s ladders handler sees it: what it writes, kept."""
 
-    def __init__(self, lines: dict[str, list[str]] | None = None) -> None:
-        self.lines, self.written = lines or {}, []
-
-    async def earlier(self, path: str) -> list[str]:
-        return self.lines.get(path, [])
+    def __init__(self) -> None:
+        self.written: list[tuple[str, str]] = []
 
     async def line(self, path: str, text: str) -> None:
         self.written.append((path, text))
@@ -528,7 +525,7 @@ class Earlier:
         pass
 
 
-async def handled(conn: Session, db, tmp_path, todo_of, earlier: Earlier | None = None):
+async def handled(conn: Session, db, tmp_path, todo_of):
     """`serve`'s handler of `eval ladders` on the cases judging P with each candidate, the
     scope's `todo` as `todo_of` gives it from the real fingerprints; the providers' calls."""
     from litwatch.core.work import ItemState, WorkItem
@@ -555,7 +552,7 @@ async def handled(conn: Session, db, tmp_path, todo_of, earlier: Earlier | None 
     item = WorkItem(7, "command:ladders", "k", "k", ItemState.RUNNING, datetime.now(UTC), 2, scope)
     serving = commands.Serving(db, Config(), ModelGate(Models(), providers))
     try:
-        result = await commands._ladders(serving, item, cast(Any, earlier or Earlier()))
+        result = await commands._ladders(serving, item, cast(Any, Written()))
     finally:
         calls = sum(len(p.calls) for p in providers.values())
         if calls == 0:
@@ -583,21 +580,3 @@ async def test_serve_refuses_a_ladder_call_whose_request_is_not_the_one_approved
     assert f"{judged(P)[0].key} nobody: no such candidate" in str(refused.value)
     _, calls = await handled(conn, db, tmp_path / "again", approved)
     assert calls == 2  # as approved, each candidate asked
-
-
-async def test_a_ladder_retry_refuses_an_earlier_attempts_overrun_before_any_call(
-    conn: Session, db, tmp_path
-):
-    """The item's own results, from an attempt before this one, are checked as a directory's
-    records are: a call that cost more than its reservation stops every later call."""
-
-    def approved(work):
-        return [(t.case.key, t.candidate.name, ladders.asked(t.candidate, t.request)) for t in work]
-
-    out = tmp_path / "runs"
-    dear = row(judged(P)[0].key, "other").model_copy(
-        update={"cost": 3.0, "reserved": 1.0, "attempt": "a1"}
-    )
-    earlier = Earlier({str(out / "judge.jsonl"): [dear.model_dump_json()]})
-    with pytest.raises(ValueError, match="cost more than its reservation"):
-        await handled(conn, db, tmp_path, approved, earlier)
