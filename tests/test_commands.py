@@ -8,10 +8,12 @@ real Postgres, the models fake."""
 
 import asyncio
 import contextlib
+import contextvars
 import functools
 import io
 import json
 import threading
+import time
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -38,7 +40,7 @@ from tests.conftest import TREE, paper
 from tests.fakes import ScriptedProvider
 from tests.scripted import CLASSIFY, CONFIG, ROLES, A, B, Scripted, decision
 from tests.sessions import Session, in_write
-from tests.working import CONFIG_TOML, command, served, until
+from tests.working import CONFIG_TOML, WAIT, command, served, until
 
 PING = Models(brief=RoleConfig(provider="anthropic", model="test-brief"))
 LABELS = Path(__file__).parent.parent / "evals" / "labels"
@@ -95,6 +97,23 @@ def short_leases(monkeypatch):
     monkeypatch.setattr(
         app_module, "WorkGate", functools.partial(WorkGate, lease=timedelta(seconds=0.6))
     )
+
+
+def following(monkeypatch, item_id: int) -> threading.Event:
+    """Set (across threads: the command runs in one) once the command follows `item_id`."""
+    real, started = cli._follow, threading.Event()
+
+    async def follow(db, followed_id, followed=None):
+        if followed_id == item_id:
+            started.set()
+        return await real(db, followed_id, followed)
+
+    monkeypatch.setattr(cli, "_follow", follow)
+    return started
+
+
+async def until_following(started: threading.Event) -> None:
+    assert await asyncio.to_thread(started.wait, 10), "the command never followed the item"
 
 
 def interrupted(monkeypatch, when: threading.Event) -> None:
@@ -405,8 +424,9 @@ async def test_an_evaluation_rerun_follows_its_item_while_it_still_runs(
     held.name = "openrouter"
     async with served(db, Config(), models=ModelGate(Models(), {"openrouter": held})):
         ids, argv, path = await _classify_left_running(conn, db, tmp_path, monkeypatch, held)
+        started = following(monkeypatch, (await items(conn, "classify"))[0]["id"])
         again = asyncio.create_task(command(conn, tmp_path, monkeypatch, *argv))
-        await asyncio.sleep(0.5)
+        await until_following(started)
         held.release.set()
         result = await asyncio.wait_for(again, 20)
     assert result.exit_code == 0, result.output
@@ -490,10 +510,11 @@ async def test_a_replay_resumed_follows_its_open_item_before_it_estimates(
             return (await items(conn, "replay"))[0]["state"] == "running"
 
         await until(running, "serve to run the replay")
+        started = following(monkeypatch, detached.id)
         again = asyncio.create_task(
             command(conn, tmp_path, monkeypatch, "eval", "replay", "--resume", "41", "--yes")
         )
-        await asyncio.sleep(0.5)
+        await until_following(started)
         release.set()
         result = await asyncio.wait_for(again, 20)
     assert result.exit_code == 0, result.output
@@ -570,8 +591,9 @@ async def test_an_evaluation_rerun_asking_more_follows_the_open_item_then_asks_t
         more = classify.load(LABELS).papers[:12]
         await in_write(conn, papers_store.upsert, [paper(i, title=f"Paper {i}") for i in more])
         wider = (*argv[:-1], "12")
+        started = following(monkeypatch, (await items(conn, "classify"))[0]["id"])
         again = asyncio.create_task(command(conn, tmp_path, monkeypatch, *wider))
-        await asyncio.sleep(0.5)
+        await until_following(started)
         held.release.set()
         result = await asyncio.wait_for(again, 20)
     assert result.exit_code == 0, result.output
@@ -700,10 +722,12 @@ async def test_yes_to_cancel_an_item_that_ended_done_meanwhile_exits_as_it_ended
 
     def confirm(*args, **kwargs) -> bool:  # the item ends while the owner reads the question
         loop.call_soon_threadsafe(held.release.set)
+        deadline = time.monotonic() + WAIT
         while (
-            asyncio.run_coroutine_threadsafe(items(conn, "ping"), loop).result()[0]["state"]
+            asyncio.run_coroutine_threadsafe(items(conn, "ping"), loop).result(WAIT)[0]["state"]
             != "ended"
         ):
+            assert time.monotonic() < deadline, "the ping's item never ended"
             threading.Event().wait(0.05)
         return True
 
@@ -744,8 +768,9 @@ async def test_a_reattached_evaluation_whose_item_stops_waits_for_serve_and_goes
     models = ModelGate(Models(), {"openrouter": held})
     async with served(db, Config(), models=models):
         ids, argv, path = await _classify_left_running(conn, db, tmp_path, monkeypatch, held)
+        started = following(monkeypatch, (await items(conn, "classify"))[0]["id"])
         again = asyncio.create_task(command(conn, tmp_path, monkeypatch, *argv))
-        await asyncio.sleep(0.5)  # it follows the item left running
+        await until_following(started)  # it follows the item left running
     (first,) = await items(conn, "classify")
     assert first["error"] == queue.STOPPED and not again.done()
     (cut,) = await rows(conn, "SELECT error FROM runs WHERE work_id = %s", first["id"])
@@ -961,3 +986,58 @@ async def test_ladders_with_no_serve_and_the_archive_down_still_drains_what_its_
     assert isinstance(result.exception, ArchiveUnavailable)  # no request is built
     assert ladders.reservations(out) == {"a1": 0.5}
     assert [r.attempt for r in ladders.rows(out)] == ["a1"]
+
+
+async def test_ctrl_c_as_a_replacement_commits_asks_about_it_not_the_stopped_one(
+    conn: Session, db, tmp_path, monkeypatch
+):
+    """`serve` stops under the ping's item, and Ctrl-C comes once its replacement committed but
+    before its submission returned: the command finds the replacement by its key and asks
+    about it, not about the stopped item it followed before."""
+    held, loop, mine = Held(), asyncio.get_running_loop(), contextvars.copy_context()
+    real, made = queue.submit, []
+
+    async def submit(unit, kind, key, **kwargs):
+        if not made:
+            made.append(await real(unit, kind, key, **kwargs))
+            return made[0]
+        # The replacement commits (here in the test's session, in the test's context, not
+        # this unit's), and Ctrl-C comes before its submission returns.
+        committed = in_write(conn, real, kind, key, **kwargs)
+        sent = mine.copy().run(asyncio.run_coroutine_threadsafe, committed, loop)
+        made.append(sent.result(WAIT))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(queue, "submit", submit)
+    monkeypatch.setattr(cli, "FOLLOW_SECONDS", 0.05)
+    models = ModelGate(PING, {"anthropic": held})
+    async with served(db, Config(), models=models):
+        ran = asyncio.create_task(
+            command(conn, tmp_path, monkeypatch, "ping", "brief", input="n\n")
+        )
+        await asyncio.to_thread(held.started.wait, WAIT)
+    async with served(db, Config(), models=models):
+        result = await asyncio.wait_for(ran, 20)
+        held.release.set()
+    assert len(made) == 2, result.output
+    stopped, replacement = made
+    assert result.exit_code == 130, result.output
+    assert f"item {replacement.id} goes on" in result.output
+    assert f"Cancel item {stopped.id}?" not in result.output
+
+
+async def test_ctrl_c_on_work_follow_of_an_item_no_command_owns_asks_nothing(
+    conn: Session, tmp_path, monkeypatch
+):
+    """`work follow` of a `serve` item, cut by Ctrl-C before `_follow` read its kind: refused
+    as `_follow` refuses it, with no question to cancel what no command owns."""
+
+    async def cut(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    item = await in_write(conn, queue.submit, "fulltext", "1")
+    monkeypatch.setattr(cli, "_follow", cut)
+    result = await command(conn, tmp_path, monkeypatch, "work", "follow", str(item.id), input="y\n")
+    assert isinstance(result.exception, SystemExit), result.output
+    assert f"no command's work item {item.id}" in result.output
+    assert "Cancel item" not in result.output

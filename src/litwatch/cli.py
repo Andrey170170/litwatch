@@ -172,6 +172,9 @@ def _submit(
     ) -> WorkItem:
         nonlocal committing
         committing = False
+        # The item followed before (one stopped) is not this one: until this submission
+        # returns, a Ctrl-C finds it by the key it records (`_interrupted`).
+        followed.item = followed.key = None
         async with db.write(f"{name}: submit") as unit:
             if not await queue.served_here(unit, work_kind, LEASE):
                 if refuse:
@@ -479,7 +482,8 @@ def _follow_again(item_id: int, command: str) -> WorkItem:
                 return await queue.get(unit, item_id)
 
         item = _run(found, name=command, migrate=False)
-        assert item is not None  # followed until now
+        if item is None or not queue.once(item.kind):  # cut before `_follow` checked it
+            raise SystemExit(f"no command's work item {item_id}") from None
         _stop(item, command, followed)
 
 

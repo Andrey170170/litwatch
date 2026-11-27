@@ -69,6 +69,9 @@ POLL_SECONDS = 30.0
 # a unit holds, a claim a peer is making), and before registering again after the database
 # was lost.
 RETRY_SECONDS = 1.0
+# How long retiring this process's `workers` row waits for a submission holding it, so a
+# stopping gate's supervisors are not kept waiting on a command's unit.
+RETIRE_WAIT = timedelta(seconds=5)
 # The gate's own bookkeeping.
 SYSTEM = Attribution.system("work gate")
 
@@ -508,7 +511,7 @@ class WorkGate:
             await asyncio.gather(*tasks, return_exceptions=True)
             try:
                 async with self._write("retire") as unit:
-                    await queue.retire(unit, me)
+                    await queue.retire(unit, me, RETIRE_WAIT)
             except Exception:
                 log.warning("work: this process's worker row stays", exc_info=True)
 

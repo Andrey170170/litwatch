@@ -93,6 +93,8 @@ Found in A2 P4's last review round and fix checks, and in P5's review, each reac
   no deadline sends a second paid request.
 - **A nightly's call can be released past its drain** (`Batcher._follow`, `llm/batches.py`), by up to one poll
   interval plus the status and results reads' budgets (`POLL_SECONDS`, `OPERATION_SECONDS`).
+- **A replay can spend past its confirmed estimate.** A replay run by `serve` (`jobs/commands.py`) regrades papers
+  whose text changed after its estimate was confirmed, without asking again (found in #190's review).
 - **The cleanup that removes this class.** Several places decide whether a batched request's answer is already known
   or paid for: `CallJournal.in_batch`, `Gateway._batched` and its cache recheck in `_ask`, and `Batcher.attach` and
   `_taken`. One owner per batch in the gate, holding its waiters and its final result in one map, would take that

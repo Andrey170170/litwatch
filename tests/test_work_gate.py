@@ -1175,7 +1175,9 @@ async def test_a_commands_item_gets_one_attempt_however_its_serve_stops(conn: Se
     assert found.error.startswith(f"{queue.STOPPED}: OperationalError")
 
 
-async def test_a_gate_stopping_while_a_cancel_cleans_up_lets_the_cleanup_finish(conn: Session, db):
+async def test_a_gate_stopping_while_a_cancel_cleans_up_lets_the_cleanup_finish(
+    conn: Session, db, monkeypatch
+):
     """The owner cancels a command's item and `serve` stops while its cleanup runs: the Worker is
     not cancelled a second time, so its cleanup ends (its run closed) and the item ends as the
     owner asked (`CANCELLED`), not given back."""
@@ -1204,8 +1206,19 @@ async def test_a_gate_stopping_while_a_cancel_cleans_up_lets_the_cleanup_finish(
         await queue.cancel(unit, submitted.id)
     async with asyncio.timeout(WAIT):
         await cleaning.wait()
+    from litwatch.gates import work as work_gate  # noqa: PLC0415
+
+    real, stopping = work_gate._stop, asyncio.Event()
+
+    def stop(handler: asyncio.Task, why: str) -> None:
+        real(handler, why)
+        if why == queue.STOPPED:
+            stopping.set()  # the supervisor has handled the gate's stop
+
+    monkeypatch.setattr(work_gate, "_stop", stop)
     running.cancel()  # `serve` stops
-    await asyncio.sleep(0.2)
+    async with asyncio.timeout(WAIT):
+        await stopping.wait()
     release.set()
     with contextlib.suppress(asyncio.CancelledError):
         async with asyncio.timeout(WAIT):
@@ -1305,3 +1318,34 @@ async def test_a_command_that_waits_after_its_owner_cancelled_it_ends_cancelled(
         await until(state_is(conn, submitted.id, ItemState.ENDED), "the item ended")
     found = await item(conn, submitted.id)
     assert (found.outcome, found.error) == (Outcome.FAILED, queue.CANCELLED)
+
+
+async def test_a_stopping_gate_does_not_wait_on_a_submission_holding_its_row(
+    conn: Session, db, other, monkeypatch
+):
+    """A command's submit unit holds the `workers` row (`served_here`, FOR SHARE) as `serve`
+    stops: retiring the row waits for it at most `RETIRE_WAIT`, so the supervisors are still
+    cancelled and the running command ends `STOPPED`; the row stays, to age out."""
+    from litwatch.gates import work as work_gate  # noqa: PLC0415
+
+    monkeypatch.setattr(work_gate, "RETIRE_WAIT", timedelta(milliseconds=200))
+    started = asyncio.Event()
+
+    async def worker(item: WorkItem) -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    submitted = await submit(db, "command:test", "1")
+    gate = WorkGate(db, lease=LONG, poll=60)
+    running = asyncio.create_task(gate.run({"command:test": worker}))
+    async with asyncio.timeout(WAIT):
+        await started.wait()
+    async with other.transaction():
+        await other.execute("SELECT id FROM workers FOR SHARE")
+        running.cancel()  # `serve` stops while the submission holds its row
+        with contextlib.suppress(asyncio.CancelledError):
+            async with asyncio.timeout(WAIT):
+                await running
+        ended = await item(conn, submitted.id)
+        assert (ended.outcome, ended.error) == (Outcome.FAILED, queue.STOPPED)
+    assert len(await (await conn.execute("SELECT id FROM workers")).fetchall()) == 1

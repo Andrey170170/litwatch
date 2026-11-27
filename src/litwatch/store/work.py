@@ -676,7 +676,13 @@ async def beat(unit: WriteUnit, worker_id: int) -> None:
     await unit.execute("UPDATE workers SET heartbeat_at = now() WHERE id = %s", (worker_id,))
 
 
-async def retire(unit: WriteUnit, worker_id: int) -> None:
+async def retire(unit: WriteUnit, worker_id: int, wait: timedelta) -> None:
+    """Delete this process's `workers` row, waiting at most `wait` for a submission holding it
+    (`served_here`): past that the row's lock is not had (`LockNotAvailable`), and it stays
+    until its heartbeat is a lease old."""
+    await unit.execute(
+        "SELECT set_config('lock_timeout', %s, true)", (f"{wait.total_seconds() * 1000:.0f}ms",)
+    )
     await unit.execute("DELETE FROM workers WHERE id = %s", (worker_id,))
 
 

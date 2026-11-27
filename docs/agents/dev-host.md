@@ -51,8 +51,12 @@ env -u ANTHROPIC_BASE_URL uv run litwatch …
 
   ```sh
   env -u ANTHROPIC_BASE_URL LITWATCH_STRICT_GATES=1 LITWATCH_API_TOKEN=dev uv run litwatch serve --port 8767 &
+  timeout 120 sh -c 'until curl -fsS http://127.0.0.1:8767/healthz >/dev/null; do sleep 1; done'
   env -u ANTHROPIC_BASE_URL uv run litwatch nightly --no-fetch --limit 5
   ```
+
+  `/healthz` answers once `serve`'s startup is done, its `workers` row written, so the command is not refused
+  while `serve` is still starting.
 
   With no `serve` on the database, the command refuses and writes nothing. A command's item gets one attempt: a
   `serve` that stops while it runs it ends it failed, `serve stopped while it ran`, and the command says so, waits
