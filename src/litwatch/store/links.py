@@ -7,11 +7,12 @@ owner's is keyed afresh each time. Each finds item carries its paper in its scop
 paper's finds are read (`latest_find`, `owners_find`). A re-check is keyed by its link, and its
 schedule is its item's `not_before` and the link's `rechecks`.
 
-Lock order. A find's answer is written in its item's unit: the item's row (the fence), then the
-paper's links, deleted and inserted (finds are admitted one at a time), then each placeholder's
-re-check item, in link id order. A re-check's unit: its item's row (the fence), its link's row
-(`locked`), then its own item's next turn. A submission of a find takes the paper's lock
-before the item's row, as every settle does (a change of the paper, or intake's page)."""
+Lock order. A find's answer is written in its item's unit: the item's row (the fence), the
+paper's row shared (`store.papers.dropped`), then the paper's links, deleted and inserted (finds
+are admitted one at a time), then each placeholder's re-check item, in link id order. A
+re-check's unit: its item's row (the fence), its link's row (`locked`), then its own item's
+next turn. A submission of a find takes the paper's lock before the item's row, as every settle
+does (a change of the paper, or intake's page)."""
 
 from __future__ import annotations
 

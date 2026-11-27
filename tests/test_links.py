@@ -21,7 +21,7 @@ from litwatch.intake import batch
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
-from litwatch.links import hosts
+from litwatch.links import adapter
 from litwatch.links.worker import FindWorker, RecheckWorker
 from litwatch.llm.context import spending
 from litwatch.store import links as store
@@ -381,7 +381,7 @@ async def test_a_hosts_api_says_what_a_link_holds(url, answers, checked):
             httpx.Response(answer) if isinstance(answer, int) else httpx.Response(200, json=answer)
         )
 
-    assert await hosts.check(url, mock(handle)) == checked
+    assert await adapter.check(url, mock(handle)) == checked
 
 
 async def test_a_paper_dropped_during_its_find_keeps_its_links(held: Session, db):

@@ -348,8 +348,9 @@ class Found:
 class Deep:
     name = "deep"
     description = (
-        "Writes a Deep card for every Focus must read and Area pick, unless unsaved, and for "
-        "any paper the owner asks about, through the full-text queue."
+        "Writes a Deep card for every Focus must read and Area pick, unless unsaved or "
+        "`automatic` is off, and for any paper the owner asks about, through the full-text "
+        "queue; finds where papers release their code and weights."
     )
 
     def __init__(

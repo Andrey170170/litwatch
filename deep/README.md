@@ -4,7 +4,8 @@ The deep service: an agent with one JavaScript REPL tool reads a paper and write
 ([`docs/specs/deep-read.md`](../docs/specs/deep-read.md)), a reviewer and a blind reader on the same model score
 the read, and the writer revises it at most twice. litwatch's `deep` integration submits papers to it (`POST /process`) and polls for
 the result (`GET /jobs/<id>`); what a finished job carries is in [`docs/integrations.md`](../docs/integrations.md).
-The service writes reads only. A Deep card from before the read stays as litwatch stored it.
+The service writes reads, and finds papers' release links (below); it writes no Deep card. A Deep card from before the
+read stays as litwatch stored it.
 
 A submission may carry an `Idempotency-Key` header (litwatch sends its attempt): a key the
 service still has is answered `200` with that key's job instead of starting another, so a

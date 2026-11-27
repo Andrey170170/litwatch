@@ -36,7 +36,7 @@ from litwatch.core.work import WorkItem
 from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Done, Later
 from litwatch.integrations.deep import Deep, find_input
-from litwatch.links import hosts
+from litwatch.links import adapter
 from litwatch.store import links as store
 from litwatch.store import papers as papers_store
 from litwatch.store import work
@@ -116,7 +116,7 @@ class RecheckWorker:
             link = await store.get(unit, link_id)
         if link is None or not rechecked_again(link.state, link.rechecks):
             return  # replaced by a find since, or no longer due one
-        checked = await hosts.check(link.url, self.http)
+        checked = await adapter.check(link.url, self.http)
         at = datetime.now(UTC)
         async with self.db.write("re-check a link") as unit:
             link = await store.locked(unit, link_id)

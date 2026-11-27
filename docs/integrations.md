@@ -318,7 +318,7 @@ or weights, once per paper and arXiv version for good, "none found" included, an
 for a new version; the owner's "Find links" (`POST /api/papers/<id>/links`) always runs a fresh
 one. Its answer replaces the paper's links (`release_links`: url, kind, access state, license,
 when checked, what set it), in the unit that ends its item. A placeholder link on GitHub or
-Hugging Face is checked again by a plain request to their API (`links.hosts`), a week apart,
+Hugging Face is checked again by a plain request to their API (`links.adapter`), a week apart,
 four times, then left alone; no other link is. The paper page shows each link as a chip coloured
 by its state, and `get_paper` lists them. Digests and the Notion export do not show them yet.
 

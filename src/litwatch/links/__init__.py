@@ -8,7 +8,7 @@ owner's "find links", a fresh one each time (`request`). Each is worked by `work
 whose answer replaces the paper's links and is recorded with its item's result in one unit
 (`record`), so an item tried again after that commit ends without asking again. A placeholder
 link is checked again a week later, four times at most, by a plain request to its host's API
-(`worker.RecheckWorker`, `hosts`); no other link is."""
+(`worker.RecheckWorker`, `adapter`); no other link is."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from litwatch.core.contracts import deep as contract
 from litwatch.core.links import FoundBy, next_check, rechecked_again, wants_find
 from litwatch.core.work import WorkItem
 from litwatch.gates.database import WriteUnit
-from litwatch.links import hosts
+from litwatch.links import adapter
 from litwatch.store import links as store
 from litwatch.store import papers as papers_store
 from litwatch.store import work
@@ -60,6 +60,6 @@ async def record(
     paper_id, version, by = item.scope["paper_id"], item.scope["version"], item.scope["by"]
     found_by: FoundBy = "owner" if by == "owner" else "finder"
     for link in await store.replace(unit, paper_id, version, answer.links, found_by):
-        if rechecked_again(link.state, link.rechecks) and hosts.checkable(link.url):
+        if rechecked_again(link.state, link.rechecks) and adapter.checkable(link.url):
             await store.submit_recheck(unit, link, next_check(link.checked_at))
     await work.put_result(unit, item, result)

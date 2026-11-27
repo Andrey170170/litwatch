@@ -28,7 +28,7 @@ export interface JobInput {
 
 export type Runner = (input: JobInput, progress: Progress) => Promise<Outcome>;
 
-export const EMPTY: Stats = { cells: 0, turns: 0, input: 0, output: 0, reasoning: 0, cache_read: 0, list_cost: 0, seconds: 0 };
+const EMPTY: Stats = { cells: 0, turns: 0, input: 0, output: 0, reasoning: 0, cache_read: 0, list_cost: 0, seconds: 0 };
 
 /** What every queue's jobs keep, whatever they run. */
 export interface Kept {
