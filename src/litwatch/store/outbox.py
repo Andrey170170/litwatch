@@ -105,11 +105,20 @@ async def emit(unit: WriteUnit, type: str, paper_id: str | None = None, **payloa
 
 
 async def wake_all(unit: WriteUnit) -> None:
-    """Wake the delivery of every integration with a cursor (`wake`), in the order of their
+    """Wake the delivery of every integration with a cursor that a process delivers to (`wake`):
+    one whose `workers` row serves deliveries, for its keys or for all (`store.work.register`),
+    whatever its heartbeat (D4: one `serve`'s row, or one killed, which its replacement
+    supersedes as it registers). A cursor no one delivers to keeps its position and backoff,
+    and gets its turn from the startup sweep of a `serve` that loads it. In the order of their
     names, so two emitters lock the cursors in one order: the last write of a unit that
     emitted, since every such unit locks those rows."""
     rows = await (
-        await unit.execute("SELECT name FROM integration_cursors ORDER BY name")
+        await unit.execute(
+            "SELECT c.name FROM integration_cursors c WHERE EXISTS (SELECT 1 FROM workers w "
+            "WHERE %(kind)s = ANY(w.kinds) AND (NOT w.keys ? %(kind)s "
+            "OR w.keys -> %(kind)s ? c.name)) ORDER BY c.name",
+            {"kind": DELIVERY},
+        )
     ).fetchall()
     for r in rows:
         await wake(unit, r["name"])

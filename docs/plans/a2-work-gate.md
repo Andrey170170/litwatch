@@ -177,9 +177,11 @@ Found in a survey of the code at 548857e3:
   - P6's (1ac688b7): that step alone;
   - P5's: also the notes for rolling back P6 (automatic Deep reads, below);
   - P3's and P4's: also P5's step for the commands' items, with the evaluations drained before the switch;
-  - those before P3 (P2's, P1's and the image before the Work gate): the same. They read liveness from the columns,
-    which P7's rows leave empty, so an open run reads dead and a running job is taken back, as after a process that
-    died; with `serve` stopped, that is what they are.
+  - P2's: the same. It reads liveness from the columns, which P7's rows leave empty, so an open run reads dead and a
+    running job is taken back, as after a process that died; with `serve` stopped, that is what they are;
+  - P1's and the image before the Work gate: the same, and deep too. They predate T1: their LaTeX submissions carry
+    no `outline`, which today's deep requires, so deep is rolled back with litwatch as an image pair (T1's row), or
+    `[integrations.deep]` is disabled until the upgrade.
 
   None of them needs P3's step for its `command` items: no such item is left.
 - **Rolling back from P4: a reservation the image before does not count.** P4 counts a call's unknown charge at its
@@ -283,7 +285,7 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
 | **P4** | **One Model gate.** Providers, limits and batchers per (provider, deadline) in one gate per process; ceiling, deadline and journal from the work context; recovery once at startup (a batch a live claim then held, once that claim's lease lapses); `work_id` on calls; `eval ladders` through it. One task per batch, known by one identity (its first call's id) and registered before its rows commit, with its own deadline; a call with no deadline looks once at a batch (its next look or lookup; none while it is being made), a limit of its own, and one no one followed is settled as at a deadline; a nightly after its deadline drains it; a call sees the batches its gate follows, a live item's included. | V4; V3 again; then merge and deploy. |
 | **P5** | **CLI and attribution.** The model and pipeline commands submit and wait; evaluations carry their inputs and stream their results to their files; Ctrl-C asks whether to cancel or detach, and `litwatch work follow ID` picks an item back up. The API, MCP, monitor and CLI set request attribution, and the check turns strict. | V5, V6; then merge and deploy. |
 | **P6** | **Release links.** The finder's endpoint and prompt in deep; `release_links`; the triggers (an analysis, a new version, the owner's action); placeholder re-checks; the paper's page, the API and MCP; the automatic Deep read switch. | V7; then merge and deploy with deep's image. |
-| **P7** | **Cleanup.** The old liveness columns (`backend_pid`, `backend_start`, written through `store.runs.SESSION`) dropped, now that no image reads them, with a rollback step that adds them back; the P3 image's `command` items ended once, and no longer at every take-back; the deliveries of an integration no longer configured ended as `serve` starts; `digests`' and `failures`' error text stored as the others'; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
+| **P7** | **Cleanup.** The old liveness columns (`backend_pid`, `backend_start`, written through `store.runs.SESSION`) dropped, now that no image reads them, with a rollback step that adds them back; the P3 image's `command` items ended once, and no longer at every take-back; an event's wake and the take-back following the integrations `serve` delivers to (migration 0054), the others' turns ended; `digests`' and `failures`' error text stored as the others'; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
 | **T1** ∥ | **Deep track:** the shared contracts (D2), one LaTeX parser (D3), Pi to the newest release, `gpt-6.2-sol` for the Deep read (high effort), the finder's own model setting (`gpt-6.2-sol`, medium). Starts with P1; P6 needs it. | V8; deployed, and rolled back if need be, as a litwatch and deep image pair. |
 | **T2** ∥ | **OpenAI adapter:** the Responses API with structured output, the Batch API behind the batcher's interface, prices and bounds. Built against today's provider interface from P1 on; it moves into the gate in P4. | V4's adapter part; merged before P4 starts. |
 
@@ -350,12 +352,14 @@ Found while building, owned by the stage named.
   its commit and starts the item's supervisor with it. One shielded task per take is left, so a claim committing
   as the gate stops is still given back.
 - **Later (from P2, P7): deliveries are served by name.** `WorkGate.run(workers, keys=)` serves a kind for some
-  keys alone; `serve` gives it the integrations it loads, so a process takes, takes back and waits on only its own
-  deliveries. As it starts, `serve` ends failed ("integration not configured", `events.worker.end_unloaded`) the
-  open turns of every integration it does not load, which nothing would take; its sweep submits one again if the
-  integration comes back. An event's commit still wakes every integration with a cursor (`store.outbox.wake_all`),
-  so a dropped integration that keeps its cursor gets one pending turn again until the next start ends it. Built
-  for one `serve` (D4): a second one, loading other integrations, would end the first's turns.
+  keys alone; `serve` gives it the integrations that react to events (none, when none does), so a process takes,
+  takes back and waits on only its own deliveries. Its `workers` row records those keys (`workers.keys`, migration
+  0054), and an event's commit wakes only the cursors a row delivers to (`store.outbox.wake_all`), whatever its
+  heartbeat: one `serve`'s row, or a killed one's until its replacement registers. Each take-back ends failed
+  (`store.work.UNSERVED`) the turns of every other integration, pending or with their lease lapsed; one under a
+  live lease is left until it lapses. A cursor no one delivers to keeps its position and backoff, and a `serve`
+  that loads it again sweeps its first turn. Built for one `serve` (D4): a second one, loading other integrations,
+  would end the first's turns and wake none of them.
 - **A3 (from P3): each job write that can change whether or when it runs arranges its chunk.** A job's chunk
   is a `job` item keyed by its id; such a write (its creation or queueing, a claim, progress, a wait, a finish or
   failure, a release) arranges its next chunk in its unit, from the job's row it locked (`store.jobs.arrange`,

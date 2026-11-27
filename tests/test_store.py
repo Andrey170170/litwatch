@@ -238,3 +238,52 @@ async def test_a_label_from_before_is_set_by_what_its_origin_says(conn: Session,
     assert [(r["topic"], r["set_by"]) for r in rows] == [
         ("a", "miss"), ("b", "reader"), ("c", "reader"), ("d", "reader"),
     ]  # fmt: skip
+
+
+# -- 0053: the old liveness columns, and the P3 image's command items ------------------------------
+
+SESSIONS = 53
+
+
+async def test_the_liveness_columns_go_and_a_p3_command_item_ends(conn: Session, monkeypatch):
+    """0053 drops `backend_pid` and `backend_start` from `runs` and `jobs`, and ends the P3
+    image's `command` item left running, freeing its admission; a CLI command's item and a
+    delivery keep their state."""
+    for table in await tables(conn):
+        await conn.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
+    every = db._migrations()
+    monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] < SESSIONS])
+    await store.migrate(conn)
+    await conn.execute(
+        "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until) VALUES "
+        "('command', 'p3', 'deep', 'running', gen_random_uuid(), now() + interval '1 hour'), "
+        "('command:ping', 'p5', 'p5', 'running', gen_random_uuid(), now() + interval '1 hour')"
+    )
+    await conn.execute(
+        "INSERT INTO work_items (kind, key, admission, state) "
+        "VALUES ('deliver', 'hook', 'deliver:hook', 'pending')"
+    )
+    monkeypatch.setattr(db, "_migrations", lambda: [m for m in every if m[0] <= SESSIONS])
+    assert await store.migrate(conn) == ["0053_drop_sessions.sql"]
+    left = await (
+        await conn.execute(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name IN ('runs', 'jobs') "
+            "AND column_name IN ('backend_pid', 'backend_start')"
+        )
+    ).fetchall()
+    assert left == []
+    rows = await (
+        await conn.execute("SELECT key, state, outcome, lease_token FROM work_items ORDER BY key")
+    ).fetchall()
+    states = {r["key"]: (r["state"], r["outcome"], r["lease_token"] is None) for r in rows}
+    assert states == {
+        "hook": ("pending", None, True),
+        "p3": ("ended", "failed", True),
+        "p5": ("running", None, False),
+    }
+    # Its admission is free: a Deep pass's item may run.
+    await conn.execute(
+        "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until) "
+        "VALUES ('deep', '1', 'deep', 'running', gen_random_uuid(), now() + interval '1 hour')"
+    )

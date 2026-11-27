@@ -150,8 +150,8 @@ Its own project on top of A6: the labelled query set and goals first, then work 
   - a CLI nightly submitted while a scheduled fire or chunk is admitted: an extra wait or run, the run lock still
     serializing;
   - overlapping `serve` processes can delete each other's live `workers` row (a registration supersedes every row);
-  - a `serve` that starts ends the delivery turns of every integration it does not load
-    (`events.worker.end_unloaded`), another `serve`'s included;
+  - a `serve` ends the delivery turns of every integration it does not deliver to (`store.work.UNSERVED`), another
+    `serve`'s included, and an event wakes the cursors any `workers` row lists, a dead one's until it is replaced;
   - two `serve`s on cloned databases sharing one deep can reuse each other's release-link find on deep where a paper
     and an item id coincide (the find's key, `links:<item>:<paper>`).
 
@@ -164,6 +164,9 @@ Its own project on top of A6: the labelled query set and goals first, then work 
 ## Outside the rework
 
 Built between milestones, on whatever structure exists then.
+
+- **Which roles move to OpenAI:** an evaluation, now that A2's OpenAI adapter is in, of which roles to run on the
+  owner's OpenAI credit (A2's spec, "Not in A2").
 
 - **Deep reads back on**, once models write well enough without the agent's heavy tooling. The Deep read
   ([`specs/deep-read.md`](specs/deep-read.md)) is built (P1 to P6) and off since 2026-11-15: the owner's read of P6

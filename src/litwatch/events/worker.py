@@ -1,7 +1,8 @@
 """The delivery Worker (docs/plans/a2-work-gate.md, P2): each work item of kind `deliver` is one
 turn of one integration's delivery (`events.dispatch`), keyed by its name. A process serves the
-keys of the integrations it loads alone (`keys`, which `serve` gives `WorkGate.run`); as it
-starts, it ends the turns of the integrations it does not load (`end_unloaded`).
+keys of the integrations it loads alone (`keys`, which `serve` gives `WorkGate.run`, none when
+none reacts to events): an event wakes only those (`store.outbox.wake_all`), and the gate's
+take-back ends a turn of any other (`store.work.UNSERVED`), whose cursor keeps its place.
 
 A turn sets the integration up, the first time in this process, then delivers one batch; one
 that hands nothing over calls the integration's `idle` hook, at most once every
@@ -31,16 +32,6 @@ from litwatch.store import outbox, work
 # How soon a turn comes again for events that committed behind an older transaction still
 # running: the outbox reads them once it ends.
 RETRY = timedelta(seconds=5)
-# How a turn for an integration no longer configured ends (`end_unloaded`).
-UNLOADED = "integration not configured"
-
-
-async def end_unloaded(db: DatabaseGate, loaded: list[str]) -> None:
-    """End failed (`UNLOADED`) every open turn for an integration not in `loaded`, which this
-    process, the one `serve`, will never take or take back. The sweep submits one again if the
-    integration is configured again."""
-    async with db.write("deliveries: end unloaded") as unit:
-        await work.end_unserved(unit, outbox.DELIVERY, loaded, UNLOADED)
 
 
 class DeliveryWorker:

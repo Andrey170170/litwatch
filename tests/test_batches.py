@@ -2031,7 +2031,7 @@ def a_work_item(item_id: int) -> Work:
     gate's bookkeeping, so its lease is not looked at)."""
     item = WorkItem(
         id=item_id,
-        kind="command",
+        kind="nightly",
         key=f"run {item_id}",
         admission="x",
         state=ItemState.RUNNING,

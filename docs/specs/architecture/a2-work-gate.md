@@ -1,11 +1,10 @@
 # A2. Work gate
 
 Status (2026-11-27): **built**, P1–P7, T1 and T2, deployed through P6; P7's deploy and the night that checks the
-milestone (V9) follow. The build plan, with its evidence, is [`plans/a2-work-gate.md`](../../plans/a2-work-gate.md).
-This is milestone A2 of [the architecture](../architecture.md): every
-background loop becomes a Worker over one Work gate, one Model gate serves the whole process, and every gate call
-knows what it serves. It also builds one new kind of work, the release-link finder, on the gate. Decisions from the
-shaping talk of 2026-11-23 (Q1–Q15).
+milestone (V9) follow. The build plan is [`plans/a2-work-gate.md`](../../plans/a2-work-gate.md). This is milestone A2
+of [the architecture](../architecture.md): every background loop becomes a Worker over one Work gate, one Model gate
+serves the whole process, and every gate call knows what it serves. It also builds one new kind of work, the
+release-link finder, on the gate. Decisions from the shaping talk of 2026-11-23 (Q1–Q15).
 
 ## Why
 

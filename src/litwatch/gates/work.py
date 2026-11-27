@@ -543,7 +543,7 @@ class WorkGate:
         while True:
             try:
                 async with self._write("register") as unit:
-                    return await queue.register(unit, name, kinds, supersede=supersede)
+                    return await queue.register(unit, name, kinds, self._keys, supersede=supersede)
             except Exception as exc:
                 if not database_lost(exc):
                     raise
