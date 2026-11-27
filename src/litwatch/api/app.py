@@ -56,6 +56,18 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
 
 
+async def _registered(work_gate: WorkGate, gate: asyncio.Task[None]) -> None:
+    """Wait until the Work gate has written its `workers` row, so a command finds `serve` once
+    its startup is over; a gate that failed first raises its error here."""
+    registered = asyncio.create_task(work_gate.registered.wait())
+    try:
+        await asyncio.wait({registered, gate}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        registered.cancel()
+    if not work_gate.registered.is_set():
+        await gate  # it ended before registering: its failure is raised
+
+
 @asynccontextmanager
 async def _running(app: FastAPI) -> AsyncIterator[None]:
     """One Work gate for the Workers the configuration enables: with the schedule on, the
@@ -120,7 +132,9 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
             await _recover(models, config)
             for sweep in swept:
                 await sweep()
-            gate = asyncio.create_task(WorkGate(db).run(workers, keys=keys, supersede=True))
+            work_gate = WorkGate(db)
+            gate = asyncio.create_task(work_gate.run(workers, keys=keys, supersede=True))
+            await _registered(work_gate, gate)
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield
     finally:

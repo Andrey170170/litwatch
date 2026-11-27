@@ -163,6 +163,7 @@ async def test_the_cli_replay_that_loses_the_database_as_it_starts_submits_nothi
         return True
 
     monkeypatch.setattr(queue, "served_here", served)
+    monkeypatch.setattr(queue, "serving", served)  # its preflight's look
 
     labels = tmp_path / "labels"
     labels.mkdir()

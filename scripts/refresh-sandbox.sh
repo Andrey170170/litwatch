@@ -108,7 +108,9 @@ if [[ -n "$production" ]]; then
   # - its outbox positions, production's transaction ids, which this cluster's snapshots
   #   cannot compare: every copied event moves to the first normal id, settled for any
   #   snapshot here, and every cursor to the end of the copy, its failures cleared, so a
-  #   sandbox integration handles only the sandbox's own events, never production's again.
+  #   sandbox integration handles only the sandbox's own events, never production's again;
+  # - its live command state: its `serve`'s `workers` rows, and every open command item ended,
+  #   so a sandbox `serve` never runs a command production's owner submitted.
   docker exec -i "$CONTAINER" psql -v ON_ERROR_STOP=1 -q -1 -U postgres -d "$NEXT" <<'SQL'
 UPDATE inference_calls SET error = 'sandbox: copied from production, not followed'
     WHERE batch_id IS NOT NULL AND output IS NULL AND error IS NULL;
@@ -117,6 +119,11 @@ UPDATE deep_attempts SET ended_at = now(), error = 'sandbox: copied from product
 UPDATE outbox SET xid = '3';
 UPDATE integration_cursors SET position_xid = '3', position = (SELECT coalesce(max(id), 0) FROM outbox),
     failing = NULL, failures = 0, retry_at = NULL, last_error = NULL, failed_at = NULL, skipped = 0;
+DELETE FROM workers;
+UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(),
+    error = 'sandbox: copied from production, not run', lease_token = NULL, lease_until = NULL,
+    resubmitted = false
+    WHERE (kind = 'command' OR kind LIKE 'command:%') AND state <> 'ended';
 SQL
 else
   # No `serve` works from the new database: the window is read in this process (`--here`).

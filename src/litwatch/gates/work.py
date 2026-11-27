@@ -186,6 +186,7 @@ class WorkGate:
     ) -> None:
         self.db, self.lease, self.poll = db, lease, poll
         self.listening = asyncio.Event()  # set while the listener is on
+        self.registered = asyncio.Event()  # set once its `workers` row is written
         self._wake = asyncio.Event()
         self._waiting = False
         # Renewals cut off at their lease's end, kept until they have unwound.
@@ -251,7 +252,9 @@ class WorkGate:
         that loads it can run). Cancelled, each claim's supervisor stops its Worker and gives
         back the claim it still owns; a command's, tried once, ends failed instead
         (`store.work.once`). With `supersede` (`serve`'s gate), this process's `workers` row
-        replaces those of the processes before it on this host."""
+        replaces every earlier one: under D4 one `serve` serves, so a row left by one killed,
+        whatever its host's name (a container recreated), advertises nothing any more.
+        `registered` is set once its row is written."""
         kinds = sorted(workers)
         self._keys = keys
         supervisors: set[asyncio.Task[None]] = set()
@@ -490,6 +493,7 @@ class WorkGate:
         command is accepted for a kind no one will run; a process killed leaves it until its
         heartbeat is a lease old."""
         me = await self._register(kinds, supersede=supersede)
+        self.registered.set()
         tasks = [asyncio.create_task(self._listen()), asyncio.create_task(self._beat(me))]
         retired = False
 
@@ -515,15 +519,13 @@ class WorkGate:
             await retire()
 
     async def _register(self, kinds: list[str], *, supersede: bool) -> int:
-        """Record this process as serving `kinds` (superseding its host's earlier processes,
-        with `supersede`), trying again while the database is lost."""
-        host = socket.gethostname()
+        """Record this process as serving `kinds` (in place of every earlier registration, with
+        `supersede`), trying again while the database is lost."""
+        name = f"{socket.gethostname()}:{os.getpid()}"
         while True:
             try:
                 async with self._write("register") as unit:
-                    return await queue.register(
-                        unit, f"{host}:{os.getpid()}", kinds, supersedes=host if supersede else None
-                    )
+                    return await queue.register(unit, name, kinds, supersede=supersede)
             except Exception as exc:
                 if not database_lost(exc):
                     raise

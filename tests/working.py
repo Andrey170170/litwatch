@@ -20,9 +20,8 @@ from litwatch.api import create_app
 from litwatch.config import Config, Schedule
 from litwatch.core.work import WorkItem
 from litwatch.gates import work as work_gate
-from litwatch.gates.context import Attribution, attributed
 from litwatch.gates.database import DatabaseGate, LeaseLostError
-from litwatch.gates.work import LEASE, Result, Worker, WorkGate
+from litwatch.gates.work import Result, Worker, WorkGate
 from litwatch.jobs.worker import JobWorker
 from litwatch.store import jobs as jobs_store
 from litwatch.store import work as queue
@@ -272,17 +271,10 @@ async def nightly_done(conn: Session) -> None:
 async def served(db: DatabaseGate, config: Config, **kwargs: Any) -> AsyncGenerator[FastAPI]:
     """`litwatch serve`'s app on `db` (open, the caller's) for the block, its lifespan running:
     the sweeps, then one Work gate with the Workers `config` enables, registered (a command
-    finds it serves) before the block; stopped at the end, as `serve` stops. `kwargs` go to
+    finds it serves) as the startup ends; stopped at the end, as `serve` stops. `kwargs` go to
     `create_app` (`models`, `publications`, `archive`)."""
     app = create_app("postgresql://unused", TOKEN, config, db=db, **kwargs)
     async with app.router.lifespan_context(app):
-
-        async def registered() -> bool:
-            with attributed(Attribution.system("test")):  # in a test's empty context too
-                async with db.read("test: serve registered") as unit:
-                    return await queue.serving(unit, "command:ping", LEASE)
-
-        await until(registered, "serve's Work gate to register")
         yield app
 
 

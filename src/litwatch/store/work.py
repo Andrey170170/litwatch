@@ -490,10 +490,21 @@ async def again(
     `not_before` (sooner if it was resubmitted meanwhile); when not given, at once, in the place
     in line it had (its `not_before`, as `take_back` keeps it). The lease must be unexpired but
     without `live`, which is for an item whose Worker has stopped (the gate giving it back as it
-    stops). False when the lease is no longer held."""
+    stops). A command's item whose owner asked to cancel it ends `CANCELLED` instead, as it
+    would have at its next claim. False when the lease is no longer held."""
     assert item.lease_token is not None  # a taken item has its lease
-    if await _held(unit, item.id, item.lease_token, live=live) is None:
+    held = await _held(unit, item.id, item.lease_token, live=live)
+    if held is None:
         return False
+    if held["cancel_asked"] is not None and once(item.kind):
+        await unit.execute(
+            "UPDATE work_items SET state = 'ended', outcome = 'failed', error = %s, "
+            "ended_at = %s, lease_token = NULL, lease_until = NULL, resubmitted = false "
+            "WHERE id = %s",
+            (CANCELLED, held["at"], item.id),
+        )
+        await _notify(unit, item.kind)
+        return True
     wanted = "LEAST(not_before, now())" if not_before is None else _WANTED
     await unit.execute(
         f"UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
@@ -645,14 +656,13 @@ async def results(unit: ReadUnit, item_id: int, after: int = 0) -> list[tuple[in
 # -- the processes that serve work items -----------------------------------------------------------
 
 
-async def register(
-    unit: WriteUnit, name: str, kinds: list[str], *, supersedes: str | None = None
-) -> int:
-    """Record a process serving `kinds` as `name`; returns its row's id. With `supersedes` (a
-    host), the rows of processes before it on that host go: one killed leaves its row, which
-    would advertise what it served until its heartbeat aged a lease."""
-    if supersedes is not None:
-        await unit.execute("DELETE FROM workers WHERE split_part(name, ':', 1) = %s", (supersedes,))
+async def register(unit: WriteUnit, name: str, kinds: list[str], *, supersede: bool = False) -> int:
+    """Record a process serving `kinds` as `name`; returns its row's id. With `supersede`
+    (`serve`'s), every earlier row goes in the same unit: under D4 one `serve` serves, and one
+    killed leaves its row, which would advertise what it served until its heartbeat aged a
+    lease, whatever host name its replacement runs under."""
+    if supersede:
+        await unit.execute("DELETE FROM workers")
     row = await (
         await unit.execute(
             "INSERT INTO workers (name, kinds) VALUES (%s, %s) RETURNING id", (name, kinds)
@@ -689,7 +699,7 @@ async def served_here(unit: WriteUnit, kind: str, within: timedelta) -> bool:
     a `serve` retiring its row (`retire`) waits for the submission, which its gate then leaves
     pending for the next `serve`, or the submission sees the row gone and is refused. A blank
     database, never migrated, has no `serve` either."""
-    if not await _migrated(unit):
+    if not await migrated(unit):
         return False
     rows = await (
         await unit.execute(
@@ -700,7 +710,7 @@ async def served_here(unit: WriteUnit, kind: str, within: timedelta) -> bool:
     return bool(rows)
 
 
-async def _migrated(unit: ReadUnit) -> bool:
+async def migrated(unit: ReadUnit) -> bool:
     """Whether the database has the work queue at all: a blank one, never migrated (no `serve`
     has started on it), has none."""
     row = await (

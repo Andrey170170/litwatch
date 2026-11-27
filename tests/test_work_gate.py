@@ -1218,35 +1218,21 @@ async def test_a_gate_stopping_while_a_cancel_cleans_up_lets_the_cleanup_finish(
     assert run["finished_at"] is not None
 
 
-async def test_only_a_commands_item_has_a_stopper(conn: Session, db):
-    """The cancel machinery is a command's alone: `serve`'s own items run with no stopper."""
-    gate = WorkGate(db, lease=LONG, poll=60)
-    seen: list[set[int]] = []
-
-    async def worker(item: WorkItem) -> Done:
-        seen.append(set(gate._running))
-        return Done()
-
-    own, mine = await submit(db, "fulltext", "1"), await submit(db, "command:test", "2")
-    async with serving(gate, {"fulltext": worker, "command:test": worker}):
-        await until(state_is(conn, own.id, ItemState.ENDED), "serve's own item ended")
-        await until(state_is(conn, mine.id, ItemState.ENDED), "the command's item ended")
-    assert sorted(seen, key=len) == [set(), {mine.id}]
-
-
-async def test_a_submission_and_a_retirement_have_an_order_and_serve_supersedes_its_host(
+async def test_a_submission_and_a_retirement_have_an_order_and_serve_supersedes_every_row(
     conn: Session, db, other
 ):
     """The serving check is made in the submit unit on the `workers` row, locked: a `serve`
     retiring its row waits for a submission that saw it, and one that comes after is refused.
-    A `serve` registering replaces its host's earlier rows, a killed one's among them."""
-    async with db.write("test: a killed serve and another host's") as unit:
-        dead = await queue.register(unit, "here:1", ["command:test"])
-        await queue.register(unit, "there:1", ["command:other"])
-    async with db.write("test: the next serve here") as unit:
-        await queue.register(unit, "here:2", ["fulltext"], supersedes="here")
+    A `serve` registering replaces every earlier row (D4: one `serve`), a killed one's among
+    them, whatever host name it ran under (a container recreated)."""
+    async with db.write("test: a killed serve, under another host name") as unit:
+        dead = await queue.register(unit, "old-container:1", ["command:deep"])
+    async with db.write("test: its replacement") as unit:
+        await queue.register(unit, "new-container:1", ["fulltext"], supersede=True)
     found = await (await conn.execute("SELECT name FROM workers ORDER BY name")).fetchall()
-    assert [r["name"] for r in found] == ["here:2", "there:1"]
+    assert [r["name"] for r in found] == ["new-container:1"]
+    async with db.write("test: is deep served") as unit:
+        assert not await queue.served_here(unit, "command:deep", LONG)
 
     async with db.write("test: one serving") as unit:
         live = await queue.register(unit, "host:1", ["command:test"])
@@ -1303,3 +1289,18 @@ async def test_a_cancel_committed_first_holds_however_the_item_stops(conn: Sessi
     async with db.write("test: it finished") as unit:
         assert await queue.end(unit, held, Outcome.DONE)
     assert (await item(conn, done.id)).outcome == Outcome.DONE
+
+
+async def test_a_command_that_waits_after_its_owner_cancelled_it_ends_cancelled(conn: Session, db):
+    """A command's item that waits (`Later`, the run lock taken) while its owner's cancel has
+    committed ends `CANCELLED` as it settles, not parked as pending work."""
+
+    async def worker(item: WorkItem) -> Later:
+        await conn.execute("UPDATE work_items SET cancel_asked = now() WHERE id = %s", (item.id,))
+        return Later(datetime.now(UTC) + timedelta(seconds=30))
+
+    submitted = await submit(db, "command:test", "1")
+    async with serving(WorkGate(db, lease=LONG, poll=60), {"command:test": worker}):
+        await until(state_is(conn, submitted.id, ItemState.ENDED), "the item ended")
+    found = await item(conn, submitted.id)
+    assert (found.outcome, found.error) == (Outcome.FAILED, queue.CANCELLED)

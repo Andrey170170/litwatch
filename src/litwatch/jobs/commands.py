@@ -258,7 +258,7 @@ async def _deep(s: Serving, item: WorkItem, out: Output) -> Done:
     limit, wait = item.scope["limit"], item.scope["wait"]
     total: Counter[str] = Counter()
 
-    async def left(paper_id: str) -> None:  # its job goes on after this item
+    async def goes_on(paper_id: str) -> None:  # its job goes on after this item
         await out.say(f"{paper_id}: its Deep job goes on; the pass's next claim follows it")
 
     deadline = asyncio.get_running_loop().time() + wait
@@ -269,14 +269,14 @@ async def _deep(s: Serving, item: WorkItem, out: Output) -> Done:
         found = await deep_passes.work(
             s.db, s.archive, s.deep, rules=word.rules(s.config),
             limit=None if limit is None else limit - worked, fires=s.config.schedule.enabled,
-            left=left,
+            left=goes_on,
         )  # fmt: skip
         await out.data(dict(found))
         total.update(found)
-        left = deadline - asyncio.get_running_loop().time()
-        if not found["awaiting_text"] or left <= 0:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if not found["awaiting_text"] or remaining <= 0:
             break
-        await asyncio.sleep(min(fulltext.TICK_SECONDS, left))
+        await asyncio.sleep(min(fulltext.TICK_SECONDS, remaining))
     return finished(shown(dict(total)))
 
 

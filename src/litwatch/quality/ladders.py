@@ -4,8 +4,10 @@ the answers set side by side.
 
 A dry run: it reads papers, the taxonomy and published digests from the configured database,
 papers it lacks from the archive's catalog, and texts the archive already holds (never asking
-it to fetch one), and writes only to its output directory. Nothing is journalled or reused, so
-every candidate is asked afresh, alone: a candidate has no fallback of its own.
+it to fetch one), and writes its records only to its output directory. Its calls are
+journalled on an evaluation run (`serve` runs it: `jobs.commands`), which production's reuse
+and price estimates leave out, and which reuses nothing itself: every candidate is asked
+afresh, alone, and has no fallback of its own.
 
 A role's **ladder** is its candidates in order, the first the role's own model, which is the
 reference the others are compared with. A **case** is one request of one role: a paper and a

@@ -234,12 +234,13 @@ async def test_serve_builds_one_gate_whose_limits_its_concurrent_items_share(
 
 async def test_serve_closes_its_model_gate_though_its_work_gate_failed(db, monkeypatch):
     """The Work gate's task ends with an error of its own: `serve` still closes the job worker
-    and the Model gate it built, and the error is raised after."""
+    and the Model gate it built, and the error is raised after: at its startup, as the gate
+    failed before it registered."""
     closed: list[str] = []
 
     class Failing:
         def __init__(self, db) -> None:
-            pass
+            self.registered = asyncio.Event()  # never: it fails first
 
         async def run(self, workers, keys, **_) -> None:
             raise RuntimeError("the work gate failed")
