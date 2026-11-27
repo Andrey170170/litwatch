@@ -435,6 +435,9 @@ async def _stored_page(
     )
     published = await publications_store.get(c, paper_id)
     card, card_pass, card_requestable = await integrations_api.card(c, paper_id, integrations)
+    links, link_find, links_findable = await integrations_api.release_links(
+        c, paper_id, integrations, processed=not found["dropped"]
+    )
     unattached = next((r for r in found["reactions"] if r["topic"] is None), None)
     waits = any(f["failed_runs"] >= FAILED_RUNS for f in found["failures"])  # on the owner
     return s.Paper(
@@ -479,6 +482,9 @@ async def _stored_page(
         card=card,
         card_pass=card_pass,
         card_requestable=card_requestable and not found["dropped"],
+        links=links,
+        link_find=link_find,
+        links_findable=links_findable,
         process=s.ProcessJob(
             id=job["id"],
             state=job["state"],

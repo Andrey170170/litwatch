@@ -33,10 +33,12 @@ from litwatch.gates.work import Worker, WorkGate
 from litwatch.jobs import commands, scheduler
 from litwatch.jobs.context import model_gate
 from litwatch.jobs.worker import JobWorker
+from litwatch.links.worker import FindWorker, RecheckWorker
 from litwatch.llm import ModelGate
 from litwatch.publications import Dblp, PublicationSource
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import jobs as jobs_store
+from litwatch.store import links as links_store
 from litwatch.store import outbox
 
 log = logging.getLogger(__name__)
@@ -81,9 +83,10 @@ async def _registered(work_gate: WorkGate, gate: asyncio.Task[None]) -> None:
 @asynccontextmanager
 async def _running(app: FastAPI) -> AsyncIterator[None]:
     """One Work gate for the Workers the configuration enables: with the schedule on, the
-    scheduler, its fires (the nightly, the publication lookup) and the jobs; full-text passes
-    when an archive is configured too (they call models and have the archive fetch, so, like
-    the schedule, they wait for cutover), Deep passes when a card provider is loaded as well;
+    scheduler, its fires (the nightly, the publication lookup), the jobs and the re-checks of
+    placeholder links; full-text passes when an archive is configured too (they call models and
+    have the archive fetch, so, like the schedule, they wait for cutover), Deep passes and finds
+    of release links when a card provider is loaded as well;
     and deliveries when any integration that reacts to events is loaded. Each kind is swept for
     what waits before the gate starts. And the MCP server (its session manager and PDF executor)
     while `/mcp` is served. Once the gate has stopped, the jobs' open runs are closed, then
@@ -114,6 +117,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
             "nightly": scheduler.NightlyWorker(db, config, models),
             "publications": scheduler.PublicationsWorker(db, app.state.publications),
             jobs_store.WORK: job_worker,
+            links_store.RECHECK: RecheckWorker(db),
         }
         swept += [schedule.sweep, job_worker.sweep]
     if archive is not None:
@@ -122,6 +126,7 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         if maker := integrations_api.card_maker(app.state.integrations):
             deep = workers[fulltext_store.DEEP_WORK] = DeepPassWorker(db, config, archive, maker)
             swept.append(deep.sweep)
+            workers[links_store.FIND] = FindWorker(db, archive, maker)
     serving = commands.Serving(
         db,
         config,

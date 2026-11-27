@@ -11,7 +11,7 @@ import { Fill } from "@/components/slots";
 import { placeOf } from "@/lib/listContext";
 import { gradeLine } from "@/lib/rarity";
 import type { ReactionValue } from "@/lib/reactions";
-import { DeepReadCell, linkCells, MissPicker, type Paper, passWord, ProcessCell } from "./Actions";
+import { DeepReadCell, FindLinksCell, linkCells, MissPicker, type Paper, passWord, ProcessCell } from "./Actions";
 import { Classes, Published } from "./Ladder";
 import { ASKING, asks, FitControl, graders, Reasons, rowColour, whoseFit, type PaperTopic } from "./TopicRow";
 import { FoldedTopics, type Topics } from "./Fold";
@@ -102,6 +102,7 @@ export function PaperSheet({ paper, topics, asked, onClose, missOpen }: { paper:
               Report as a miss
             </button>
           ))}
+        <FindLinksCell paper={paper} />
       </div>
       <div className="kv sm">
         <span>Versions</span>

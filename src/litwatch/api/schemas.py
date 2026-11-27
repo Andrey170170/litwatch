@@ -513,6 +513,35 @@ class CardPass(BaseModel):
     error: str | None = None
 
 
+class ReleaseLink(BaseModel):
+    """Where the paper's code or weights are released, and their access state as of
+    `checked_at`: public, gated (behind a sign-up or a request), a placeholder (the repository
+    holds no release yet) or missing; `found_by` what set it: a find (the finder's or the
+    owner's), or a re-check."""
+
+    url: str
+    kind: Literal["code", "weights"]
+    state: Literal["public", "gated", "placeholder", "missing"]
+    license: str | None = None
+    checked_at: datetime
+    found_by: Literal["finder", "owner", "recheck"]
+
+
+class LinkFind(BaseModel):
+    """The paper's newest find of release links: queued, running, done (its links, none
+    included, are the paper's) or failed; the finder's or the owner's; when it ended, started or
+    is due."""
+
+    state: Literal["queued", "running", "done", "failed"]
+    by: Literal["finder", "owner"]
+    at: datetime
+    error: str | None = None
+
+
+class LinksRequested(BaseModel):
+    find_id: int  # the work item that finds them
+
+
 JobState = Literal["offered", "stopped", "tonight", "queued", "running", "failed", "done"]
 
 
@@ -575,6 +604,11 @@ class Paper(BaseModel):
     # A card provider is loaded and no card is queued or being written: "Deep read", or "Write
     # again" under a card.
     card_requestable: bool = False
+    links: list[ReleaseLink] = Field(default_factory=list)  # code first, then weights
+    link_find: LinkFind | None = None  # the newest find, when the paper has had one
+    # A card provider is loaded, the paper is held and processed, and no find of the owner's is
+    # open: "Find links".
+    links_findable: bool = False
     process: ProcessJob | None = None  # the paper's newest Process job, when it has one
     # A paper litwatch holds, outside the collection: Process would queue its job now, since the
     # schedule is on (it runs the jobs worker), a taxonomy is there, the next run would process

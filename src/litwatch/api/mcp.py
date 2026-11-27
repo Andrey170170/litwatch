@@ -342,8 +342,9 @@ def build(state: State) -> MCPServer:
     ) -> str:
         """Everything litwatch has on one arXiv paper: its metadata and abstract; where litwatch
         processed it, its Gist, Brief, Weight, grade and Fit per topic, and its Deep read's At a
-        glance and sections (read one with read_deep; an older Deep card is shown whole); whether
-        it is in the owner's library, and the owner's word, labels, misses and thumbs, on topics
+        glance and sections (read one with read_deep; an older Deep card is shown whole); where
+        its code and weights are released, with their access state; whether it is in the owner's
+        library, and the owner's word, labels, misses and thumbs, on topics
         no longer followed too; and its citation as BibTeX (the published version where one is
         known). A paper litwatch has not processed shows the archive's record."""
         try:
@@ -814,6 +815,8 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
             *([OLDER_CARD] if older else []),
             *(mcp_deep.summary(c.card) if is_read else _card(c.card)),
         ]
+    if released := _links_lines(p):
+        out += ["", "## Release links", *released]
     if p.publication and (p.publication.venue or p.publication.doi):
         pub = p.publication
         out += ["", f"Published: {' '.join(str(x) for x in (pub.venue, pub.year) if x)}"]
@@ -824,6 +827,23 @@ def _paper_answer(p: s.Paper, citation: str) -> str:
 
 
 OLDER_CARD = "(Written from an older text of this paper than the one above.)"
+
+
+def _links_lines(p: s.Paper) -> list[str]:
+    """Where the paper's code and weights are, each with its access state as last checked; or
+    that a find found none, or is under way."""
+    out = [
+        f"- {link.kind}: {link.url} · {link.state}"
+        + (f" · license {link.license}" if link.license else "")
+        + f" · checked {_day(link.checked_at)}"
+        for link in p.links
+    ]
+    f = p.link_find
+    if f is not None and f.state in ("queued", "running"):
+        out.append(f"(A find of its links is {f.state}.)")
+    elif not out and f is not None and f.state == "done":
+        out.append(f"None found ({_day(f.at)}).")
+    return out
 
 
 def _mark_line(row: dict[str, Any], badge: s.Badge) -> list[str]:

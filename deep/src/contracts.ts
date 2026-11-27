@@ -1,7 +1,7 @@
 /**
  * The contracts the deep service shares with litwatch (docs/plans/a2-work-gate.md, D2): what a job is sent
- * (`POST /process`), the answer to a submission, the job as `GET /jobs/<id>` reports it, and the names of a read that
- * litwatch reads its stored reads by. These schemas are the one source of each: the service checks a submission
+ * (`POST /process`), the answer to a submission, the job as `GET /jobs/<id>` reports it, the names of a read that
+ * litwatch reads its stored reads by, and a release-link find (`POST /links`, `GET /links/<id>`) with its answer. These schemas are the one source of each: the service checks a submission
  * against `JobInputSchema`, and `npm run contracts` exports every schema in `CONTRACTS` to
  * `contracts/deep.schema.json`, from which litwatch's models are generated (`scripts/contracts.sh` at the repository's
  * root regenerates everything). A new contract is one schema here, added to `CONTRACTS`, and one regenerate.
@@ -147,6 +147,66 @@ export const JobSchema = Type.Object(
   { description: "A job as GET /jobs/<id> reports it; a finished one carries what litwatch stores of it." },
 );
 
+// ── release links ───────────────────────────────────────────────────────────────────────────────────
+
+export const LINK_KINDS = ["code", "weights"] as const;
+export const LINK_STATES = ["public", "gated", "placeholder", "missing"] as const;
+const LinkKind = enumOf(LINK_KINDS, "What the link releases: the paper's code, or its model weights.");
+const LinkState = enumOf(
+  LINK_STATES,
+  "Whether it can be had: public, open to anyone now; gated, behind a request form or a licence to accept; " +
+    "placeholder, a repository with nothing but a README; missing, a link the paper gives that leads nowhere.",
+);
+/** A link as the finder gives it: `ReleaseLinkSchema` but when it was checked, which the service adds. */
+export const LINK_FIELDS = {
+  url: Type.String({ minLength: 1, description: "The repository's or model's page, an absolute http(s) URL." }),
+  kind: LinkKind,
+  state: LinkState,
+  license: nullable(Type.String({ minLength: 1, description: "Its license as the host states it (an SPDX id where it gives one); left out when it is not cheap to see." })),
+};
+
+export const ReleaseLinkSchema = Type.Object(
+  { ...LINK_FIELDS, checked_at: Type.String({ description: "When the service last fetched it, an ISO 8601 time in UTC." }) },
+  { additionalProperties: false, description: "A link to a paper's released code or weights, with its access state." },
+);
+
+export const LinksAnswerSchema = Type.Object(
+  {
+    links: Type.Array(ReleaseLinkSchema, { description: "Each link found and checked; empty when none was found." }),
+    note: Type.Optional(Type.String({ description: "What the finder could not settle, in a sentence or two." })),
+  },
+  { additionalProperties: false, description: "What a find of a paper's release links answers." },
+);
+
+export const LinksInputSchema = Type.Object(
+  {
+    paper: PaperSchema,
+    comments: Type.Optional(nullable(Type.String({ description: "The paper's comments on arXiv, where links are often given; none when absent." }))),
+  },
+  { additionalProperties: false, description: "What POST /links is sent: one paper to find the release links of." },
+);
+
+export const LinkJobSchema = Type.Object(
+  {
+    id: Type.String(),
+    paper_id: Type.String(),
+    status: JobStatus,
+    created_at: Type.String(),
+    started_at: Type.Optional(Type.String()),
+    finished_at: Type.Optional(Type.String()),
+    model: Type.Optional(Type.String()),
+    stats: StatsSchema,
+    last_event: Type.Optional(Type.String()),
+    last_activity: Type.String(),
+    result: nullable(LinksAnswerSchema),
+    trace: Type.Optional(Type.Array(Type.Unknown(), { description: "What the find did, event by event (links.ts)." })),
+    error: Type.Optional(Type.String()),
+    failure: Type.Optional(enumOf(FAILURES, "Whose failure an error job's was: the service's, or the paper's.")),
+    key: Type.Optional(Type.String()),
+  },
+  { description: "A find as GET /links/<id> reports it; a done one carries its answer." },
+);
+
 // ── a read's names ──────────────────────────────────────────────────────────────────────────────────
 
 /** The strings a schema of string literals allows: a literal's, or each of a union's. */
@@ -181,9 +241,18 @@ export const CONTRACTS: Record<string, TSchema> = {
   Relation,
   LimitationBy,
   ReadFormat,
+  LinksInput: LinksInputSchema,
+  LinkJob: LinkJobSchema,
+  LinksAnswer: LinksAnswerSchema,
+  ReleaseLink: ReleaseLinkSchema,
+  LinkKind,
+  LinkState,
 };
 
 export type JobInput = Static<typeof JobInputSchema>;
+export type LinksInput = Static<typeof LinksInputSchema>;
+export type LinksAnswer = Static<typeof LinksAnswerSchema>;
+export type ReleaseLink = Static<typeof ReleaseLinkSchema>;
 export type PaperInput = Static<typeof PaperSchema>;
 export type Outline = Static<typeof OutlineSchema>;
 export type SelectionContext = Static<typeof SelectionSchema>;

@@ -12,6 +12,7 @@ import { authState, buildModels, login } from "./auth.ts";
 import type { HostConfig } from "./hosts.ts";
 import { Studio } from "./imaging.ts";
 import { JobQueue } from "./jobs.ts";
+import { findLinks, LINK_CELLS, LINK_WALL_CLOCK_MS, LinkQueue } from "./links.ts";
 import type { JobInput } from "./contracts.ts";
 import { buildServer, refusal } from "./server.ts";
 
@@ -57,12 +58,13 @@ const config = {
     maxOutputChars: whole("DEEP_MAX_OUTPUT_CHARS", 8000),
   } satisfies RunOptions,
   /** The release-link finder's model and effort, its own: a lookup, not writing (docs/specs/architecture/a2-work-gate.md,
-   * "Release links"). Read by the finder, which P6 builds. */
+   * "Release links"); its cells' limits are the read's, its budget its own (`links.ts`). */
   links: {
     model: env("DEEP_LINKS_MODEL", "gpt-6.2-sol"),
     effort: env("DEEP_LINKS_EFFORT", "medium") as RunOptions["effort"],
   },
 };
+const linkRun: RunOptions = { ...config.run, ...config.links, maxCells: LINK_CELLS, wallClockMs: LINK_WALL_CLOCK_MS };
 
 const log = (msg: string) => console.log(`${new Date().toISOString()} ${msg}`);
 
@@ -101,9 +103,21 @@ async function main(): Promise<void> {
         log(`${paper.id} ${event.type}${event.type === "cell" ? ` ${event.n}` : ""} cells=${stats.cells} turns=${stats.turns} $${stats.list_cost.toFixed(2)}`);
     }),
   );
+  const links = new LinkQueue((input, progress) =>
+    findLinks(input, models, config.hosts, linkRun, (event, stats) => {
+      progress(event, stats);
+      if (event.type === "cell" || event.type === "submit") log(`${input.paper.id} links ${event.type} cells=${stats.cells} turns=${stats.turns}`);
+    }),
+  );
   const server = buildServer({
     jobs,
-    health: async () => ({ ok: true, model: `${config.run.model}@${config.run.effort}`, auth: await authState(models) }),
+    links,
+    health: async () => ({
+      ok: true,
+      model: `${config.run.model}@${config.run.effort}`,
+      links_model: `${config.links.model}@${config.links.effort}`,
+      auth: await authState(models),
+    }),
   });
   server.listen(config.port, () => log(`litwatch-deep listening on ${config.port} (auth file ${config.authFile})`));
   const stop = () => server.close(() => void studio.close().finally(() => process.exit(0)));

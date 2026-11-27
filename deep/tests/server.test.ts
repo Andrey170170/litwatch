@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
 import { JobQueue } from "../src/jobs.ts";
+import { LinkQueue } from "../src/links.ts";
 import { buildServer, refusal } from "../src/server.ts";
 import type { Outcome } from "../src/agent.ts";
 import { JobInputSchema, JobRefSchema, JobSchema } from "../src/contracts.ts";
 import { BODY, latex, sentJob } from "./support.ts";
+
+/** A finds queue no test here submits to. */
+const noFinds = () => new LinkQueue(async () => assert.fail("no find was asked for"));
 
 /** A paper as litwatch sends one, a PDF's text unless `over` says otherwise. */
 const paper = (over: Record<string, unknown> = {}) => ({ id: "a", title: "T", abstract: "", authors: [], body: "# T", body_source: "pdf", ...over });
@@ -35,7 +39,7 @@ test("jobs run one at a time and expose progress, outcome, and health", async ()
     order.push(`end ${paper.id}`);
     return outcome(paper.id);
   });
-  const server = buildServer({ jobs, health: async () => ({ ok: true }) });
+  const server = buildServer({ jobs, links: noFinds(), health: async () => ({ ok: true }) });
   await new Promise<void>((r) => server.listen(0, r));
   const port = (server.address() as { port: number }).port;
   const base = `http://127.0.0.1:${port}`;
@@ -96,7 +100,7 @@ test("a submission's key answers with the job it started, and a runner that thro
     runs += 1;
     throw new Error("not running on the ChatGPT subscription: no credential stored; run `login`");
   });
-  const server = buildServer({ jobs, health: async () => ({ ok: true }) });
+  const server = buildServer({ jobs, links: noFinds(), health: async () => ({ ok: true }) });
   await new Promise<void>((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const submit = (key?: string) =>
@@ -155,7 +159,7 @@ test("a finished job carries the read, its figures and its reviews, and the text
     // the second paper's read shows no figure and was never reviewed
     return { ...outcome(paper.id), result: read, error: undefined, failure: undefined, ...(paper.id === "a" ? { figures, reviews } : {}) };
   });
-  const server = buildServer({ jobs, health: async () => ({ ok: true }) });
+  const server = buildServer({ jobs, links: noFinds(), health: async () => ({ ok: true }) });
   await new Promise<void>((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const submit = (over: Record<string, unknown>) => fetch(`${base}/process`, { method: "POST", body: JSON.stringify({ paper: paper(over) }) });

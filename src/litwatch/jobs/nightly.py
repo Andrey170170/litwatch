@@ -12,7 +12,7 @@ from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
-from litwatch import analysis, classification, digests, fulltext, grading, intake
+from litwatch import analysis, classification, digests, fulltext, grading, intake, links
 from litwatch.config import Config
 from litwatch.core import FAILED_RUNS, Cause
 from litwatch.core.fulltext import LEASE, RECONCILE_LOOKBACK
@@ -73,7 +73,8 @@ async def analyse(
 ) -> None:
     """Analyse every paper whose current text is classified and not analysed, up to `limit`, of
     `ids` when given. A paper whose answers were unusable `FAILED_RUNS` runs in a row is left for
-    the owner, who can have it tried again."""
+    the owner, who can have it tried again. A paper whose analysis says it releases code or
+    weights has its links found, once per arXiv version (`links.due`)."""
     async with db.read("analyse: due") as unit:
         papers = await analyses_store.due(unit, FAILED_RUNS, limit, ids)
     rules = word.rules(config)
@@ -83,6 +84,8 @@ async def analyse(
                 db, a.paper.id, cause=Cause.VERDICT, rules=rules, name="record analysis"
             ) as done:
                 recorded = await analysis.record(done.unit, a)
+                if recorded and rules.find_links:
+                    await links.due(done.unit, [a.paper.id])
             if recorded:
                 run.add("analysed" if a.error is None else "analysis_failed")
 

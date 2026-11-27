@@ -588,6 +588,77 @@ describe("a paper's page", () => {
   });
 });
 
+describe("a paper's release links", () => {
+  const link = (kind: string, state: string, url: string) => ({ url, kind, state, license: state === "public" ? "MIT" : null, checked_at: "2026-11-20T03:00:00Z", found_by: "finder" });
+  const done = { state: "done", by: "finder", at: "2026-11-20T03:00:00Z" };
+
+  it("show as chips coloured by state among the facts, and in the phone's grid in the Code and Weights places", async () => {
+    viewport(true);
+    const links = [link("code", "public", "https://github.com/o/r"), link("weights", "placeholder", "https://huggingface.co/o/m")];
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, links, link_find: done, facets: { ...paper.facets, releases_code: true } } });
+    const { unmount } = renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    const code = screen.getByRole("link", { name: "⟨/⟩ code ↗" });
+    expect(code).toHaveAttribute("data-state", "public");
+    expect(code).toHaveAttribute("href", "https://github.com/o/r");
+    expect(code.title).toMatch(/^public · MIT · checked /);
+    expect(screen.getByRole("link", { name: "◆ weights · placeholder ↗" })).toHaveAttribute("data-state", "placeholder");
+    unmount();
+    viewport(false);
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    const cells = [...within(screen.getByRole("dialog", { name: "The paper" })).getAllByRole("link")].map((a) => a.textContent);
+    expect(cells).toEqual(["arXiv ↗", "PDF ↗", "LaTeX ↗", "⟨/⟩ Code ↗", "◆ Weights · placeholder ↗"]);
+  });
+
+  it("leave the Deep card's Code link where no release link is known, and say when a find found none", async () => {
+    viewport(true);
+    const card = { card: { code_url: "https://github.com/card/code" }, among: [] };
+    scriptFetch({
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": { ...paper, card, facets: { ...paper.facets, releases_code: true, releases_weights: true }, link_find: done },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getAllByRole("link", { name: "⟨/⟩ code ↗" })[0]).toHaveAttribute("href", "https://github.com/card/code");
+    expect(screen.getByText("◆ weights").title).toMatch(/no link was found/);
+  });
+
+  it("are found afresh by Find links, last in the rail's grid, which says so while the owner's find is open", async () => {
+    viewport(true);
+    let reads = 0;
+    const calls = scriptFetch({
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, links_findable: true } : { ...paper, links_findable: false, link_find: { state: "queued", by: "owner", at: "2026-11-26T10:00:00Z" } }),
+      "POST /api/papers/2610.00002/links": { find_id: 5 },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    const grid = screen.getByRole("button", { name: "Find links" }).parentElement!;
+    expect([...grid.children].at(-1)).toHaveTextContent("Find links");
+    await userEvent.click(screen.getByRole("button", { name: "Find links" }));
+    expect(await screen.findByRole("button", { name: "Find links · queued" })).toBeDisabled();
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/papers/2610.00002/links"]);
+  });
+
+  it("offer no Find links where none can be asked for", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.queryByRole("button", { name: /Find links/ })).toBeNull();
+  });
+
+  it("poll while a find is queued or running", () => {
+    const at = (state: string) => pollEvery({ ...paper, states: [], link_find: { state, by: "finder", at: "2026-11-26T10:00:00Z" } } as unknown as Paper, false);
+    expect(at("queued")).toBe(15_000);
+    expect(at("running")).toBe(15_000);
+    expect(at("done")).toBe(false);
+    expect(at("failed")).toBe(false);
+  });
+});
+
 describe("a paper's Brief and abstract", () => {
   it("opens on the Brief, switches to the abstract in its place, and opens on the Brief again on the next paper", async () => {
     viewport(true);

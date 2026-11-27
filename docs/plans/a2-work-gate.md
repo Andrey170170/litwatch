@@ -350,7 +350,7 @@ Found while building, owned by the stage named.
   `runs.work_id` and `work_items.run_id` stay as the history of which item ran what. A run opened outside any item
   reads dead at once: only the API's grade now (`api/settings.py`, kind `grading`), which P5 attributes as its
   request and leaves outside an item, as nothing reads its liveness.
-- **P6, P7 (from P5): the CLI's commands.** A command `serve` runs is an item of kind `command:<name>` with a fresh
+- **P7 (from P5): the CLI's commands.** A command `serve` runs is an item of kind `command:<name>` with a fresh
   uuid key (a replay's, its run's id), its inputs in the scope (`jobs.commands`), admitted by its key or by the kind
   whose work it does (`deep`, `publications`); every `serve` serves them whatever its schedule (one without an archive
   or a deep service not those that need it), under its own configuration, so the commands lost `--config` but for the
@@ -386,6 +386,10 @@ Found while building, owned by the stage named.
   P3's rules): a CLI's `command:nightly` item counts always, a scheduled fire's only where this process's
   configuration runs fires (`fires=`).
 
+- **P7 (from P6): release links keep nothing for rollback.** Migration 0052 (`release_links`, the `work_items_finds`
+  index) is additive; the image before serves neither `links` nor `link check`, so their items wait for this one. A
+  find's `work_results` row is what a retried find reads to end without asking deep again (`links.record`): needed
+  only while its item is open, so P7's cleanup may prune it with the ended item's other results.
 
 ## Evidence
 

@@ -3,13 +3,15 @@ import { useQuery } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import { Fragment, useState } from "react";
 import type { Schemas } from "@/api/client";
-import { bibtexFor, copyText, useDeepRead, useMiss, useProcess, usePublication, useSave } from "@/api/mutations";
+import { bibtexFor, copyText, useDeepRead, useFindLinks, useMiss, useProcess, usePublication, useSave } from "@/api/mutations";
 import { topicsQuery } from "@/api/queries";
 import { Badge } from "@/components/Badge";
+import { fullDate } from "@/lib/format";
 import { processing } from "@/lib/jobs";
 import { toast } from "@/lib/toast";
 
 export type Paper = Schemas["Paper"];
+export type ReleaseLink = Schemas["ReleaseLink"];
 
 /** The copy mark, drawn rather than typed: ⧉ is missing from the UI fonts. */
 export const CopyMark = () => <Copy size="1em" aria-hidden style={{ verticalAlign: "-0.125em" }} />;
@@ -85,19 +87,64 @@ const ext = (href: string, label: string) => (
   </a>
 );
 
-/** The links as cells: arXiv, PDF, LaTeX, Code and Weights where the card knows them, BibTeX. */
+const KIND_MARK = { code: "⟨/⟩", weights: "◆" } as const;
+const STATE_WORD = { public: "", gated: "gated", placeholder: "placeholder", missing: "missing" } as const;
+
+/** What a release link's chip says on hover: its state, license and when it was last checked. */
+const linkTitle = (l: ReleaseLink) => `${l.state}${l.license ? ` · ${l.license}` : ""} · checked ${fullDate(l.checked_at)}`;
+
+/** A release link as a chip coloured by its access state (DESIGN.md, "Paper"): `name` the kind's word as the place
+ * shows it ("code", "Code"); a state other than public is said after it. */
+export function ReleaseChip({ link, name }: { link: ReleaseLink; name: string }) {
+  const word = STATE_WORD[link.state];
+  return (
+    <a className="rlink" data-state={link.state} href={link.url} target="_blank" rel="noopener" title={linkTitle(link)}>
+      {KIND_MARK[link.kind]} {name}
+      {word && ` · ${word}`} ↗
+    </a>
+  );
+}
+
+/** Why a kind the analysis announces has no link: none is known yet, or the paper's last find found none. */
+export function noLinkTitle(paper: Paper, kind: "code" | "weights") {
+  const f = paper.link_find;
+  return f?.state === "done" ? `The abstract announces ${kind}; no link was found (${fullDate(f.at)})` : `The abstract announces ${kind}; no link is known yet`;
+}
+
+/** The links as cells: arXiv, PDF, LaTeX, Code and Weights (the first release link of each, by state, else where
+ * the analysis or the Deep card knows them), BibTeX. */
 export function linkCells(paper: Paper, keys: ("arxiv" | "pdf" | "latex" | "code" | "weights" | "bib" | "id")[]) {
   const card = paper.card?.card as { code_url?: string } | undefined;
+  const code = paper.links?.find((l) => l.kind === "code");
+  const weights = paper.links?.find((l) => l.kind === "weights");
   const cells: Record<string, React.ReactNode> = {
     arxiv: ext(paper.arxiv_url, "arXiv"),
     pdf: ext(paper.pdf_url, "PDF"),
     latex: ext(paper.source_url, "LaTeX"),
-    code: paper.facets?.releases_code ? (card?.code_url ? ext(card.code_url, "Code") : <span title="The abstract announces code; no link is known yet">⟨/⟩ Code</span>) : null,
-    weights: paper.facets?.releases_weights ? <span title="The abstract announces weights; no link is known yet">◆ Weights</span> : null,
+    code: code ? <ReleaseChip link={code} name="Code" /> : paper.facets?.releases_code ? card?.code_url ? ext(card.code_url, "Code") : <span title={noLinkTitle(paper, "code")}>⟨/⟩ Code</span> : null,
+    weights: weights ? <ReleaseChip link={weights} name="Weights" /> : paper.facets?.releases_weights ? <span title={noLinkTitle(paper, "weights")}>◆ Weights</span> : null,
     bib: <button onClick={() => void copyBibtex(paper)}>BibTeX <CopyMark /></button>,
     id: <button onClick={() => void copyId(paper.id)}>arXiv id <CopyMark /></button>,
   };
   return keys.map((k) => cells[k] && <Fragment key={k}>{cells[k]}</Fragment>);
+}
+
+/** The owner's find of the paper's links is open (queued or running). */
+const findingLinks = (paper: Paper) => paper.link_find?.by === "owner" && (paper.link_find.state === "queued" || paper.link_find.state === "running");
+
+/** Find links asks the deep service for the paper's release links afresh; while the owner's find is open the cell
+ * says so. It comes last in its grid, so the cells before it keep their places. */
+export function FindLinksCell({ paper }: { paper: Paper }) {
+  const find = useFindLinks(paper.id);
+  const open = findingLinks(paper);
+  if (!paper.links_findable && !open) return null;
+  const f = paper.link_find;
+  const failed = f?.by === "owner" && f.state === "failed" ? `The last find failed: ${f.error ?? "no reason given"}` : undefined;
+  return (
+    <button className="wide" onClick={() => find.mutate(undefined)} disabled={find.isPending || open} title={failed}>
+      {open ? `Find links · ${f?.state === "running" ? "finding" : "queued"}` : "Find links"}
+    </button>
+  );
 }
 
 /** Report as a miss: the Focus topic (the API takes no other), and whether it is central or related, asked at once

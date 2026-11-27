@@ -545,6 +545,15 @@ html[data-theme="light"] .mday.today .mnum, html[data-theme="light"] .mnum:hover
 .pghead .facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--fg3); align-items: center; }
 .pghead .facts b { color: var(--fg); font-weight: 600; }
 .pghead .facts .idl { display: inline-flex; align-items: center; gap: 4px; }
+/* Release links, coloured by access state: public fine, gated a look, a placeholder quiet and dashed, missing a
+   failure (DESIGN.md, "Paper"). Scoped to the header's facts and the action grid. */
+.rlink { --st: var(--cy); }
+.rlink[data-state="gated"] { --st: var(--warn); }
+.rlink[data-state="placeholder"] { --st: var(--fg3); }
+.rlink[data-state="missing"] { --st: var(--sig); }
+.pghead .facts .rlink { display: inline-flex; align-items: center; padding: 0 6px; border: 1px solid var(--st); color: var(--st); white-space: nowrap; }
+.pghead .facts .rlink[data-state="placeholder"] { border-style: dashed; }
+.pghead .facts .rlink:hover { color: var(--fg); }
 .cp { color: var(--fg3); font-size: 12px; }
 .cp:hover { color: var(--fg); }
 /* the open-state note under the header: yellow asks for a word, red reports a failure */
@@ -685,6 +694,8 @@ html[data-theme="light"] .tprow .vd b.askt { color: var(--fg); }
 .agrid > *:hover { border-color: var(--fg2); color: var(--fg); }
 .agrid > .on, .agrid > .pri { background: var(--acc); border-color: var(--acc); color: var(--acc-fg); }
 .agrid > .wide { grid-column: 1 / -1; }
+.agrid > .rlink { color: var(--st); box-shadow: inset 3px 0 0 var(--st); }
+.agrid > .rlink[data-state="placeholder"] { border-style: dashed; }
 .agrid > *:active { transform: translateY(1px); }
 .agrid > :disabled { opacity: 0.5; }
 .pgrail .agrid { margin: 14px 0 0; }

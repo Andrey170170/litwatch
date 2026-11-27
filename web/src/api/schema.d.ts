@@ -960,6 +960,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/papers/{paper_id}/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Find Links
+         * @description Find where this paper's code and weights are released, afresh, whatever its analysis
+         *     says and whatever a find before found: the deep service's finder, first in line. Asking
+         *     again while one of the owner's is open changes nothing. Only a paper litwatch holds.
+         */
+        post: operations["find_links_api_papers__paper_id__links_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/search/scope": {
         parameters: {
             query?: never;
@@ -2290,6 +2312,36 @@ export interface components {
             deep_notes: components["schemas"]["DeepNotes"][];
         };
         /**
+         * LinkFind
+         * @description The paper's newest find of release links: queued, running, done (its links, none
+         *     included, are the paper's) or failed; the finder's or the owner's; when it ended, started or
+         *     is due.
+         */
+        LinkFind: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "done" | "failed";
+            /**
+             * By
+             * @enum {string}
+             */
+            by: "finder" | "owner";
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Error */
+            error?: string | null;
+        };
+        /** LinksRequested */
+        LinksRequested: {
+            /** Find Id */
+            find_id: number;
+        };
+        /**
          * MattersNoTopic
          * @description A paper the owner appraised as mattering that no Focus topic grades relevant or above.
          */
@@ -2565,6 +2617,14 @@ export interface components {
              * @default false
              */
             card_requestable: boolean;
+            /** Links */
+            links?: components["schemas"]["ReleaseLink"][];
+            link_find?: components["schemas"]["LinkFind"] | null;
+            /**
+             * Links Findable
+             * @default false
+             */
+            links_findable: boolean;
             process?: components["schemas"]["ProcessJob"] | null;
             /**
              * Process Now
@@ -2889,6 +2949,39 @@ export interface components {
         };
         /** @enum {string} */
         Relation: "agrees" | "contradicts" | "extends" | "supersedes";
+        /**
+         * ReleaseLink
+         * @description Where the paper's code or weights are released, and their access state as of
+         *     `checked_at`: public, gated (behind a sign-up or a request), a placeholder (the repository
+         *     holds no release yet) or missing; `found_by` what set it: a find (the finder's or the
+         *     owner's), or a re-check.
+         */
+        ReleaseLink: {
+            /** Url */
+            url: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "code" | "weights";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "public" | "gated" | "placeholder" | "missing";
+            /** License */
+            license?: string | null;
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /**
+             * Found By
+             * @enum {string}
+             */
+            found_by: "finder" | "owner" | "recheck";
+        };
         /**
          * ReplayIn
          * @description Run replay under a ceiling, in USD; a stopped replay goes on only above what it spent.
@@ -6306,6 +6399,65 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    find_links_api_papers__paper_id__links_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                paper_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinksRequested"];
+                };
+            };
+            /** @description Missing or wrong token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The read token, outside reading papers */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description litwatch does not hold the paper */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no card provider is configured, or the paper is no longer processed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

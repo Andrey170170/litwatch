@@ -1,6 +1,6 @@
 """What the API knows of integrations: their status under Settings, the owner's retry and
-skip, Deep cards and their requests, and the search providers asked beside litwatch's own
-search.
+skip, Deep cards and their requests, release links and the owner's "find links", and the
+search providers asked beside litwatch's own search.
 
 The API never imports `integrations`. The service's start-up wiring hands `create_app` the
 loaded integrations, which it sees only through the contracts in `events` and `core`.
@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import HTTPException, Query, Request
 
-from litwatch import events
+from litwatch import events, links
 from litwatch.api import schemas as s
 from litwatch.api.deps import Db, Rules, protected
 from litwatch.api.jobs import DROPPED
@@ -32,6 +32,7 @@ from litwatch.store import failures, outbox
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import jobs as jobs_store
+from litwatch.store import links as links_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
@@ -297,6 +298,63 @@ async def card(
     open_pass = await fulltext_store.open_deep(c, paper_id)
     requestable = open_pass is None or open_pass["reason"] != REQUESTED
     return found, s.CardPass(**open_pass) if open_pass else None, requestable
+
+
+LINKS_REFUSED: dict[int | str, dict[str, Any]] = {
+    404: {"description": "litwatch does not hold the paper"},
+    409: {"description": "no card provider is configured, or the paper is no longer processed"},
+}
+
+
+@router.post("/papers/{paper_id:path}/links", status_code=202, responses=LINKS_REFUSED)
+async def find_links(paper_id: str, request: Request, db: Db) -> s.LinksRequested:
+    """Find where this paper's code and weights are released, afresh, whatever its analysis
+    says and whatever a find before found: the deep service's finder, first in line. Asking
+    again while one of the owner's is open changes nothing. Only a paper litwatch holds."""
+    if not answers_card_requests(loaded(request)):
+        raise HTTPException(status_code=409, detail="no card provider is configured")
+    # Under the paper's lock, as an automatic find is submitted (`store.links`).
+    async with db.write("find links", taxonomy="shared", papers=[paper_id]) as unit:
+        if not await papers_store.held(unit, [paper_id]):
+            raise HTTPException(status_code=404, detail="no such paper")
+        item = await links.request(unit, paper_id)
+    if item is None:
+        raise HTTPException(status_code=409, detail=DROPPED)
+    return s.LinksRequested(find_id=item.id)
+
+
+_FIND_STATES: dict[tuple[str, str | None], Any] = {
+    ("pending", None): "queued",
+    ("running", None): "running",
+    ("ended", "done"): "done",
+    ("ended", "failed"): "failed",
+}
+
+
+async def release_links(
+    c: ReadUnit, paper_id: str, integrations: list[events.Integration], *, processed: bool
+) -> tuple[list[s.ReleaseLink], s.LinkFind | None, bool]:
+    """The paper page's release links: those stored, shown whatever is loaded, its newest find,
+    and whether "Find links" applies: a card provider is loaded, the paper is `processed` (not
+    dropped), and no find of the owner's is open."""
+    stored = [
+        s.ReleaseLink(**link.model_dump()) for link in await links_store.of_paper(c, paper_id)
+    ]
+    newest = await links_store.latest_find(c, paper_id)
+    find = None
+    if newest is not None:
+        find = s.LinkFind(
+            state=_FIND_STATES[(newest["state"], newest["outcome"])],
+            by="owner" if newest["by"] == "owner" else "finder",
+            at=newest["at"],
+            error=newest["error"],
+        )
+    findable = (
+        processed
+        and answers_card_requests(integrations)
+        and await links_store.owners_find(c, paper_id) is None
+    )
+    return stored, find, findable
 
 
 def _among(entry: dict[str, Any], mark: dict[str, Any] | None) -> s.AmongRow:

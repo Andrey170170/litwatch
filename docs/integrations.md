@@ -239,7 +239,7 @@ The built-in `archive` integration is a search provider.
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `publication.found`, `card.ready` | Keeps a Zotero item per library paper with tags and notes in step; tags it `litwatch:dropped` when it leaves the library and never deletes it. A Deep read gets no note and no tags of its own (it is read on the paper page) and still counts as written for the inbox tag; a Deep card from before keeps its note and tags |
 | `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF of a `must_read` library paper for Zotero's file sync (needs `zotero`) |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source), unless intake read it from the archive; answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers. With `harvest = true` (and registering), intake's catalog pass also registers every new or revised arXiv paper outside intake's categories, as metadata only: `litwatch intake --catalog-from DATE` backfills it from a day |
-| `deep` | none: its work is the full-text queue's Deep passes (a saved Focus must read without a card, the owner's request) | Asks the deep service for a Deep read, stores it with its figures, and records each attempt's usage, trace and reviews (`litwatch deep trace`); emits `card.ready`. Loads only with an archive to read papers from. See below |
+| `deep` | none: its work is the full-text queue's Deep passes (a saved Focus must read without a card, the owner's request) and the finds of release links | Asks the deep service for a Deep read, stores it with its figures, and records each attempt's usage, trace and reviews (`litwatch deep trace`); emits `card.ready`. Finds where a paper's code and weights are released. `automatic = false` stops the automatic Deep reads, and leaves the owner's requests and the finds on. Loads only with an archive to read papers from. See below |
 | `notion` | `grade.changed` for an exported topic, `gist.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the papers listed for the exported topics, for a reader who does not use litwatch; never deletes a page. See below |
 | `webhook` | any, by pattern | POSTs the event as JSON to a URL |
 
@@ -308,6 +308,19 @@ papers (`GET /api/papers`, `GET /api/papers/<id>`) and fetches a paper's PDF
 (`GET /api/papers/<id>/pdf`), from which the service cuts the figures of a paper with no LaTeX
 source. The service asks for the version its text is of (`?version=<n>`), which the archive is
 asked for, or arXiv's PDF of it. Everything else answers it 403.
+
+### Release links
+
+The service also finds where a paper's code and weights are released (`POST /links`, followed at
+`GET /links/<id>`, the same key protocol as a read; `deep/README.md`). A find is a work item of
+kind `links` (`litwatch.links`): an automatic one when the paper's analysis says it releases code
+or weights, once per paper and arXiv version for good, "none found" included, and found again
+for a new version; the owner's "Find links" (`POST /api/papers/<id>/links`) always runs a fresh
+one. Its answer replaces the paper's links (`release_links`: url, kind, access state, license,
+when checked, what set it), in the unit that ends its item. A placeholder link on GitHub or
+Hugging Face is checked again by a plain request to their API (`links.hosts`), a week apart,
+four times, then left alone; no other link is. The paper page shows each link as a chip coloured
+by its state, and `get_paper` lists them. Digests and the Notion export do not show them yet.
 
 ### The Notion export
 

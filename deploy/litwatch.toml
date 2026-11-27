@@ -28,3 +28,4 @@ deadline = "07:30"
 # Deep cards: start the stack with `--profile deep` and uncomment.
 # [integrations.deep]
 # url = "http://deep:8081"
+# automatic = false   # only the Deep reads you ask for; release links are still found

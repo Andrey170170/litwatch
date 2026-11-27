@@ -31,6 +31,8 @@ class Upserted:
     rewritten: list[str] = field(default_factory=list)
     # Ids withdrawn, or brought back by a later version: dropped or not from now on.
     withdrawn: list[str] = field(default_factory=list)
+    # Stored ids whose arXiv version changed: their release links are found again.
+    versioned: list[str] = field(default_factory=list)
 
 
 def row_to_paper(row: dict[str, Any]) -> Paper:
@@ -233,6 +235,8 @@ async def upsert(
                 )
             if (row["withdrawn_at"] is None) != (old["withdrawn_at"] is None):
                 result.withdrawn.append(p.id)
+            if row["version"] != old["version"]:
+                result.versioned.append(p.id)
             if changed or row["version"] != old["version"]:
                 await outbox.emit(
                     unit,
