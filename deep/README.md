@@ -4,7 +4,8 @@ The deep service: an agent with one JavaScript REPL tool reads a paper and write
 ([`docs/specs/deep-read.md`](../docs/specs/deep-read.md)), a reviewer and a blind reader on the same model score
 the read, and the writer revises it at most twice. litwatch's `deep` integration submits papers to it (`POST /process`) and polls for
 the result (`GET /jobs/<id>`); what a finished job carries is in [`docs/integrations.md`](../docs/integrations.md).
-The service writes reads only. A Deep card from before the read stays as litwatch stored it.
+The service writes reads, and finds papers' release links (below); it writes no Deep card. A Deep card from before the
+read stays as litwatch stored it.
 
 A submission may carry an `Idempotency-Key` header (litwatch sends its attempt): a key the
 service still has is answered `200` with that key's job instead of starting another, so a
@@ -159,10 +160,29 @@ its lens; they are no longer objects of their own.
 `npm run read-schema` exports the stored read's schema to `web/src/deepread/read.schema.json`, from which the web
 app's types are generated (`pnpm generate:read` in `web/`). The contracts litwatch shares with the service are
 declared in `src/contracts.ts`: what `POST /process` is sent (checked against `JobInputSchema`, a 422 otherwise),
-the answer to a submission, the job as `GET /jobs/<id>` reports it, and the names of a read's sections, notes and
+the answer to a submission, the job as `GET /jobs/<id>` reports it, a find's input, job and answer, and the names of a read's sections, notes and
 relations. `npm run contracts` exports them to `contracts/deep.schema.json` at the repository's root, from which
 litwatch's models are generated. After changing `src/read.ts` or `src/contracts.ts`, run `scripts/contracts.sh` at
 the repository's root, which does all of it; CI fails on a generated file that is not current.
+
+## Release links
+
+`POST /links` finds where one paper's code and model weights are released (`LinksInputSchema`: the paper as
+`/process` takes it, its body empty when litwatch has no text, and its arXiv comments), on a queue of its own beside
+the reads', one find at a time, with the same `Idempotency-Key` protocol: `GET /links/<id>` reports it
+(`LinkJobSchema`), `GET /links/keys/<key>` finds it by key; a finished find is kept six hours at least. A narrow
+agent on `DEEP_LINKS_MODEL` (`src/links.ts`), in the same REPL with the same hosts, starts from the abstract, the
+comments and the paper's text, and goes to the open web only when they say nothing. It answers through
+`answer({links, note?})`: each link's `url`, `kind` (code or weights), `state` (public, gated, placeholder or
+missing) and `license` where it is cheap to see. A GitHub or Hugging Face link takes its state from the host's API
+(`src/hostcheck.ts`, the same check as litwatch's weekly re-check, both driven by `tests/fixtures/host-checks.json`),
+whatever the agent drafted, asked by a plain GET of its own, not the session's fetch: 8 MB at most, each redirect hop
+over HTTPS on the host asked. Any other link must be one it fetched in the session, by that URL, with an answer that
+shows its state: a 404 or 410 (or no such host) for missing, a 401 or 403 or a quoted request form for gated, a 2xx
+with a quote of what the page holds for public; a page that answered but is not quoted is dropped, and anything else
+is refused back to it. Its `checked_at` is that fetch's, or the check's, time. An empty list is an answer: none found.
+It has 30 cells and 15 minutes; a find that never answers is the paper's failure, a model error the service's, as
+for a read.
 
 ## Running it
 
@@ -204,7 +224,7 @@ cd deep && node src/main.ts run paper.json
 | `DEEP_PORT` | `8081` | Port to listen on |
 | `DEEP_AUTH_FILE` | `/var/lib/litwatch-deep/auth.json` | Where `login` keeps the model session |
 | `DEEP_MODEL`, `DEEP_EFFORT` | `gpt-6.2-sol`, `high` | The model and reasoning effort, the writer's and the reviewer's |
-| `DEEP_LINKS_MODEL`, `DEEP_LINKS_EFFORT` | `gpt-6.2-sol`, `medium` | The release-link finder's model and reasoning effort; read by nothing until the finder is built (A2, P6) |
+| `DEEP_LINKS_MODEL`, `DEEP_LINKS_EFFORT` | `gpt-6.2-sol`, `medium` | The release-link finder's model and reasoning effort |
 | `DEEP_MAX_CELLS` | `100` | REPL cells per paper, revisions included |
 | `DEEP_CELL_TIMEOUT_S` | `90` | One cell's time limit |
 | `DEEP_WALL_CLOCK_MIN` | `60` | One paper's time limit, its review and revisions included; keep it below litwatch's `[integrations.deep] timeout_minutes` (75), past which litwatch ends a running job as stuck and may start a duplicate |

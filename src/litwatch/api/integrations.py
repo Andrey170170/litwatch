@@ -1,6 +1,6 @@
 """What the API knows of integrations: their status under Settings, the owner's retry and
-skip, Deep cards and their requests, and the search providers asked beside litwatch's own
-search.
+skip, Deep cards and their requests, release links and the owner's "find links", and the
+search providers asked beside litwatch's own search.
 
 The API never imports `integrations`. The service's start-up wiring hands `create_app` the
 loaded integrations, which it sees only through the contracts in `events` and `core`.
@@ -14,14 +14,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, Query, Request
+from starlette.datastructures import State
 
-from litwatch import events
+from litwatch import events, links
 from litwatch.api import schemas as s
 from litwatch.api.deps import Db, Rules, protected
 from litwatch.api.jobs import DROPPED
 from litwatch.archive import ArchiveError
 from litwatch.core import FAILED_RUNS, Cause, SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
+from litwatch.core.links import Find
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.gates.database import DatabaseGate, ReadUnit
@@ -32,6 +34,7 @@ from litwatch.store import failures, outbox
 from litwatch.store import fulltext as fulltext_store
 from litwatch.store import integrations as integrations_store
 from litwatch.store import jobs as jobs_store
+from litwatch.store import links as links_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import word as word_store
@@ -60,6 +63,17 @@ def card_maker(integrations: list[events.Integration]) -> Deep | None:
 
 def answers_card_requests(integrations: list[events.Integration]) -> bool:
     return card_maker(integrations) is not None
+
+
+def link_finder(state: State) -> Deep | None:
+    """The card provider that finds release links in this process, if one does: with the
+    schedule on, an archive to read papers' texts from and a card provider loaded. `app.serve`
+    registers the find's Worker by it, and "Find links" is offered and taken by it, so no find
+    is asked for that no Worker would run. An automatic find submitted meanwhile (a nightly run
+    with the schedule off) waits, queued, and runs once a process here finds links again."""
+    if not state.config.schedule.enabled or state.archive is None:
+        return None
+    return card_maker(state.integrations)
 
 
 # -- Settings → Integrations -----------------------------------------------------------------------
@@ -250,7 +264,7 @@ async def request_card(paper_id: str, request: Request, db: Db, rules: Rules) ->
             return s.CardRequested(pass_id=open_pass["id"])
         # Only a record fetched can revise the paper; with none, `keep` reads it as it stands.
         held = await papers_store.get(unit, paper_id) if fetched is not None else None
-        kept, _ = await misses.keep(unit, paper_id, fetched)
+        kept, _ = await misses.keep(unit, paper_id, fetched, rules)
         rewritten = held is not None and held.revision != kept.revision
         pass_id = await deep_passes.request(unit, paper_id)
         if pass_id is None:
@@ -297,6 +311,99 @@ async def card(
     open_pass = await fulltext_store.open_deep(c, paper_id)
     requestable = open_pass is None or open_pass["reason"] != REQUESTED
     return found, s.CardPass(**open_pass) if open_pass else None, requestable
+
+
+LINKS_REFUSED: dict[int | str, dict[str, Any]] = {
+    404: {"description": "No such paper"},
+    409: {
+        "description": "No find of links runs here (it needs the schedule on, the archive and a "
+        "card provider), or the paper is dismissed or withdrawn"
+    },
+    503: {"description": "arXiv did not answer in time; nothing was stored"},
+}
+NO_FINDER = "no find of links runs here: it needs the schedule on, the archive and a card provider"
+
+
+@router.post("/papers/{paper_id:path}/links", status_code=202, responses=LINKS_REFUSED)
+async def find_links(paper_id: str, request: Request, db: Db, rules: Rules) -> s.LinksRequested:
+    """Find where this paper's code and weights are released, afresh, whatever its analysis
+    says and whatever a find before found: the deep service's finder, first in line. Asking
+    again while one of the owner's is open changes nothing. A paper litwatch lacks is fetched
+    and stored first, as a Deep read's request stores it."""
+    if link_finder(request.app.state) is None:
+        raise HTTPException(status_code=409, detail=NO_FINDER)
+    try:
+        paper_id, fetched = await misses.resolve(db, paper_id)
+    except misses.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="no such paper") from exc
+    except NoAnswerError as exc:
+        raise HTTPException(status_code=503, detail=misses.SILENT) from exc
+    # Under the paper's locks, as an automatic find is submitted (`store.links`); a paper
+    # stored here is the owner's change of it, settled by hand (`request_card`).
+    async with db.write("find links", taxonomy="shared", papers=[paper_id]) as unit:
+        held = await papers_store.get(unit, paper_id) if fetched is not None else None
+        kept, _ = await misses.keep(unit, paper_id, fetched, rules)
+        item = await links.request(unit, paper_id)
+        if fetched is not None:
+            rewritten = held is not None and held.revision != kept.revision
+            await word.settle_many(
+                unit, [paper_id], cause=Cause.OWNER, rules=rules, steps=rewritten
+            )
+    if item is None:
+        raise HTTPException(status_code=409, detail=DROPPED)
+    return s.LinksRequested(find_id=item.id)
+
+
+_FIND_STATES: dict[tuple[str, str | None], Any] = {
+    ("pending", None): "queued",
+    ("running", None): "running",
+    ("ended", "done"): "done",
+    ("ended", "failed"): "failed",
+}
+
+
+def _find(found: Find | None) -> s.LinkFind | None:
+    if found is None:
+        return None
+    return s.LinkFind(
+        state=_FIND_STATES[(found.state, found.outcome)],
+        by=found.by,
+        at=found.at,
+        error=found.error,
+        answered=found.answered,
+        links=found.links,
+    )
+
+
+async def release_links(
+    c: ReadUnit, paper_id: str, *, finds: bool, processed: bool
+) -> dict[str, Any]:
+    """The paper page's release links (`s.Paper`'s fields), as the paper is now (`links`'s
+    identity): those stored, shown whatever is loaded; the answer for the paper as it is that
+    replaced them last; the owner's last find of it; its open find; whether the page is to poll
+    (`finding_links`: finds run here, `link_finder`, and one of it is open, or one of the
+    owner's of what it was, still to hand over); and whether "Find links" applies: finds run
+    here, the paper is `processed` (not dropped), and no find of the owner's of it is open."""
+    stored = [
+        s.ReleaseLink(**link.model_dump()) for link in await links_store.of_paper(c, paper_id)
+    ]
+    all_finds = await links_store.finds(c, paper_id)
+    now = await links_store.current(c, paper_id)
+    of_now = links.covering(all_finds, now.of) if now else []
+    # The answer that replaced the links last, whichever item the Work gate ended last.
+    answers = sorted((f for f in of_now if f.answered), key=lambda f: f.answered_at or f.at)
+    owners = [f for f in of_now if f.by == "owner"]
+    open_finds = sorted((f for f in of_now if f.open), key=lambda f: (f.state != "running", f.id))
+    # An owner's find of what the paper was, still open, is to hand over: the page waits for it.
+    handing_over = any(f.open and f.by == "owner" for f in all_finds)
+    return {
+        "links": stored,
+        "link_answer": _find(answers[-1] if answers else None),
+        "owner_find": _find(owners[-1] if owners else None),
+        "open_find": _find(open_finds[0] if open_finds else None),
+        "finding_links": finds and (bool(open_finds) or handing_over),
+        "links_findable": finds and processed and not any(f.open for f in owners),
+    }
 
 
 def _among(entry: dict[str, Any], mark: dict[str, Any] | None) -> s.AmongRow:

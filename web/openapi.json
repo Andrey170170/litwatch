@@ -2701,6 +2701,61 @@
         }
       }
     },
+    "/api/papers/{paper_id}/links": {
+      "post": {
+        "summary": "Find Links",
+        "description": "Find where this paper's code and weights are released, afresh, whatever its analysis\nsays and whatever a find before found: the deep service's finder, first in line. Asking\nagain while one of the owner's is open changes nothing. A paper litwatch lacks is fetched\nand stored first, as a Deep read's request stores it.",
+        "operationId": "find_links_api_papers__paper_id__links_post",
+        "parameters": [
+          {
+            "name": "paper_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Paper Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinksRequested"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "403": {
+            "description": "The read token, outside reading papers"
+          },
+          "404": {
+            "description": "No such paper"
+          },
+          "409": {
+            "description": "No find of links runs here (it needs the schedule on, the archive and a card provider), or the paper is dismissed or withdrawn"
+          },
+          "503": {
+            "description": "arXiv did not answer in time; nothing was stored"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/search/scope": {
       "get": {
         "summary": "Search Scope",
@@ -5904,6 +5959,81 @@
         "title": "LastNight",
         "description": "What last night left for the owner: its run and error, the splits since it, the stopped\nsteps and passes, the failed digests, and the Deep notes (which wait on nothing)."
       },
+      "LinkFind": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "by": {
+            "type": "string",
+            "enum": [
+              "finder",
+              "owner"
+            ],
+            "title": "By"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "answered": {
+            "type": "boolean",
+            "title": "Answered",
+            "default": false
+          },
+          "links": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Links"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "by",
+          "at"
+        ],
+        "title": "LinkFind",
+        "description": "A find of the paper's release links: queued, running, done or failed; the finder's or\nthe owner's; when it ended, started or is due; whether it answered (done with its answer,\n`links` of them, none found included; a find skipped or superseded ended done unanswered)."
+      },
+      "LinksRequested": {
+        "properties": {
+          "find_id": {
+            "type": "integer",
+            "title": "Find Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "find_id"
+        ],
+        "title": "LinksRequested"
+      },
       "MattersNoTopic": {
         "properties": {
           "paper_id": {
@@ -6654,6 +6784,53 @@
           "card_requestable": {
             "type": "boolean",
             "title": "Card Requestable",
+            "default": false
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/ReleaseLink"
+            },
+            "type": "array",
+            "title": "Links"
+          },
+          "link_answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkFind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "owner_find": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkFind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open_find": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkFind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finding_links": {
+            "type": "boolean",
+            "title": "Finding Links",
+            "default": false
+          },
+          "links_findable": {
+            "type": "boolean",
+            "title": "Links Findable",
             "default": false
           },
           "process": {
@@ -7568,6 +7745,67 @@
           "extends",
           "supersedes"
         ]
+      },
+      "ReleaseLink": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "code",
+              "weights"
+            ],
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "public",
+              "gated",
+              "placeholder",
+              "missing"
+            ],
+            "title": "State"
+          },
+          "license": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "found_by": {
+            "type": "string",
+            "enum": [
+              "finder",
+              "owner",
+              "recheck"
+            ],
+            "title": "Found By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "kind",
+          "state",
+          "checked_at",
+          "found_by"
+        ],
+        "title": "ReleaseLink",
+        "description": "Where the paper's code or weights are released, and their access state as of\n`checked_at`: public, gated (behind a sign-up or a request), a placeholder (the repository\nholds no release yet) or missing; `found_by` what set it: a find (the finder's or the\nowner's), or a re-check."
       },
       "ReplayIn": {
         "properties": {

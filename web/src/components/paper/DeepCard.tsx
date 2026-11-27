@@ -122,7 +122,8 @@ export function DeepCard({ paper, asked, deepRead }: { paper: Paper; asked: bool
     return (
       <Rung name="Deep card">
         <p className="prose faint">
-          None: cards are automatic for Focus must reads and Area picks. {deepRead}
+          {/* true whether automatic cards are on or off ([integrations.deep] automatic), which the page is not told */}
+          None yet.{deepRead && <> {deepRead} asks for one.</>}
         </p>
       </Rung>
     );

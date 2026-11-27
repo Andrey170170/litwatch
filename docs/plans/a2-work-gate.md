@@ -181,8 +181,9 @@ Found in a survey of the code at 548857e3:
     finder, a re-check or the owner's action);
   - on the paper's page they show as chips coloured by state (`web/src/components/paper/Actions.tsx`, `linkCells`),
     and a Deep card's Code link stays where no release link exists;
-  - an automatic find is keyed for good by paper and version, a "none found" outcome included; the owner's action
-    always runs a fresh find;
+  - an automatic find is keyed by the paper's identity (its version, or its update when none is known), which
+    keeps one open at a time; its saved answer, "none found" included, keeps later automatic finds of the same
+    identity from running; the owner's action runs a fresh find, one open at a time;
   - re-checks use GitHub's and Hugging Face's APIs;
   - the automatic Deep read switch is `[integrations.deep] automatic`, which sets `word.Rules.automatic_deep`;
     unset keeps today's behaviour, and production sets it `false`.
@@ -299,7 +300,8 @@ Found while building, owned by the stage named.
   admission=, lasting=)` in the caller's unit; `WorkGate(db).run({kind: worker})` serves until cancelled, and a
   cancelled gate gives back each claim it still owns once its Worker has stopped. A Worker returns `Done(cost)`
   (or None) or `Later(at)`, which puts the item back to pending until `at` (a pass claimed by another owner, the
-  run lock taken, text awaited). Raising fails the item; only a lost database (a dropped connection, a server
+  run lock taken, text awaited). Raising fails the item, with the cost a `TerminalError` carries (P6: a find
+  that failed after deep charged for it); only a lost database (a dropped connection, a server
   shutting down or ending the session, an empty pool) or a lost deadlock or serialization conflict
   (`gates.work.conflicted`) gives it back to try again. Settling needs a live lease.
   `LeaseLostError` from a write unit means the item is no longer the task's.
@@ -350,7 +352,7 @@ Found while building, owned by the stage named.
   `runs.work_id` and `work_items.run_id` stay as the history of which item ran what. A run opened outside any item
   reads dead at once: only the API's grade now (`api/settings.py`, kind `grading`), which P5 attributes as its
   request and leaves outside an item, as nothing reads its liveness.
-- **P6, P7 (from P5): the CLI's commands.** A command `serve` runs is an item of kind `command:<name>` with a fresh
+- **P7 (from P5): the CLI's commands.** A command `serve` runs is an item of kind `command:<name>` with a fresh
   uuid key (a replay's, its run's id), its inputs in the scope (`jobs.commands`), admitted by its key or by the kind
   whose work it does (`deep`, `publications`); every `serve` serves them whatever its schedule (one without an archive
   or a deep service not those that need it), under its own configuration, so the commands lost `--config` but for the
@@ -386,6 +388,21 @@ Found while building, owned by the stage named.
   P3's rules): a CLI's `command:nightly` item counts always, a scheduled fire's only where this process's
   configuration runs fires (`fires=`).
 
+- **P7 (from P6): release links keep nothing for rollback.** Migration 0052 (`release_links`, the `work_items_finds`
+  index) is additive; the image before serves neither `links` nor `link check`, so their items wait for this one. A
+  find's `work_results` row, its answer or its failure, is what a retried find reads to end without asking deep again
+  (`links.record`), and what says the find answered while its item is open; once the item ends, its own `result` says
+  so (`store.links.finds`), so P7's cleanup may prune the row with the ended item's other results.
+- **Rolling back P6 turns automatic Deep reads back on.** The image before P6 ignores `[integrations.deep]
+  automatic`: rolled back with `automatic = false` installed, it writes automatic Deep reads wherever deep is
+  configured. The rollback step is a choice: keep deep configured and accept the automatic reads until the image is
+  upgraded again, or disable `[integrations.deep]`, the only way the previous image stops them, which also pauses
+  the owner's Deep read requests until deep is enabled again.
+- **Back up to P6 after a rollback that spanned a nightly.** The image before P6 finds no links: the analyses and
+  versions it recorded triggered no find. Upgraded again, nothing submits them at once. The next nightly's `due`
+  sweep covers only the papers it analyses that night and the failed finds of the last week, so a paper analysed or
+  versioned under the old image is not found by it; the owner's "Find links" covers those, one paper at a time. No
+  catch-up is built.
 
 ## Evidence
 

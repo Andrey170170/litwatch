@@ -116,3 +116,5 @@ function crop(page, box, name, number) { return __call('crop', [page, box, name,
 function render(read, target, width) { return __call('render', [read, target, width]); }
 function check(read, standBy) { return __call('check', standBy === undefined ? [read] : [read, standBy]); }
 function submit(read, standBy) { return __call('submit', standBy === undefined ? [read] : [read, standBy]); }
+// The release-link finder's answer (links.ts).
+function answer(found) { return __call('answer', [found]); }

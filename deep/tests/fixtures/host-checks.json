@@ -1,0 +1,862 @@
+{
+ "about": "The host checks' table (deep/src/hostcheck.ts, src/litwatch/links/adapter.py): each case's link and kind, what each API URL answers (absent: 404), the repository's own page the finder answers for it (`page`, when the link names it otherwise; litwatch re-checks that), and what the check says: a state and license, null when the host cannot say, \"unsupported\" for a link it does not check.",
+ "cases": [
+  {
+   "name": "a GitHub repository that does not exist is missing",
+   "url": "https://github.com/o/gone",
+   "kind": "code",
+   "answers": {},
+   "expect": {
+    "state": "missing"
+   }
+  },
+  {
+   "name": "a GitHub rate limit says nothing",
+   "url": "https://github.com/o/r",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 403
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a link on another host is not checked",
+   "url": "https://example.org/code",
+   "kind": "code",
+   "answers": {},
+   "expect": "unsupported"
+  },
+  {
+   "name": "a file in a repository is not its page",
+   "url": "https://github.com/o/r/tree/main/src",
+   "kind": "code",
+   "answers": {},
+   "expect": "unsupported"
+  },
+  {
+   "name": "GitHub code with a file beside the filler is public",
+   "url": "https://github.com/o/r",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/contents": {
+     "status": 200,
+     "json": [
+      {
+       "path": "README.md"
+      },
+      {
+       "path": "train.py"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "state": "public",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "a repository's page named by a winding path is checked, and answered, as its own page",
+   "url": "https://github.com/o/archive/../r",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/contents": {
+     "status": 200,
+     "json": [
+      {
+       "path": "README.md"
+      },
+      {
+       "path": "train.py"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "state": "public",
+    "license": "MIT"
+   },
+   "page": "https://github.com/o/r"
+  },
+  {
+   "name": "GitHub code with only a README and a licence is a placeholder",
+   "url": "https://github.com/o/r",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/contents": {
+     "status": 200,
+     "json": [
+      {
+       "path": "README.md"
+      },
+      {
+       "path": "LICENSE"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "state": "placeholder",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "a GitHub repository with no commit is a placeholder",
+   "url": "https://github.com/o/r",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": null
+     }
+    }
+   },
+   "expect": {
+    "state": "placeholder"
+   }
+  },
+  {
+   "name": "a renamed GitHub repository is followed to its contents",
+   "url": "https://github.com/o/old",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/old": {
+     "status": 301,
+     "location": "https://api.github.com/repositories/7"
+    },
+    "https://api.github.com/repositories/7": {
+     "status": 200,
+     "json": {
+      "full_name": "o/new",
+      "default_branch": "main",
+      "license": null
+     }
+    },
+    "https://api.github.com/repos/o/new/contents": {
+     "status": 200,
+     "json": [
+      {
+       "path": "train.py"
+      }
+     ]
+    }
+   },
+   "expect": {
+    "state": "public"
+   }
+  },
+  {
+   "name": "a redirect off GitHub's API is not followed",
+   "url": "https://github.com/o/away",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/away": {
+     "status": 301,
+     "location": "https://elsewhere.test/repos/o/away"
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a hop off GitHub's API is not followed, even one that comes back",
+   "url": "https://github.com/o/hop",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/hop": {
+     "status": 301,
+     "location": "https://elsewhere.test/back"
+    },
+    "https://elsewhere.test/back": {
+     "status": 301,
+     "location": "https://api.github.com/repos/o/r"
+    },
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": null
+     }
+    },
+    "https://api.github.com/repos/o/r/contents": {
+     "status": 200,
+     "json": [
+      {
+       "path": "train.py"
+      }
+     ]
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "GitHub contents that are not a list say nothing",
+   "url": "https://github.com/o/r",
+   "kind": "code",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": null
+     }
+    },
+    "https://api.github.com/repos/o/r/contents": {
+     "status": 200,
+     "json": {
+      "message": "not a list"
+     }
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a GitHub tree with no list of entries says nothing",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": null
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "sha": "abc"
+     }
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "GitHub weights with code but no checkpoint are a placeholder",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "README.md",
+        "type": "blob"
+       },
+       {
+        "path": "train.py",
+        "type": "blob"
+       }
+      ]
+     }
+    },
+    "https://api.github.com/repos/o/r/releases?per_page=100": {
+     "status": 200,
+     "json": [
+      {
+       "assets": [
+        {
+         "name": "paper.pdf"
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "expect": {
+    "state": "placeholder",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "GitHub weights with a checkpoint in the tree are public",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "ckpt/model.pt",
+        "type": "blob"
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "public",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "GitHub weights as a release asset are public",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "README.md",
+        "type": "blob"
+       }
+      ]
+     }
+    },
+    "https://api.github.com/repos/o/r/releases?per_page=100": {
+     "status": 200,
+     "json": [
+      {
+       "assets": [
+        {
+         "name": "model-00001-of-00002.safetensors"
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "expect": {
+    "state": "public",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "GitHub weights of a repository with no commit are a placeholder",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 409
+    },
+    "https://api.github.com/repos/o/r/releases?per_page=100": {
+     "status": 200,
+     "json": []
+    }
+   },
+   "expect": {
+    "state": "placeholder",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "a folder named like a weight file is not one",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "README.md",
+        "type": "blob"
+       },
+       {
+        "path": "model.pt",
+        "type": "tree"
+       }
+      ]
+     }
+    },
+    "https://api.github.com/repos/o/r/releases?per_page=100": {
+     "status": 200,
+     "json": []
+    }
+   },
+   "expect": {
+    "state": "placeholder",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "a truncated GitHub tree with no weights in it or its releases says nothing",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "README.md",
+        "type": "blob"
+       },
+       {
+        "path": "train.py",
+        "type": "blob"
+       }
+      ],
+      "truncated": true
+     }
+    },
+    "https://api.github.com/repos/o/r/releases?per_page=100": {
+     "status": 200,
+     "json": [
+      {
+       "assets": [
+        {
+         "name": "paper.pdf"
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a truncated GitHub tree with a weight file in it is public",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "ckpt/model.safetensors",
+        "type": "blob"
+       }
+      ],
+      "truncated": true
+     }
+    }
+   },
+   "expect": {
+    "state": "public",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "a truncated GitHub tree with weights as a release asset is public",
+   "url": "https://github.com/o/r",
+   "kind": "weights",
+   "answers": {
+    "https://api.github.com/repos/o/r": {
+     "status": 200,
+     "json": {
+      "full_name": "o/r",
+      "default_branch": "main",
+      "license": {
+       "spdx_id": "MIT",
+       "name": "MIT"
+      }
+     }
+    },
+    "https://api.github.com/repos/o/r/git/trees/main?recursive=1": {
+     "status": 200,
+     "json": {
+      "tree": [
+       {
+        "path": "train.py",
+        "type": "blob"
+       }
+      ],
+      "truncated": true
+     }
+    },
+    "https://api.github.com/repos/o/r/releases?per_page=100": {
+     "status": 200,
+     "json": [
+      {
+       "assets": [
+        {
+         "name": "model.safetensors"
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "expect": {
+    "state": "public",
+    "license": "MIT"
+   }
+  },
+  {
+   "name": "a gated Hugging Face model is gated",
+   "url": "https://huggingface.co/o/m",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/m": {
+     "status": 200,
+     "json": {
+      "gated": "manual",
+      "siblings": [
+       {
+        "rfilename": "model-00001-of-00002.safetensors"
+       }
+      ],
+      "cardData": {
+       "license": "llama3"
+      }
+     }
+    }
+   },
+   "expect": {
+    "state": "gated",
+    "license": "llama3"
+   }
+  },
+  {
+   "name": "a gated Hugging Face model with no weights yet is gated",
+   "url": "https://huggingface.co/o/m",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/m": {
+     "status": 200,
+     "json": {
+      "gated": "auto",
+      "siblings": [
+       {
+        "rfilename": "README.md"
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "gated"
+   }
+  },
+  {
+   "name": "Hugging Face weights with a weight file are public",
+   "url": "https://huggingface.co/o/m",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/m": {
+     "status": 200,
+     "json": {
+      "gated": false,
+      "siblings": [
+       {
+        "rfilename": "model.gguf"
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "public"
+   }
+  },
+  {
+   "name": "Hugging Face weights with a README and a config only are a placeholder",
+   "url": "https://huggingface.co/o/m",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/m": {
+     "status": 200,
+     "json": {
+      "gated": false,
+      "siblings": [
+       {
+        "rfilename": "README.md"
+       },
+       {
+        "rfilename": "config.json"
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "placeholder"
+   }
+  },
+  {
+   "name": "a Hugging Face dataset with only a README is a placeholder",
+   "url": "https://huggingface.co/datasets/o/d",
+   "kind": "code",
+   "answers": {
+    "https://huggingface.co/api/datasets/o/d": {
+     "status": 200,
+     "json": {
+      "gated": false,
+      "siblings": [
+       {
+        "rfilename": "README.md"
+       }
+      ],
+      "tags": [
+       "license:cc-by-4.0"
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "placeholder",
+    "license": "cc-by-4.0"
+   }
+  },
+  {
+   "name": "a Hugging Face space with its app is public",
+   "url": "https://huggingface.co/spaces/o/s",
+   "kind": "code",
+   "answers": {
+    "https://huggingface.co/api/spaces/o/s": {
+     "status": 200,
+     "json": {
+      "siblings": [
+       {
+        "rfilename": "README.md"
+       },
+       {
+        "rfilename": "app.py"
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "public"
+   }
+  },
+  {
+   "name": "a renamed Hugging Face repository is followed (307) to its weights",
+   "url": "https://huggingface.co/o/old",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/old": {
+     "status": 307,
+     "location": "/api/models/o/new"
+    },
+    "https://huggingface.co/api/models/o/new": {
+     "status": 200,
+     "json": {
+      "id": "o/new",
+      "siblings": [
+       {
+        "rfilename": "README.md"
+       },
+       {
+        "rfilename": "model.safetensors"
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "public"
+   }
+  },
+  {
+   "name": "a redirect off Hugging Face is not followed",
+   "url": "https://huggingface.co/o/away",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/away": {
+     "status": 307,
+     "location": "https://elsewhere.test/api/models/o/away"
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a redirect to plain HTTP is not followed",
+   "url": "https://huggingface.co/o/plain",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/plain": {
+     "status": 307,
+     "location": "http://huggingface.co/api/models/o/plain"
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a Hugging Face repository it does not have is missing",
+   "url": "https://huggingface.co/o/gone",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/gone": {
+     "status": 401
+    }
+   },
+   "expect": {
+    "state": "missing"
+   }
+  },
+  {
+   "name": "a Hugging Face server error says nothing",
+   "url": "https://huggingface.co/o/m",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/m": {
+     "status": 503
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a Hugging Face answer of JSON null says nothing",
+   "url": "https://huggingface.co/o/m",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/m": {
+     "status": 200,
+     "json": null
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a gated flag that is not one of the API's values says nothing",
+   "url": "https://huggingface.co/o/m",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/m": {
+     "status": 200,
+     "json": {
+      "gated": "false",
+      "siblings": []
+     }
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "a Hugging Face model gated automatically is gated",
+   "url": "https://huggingface.co/o/auto",
+   "kind": "weights",
+   "answers": {
+    "https://huggingface.co/api/models/o/auto": {
+     "status": 200,
+     "json": {
+      "gated": "auto",
+      "siblings": [
+       {
+        "rfilename": "model.safetensors"
+       }
+      ]
+     }
+    }
+   },
+   "expect": {
+    "state": "gated"
+   }
+  }
+ ]
+}

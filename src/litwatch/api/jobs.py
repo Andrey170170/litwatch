@@ -168,7 +168,7 @@ async def process(body: s.ProcessIn, request: Request, db: Db, rules: Rules) -> 
             return s.ProcessJob(id=found["id"], state=found["state"], error=found["error"])
         if await taxonomy_store.load(unit) is None:  # nothing to sort the paper into
             raise HTTPException(status_code=409, detail="no taxonomy yet")
-        await misses.keep(unit, paper_id, fetched)
+        await misses.keep(unit, paper_id, fetched, rules)
         if await word_store.in_collection(unit, paper_id):
             raise HTTPException(status_code=409, detail="already in the collection")
         if await papers_store.dropped(unit, paper_id):

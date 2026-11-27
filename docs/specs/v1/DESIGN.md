@@ -158,8 +158,11 @@ and Done. The header shows the topic's badge and name, cut with "…" when long.
 **The header**, on a ground carrying the paper's rarity stripe and glow: the rarity's name ("Legendary") and the
 topic badges; the title; the authors (the first three and "+3", which expands); the facts line: the arXiv id (a link,
 with ⧉ to copy it), the date, the version ("v2 of 2"), the kind (Analysis, Method…), the published venue when DBLP
-knows one, and "⟨/⟩ code ↗" and "◆ weights ↗" when released. A paper outside the collection says "Not in the
-collection" in place of a rarity.
+knows one, and its release links. Each link is a chip, "⟨/⟩ code ↗" or "◆ weights ↗", in the colour of its access
+state: public `--cy`, gated `--warn`, a placeholder `--fg3` and dashed, missing `--sig`; the state follows the kind
+unless public ("◆ weights · gated ↗"), and its license and last check show on hover. Where no link of a kind is known, the
+Deep card's Code link where it has one, else the analysis's word, quiet ("⟨/⟩ code", "◆ weights"); after a find that
+found none, the hover says so. A paper outside the collection says "Not in the collection" in place of a rarity.
 
 **Withdrawn.** A paper arXiv withdrew ([pipeline.md](pipeline.md), section 8) has, under the header, a status panel as
 today's run has one, in `--sig`: the tag "Withdrawn", the day at the right, the line "Withdrawn on arXiv. litwatch no
@@ -180,8 +183,9 @@ italics. It offers no Deep read. Where a row of it shows (a digest that listed i
    any ("Process notes · 2", folded until opened, each with its kind as a tag: access, tool, budget, input), Prior work (rows that open the paper
    when it has an arXiv id), Among the collection (rows with their rarity stripe and a tag: agrees, extends,
    contradicts, supersedes). It ends with what it was written from and when, and "Write again". Without a card: one
-   line saying when cards are automatic and "Deep read" to ask for one, only while a Deep provider is loaded (no
-   rung at all without one); while one is queued or being written, a status line with a pulsing dot.
+   line, "None yet", and "Deep read" to ask for one (true whether automatic cards are on or off), only while a Deep
+   provider is loaded (no rung at all without one); while one is queued or being written, a status line with a
+   pulsing dot.
 
    A card in the Deep read's format (`"format": "read"`, [deep-read.md](../deep-read.md)) shows as the **Deep read**
    instead, and a card without the tag as above. The rung reads "Deep read", and each section of the read is a rung
@@ -208,7 +212,10 @@ italics. It offers no Deep read. Where a row of it shows (a digest that listed i
   two rows the rest fold behind one line: their badges and a count by grade in the grades' colours ("+4 · 1 must
   read, 3 adjacent"). It opens closed on every paper; a note's Label opens it when its topic is folded.
 - The quick actions as a 2×2 grid: Save, BibTeX ⧉, arXiv ↗, PDF ↗, with Deep read across the full width while the
-  paper has no card. For a paper outside the collection: Process, BibTeX, Deep read, Report as a miss. Process
+  paper has no card. For a paper outside the collection: Process, BibTeX, Deep read, Report as a miss. Where a card
+  provider is configured, Find links comes last, across the full width, so the cells before it keep their places: it
+  asks for the paper's release links afresh and reads "Find links · queued" (or "· finding") while that find is open,
+  then how it ended: "· none found", or "· failed" in the signal colour, its error on hover; the same cell on the phone. Process
   fetches it and starts a job that processes it now (Jobs); the button reads "Processing" while it runs. A paper
   litwatch fetched but never processed (a lookup, a miss report) gets the same Process. While the schedule is off,
   which runs no jobs, Process only fetches the paper, and a fetched one reads "Fetched · next run" instead.
@@ -220,7 +227,9 @@ strip of section chips sticks under the top bar, the current one outlined and sc
 its section; diagrams and wide tables scroll sideways. The bottom bar: ☆ Save, 👍,
 the paper's place in its list ("3/22"), 👎, and ⋯. ⋯ opens the paper sheet: a label per topic (the topic's name, its
 grade and whose Fit it shows, then the Fit control; in the rail's order and fold), the actions and links as the same grid (arXiv, PDF, LaTeX, Code,
-Weights, BibTeX), then versions, published version and classes, and Done. A swipe steps to the previous or next paper
+Weights, BibTeX, then Deep read and Find links; Code and Weights are always there, so a find moves no cell: the first
+release link of each, in its state's colour with a 3 px left edge (a placeholder dashed all round instead), else as
+the header has it, else empty and quiet: the ordinary solid border, its label dimmed, so only a placeholder is dashed), then versions, published version and classes, and Done. A swipe steps to the previous or next paper
 of the list it was opened from.
 
 A paper outside the collection on the phone: the header and the Abstract (no Gist or Brief), and a bottom bar of

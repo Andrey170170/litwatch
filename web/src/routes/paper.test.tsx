@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { freshClient, json, renderApp, scriptFetch, viewport } from "@/test/harness";
 import type { Paper } from "@/components/paper/Actions";
 import { pollEvery } from "./paper";
@@ -530,13 +530,21 @@ describe("a paper's page", () => {
     expect(rung.querySelector('a[href^="javascript"]')).toBeNull();
   });
 
+  it("says a paper has no Deep card yet without promising one, whether automatic cards are on or off", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
+    renderApp("/paper/2610.00002");
+    expect(await screen.findByText(/None yet\./)).toHaveTextContent("None yet. Deep read asks for one.");
+    expect(screen.queryByText(/automatic/)).toBeNull();
+  });
+
   it("has no Deep card rung for a paper without one while no card can be asked for", async () => {
     viewport(true);
     scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, card_requestable: false } });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     expect(screen.queryByText("Deep card")).toBeNull();
-    expect(screen.queryByText(/cards are automatic/)).toBeNull();
+    expect(screen.queryByText(/None yet/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Deep read" })).toBeNull();
   });
 
@@ -585,6 +593,150 @@ describe("a paper's page", () => {
     expect(await screen.findByText("Asked for · queued")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deep read · queued" })).toBeDisabled();
     expect(reads).toBe(2);
+  });
+});
+
+describe("a paper's release links", () => {
+  const link = (kind: string, state: string, url: string) => ({ url, kind, state, license: state === "public" ? "MIT" : null, checked_at: "2026-11-20T03:00:00Z", found_by: "finder" });
+  const answer = (links: number) => ({ state: "done", by: "finder", at: "2026-11-20T03:00:00Z", answered: true, links });
+
+  it("show as chips coloured by state among the facts, and in the phone's grid in the Code and Weights places", async () => {
+    viewport(true);
+    const links = [link("code", "public", "https://github.com/o/r"), link("weights", "placeholder", "https://huggingface.co/o/m")];
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, links, link_answer: answer(2), facets: { ...paper.facets, releases_code: true } } });
+    const { unmount } = renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    const code = screen.getByRole("link", { name: "⟨/⟩ code ↗" });
+    expect(code).toHaveAttribute("data-state", "public");
+    expect(code).toHaveAttribute("href", "https://github.com/o/r");
+    expect(code.title).toMatch(/^public · MIT · checked /);
+    expect(screen.getByRole("link", { name: "◆ weights · placeholder ↗" })).toHaveAttribute("data-state", "placeholder");
+    unmount();
+    viewport(false);
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    const cells = [...within(screen.getByRole("dialog", { name: "The paper" })).getAllByRole("link")].map((a) => a.textContent);
+    expect(cells).toEqual(["arXiv ↗", "PDF ↗", "LaTeX ↗", "⟨/⟩ Code ↗", "◆ Weights · placeholder ↗"]);
+  });
+
+  it("keep every phone cell in its place when a find adds a kind the abstract never announced", async () => {
+    viewport(false);
+    const grid = async (body: object) => {
+      scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": body });
+      const { unmount } = renderApp("/paper/2610.00002");
+      await screen.findByRole("heading", { name: "Epic one" });
+      await userEvent.click(screen.getByRole("button", { name: "More" }));
+      const cells = [...screen.getByRole("button", { name: /BibTeX/ }).parentElement!.children].map((c) => c.textContent);
+      unmount();
+      return cells;
+    };
+    const before = await grid({ ...paper, facets: { ...paper.facets, releases_code: false, releases_weights: false } });
+    const after = await grid({ ...paper, facets: { ...paper.facets, releases_code: false, releases_weights: false }, links: [link("weights", "public", "https://huggingface.co/o/m")] });
+    expect(before.slice(0, 6)).toEqual(["arXiv ↗", "PDF ↗", "LaTeX ↗", "⟨/⟩ Code", "◆ Weights", "BibTeX "]);
+    expect(after.slice(0, 6)).toEqual(["arXiv ↗", "PDF ↗", "LaTeX ↗", "⟨/⟩ Code", "◆ Weights ↗", "BibTeX "]);
+  });
+
+  it("leave the Deep card's Code link where no release link is known, whatever the abstract says, and say when a find found none", async () => {
+    viewport(true);
+    const card = { card: { code_url: "https://github.com/card/code" }, among: [] };
+    scriptFetch({
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": { ...paper, card, facets: { ...paper.facets, releases_code: false, releases_weights: true }, link_answer: answer(0) },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getAllByRole("link", { name: "⟨/⟩ code ↗" })[0]).toHaveAttribute("href", "https://github.com/card/code");
+    expect(screen.getByText("◆ weights").title).toMatch(/no link was found/);
+  });
+
+  it("are found afresh by Find links, last in the rail's grid, which says so while the owner's find is open", async () => {
+    viewport(true);
+    let reads = 0;
+    const calls = scriptFetch({
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, links_findable: true } : { ...paper, links_findable: false, finding_links: true, owner_find: { state: "queued", by: "owner", at: "2026-11-26T10:00:00Z" } }),
+      "POST /api/papers/2610.00002/links": { find_id: 5 },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    const grid = screen.getByRole("button", { name: "Find links" }).parentElement!;
+    expect([...grid.children].at(-1)).toHaveTextContent("Find links");
+    await userEvent.click(screen.getByRole("button", { name: "Find links" }));
+    expect(await screen.findByRole("button", { name: "Find links · queued" })).toBeDisabled();
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/papers/2610.00002/links"]);
+  });
+
+  it("offer Find links while only an automatic find is open", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, links_findable: true, finding_links: true } });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.getByRole("button", { name: "Find links" })).toBeEnabled();
+  });
+
+  it("offer no Find links where none can be asked for", async () => {
+    viewport(true);
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": paper });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    expect(screen.queryByRole("button", { name: /Find links/ })).toBeNull();
+  });
+
+  it("say on the Find links cell that the owner's find found none, or failed", async () => {
+    viewport(true);
+    const owners = (fields: object) => ({ ...paper, links_findable: true, owner_find: { by: "owner", at: "2026-11-26T10:00:00Z", ...fields } });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": owners({ state: "done", answered: true, links: 0 }) });
+    const { unmount } = renderApp("/paper/2610.00002");
+    expect(await screen.findByRole("button", { name: "Find links · none found" })).toBeEnabled();
+    unmount();
+    // Superseded (a newer version came) or the paper dismissed: no answer, so not "none found".
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": owners({ state: "done", answered: false, links: null }) });
+    const again = renderApp("/paper/2610.00002");
+    expect(await screen.findByRole("button", { name: "Find links" })).toBeEnabled();
+    again.unmount();
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": owners({ state: "failed", error: "FindError: the deep service broke" }) });
+    renderApp("/paper/2610.00002");
+    const failed = await screen.findByRole("button", { name: "Find links · failed" });
+    expect(failed.title).toMatch(/the deep service broke/);
+    expect([...failed.parentElement!.children].at(-1)).toBe(failed); // last: the cells before it keep their places
+  });
+
+  it("poll after Find links is accepted though the read after it failed, until a read sees the find end", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => void vi.useRealTimers());
+    viewport(true);
+    let reads = 0;
+    scriptFetch({
+      "GET /api/topics": [],
+      "GET /api/papers/2610.00002": () => (++reads === 1 ? { ...paper, links_findable: true } : reads === 2 ? json({ detail: "down" }, 500) : { ...paper, link_answer: answer(0) }),
+      "POST /api/papers/2610.00002/links": { find_id: 5 },
+    });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await userEvent.click(screen.getByRole("button", { name: "Find links" }));
+    await waitFor(() => expect(reads).toBe(2)); // the refresh after the POST fails
+    await vi.advanceTimersByTimeAsync(15_000);
+    await waitFor(() => expect(reads).toBe(3));
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(reads).toBe(3);
+  });
+
+  it("poll while a find is open, and stop once the page sees it end", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => void vi.useRealTimers());
+    viewport(true);
+    let reads = 0;
+    const open = { ...paper, finding_links: true, open_find: { state: "running", by: "finder", at: "2026-11-26T10:00:00Z" } };
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": () => (++reads < 3 ? open : { ...paper, link_answer: answer(0) }) });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await waitFor(() => expect(reads).toBe(2));
+    await vi.advanceTimersByTimeAsync(15_000);
+    await waitFor(() => expect(reads).toBe(3));
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(reads).toBe(3);
   });
 });
 

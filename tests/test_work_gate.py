@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from uuid import uuid4
 
 import psycopg
@@ -17,7 +18,7 @@ from psycopg.abc import Params
 from litwatch.core.work import ItemState, Outcome, WorkItem
 from litwatch.gates.context import Attribution, Work, attribution, current_work, working
 from litwatch.gates.database import Cursor, DatabaseGate, LeaseLostError, Query, WriteUnit
-from litwatch.gates.work import SYSTEM, Done, Later, Worker, WorkGate
+from litwatch.gates.work import SYSTEM, Done, Later, TerminalError, Worker, WorkGate
 from litwatch.store import work as queue
 from tests.sessions import Session, in_read, sibling, staged
 from tests.working import WAIT, serving, until
@@ -423,6 +424,27 @@ async def test_a_claim_kept_waiting_by_a_peer_starts_its_lease_when_it_wins(
 
 
 # -- leases ----------------------------------------------------------------------------------------
+
+
+async def test_a_worker_that_fails_for_good_after_spending_ends_its_item_with_the_cost(
+    conn: Session, db
+):
+    async def worker(item: WorkItem) -> Done:
+        raise TerminalError("the service broke", cost=Decimal("0.25"))
+
+    submitted = await submit(db, "fulltext", "1")
+    async with serving(WorkGate(db, poll=60), {"fulltext": worker}):
+        await until(state_is(conn, submitted.id, ItemState.ENDED), "the item failed")
+    row = await (
+        await conn.execute(
+            "SELECT outcome, error, cost FROM work_items WHERE id = %s", (submitted.id,)
+        )
+    ).fetchone()
+    assert row == {
+        "outcome": "failed",
+        "error": "TerminalError: the service broke",
+        "cost": Decimal("0.25"),
+    }
 
 
 async def test_an_expired_lease_is_taken_back_and_the_item_tried_again(conn: Session, db):

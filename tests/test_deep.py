@@ -9,6 +9,7 @@ import contextlib
 import json
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 
 from litwatch import events
@@ -19,6 +20,7 @@ from litwatch.core import (
     FAILED_RUNS,
     Cause,
     Fit,
+    Grade,
     Hand,
     Label,
     LabelOrigin,
@@ -45,6 +47,7 @@ from litwatch.fulltext import deep as deep_passes
 from litwatch.fulltext.worker import DeepPassWorker
 from litwatch.gates.work import WorkGate
 from litwatch.intake import search
+from litwatch.integrations import IntegrationError
 from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
@@ -55,6 +58,7 @@ from litwatch.store import jobs as jobs_store
 from litwatch.store import papers as papers_store
 from litwatch.store import taxonomy as taxonomy_store
 from litwatch.store import verdicts
+from litwatch.store import word as word_store
 from tests import settling
 from tests.conftest import (
     AGENTS,
@@ -73,10 +77,11 @@ from tests.conftest import (
 from tests.deep_service import CARD, DONE, USAGE, Q, make
 from tests.digesting import MON, TUE, Writer, area, day, listed, week
 from tests.fakes_http import FakeArchive, FakeDeep, mock
+from tests.scripted import ANALYSIS, CONFIG, Scripted, decision
 from tests.seed import analyse, classify
 from tests.seed import grade as verdict
 from tests.sessions import Bridge, Session, in_read, in_write
-from tests.working import items_of, job_of, serving, until
+from tests.working import QUIET, items_of, job_of, night, served, serving, until
 
 P = paper("2610.00001", title="Traces that hide steps", abstract="Hidden computation.", version=2)
 BODY = "\\section{Method} We read hidden steps off the residual stream. " * 40
@@ -226,22 +231,40 @@ async def test_without_the_deep_integration_a_must_read_gets_no_pass_and_one_que
 
 
 @pytest.mark.parametrize(
-    ("toml", "on"),
+    ("toml", "on", "deep"),
     [
-        ('[integrations.deep]\nurl = "http://deep:8081"\n', True),
-        ('[integrations.reader]\nuse = "deep"\nurl = "http://deep:8081"\n', True),
-        ('[integrations.reader]\nuse = "litwatch.integrations.deep"\nurl = "http://d"\n', True),
-        ('[integrations.deep]\nenabled = false\nurl = "http://deep:8081"\n', False),
-        ('[integrations.deep]\nuse = "webhook"\nurl = "http://hook"\n', False),
-        ("[integrations.archive]\n", False),
+        ('[integrations.deep]\nurl = "http://deep:8081"\n', True, True),
+        ('[integrations.reader]\nuse = "deep"\nurl = "http://deep:8081"\n', True, True),
+        (
+            '[integrations.reader]\nuse = "litwatch.integrations.deep"\nurl = "http://d"\n',
+            True,
+            True,
+        ),
+        ('[integrations.deep]\nurl = "http://deep:8081"\nautomatic = true\n', True, True),
+        # Automatic reads off; the finder, and the owner's requests, still use deep.
+        ('[integrations.deep]\nurl = "http://deep:8081"\nautomatic = false\n', False, True),
+        ('[integrations.deep]\nenabled = false\nurl = "http://deep:8081"\n', False, False),
+        ('[integrations.deep]\nuse = "webhook"\nurl = "http://hook"\n', False, False),
+        ("[integrations.archive]\n", False, False),
     ],
 )
-def test_automatic_deep_cards_are_on_only_with_the_deep_integration(tmp_path, toml, on):
+def test_automatic_deep_cards_are_on_with_the_deep_integration_unless_switched_off(
+    tmp_path, toml, on, deep
+):
     from litwatch import config
 
     path = tmp_path / "litwatch.toml"
     path.write_text(toml)
-    assert settling.configured(config.load(path)) == word.Rules(automatic_deep=on)
+    assert settling.configured(config.load(path)) == word.Rules(automatic_deep=on, find_links=deep)
+
+
+def test_deep_s_automatic_switch_is_true_or_false(tmp_path):
+    from litwatch import config
+
+    path = tmp_path / "litwatch.toml"
+    path.write_text('[integrations.deep]\nurl = "http://deep:8081"\nautomatic = "no"\n')
+    with pytest.raises(IntegrationError, match="automatic is true or false"):
+        settling.configured(config.load(path))
 
 
 @pytest.mark.parametrize("command", [["taxonomy", "import"], ["library", "sync"]])
@@ -260,7 +283,7 @@ def test_the_cli_commands_that_settle_take_their_rules_from_the_configuration(
     monkeypatch.setattr(cli, "_run", lambda *a, **k: {})  # what it prints is not the point
     monkeypatch.setattr(cli, "_taxonomy_file", lambda p: None)  # `_run`, stubbed, never uses it
     CliRunner().invoke(cli.app, [*command, "--config", str(path)])
-    assert seen == [word.Rules(automatic_deep=True)]
+    assert seen == [word.Rules(automatic_deep=True, find_links=True)]
 
 
 async def test_the_owners_request_takes_over_an_automatic_pass_and_no_unsave_cancels_it(
@@ -1732,6 +1755,47 @@ async def test_a_requested_card_runs_as_its_passs_work_item_while_the_gate_serve
 
         await until(ended, "the item ends")
     assert (await in_read(db, cards.card, P.id))["card"] == CARD
+
+
+async def test_with_automatic_reads_off_a_must_read_queues_none_and_the_owners_request_runs(
+    db: Session, gate, monkeypatch
+):
+    """`[integrations.deep] automatic = false`, as production sets it, in `serve` on the
+    configuration's own rules: the nightly grading a paper a must read queues no Deep pass, and
+    the owner's request is worked on deep by `serve`'s own Deep worker."""
+    monkeypatch.setattr(word, "rules", settling.configured)
+    deep = {"url": "http://deep.test", "automatic": False}
+    off = CONFIG.model_copy(update={"schedule": QUIET, "integrations": {"deep": deep}})
+    models = Scripted()  # P is on CoT faithfulness, central by both labs: a must read
+    models.decisions[P.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
+    models.analyses[P.title] = ANALYSIS | {"releases_code": False}  # no find of its links
+    models.fits[("judge", P.title)] = models.fits[("check", P.title)] = {
+        "reason": "On it.",
+        "fit": "central",
+    }
+    integrations = [make(FakeDeep(DONE))]
+    async with served(
+        gate, off, models=models.gate(off), integrations=integrations, archive=archive(with_text(P))
+    ) as app:
+        await night(gate, db)  # a `litwatch nightly` item, worked by this `serve`
+        grades = await in_read(db, word_store.effective_for, P.id)
+        assert grades[FAITH.slug].grade == Grade.MUST_READ  # one an automatic Deep read is for
+        assert await deep_rows(db) == []
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://t",
+            headers={"Authorization": "Bearer test"},
+        ) as http:
+            asked = await http.post(f"/api/papers/{P.id}/card")
+        assert asked.status_code == 202
+        pass_id = asked.json()["pass_id"]
+
+        async def ended() -> bool:
+            return [i["state"] for i in await items_of(db, "deep", str(pass_id))] == ["ended"]
+
+        await until(ended, "the owner's pass ends")
+    written = await in_read(db, cards.card, P.id)
+    assert written is not None and written["card"] == CARD
 
 
 async def test_a_deep_pass_waits_out_the_services_pause_as_the_same_item(

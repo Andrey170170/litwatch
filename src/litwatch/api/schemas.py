@@ -513,6 +513,37 @@ class CardPass(BaseModel):
     error: str | None = None
 
 
+class ReleaseLink(BaseModel):
+    """Where the paper's code or weights are released, and their access state as of
+    `checked_at`: public, gated (behind a sign-up or a request), a placeholder (the repository
+    holds no release yet) or missing; `found_by` what set it: a find (the finder's or the
+    owner's), or a re-check."""
+
+    url: str
+    kind: Literal["code", "weights"]
+    state: Literal["public", "gated", "placeholder", "missing"]
+    license: str | None = None
+    checked_at: datetime
+    found_by: Literal["finder", "owner", "recheck"]
+
+
+class LinkFind(BaseModel):
+    """A find of the paper's release links: queued, running, done or failed; the finder's or
+    the owner's; when it ended, started or is due; whether it answered (done with its answer,
+    `links` of them, none found included; a find skipped or superseded ended done unanswered)."""
+
+    state: Literal["queued", "running", "done", "failed"]
+    by: Literal["finder", "owner"]
+    at: datetime
+    error: str | None = None
+    answered: bool = False
+    links: int | None = None
+
+
+class LinksRequested(BaseModel):
+    find_id: int  # the work item that finds them
+
+
 JobState = Literal["offered", "stopped", "tonight", "queued", "running", "failed", "done"]
 
 
@@ -575,6 +606,16 @@ class Paper(BaseModel):
     # A card provider is loaded and no card is queued or being written: "Deep read", or "Write
     # again" under a card.
     card_requestable: bool = False
+    links: list[ReleaseLink] = Field(default_factory=list)  # code first, then weights
+    # Of the paper as it is now (its version, or its update when none is known): the last
+    # answer, "None found" when it has no links; and the owner's last find, open or ended.
+    link_answer: LinkFind | None = None
+    owner_find: LinkFind | None = None
+    open_find: LinkFind | None = None  # the paper's find queued or running, the running first
+    finding_links: bool = False  # a find is open and finds run here: the page polls
+    # Finds run here (the schedule on, the archive, a card provider), the paper is not dropped,
+    # and no find of the owner's of it is open: "Find links".
+    links_findable: bool = False
     process: ProcessJob | None = None  # the paper's newest Process job, when it has one
     # A paper litwatch holds, outside the collection: Process would queue its job now, since the
     # schedule is on (it runs the jobs worker), a taxonomy is there, the next run would process

@@ -18,10 +18,12 @@ from litwatch.api import mcp as mcp_api
 from litwatch.api.monitor import MCP_WINDOW, McpCalls, create_monitor
 from litwatch.config import Config
 from litwatch.core import Publication, Taxonomy
+from litwatch.core.contracts import deep as contract
 from litwatch.core.digests import DigestPeriod, DigestRole, DigestState
 from litwatch.jobs import publications as lookups
 from litwatch.store import digests as digests_store
 from litwatch.store import integrations as integrations_store
+from litwatch.store import links as links_store
 from litwatch.store import papers as papers_store
 from tests import settling
 from tests.conftest import AGENTS, FAITH, INTERP, TREE, AppClient, fixture_read, gate_on, paper
@@ -395,6 +397,28 @@ async def test_get_paper_says_arxiv_withdrew_it_and_why(conn: Session, shelves):
     assert (
         "Withdrawn on arXiv 2026-10-21: litwatch no longer processes it. "
         "The comment on arXiv: The proof is wrong"
+    ) in held
+
+
+async def test_get_paper_lists_the_release_links_with_their_states(conn: Session, shelves):
+    fake, *_ = shelves
+    links = [
+        contract.ReleaseLink(
+            url="https://github.com/o/probes", kind="code", state="public", license="MIT",
+            checked_at="2026-11-20T03:00:00Z",
+        ),
+        contract.ReleaseLink(
+            url="https://huggingface.co/o/m", kind="weights", state="gated", license=None,
+            checked_at="2026-11-21T03:00:00Z",
+        ),
+    ]  # fmt: skip
+    await in_write(conn, links_store.replace, P.id, 1, links, "finder")
+    async with serving(mcp_app(conn, fake)) as http:
+        held = await ok(http, "get_paper", paper_id=P.id)
+    assert (
+        "## Release links\n"
+        "- code: https://github.com/o/probes · public · license MIT · checked 2026-11-20\n"
+        "- weights: https://huggingface.co/o/m · gated · checked 2026-11-21"
     ) in held
 
 

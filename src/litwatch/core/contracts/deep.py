@@ -176,6 +176,24 @@ Marks a Deep read; a Deep card from before has no format.
 """
 
 
+type License = Annotated[str, Field(min_length=1)]
+"""
+Its license as the host states it (an SPDX id where it gives one); left out when it is not cheap to see.
+"""
+
+
+type LinkKind = Literal["code", "weights"]
+"""
+What the link releases: the paper's code, or its model weights.
+"""
+
+
+type LinkState = Literal["public", "gated", "placeholder", "missing"]
+"""
+Whether it can be had: public, open to anyone now; gated, behind a request form or a licence to accept; placeholder, a repository with nothing but a README; missing, a link the paper gives that leads nowhere.
+"""
+
+
 class Outline(BaseModel):
     """
     A LaTeX source's outline, as litwatch parses it (src/litwatch/core/outline.py); the service reads a LaTeX paper by it.
@@ -207,6 +225,29 @@ class Result(BaseModel):
         extra="allow",
     )
     format: ReadFormat
+
+
+class ReleaseLink(BaseModel):
+    """
+    A link to a paper's released code or weights, with its access state.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    url: Annotated[str, Field(pattern="^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#]+[^\\s]*$")]
+    """
+    The repository's or model's page, an absolute http(s) URL.
+    """
+    kind: LinkKind
+    state: LinkState
+    license: License | None = None
+    checked_at: Annotated[
+        str, Field(pattern="^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$")
+    ]
+    """
+    When the service last fetched it, an RFC 3339 time in UTC.
+    """
 
 
 class LatexPaper(BaseModel):
@@ -273,10 +314,71 @@ class Job(BaseModel):
     key: str | None = None
 
 
+class LinksAnswer(BaseModel):
+    """
+    What a find of a paper's release links answers.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    links: list[ReleaseLink]
+    """
+    Each link found and checked; empty when none was found.
+    """
+    note: str | None = None
+    """
+    What the finder could not settle, in a sentence or two.
+    """
+
+
 type Paper = LatexPaper | PdfPaper
 """
 The paper, by where its text comes from.
 """
+
+
+class LinksInput(BaseModel):
+    """
+    What POST /links is sent: one paper to find the release links of.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    paper: Paper
+    comments: str | None = None
+
+
+class LinkJob(BaseModel):
+    """
+    A find as GET /links/<id> reports it; a done one carries its answer.
+    """
+
+    id: str
+    paper_id: str
+    status: Literal["queued", "running", "done", "error"]
+    """
+    Where the job is.
+    """
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    model: str | None = None
+    stats: Stats
+    last_event: str | None = None
+    last_activity: str
+    result: LinksAnswer | None = None
+    trace: list[Any] | None = None
+    """
+    What the find did, event by event (links.ts).
+    """
+    error: str | None = None
+    failure: Literal["service", "paper"] | None = None
+    """
+    Whose failure an error job's was: the service's, or the paper's.
+    """
+    key: str | None = None
 
 
 class JobInput(BaseModel):

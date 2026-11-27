@@ -690,7 +690,7 @@ async def test_two_requests_storing_the_same_fetched_paper_both_get_it(
     fetched = paper("2610.06666")
     async with await sessions.connect(conn.test_dsn, conn.test_schema) as other:
         async with settling.held(other, fetched.id) as change:
-            first = await misses.keep(change.unit, fetched.id, fetched)
+            first = await misses.keep(change.unit, fetched.id, fetched, settling.RULES)
             # The second runs into the first's settle lock, and waits on it.
             second = asyncio.create_task(
                 settling.keep(conn, fetched.id, fetched)

@@ -239,7 +239,7 @@ The built-in `archive` integration is a search provider.
 | `zotero` | `paper.saved`, `paper.unsaved`, `grade.changed`, `publication.found`, `card.ready` | Keeps a Zotero item per library paper with tags and notes in step; tags it `litwatch:dropped` when it leaves the library and never deletes it. A Deep read gets no note and no tags of its own (it is read on the paper page) and still counts as written for the inbox tag; a Deep card from before keeps its note and tags |
 | `webdav` | `grade.changed` to `must_read`, `paper.saved` | Stores the PDF of a `must_read` library paper for Zotero's file sync (needs `zotero`) |
 | `archive` | `paper.added`, `paper.revised` | Registers the paper with arxiv-archive (metadata, PDF and source), unless intake read it from the archive; answers searches. With `register = false` it registers nothing and only answers searches and serves PDFs, for running beside another litwatch that already registers the same papers. With `harvest = true` (and registering), intake's catalog pass also registers every new or revised arXiv paper outside intake's categories, as metadata only: `litwatch intake --catalog-from DATE` backfills it from a day |
-| `deep` | none: its work is the full-text queue's Deep passes (a saved Focus must read without a card, the owner's request) | Asks the deep service for a Deep read, stores it with its figures, and records each attempt's usage, trace and reviews (`litwatch deep trace`); emits `card.ready`. Loads only with an archive to read papers from. See below |
+| `deep` | none: its work is the full-text queue's Deep passes (a saved Focus must read without a card, the owner's request) and the finds of release links | Asks the deep service for a Deep read, stores it with its figures, and records each attempt's usage, trace and reviews (`litwatch deep trace`); emits `card.ready`. Finds where a paper's code and weights are released. `automatic = false` stops the automatic Deep reads, and leaves the owner's requests and the finds on. Loads only with an archive to read papers from. See below |
 | `notion` | `grade.changed` for an exported topic, `gist.written`, `card.ready`, `publication.found`, `paper.revised` | Keeps a Notion database of the papers listed for the exported topics, for a reader who does not use litwatch; never deletes a page. See below |
 | `webhook` | any, by pattern | POSTs the event as JSON to a URL |
 
@@ -308,6 +308,47 @@ papers (`GET /api/papers`, `GET /api/papers/<id>`) and fetches a paper's PDF
 (`GET /api/papers/<id>/pdf`), from which the service cuts the figures of a paper with no LaTeX
 source. The service asks for the version its text is of (`?version=<n>`), which the archive is
 asked for, or arXiv's PDF of it. Everything else answers it 403.
+
+### Release links
+
+The service also finds where a paper's code and weights are released (`POST /links`, followed at
+`GET /links/<id>`, the same key protocol as a read; `deep/README.md`). A find is a work item of
+kind `links` (`litwatch.links`), worked only by a `serve` with the schedule on and an archive to
+read papers from. A find submitted while none runs (the schedule off: the nightly or intake
+still submits automatic ones) waits in the queue, and runs once such a `serve` is back. Each find is of the paper as it is when submitted (`core.links.Identity`): its
+arXiv version, or its update when no version is known; every decision about it asks whether it is
+of the paper as it is now. An automatic one runs when the paper's analysis says it releases code
+or weights, unless the paper as it is has an answer, "none found" included, the owner's or an
+automatic one's, or an automatic find of it is open; an open find of the owner's does not count,
+so should it fail the automatic one still runs. A failed automatic find ends failed with its
+error and cost, and a later trigger (an analysis again, or the nightly's retries of the last
+week, run after its analyses; three failures at most) submits a fresh one. A new version, or
+update, is found again, wherever it is stored (intake, or an owner's action fetching the paper).
+Automatic finds start from the analyses and versions recorded once P6 is deployed: a paper
+analysed before gets none (no backfill is built), and the owner's "Find links" covers it.
+The owner's "Find links" (`POST /api/papers/<id>/links`) runs a fresh find of the paper as it is,
+unless one of theirs of the same is open, on a paper only in the archive too, which it stores
+first. Right before a find pays, after any wait for the archive's text, and again with its answer,
+under the paper's locks: a find of what the paper no longer is ends superseded without paying, or
+with its answer dropped, and hands over in the same unit (the owner's is asked again of the paper
+as it is, an automatic one is due again); an automatic find whose paper another find answered
+meanwhile ends without asking deep. A find's answer replaces the paper's links (`release_links`:
+url, kind, access state, license, when checked, what set it). Each find ends with one record, its
+item's result: answered (with when it replaced the links, which orders the paper's answers),
+failed, superseded, dropped or answered by another, with what it cost, written in the unit that
+replaces the links or hands the find over; the Work gate ends the item in a second commit. A find
+tried again (its process died before that) ends by its record before anything else; one without
+asks deep about its key first, follows a find deep has to its end (an answer for what the paper
+no longer is ending superseded, with its cost), and sends only one deep does not know. A wrong answer (a URL that is not absolute http(s), a time that is not one
+in UTC) fails the find and touches nothing. A GitHub or Hugging Face link takes its state from
+the host's API, by one check shared by deep's finder and the weekly re-check (`deep/src/hostcheck.ts`,
+`links.adapter`, both suites driven by `deep/tests/fixtures/host-checks.json`); deep confirms any
+other link by a fetch of it that shows its state. A placeholder link on GitHub or Hugging Face is
+checked again by that check, a week apart, four times, each check its own work item, then left
+alone; no other link is. The paper page shows each link as a chip coloured by its state, and
+"Find links" says how the owner's last find of the paper as it is ended ("none found", "failed");
+`get_paper` lists the links, or "None found" for a current answer of none, or that a find is
+queued or running. Digests and the Notion export do not show them yet.
 
 ### The Notion export
 

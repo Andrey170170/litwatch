@@ -1,9 +1,10 @@
-/** The paper's header on its rarity ground: level and badges, title, authors, the facts line (DESIGN.md, "Paper"). */
+/** The paper's header on its rarity ground: level and badges, title, authors, the facts line, its release links
+ * among the facts (DESIGN.md, "Paper"). */
 import { useState } from "react";
 import { Badge } from "@/components/Badge";
 import { authorsShort, fullDate } from "@/lib/format";
 import { CONTRIBUTION_NAME, RARITY_NAME, rc } from "@/lib/rarity";
-import { CopyMark, copyId, type Paper } from "./Actions";
+import { CopyMark, copyId, noLinkTitle, type Paper, ReleaseChip } from "./Actions";
 
 /** arXiv withdrew the paper: a status panel in the signal tone under the header, the day at the right, and the
  * comment arXiv gives with the withdrawal, its authors' or arXiv's own (DESIGN.md, "Withdrawn"). */
@@ -27,6 +28,9 @@ export function Header({ paper }: { paper: Paper }) {
   const awaiting = (paper.states ?? []).some((s) => s.kind === "awaiting_classification");
   const authors = all ? { shown: paper.authors, more: 0 } : authorsShort(paper.authors);
   const card = paper.card?.card as { code_url?: string } | undefined;
+  // Release links show by state where a find gave them; else the Deep card's Code link; else the analysis's word.
+  const code = (paper.links ?? []).filter((l) => l.kind === "code");
+  const weights = (paper.links ?? []).filter((l) => l.kind === "weights");
   const versions = paper.versions ?? [];
   const version = paper.version ? `v${paper.version}${versions.length > 1 ? ` of ${versions.length}` : ""}` : null;
   return (
@@ -70,15 +74,18 @@ export function Header({ paper }: { paper: Paper }) {
             <b>{[paper.publication.venue, paper.publication.year].filter(Boolean).join(" ")}</b>
           </span>
         )}
-        {paper.facets?.releases_code &&
-          (card?.code_url ? (
-            <a className="lnk" href={card.code_url} target="_blank" rel="noopener">
-              ⟨/⟩ code ↗
-            </a>
-          ) : (
-            <span title="The abstract announces released code">⟨/⟩ code</span>
-          ))}
-        {paper.facets?.releases_weights && <span title="The abstract announces released weights">◆ weights</span>}
+        {code.length
+          ? code.map((l) => <ReleaseChip key={l.url} link={l} name="code" />)
+          : card?.code_url ? (
+              <a className="lnk" href={card.code_url} target="_blank" rel="noopener">
+                ⟨/⟩ code ↗
+              </a>
+            ) : (
+              paper.facets?.releases_code && <span title={noLinkTitle(paper, "code")}>⟨/⟩ code</span>
+            )}
+        {weights.length
+          ? weights.map((l) => <ReleaseChip key={l.url} link={l} name="weights" />)
+          : paper.facets?.releases_weights && <span title={noLinkTitle(paper, "weights")}>◆ weights</span>}
       </div>
     </header>
   );

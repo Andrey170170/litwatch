@@ -8,7 +8,8 @@ same unit. Whoever settles names the `Cause`, which `grade.changed` carries. It 
 paper's full-text passes when it qualifies for them (its Brief or Weight re-check, its Deep
 card), so the owner's word can queue one too, and drops one not started that it no longer
 qualifies for. What it takes from the configuration is its `Rules`: automatic Deep cards are
-queued only while the `deep` integration is configured.
+queued only while the `deep` integration is configured and its `automatic` switch is not off,
+and release-link finds submitted only while it is configured.
 
 A change to papers goes through `change`, which opens a write unit of the Database gate holding
 the locks, runs the action's checks and writes in it, and settles each paper once before commit.
@@ -61,7 +62,7 @@ from litwatch.core.fulltext import (
     wanted,
 )
 from litwatch.gates.database import DatabaseGate, WriteUnit
-from litwatch.integrations import enabled_using
+from litwatch.integrations import IntegrationError, enabled_using
 from litwatch.store import analyses as analyses_store
 from litwatch.store import feedback as feedback_store
 from litwatch.store import fulltext as fulltext_store
@@ -79,18 +80,28 @@ CHUNK = 500
 
 @dataclass(frozen=True)
 class Rules:
-    """What settling takes from the configuration.
+    """What a change takes from the configuration.
 
-    `automatic_deep`: whether it queues automatic Deep cards. Off, it wants none, so it drops
-    an automatic one not started; the owner's request is left alone either way."""
+    `automatic_deep`: whether settling queues automatic Deep cards. Off, it wants none, so it
+    drops an automatic one not started; the owner's request is left alone either way.
+    `find_links`: whether recording an analysis, or storing a paper's new arXiv version, submits
+    its automatic release-link find (`litwatch.links.due`)."""
 
     automatic_deep: bool
+    find_links: bool = False
 
 
 def rules(config: Config) -> Rules:
-    """The configuration's rules: automatic Deep cards only while an enabled integration loads
-    `deep`. Whoever opens a change or settles reads them from the configuration it runs on."""
-    return Rules(automatic_deep=enabled_using(config, "deep") is not None)
+    """The configuration's rules, while an enabled integration loads `deep`: automatic Deep
+    cards unless its `automatic` is false (unset keeps them on), and release-link finds. Whoever
+    opens a change or settles reads them from the configuration it runs on."""
+    deep = enabled_using(config, "deep")
+    if deep is None:
+        return Rules(automatic_deep=False)
+    automatic = deep.get("automatic", True)
+    if not isinstance(automatic, bool):
+        raise IntegrationError(f"deep's automatic is true or false, not {automatic!r}")
+    return Rules(automatic_deep=automatic, find_links=True)
 
 
 @dataclass

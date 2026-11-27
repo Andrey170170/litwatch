@@ -287,6 +287,29 @@ export function useDeepRead(paperId: string) {
   );
 }
 
+/** "Find links": a fresh find of the paper's release links on the deep service, the owner's, first in line. */
+export function useFindLinks(paperId: string) {
+  const qc = useQueryClient();
+  return usePaperMutation(
+    paperId,
+    async (id, _: undefined) => {
+      try {
+        return ok(await api.POST("/api/papers/{paper_id}/links", { params: { path: { paper_id: id } } }));
+      } catch (e) {
+        // a 409 means the page is behind (no provider, or the paper is no longer processed): read it again
+        if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ["paper", id] });
+        throw e;
+      }
+    },
+    (qc, id) => {
+      toast("Finding links");
+      // the page polls while a find is open: so too when the read after this fails, until a read reconciles it
+      qc.setQueryData<Schemas["Paper"]>(["paper", id], (p) => p && { ...p, finding_links: true });
+      return settled(qc, id);
+    },
+  );
+}
+
 /** The owner names the published version by DOI, or that there is none. */
 export function usePublication(paperId: string) {
   return usePaperMutation(

@@ -141,6 +141,8 @@ Shape (with sketches), blueprint, drive.
 - **Evals as checks** (review, project 6): maintained inputs in `evals/` apart from historical reports, then a
   performance evaluation CI can run (API latency on the main pages and search, bundle size, render counts).
 - **The evaluation harnesses resume past a half-written last line** (review, project 8).
+- **Release links' waits and host requests are logged:** a find's wait for the archive's text, and a re-check's host
+  request, log nothing today. They show only as `attempts` and the link's `checked_at`.
 
 ### A5. Fetch, Compute and Files gates
 
@@ -185,7 +187,9 @@ Its own project on top of A6: the labelled query set and goals first, then work 
     (`nightly`, `fulltext`) has nothing to find it by but `work_items`;
   - a CLI nightly submitted while a scheduled fire or chunk is admitted: an extra wait or run, the run lock still
     serializing;
-  - overlapping `serve` processes can delete each other's live `workers` row (a registration supersedes every row).
+  - overlapping `serve` processes can delete each other's live `workers` row (a registration supersedes every row);
+  - two `serve`s on cloned databases sharing one deep can reuse each other's release-link find on deep where a paper
+    and an item id coincide (the find's key, `links:<item>:<paper>`).
 
 - **N9, the release** ([milestones.md](specs/v1/milestones.md)): `v1.0.0`, install docs, repository clean-up,
   `evals/` and homelab specifics out of the repository (the image ships `evals/labels/` for Run replay: they move
@@ -209,6 +213,23 @@ Built between milestones, on whatever structure exists then.
 - **Release links in the digests and the Notion export,** once A2's finder has run long enough to show how often
   links are found (A2's spec, "Not in A2"). The Notion export's contract changes with it, so the PI's view is
   checked first.
+
+- **The release-link finder's judgement,** once the finder has run long enough to show where it goes wrong. A2
+  handles the finder's data; how well it judges a link is this. From P6's round-3 review:
+  - a candidate it could not confirm is dropped, so the answer turns into "none found" and replaces stored links;
+  - a GitHub repository with a README and `assets/` counts as code: PMS-SR (2611.03390), a README and a folder of
+    PNG figures, is stored as public; so does a root listing with any other folder beside the filler (`docs/`);
+  - a GitHub repository's releases are read from their first page only (100);
+  - on other hosts, the evidence for a state, and a redirect's final URL standing for the link;
+  - provenance: a URL the paper never gave, accepted on a host's 404 or on an unrelated repository;
+  - a GitHub API check that says nothing (a 403) falls back to the model's state, and a license the API did not
+    give is kept;
+  - the newest observation of a resource should win over an older one in the same find;
+  - deep caps an answer at 12 links: LoopTitan's (2611.34821) 18 weight repositories became 12. The finder's note
+    naming the rest stays in deep's job, and nothing in litwatch shows that more exist;
+  - Hugging Face datasets are stored as kind "code" (AliceAI, 2611.34529): the contract has only code and weights.
+
+  *Needs shaping.*
 
 - **Frontend polish and speed** (review, project 2): elements jumping when a topic tab or paper loads the first
   time; windowed rendering with scroll restoration and paper order kept; lean shelf pages; mutations with their own

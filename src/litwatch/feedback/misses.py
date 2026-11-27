@@ -7,6 +7,7 @@ says), and the owner's newest Save (feedback.md, misses).
 
 from __future__ import annotations
 
+from litwatch import links
 from litwatch.core import Fit, Hand, Label, LabelOrigin, LabelSetter, LabelValue, Paper
 from litwatch.core.classification import Source
 from litwatch.feedback import word
@@ -45,14 +46,18 @@ async def resolve(db: DatabaseGate, text: str) -> tuple[str, Paper | None]:
     return paper_id, fetched[0]
 
 
-async def keep(unit: WriteUnit, paper_id: str, fetched: Paper | None) -> tuple[Paper, bool]:
+async def keep(
+    unit: WriteUnit, paper_id: str, fetched: Paper | None, rules: word.Rules
+) -> tuple[Paper, bool]:
     """Store the record `resolve` fetched, as intake stores one (`store.papers.upsert`), in a unit
     holding the paper's settle lock, so a request or an intake storing it meanwhile went
     first and this one stores over it as intake would; the unit settles the paper after it, a
-    rewrite included (a change of the paper, `word.change`). Returns the paper and whether it
-    was inserted just now."""
+    rewrite included (a change of the paper, `word.change`). A new version stored here has its
+    release links found again, by `rules`, as intake's would (`links.stored`). Returns the
+    paper and whether it was inserted just now."""
     if fetched is not None:
         stored = await papers_store.upsert(unit, [fetched], source="arxiv")
+        await links.stored(unit, stored, find_links=rules.find_links)
     paper = await papers_store.get(unit, paper_id)
     assert paper is not None  # stored now, or held when resolve looked
     return paper, fetched is not None and stored.inserted > 0

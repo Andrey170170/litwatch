@@ -11,6 +11,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core import Paper, events, rewritten, withdrawn_at
 from litwatch.core.digests import announced, first_listing
+from litwatch.core.links import Identity
 from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import outbox
 
@@ -31,6 +32,9 @@ class Upserted:
     rewritten: list[str] = field(default_factory=list)
     # Ids withdrawn, or brought back by a later version: dropped or not from now on.
     withdrawn: list[str] = field(default_factory=list)
+    # Stored ids that are another paper for release links than they were (`core.links.Identity`):
+    # a new arXiv version, or, of no known version, a new update.
+    versioned: list[str] = field(default_factory=list)
 
 
 def row_to_paper(row: dict[str, Any]) -> Paper:
@@ -158,7 +162,8 @@ async def upsert(
         r["id"]: r
         for r in await (
             await unit.execute(
-                "SELECT id, title, abstract, version, withdrawn_at FROM papers WHERE id = ANY(%s)",
+                "SELECT id, title, abstract, version, updated, withdrawn_at FROM papers "
+                "WHERE id = ANY(%s)",
                 ([p.id for p in papers],),
             )
         ).fetchall()
@@ -197,7 +202,7 @@ async def upsert(
                        OR (papers.version IS NULL AND EXCLUDED.version IS NOT NULL)
                        OR (EXCLUDED.version = papers.version
                            AND EXCLUDED.updated::date > papers.updated::date))
-                RETURNING (xmax = 0) AS inserted, version, title, abstract, withdrawn_at
+                RETURNING (xmax = 0) AS inserted, version, updated, title, abstract, withdrawn_at
                 """,
                 {
                     **p.model_dump(),
@@ -233,6 +238,9 @@ async def upsert(
                 )
             if (row["withdrawn_at"] is None) != (old["withdrawn_at"] is None):
                 result.withdrawn.append(p.id)
+            was = Identity.at(old["version"], old["updated"])
+            if not was.covers(Identity.at(row["version"], row["updated"])):
+                result.versioned.append(p.id)
             if changed or row["version"] != old["version"]:
                 await outbox.emit(
                     unit,

@@ -137,7 +137,7 @@ async def toggle(conn: Connection, paper_id: str, hand: Hand) -> word.Change:
 async def keep(conn: Connection, paper_id: str, fetched: Paper | None) -> tuple[Paper, bool]:
     """Keep a paper an owner's request fetched (`misses.keep`), in a change of it."""
     async with change(conn, paper_id, cause=Cause.OWNER) as done:
-        return await misses.keep(done.unit, paper_id, fetched)
+        return await misses.keep(done.unit, paper_id, fetched, RULES)
 
 
 async def report_miss(

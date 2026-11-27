@@ -678,6 +678,222 @@
       "type": "string",
       "const": "read",
       "description": "Marks a Deep read; a Deep card from before has no format."
+    },
+    "LinksInput": {
+      "type": "object",
+      "required": [
+        "paper"
+      ],
+      "properties": {
+        "paper": {
+          "$ref": "#/$defs/Paper"
+        },
+        "comments": {
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "The paper's comments on arXiv, where links are often given; none when absent."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "description": "What POST /links is sent: one paper to find the release links of."
+    },
+    "LinkJob": {
+      "type": "object",
+      "required": [
+        "id",
+        "paper_id",
+        "status",
+        "created_at",
+        "stats",
+        "last_activity"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "paper_id": {
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "queued"
+            },
+            {
+              "type": "string",
+              "const": "running"
+            },
+            {
+              "type": "string",
+              "const": "done"
+            },
+            {
+              "type": "string",
+              "const": "error"
+            }
+          ],
+          "description": "Where the job is."
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "finished_at": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "stats": {
+          "$ref": "#/$defs/Stats"
+        },
+        "last_event": {
+          "type": "string"
+        },
+        "last_activity": {
+          "type": "string"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LinksAnswer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trace": {
+          "type": "array",
+          "items": {},
+          "description": "What the find did, event by event (links.ts)."
+        },
+        "error": {
+          "type": "string"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "service"
+            },
+            {
+              "type": "string",
+              "const": "paper"
+            }
+          ],
+          "description": "Whose failure an error job's was: the service's, or the paper's."
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "description": "A find as GET /links/<id> reports it; a done one carries its answer."
+    },
+    "LinksAnswer": {
+      "type": "object",
+      "required": [
+        "links"
+      ],
+      "properties": {
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReleaseLink"
+          },
+          "description": "Each link found and checked; empty when none was found."
+        },
+        "note": {
+          "type": "string",
+          "description": "What the finder could not settle, in a sentence or two."
+        }
+      },
+      "additionalProperties": false,
+      "description": "What a find of a paper's release links answers."
+    },
+    "ReleaseLink": {
+      "type": "object",
+      "required": [
+        "url",
+        "kind",
+        "state",
+        "checked_at"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#]+[^\\s]*$",
+          "description": "The repository's or model's page, an absolute http(s) URL."
+        },
+        "kind": {
+          "$ref": "#/$defs/LinkKind"
+        },
+        "state": {
+          "$ref": "#/$defs/LinkState"
+        },
+        "license": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "description": "Its license as the host states it (an SPDX id where it gives one); left out when it is not cheap to see."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checked_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$",
+          "description": "When the service last fetched it, an RFC 3339 time in UTC."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A link to a paper's released code or weights, with its access state."
+    },
+    "LinkKind": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "code"
+        },
+        {
+          "type": "string",
+          "const": "weights"
+        }
+      ],
+      "description": "What the link releases: the paper's code, or its model weights."
+    },
+    "LinkState": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "public"
+        },
+        {
+          "type": "string",
+          "const": "gated"
+        },
+        {
+          "type": "string",
+          "const": "placeholder"
+        },
+        {
+          "type": "string",
+          "const": "missing"
+        }
+      ],
+      "description": "Whether it can be had: public, open to anyone now; gated, behind a request form or a licence to accept; placeholder, a repository with nothing but a README; missing, a link the paper gives that leads nowhere."
     }
   }
 }

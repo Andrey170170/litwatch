@@ -16,7 +16,7 @@ import { Failed } from "@/routes/settings/parts";
 import { useDesktop } from "@/hooks/useDesktop";
 import { rc } from "@/lib/rarity";
 import { Contents } from "@/deepread/contents";
-import { DeepReadCell, linkCells, MissPicker, ProcessCell, SaveCell, type Paper } from "@/components/paper/Actions";
+import { DeepReadCell, FindLinksCell, linkCells, MissPicker, ProcessCell, SaveCell, type Paper } from "@/components/paper/Actions";
 import { Header, WithdrawnNote } from "@/components/paper/Header";
 import { Ladder } from "@/components/paper/Ladder";
 import { Notes } from "@/components/paper/Notes";
@@ -50,6 +50,7 @@ function Rail({ paper, topics, gistAway, asked, missOpen }: { paper: Paper; topi
           <SaveCell paper={paper} />
           {linkCells(paper, ["bib", "arxiv", "pdf"])}
           <DeepReadCell paper={paper} asked={asked} wide />
+          <FindLinksCell paper={paper} />
         </div>
       ) : (
         <>
@@ -60,6 +61,7 @@ function Rail({ paper, topics, gistAway, asked, missOpen }: { paper: Paper; topi
             <button className="wide" onClick={() => setMiss((m) => !m)}>
               Report as a miss
             </button>
+            <FindLinksCell paper={paper} />
           </div>
           {miss && <MissPicker paper={paper} onDone={() => setMiss(false)} />}
         </>
@@ -70,12 +72,12 @@ function Rail({ paper, topics, gistAway, asked, missOpen }: { paper: Paper; topi
   );
 }
 
-/** How often the page polls: while a card is asked for, the paper's Process job is under way, or the Brief's or the
- * Deep card's pass is queued or running, and more slowly while one awaits its text. A pass waiting on the owner (an open state names it) is not polled for. */
+/** How often the page polls: while a card is asked for, the paper's Process job is under way, the Brief's or the
+ * Deep card's pass is queued or running, or a find of its links is, and more slowly while a pass awaits its text. A pass waiting on the owner (an open state names it) is not polled for. */
 export function pollEvery(p: Paper | undefined, asked: boolean): number | false {
   const owner = new Set((p?.states ?? []).map((s) => s.pass_id));
   const passes = [p?.text_pass, p?.card_pass].filter((x): x is NonNullable<typeof x> => x != null && !owner.has(x.id));
-  if (asked || processing(p?.process) || passes.some((x) => x.state === "ready" || x.state === "running")) return 15_000;
+  if (asked || p?.finding_links || processing(p?.process) || passes.some((x) => x.state === "ready" || x.state === "running")) return 15_000;
   return passes.some((x) => x.state === "awaiting_text") ? 60_000 : false;
 }
 

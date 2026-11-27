@@ -13,6 +13,10 @@ images (`core.deepread.received`), ends as the service's failure, with the usage
 reported kept where they are readable; nothing of it is stored. A progress reply that is not
 the contract's is a failed poll.
 
+The service also finds a paper's release links (`find`, `follow_find`; `litwatch.links`), on
+its own queue, by the same protocol under `/links`: what it is sent (`find_input`) and what it
+answers are contracts too (`LinksInput`, `LinkJob`).
+
 The queue records each submission as an attempt before it is sent and the job once accepted,
 and sends the attempt as the submission's key, by which the service finds the job it
 started for that key while it keeps it; so a submission whose answer was lost is looked up,
@@ -21,7 +25,9 @@ reacts to no event, so no delivery runs it: `card.requested` is the owner's requ
 already queued, and `card.ready` is emitted when the card is stored.
 
 Options: `url` (or $LITWATCH_DEEP_URL), `extensions` ({topic slug: extension}), `poll_seconds`
-(15) and `timeout_minutes` (75). There is no daily cap: `max_per_day` is refused. Keep
+(15), `timeout_minutes` (75) and `automatic` (true): whether settling queues automatic Deep
+cards (`feedback.word.rules`); off, the owner's requests and the finds still go to the service.
+There is no daily cap: `max_per_day` is refused. Keep
 `timeout_minutes` above the service's `DEEP_WALL_CLOCK_MIN` (60, the time a read's writing,
 review and revisions may take): a job running longer than it, by its own start, ends as stuck,
 so a lower one ends healthy jobs and lets a duplicate in. The 15 minutes between the two are
@@ -37,7 +43,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 from pydantic import ValidationError
@@ -58,6 +64,9 @@ log = logging.getLogger(__name__)
 EXTENSIONS = {"cot-faithfulness": "faithfulness", "cot-monitoring": "monitoring"}
 # A pass's lease outlasts following its job to the end by this much.
 LEASE_MARGIN = timedelta(minutes=15)
+# How long a find is followed before litwatch stops waiting, to follow it again later: past the
+# service's own wall clock for one (15 minutes) and the time it may wait behind another.
+FIND_WAIT = timedelta(minutes=30)
 
 
 @dataclass
@@ -202,8 +211,18 @@ class DeepClient:
         """Submit one paper; returns the job's id. `key` names the submission: the service
         answers a key it has with that key's job, so one sent again after a lost answer never
         starts a second. Raises `RejectedError` when the service turns it down for what it is."""
+        return await self._submit("/process", submission, key)
+
+    async def find(self, submission: contract.LinksInput, *, key: str) -> str:
+        """Submit a find of one paper's release links; returns the find's id. `key` names it as
+        `submit`'s does, so a find sent again while the service keeps it is that find."""
+        return await self._submit("/links", submission, key)
+
+    async def _submit(
+        self, path: str, submission: contract.JobInput | contract.LinksInput, key: str
+    ) -> str:
         resp = await self.http.post(
-            f"{self.base_url}/process",
+            f"{self.base_url}{path}",
             json=submission.model_dump(mode="json", exclude_none=True),
             headers={"Idempotency-Key": key},
         )
@@ -212,9 +231,58 @@ class DeepClient:
         resp.raise_for_status()
         return _job_ref(resp).id
 
+    async def follow_find(self, find_id: str) -> Found:
+        """Poll a find until it ends. Its end is `unsettled` past `FIND_WAIT` from now, or when
+        the service no longer has it (restarted): the find is sent again by its key, which is
+        the same find while the service keeps it, and a fresh one once it does not. A failed
+        poll raises. A find ended in what is not the contract's is the service's failure, with
+        the usage it reported."""
+        deadline = datetime.now(UTC) + FIND_WAIT
+        while True:
+            await asyncio.sleep(self.poll_seconds)
+            resp = await self.http.get(f"{self.base_url}/links/{find_id}")
+            if resp.status_code == 404:
+                error = "the deep service lost the find (restarted?)"
+                return Found(None, error=error, failure="service", unsettled=True)
+            resp.raise_for_status()
+            try:
+                raw = resp.json()
+            except ValueError as exc:
+                raise httpx.DecodingError(
+                    f"the find is not JSON: {exc}", request=resp.request
+                ) from exc
+            try:
+                job = contract.LinkJob.model_validate(raw)
+            except ValidationError as exc:
+                if isinstance(raw, dict) and raw.get("status") in ("done", "error"):
+                    error = f"the deep service returned a find litwatch cannot read: {_errors(exc)}"
+                    usage = raw.get("stats") if isinstance(raw.get("stats"), dict) else None
+                    return Found(None, str(raw.get("model") or ""), usage, error, "service")
+                error = f"the find is not one: {_errors(exc)}"
+                raise httpx.DecodingError(error, request=resp.request) from exc
+            if job.status in ("done", "error"):
+                answer = job.result if job.status == "done" else None
+                failure = job.failure or ("service" if answer is None else None)
+                error = job.error or (None if answer is not None else "the find gave no answer")
+                if answer is not None and (wrong := _off_the_wire(answer)):
+                    answer, failure = None, "service"
+                    error = f"the deep service returned a find litwatch cannot read: {wrong}"
+                return Found(answer, job.model or "", job.stats.model_dump(), error, failure)
+            if datetime.now(UTC) > deadline:
+                error = "litwatch stopped waiting for the find, to follow it again"
+                return Found(None, error=error, failure="service", unsettled=True)
+
     async def job_for(self, key: str) -> str | None:
         """The job a submission with `key` started, if the service still has it."""
         resp = await self.http.get(f"{self.base_url}/keys/{quote(key, safe='')}")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return _job_ref(resp).id
+
+    async def find_for(self, key: str) -> str | None:
+        """The find a submission with `key` started, if the service still has it."""
+        resp = await self.http.get(f"{self.base_url}/links/keys/{quote(key, safe='')}")
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -276,11 +344,46 @@ class DeepClient:
         return timedelta(seconds=self.timeout_seconds)
 
 
+def _off_the_wire(answer: contract.LinksAnswer) -> str | None:
+    """What is wrong with a find's answer that its schema lets by, if anything: each link's URL
+    must parse as an absolute http(s) URL with a host, and its `checked_at` as a time in UTC."""
+    for i, link in enumerate(answer.links):
+        try:
+            url = urlsplit(link.url)
+            url.port  # noqa: B018 — a port that is not one raises
+            if url.scheme.lower() not in ("http", "https") or not url.hostname:
+                raise ValueError("not an absolute http(s) URL with a host")
+        except ValueError as exc:
+            return f"links.{i}.url: {link.url!r}: {exc}"
+        try:
+            at = datetime.fromisoformat(link.checked_at)
+            if at.utcoffset() != timedelta(0):
+                raise ValueError("not in UTC")
+        except ValueError as exc:
+            return f"links.{i}.checked_at: {link.checked_at!r}: {exc}"
+    return None
+
+
+@dataclass
+class Found:
+    """How a find ended: its `answer`, with the `model` and `usage` the service reported; or
+    its `error` and whose `failure` it was. `unsettled`: its end is not known (litwatch stopped
+    waiting, or the service lost it), so it is followed again by its key; else it is final."""
+
+    answer: contract.LinksAnswer | None
+    model: str = ""
+    usage: dict[str, Any] | None = None
+    error: str | None = None
+    failure: Literal["paper", "service"] | None = None
+    unsettled: bool = False
+
+
 class Deep:
     name = "deep"
     description = (
-        "Writes a Deep card for every Focus must read and Area pick, unless unsaved, and for "
-        "any paper the owner asks about, through the full-text queue."
+        "Writes a Deep card for every Focus must read and Area pick, unless unsaved or "
+        "`automatic` is off, and for any paper the owner asks about, through the full-text "
+        "queue; finds where papers release their code and weights."
     )
 
     def __init__(
@@ -379,6 +482,26 @@ def job_input(
         else contract.PdfPaper(**fields, body_source="pdf")
     )
     return contract.JobInput(paper=sent, extensions=extensions, selections=selections)
+
+
+def find_input(paper: Paper, text: PaperText | None) -> contract.LinksInput:
+    """What the service is sent to find a paper's release links: the paper with its text as
+    `job_input` sends it, or with an empty one when there is none to be had, and its arXiv
+    comments."""
+    if text is not None:
+        sent = job_input(paper, text).paper
+    else:
+        sent = contract.PdfPaper(
+            id=paper.id,
+            title=paper.title,
+            abstract=paper.abstract,
+            authors=paper.authors,
+            published=paper.published,
+            url=paper.url,
+            body="",
+            body_source="pdf",
+        )
+    return contract.LinksInput(paper=sent, comments=paper.comments)
 
 
 def outline(body: str) -> contract.Outline:
