@@ -528,14 +528,16 @@ class ReleaseLink(BaseModel):
 
 
 class LinkFind(BaseModel):
-    """A find of the paper's release links: queued, running, done (its links, none included,
-    are the paper's, unless a newer version's find was under way) or failed; the finder's or
-    the owner's; when it ended, started or is due."""
+    """A find of the paper's release links: queued, running, done or failed; the finder's or
+    the owner's; when it ended, started or is due; whether it answered (done with its answer,
+    `links` of them, none found included; a find skipped or superseded ended done unanswered)."""
 
     state: Literal["queued", "running", "done", "failed"]
     by: Literal["finder", "owner"]
     at: datetime
     error: str | None = None
+    answered: bool = False
+    links: int | None = None
 
 
 class LinksRequested(BaseModel):
@@ -605,11 +607,14 @@ class Paper(BaseModel):
     # again" under a card.
     card_requestable: bool = False
     links: list[ReleaseLink] = Field(default_factory=list)  # code first, then weights
-    link_find: LinkFind | None = None  # the find that ended last, when one has
-    owner_find: LinkFind | None = None  # the owner's find, while it is queued or running
-    finding_links: bool = False  # a find of the paper is queued or running, the owner's or not
+    # Of the paper as it is now (its version, or its update when none is known): the last
+    # answer, "None found" when it has no links; and the owner's last find, open or ended.
+    link_answer: LinkFind | None = None
+    owner_find: LinkFind | None = None
+    open_find: LinkFind | None = None  # the paper's find queued or running, the running first
+    finding_links: bool = False  # a find is open and finds run here: the page polls
     # Finds run here (the schedule on, the archive, a card provider), the paper is not dropped,
-    # and no find of the owner's is open: "Find links".
+    # and no find of the owner's of it is open: "Find links".
     links_findable: bool = False
     process: ProcessJob | None = None  # the paper's newest Process job, when it has one
     # A paper litwatch holds, outside the collection: Process would queue its job now, since the

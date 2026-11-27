@@ -1,31 +1,30 @@
 """Release links and the work that keeps them (data.md: `release_links`; docs/plans/a2-work-gate.md,
 P6): finds, work items of kind `FIND`, and re-checks of a placeholder, of kind `RECHECK`.
 
-What a find is of is its scope's `find` (`core.links.find_key`: the paper at an arXiv version, or
-at an update when no version is known). An automatic find is keyed by it; the owner's by it and a
-fresh uuid, so each runs. An automatic find runs while none of the same is open or answered
-(`find_status`): only an answered find, "none found" included, holds it for good; one that failed
-leaves its failure on record and lets a later trigger try again, `FIND_TRIES` failures at most.
-A find is answered when its item ends done with its answer's count (`result.links`). A re-check
-is keyed by its link and its number (`core.links.recheck_key`); its schedule is its item's
-`not_before` and the link's `rechecks`.
+What a find is of is its scope's `version` and `updated` (`core.links.Identity`), and whether it
+is of the paper as it is now is `Identity.covers`, which `litwatch.links` decides with: this
+module only stores and reads. An automatic find is keyed by its identity; the owner's by it and
+a fresh uuid, so each runs. A find is answered when its item ends done with its answer's count
+(`result.links`). A re-check is keyed by its link and its number (`core.links.recheck_key`); its
+schedule is its item's `not_before` and the link's `rechecks`.
 
-Lock order. A find's answer is written in its item's unit: the item's row (the fence), the
-paper's row shared (`identity`), then the paper's links, deleted and inserted (finds are admitted
-one at a time), then each placeholder's first re-check item, in link id order. A re-check's
-unit: its item's row (the fence), its link's row (`locked`), then the next re-check's item. A
-submission of a find takes the paper's lock before the item's row, as every settle does (a
-change of the paper, or intake's page)."""
+Lock order. A find's check before it pays, and its answer, are written in a unit of its item
+(the fence) holding the paper's locks (the taxonomy shared, then the paper), as every change
+takes them: then the paper's row shared (`identity`), then the paper's links, deleted and
+inserted, then each placeholder's first re-check item in link id order, or the find handed over
+to the paper as it now is. A re-check's unit: its item's row (the fence), its link's row
+(`locked`), then the next re-check's item. A submission of a find takes the paper's locks before
+the item's row, as every settle does (a change of the paper, or intake's page)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 from litwatch.core.contracts import deep as contract
-from litwatch.core.links import FoundBy, ReleaseLink, State, find_key, recheck_key
+from litwatch.core.links import Find, FoundBy, Identity, ReleaseLink, State, recheck_key
 from litwatch.core.work import WorkItem
 from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import work
@@ -39,29 +38,30 @@ _COLUMNS = "id, paper_id, version, url, kind, state, license, checked_at, found_
 
 
 @dataclass(frozen=True)
-class Identity:
-    """What a paper is now, as a find is of it: whether litwatch no longer processes it, and
-    what a find of it now is of (`core.links.find_key`), with its version and update."""
+class Now:
+    """A paper as a find is of it now: whether litwatch no longer processes it, and what a find
+    of it is of (`core.links.Identity`)."""
 
     dropped: bool
-    version: int | None
-    updated: str | None
-    find: str
+    of: Identity
 
 
-async def identity(unit: WriteUnit, paper_id: str) -> Identity | None:
-    """The paper's identity, its row shared to the end of the unit, so a version or a dismissal
-    being stored is waited for; None for a paper not held."""
-    row = await (
-        await unit.execute(
-            "SELECT dropped, version, updated FROM papers WHERE id = %s FOR SHARE", (paper_id,)
-        )
-    ).fetchone()
-    if row is None:
-        return None
-    updated = row["updated"].astimezone(UTC).isoformat() if row["updated"] else None
-    key = find_key(paper_id, row["version"], updated)
-    return Identity(row["dropped"], row["version"], updated, key)
+_NOW = "SELECT dropped, version, updated FROM papers WHERE id = %s"
+
+
+def _now(row: dict[str, Any] | None) -> Now | None:
+    return Now(row["dropped"], Identity.at(row["version"], row["updated"])) if row else None
+
+
+async def identity(unit: WriteUnit, paper_id: str) -> Now | None:
+    """The paper as a find is of it now, its row shared to the end of the unit, so a version or
+    a dismissal being stored is waited for; None for a paper not held."""
+    return _now(await (await unit.execute(f"{_NOW} FOR SHARE", (paper_id,))).fetchone())
+
+
+async def current(unit: ReadUnit, paper_id: str) -> Now | None:
+    """`identity`, read without a lock (the page's)."""
+    return _now(await (await unit.execute(_NOW, (paper_id,))).fetchone())
 
 
 async def release_facts(unit: ReadUnit, paper_id: str) -> tuple[bool, bool] | None:
@@ -79,45 +79,46 @@ async def release_facts(unit: ReadUnit, paper_id: str) -> tuple[bool, bool] | No
 
 
 async def submit_find(unit: WriteUnit, paper_id: str, of: Identity, *, by: FoundBy) -> WorkItem:
-    """Submit a find of the paper as `of` is: the finder's, keyed by what it is of, so a
+    """Submit a find of the paper as `of` is: the finder's, keyed by it (`Identity.key`), so a
     submission while one is open is that one; the owner's, a fresh one."""
-    scope = {
-        "paper_id": paper_id,
-        "version": of.version,
-        "updated": of.updated,
-        "find": of.find,
-        "by": by,
-    }
+    key = of.key(paper_id)
+    scope = {"paper_id": paper_id, "version": of.version, "updated": of.updated, "find": key}
     if by == "owner":
-        key, priority = f"{of.find}#{uuid4()}", OWNERS_PRIORITY
+        key, priority = f"{key}#{uuid4()}", OWNERS_PRIORITY
     else:
-        key, priority = of.find, AUTOMATIC_PRIORITY
-    return await work.submit(unit, FIND, key, scope=scope, priority=priority)
+        key, priority = key, AUTOMATIC_PRIORITY
+    return await work.submit(unit, FIND, key, scope=scope | {"by": by}, priority=priority)
 
 
-@dataclass(frozen=True)
-class FindStatus:
-    answered: bool  # a find of the same ended with an answer
-    open: bool  # one is pending or running
-    failed: int  # the finder's that failed
-
-
-async def find_status(unit: ReadUnit, paper_id: str, of: Identity) -> FindStatus:
-    """The paper's finds of what `of` is of, or of its same update when that find knew no
-    version (a version learnt since for the update found is no new find)."""
-    row = await (
+async def finds(unit: ReadUnit, paper_id: str) -> list[Find]:
+    """The paper's finds, oldest first. A find answered once its answer is recorded (`links.record`
+    keeps it as the item's result in the unit that writes the links), before the Work gate ends
+    its item in a commit of its own."""
+    rows = await (
         await unit.execute(
-            "SELECT COALESCE(bool_or(state = 'ended' AND outcome = 'done' AND result ? 'links'), "
-            "false) AS answered, COALESCE(bool_or(state <> 'ended'), false) AS open, "
-            "count(*) FILTER (WHERE outcome = 'failed' AND scope ->> 'by' = 'finder') AS failed "
-            "FROM work_items WHERE kind = %s AND scope ->> 'paper_id' = %s "
-            "AND (scope ->> 'find' = %s "
-            "OR (scope ->> 'version' IS NULL AND scope ->> 'updated' = %s))",
-            (FIND, paper_id, of.find, of.updated),
+            "SELECT w.id, w.state, w.outcome, w.error, w.scope, a.body IS NOT NULL AS answered, "
+            "(a.body ->> 'links')::int AS links, "
+            "COALESCE(w.ended_at, w.started_at, w.not_before) AS at "
+            "FROM work_items w LEFT JOIN LATERAL (SELECT body FROM work_results r "
+            "WHERE r.work_id = w.id AND r.body ? 'links' ORDER BY r.id DESC LIMIT 1) a ON true "
+            "WHERE w.kind = %s AND w.scope ->> 'paper_id' = %s ORDER BY w.id",
+            (FIND, paper_id),
         )
-    ).fetchone()
-    assert row is not None  # an aggregate
-    return FindStatus(row["answered"], row["open"], row["failed"])
+    ).fetchall()
+    return [
+        Find(
+            id=r["id"],
+            by="owner" if r["scope"].get("by") == "owner" else "finder",
+            of=Identity.of(r["scope"]),
+            state=r["state"],
+            outcome=r["outcome"],
+            answered=bool(r["answered"]),
+            links=r["links"] if r["answered"] else None,
+            error=r["error"],
+            at=r["at"],
+        )
+        for r in rows
+    ]
 
 
 async def failed_lately(unit: ReadUnit, since: datetime) -> list[str]:
@@ -131,37 +132,6 @@ async def failed_lately(unit: ReadUnit, since: datetime) -> list[str]:
         )
     ).fetchall()
     return [r["paper_id"] for r in rows]
-
-
-_FIND_COLUMNS = (
-    "id, state, outcome, error, result, scope ->> 'by' AS by, "
-    "COALESCE(ended_at, started_at, not_before) AS at"
-)
-
-
-async def last_finished(unit: ReadUnit, paper_id: str) -> dict[str, Any] | None:
-    """The paper's find that ended last (its item: state, outcome, error, result, by, and when
-    it ended), if one has."""
-    return await (
-        await unit.execute(
-            f"SELECT {_FIND_COLUMNS} FROM work_items WHERE kind = %s "
-            "AND scope ->> 'paper_id' = %s AND state = 'ended' ORDER BY ended_at DESC, id DESC "
-            "LIMIT 1",
-            (FIND, paper_id),
-        )
-    ).fetchone()
-
-
-async def open_finds(unit: ReadUnit, paper_id: str) -> list[dict[str, Any]]:
-    """The paper's finds pending or running, the owner's first, then the oldest."""
-    return await (
-        await unit.execute(
-            f"SELECT {_FIND_COLUMNS} FROM work_items WHERE kind = %s "
-            "AND scope ->> 'paper_id' = %s AND state <> 'ended' "
-            "ORDER BY (scope ->> 'by') <> 'owner', id",
-            (FIND, paper_id),
-        )
-    ).fetchall()
 
 
 def _link(row: dict[str, Any]) -> ReleaseLink:

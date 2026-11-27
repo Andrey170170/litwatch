@@ -5994,6 +5994,22 @@
               }
             ],
             "title": "Error"
+          },
+          "answered": {
+            "type": "boolean",
+            "title": "Answered",
+            "default": false
+          },
+          "links": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Links"
           }
         },
         "type": "object",
@@ -6003,7 +6019,7 @@
           "at"
         ],
         "title": "LinkFind",
-        "description": "A find of the paper's release links: queued, running, done (its links, none included,\nare the paper's, unless a newer version's find was under way) or failed; the finder's or\nthe owner's; when it ended, started or is due."
+        "description": "A find of the paper's release links: queued, running, done or failed; the finder's or\nthe owner's; when it ended, started or is due; whether it answered (done with its answer,\n`links` of them, none found included; a find skipped or superseded ended done unanswered)."
       },
       "LinksRequested": {
         "properties": {
@@ -6777,7 +6793,7 @@
             "type": "array",
             "title": "Links"
           },
-          "link_find": {
+          "link_answer": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/LinkFind"
@@ -6788,6 +6804,16 @@
             ]
           },
           "owner_find": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkFind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open_find": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/LinkFind"

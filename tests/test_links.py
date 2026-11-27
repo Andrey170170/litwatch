@@ -10,16 +10,22 @@ import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
+from psycopg.types.json import Jsonb
 
 from litwatch import links
+from litwatch.api import integrations as integrations_api
+from litwatch.api import mcp
+from litwatch.api import schemas as s
 from litwatch.archive import ArchiveClient
-from litwatch.config import Schedule
+from litwatch.config import Config, Schedule
 from litwatch.core.contracts import deep as contract
-from litwatch.core.links import RECHECK_EVERY, RECHECKS, ReleaseLink, find_key, recheck_key
+from litwatch.core.links import RECHECK_EVERY, RECHECKS, Identity, ReleaseLink, recheck_key
+from litwatch.core.work import WorkItem
 from litwatch.feedback import misses, word
 from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Done, Later
@@ -28,7 +34,8 @@ from litwatch.integrations.deep import Deep, DeepClient
 from litwatch.jobs import nightly
 from litwatch.jobs.context import model_run
 from litwatch.links import adapter
-from litwatch.links.worker import FindWorker, RecheckWorker
+from litwatch.links import worker as worker_module
+from litwatch.links.worker import FindError, FindWorker, RecheckWorker
 from litwatch.llm.context import spending
 from litwatch.store import links as store
 from litwatch.store import papers as papers_store
@@ -59,11 +66,13 @@ class Finder:
     """deep's finds: a key it has not seen starts a find, which ends on its first poll as the
     next of `ends` (its `result`, or its `error` and `failure`), else none found; a key it has
     is that find. `lose` submissions are answered 502 after the find started, as a proxy losing
-    the answer would. `sent` is what each submission sent."""
+    the answer would; with `refuse`, every submission is turned down with that status. `sent` is
+    what each submission sent."""
 
-    def __init__(self, *ends: dict[str, Any], lose: int = 0) -> None:
+    def __init__(self, *ends: dict[str, Any], lose: int = 0, refuse: int | None = None) -> None:
         self.ends = list(ends)
         self.lose = lose
+        self.refuse = refuse
         self.keys: dict[str, str] = {}
         self.finds: dict[str, dict[str, Any]] = {}
         self.sent: list[dict[str, Any]] = []
@@ -75,6 +84,8 @@ class Finder:
     def handle(self, req: httpx.Request) -> httpx.Response:
         if req.method == "POST" and req.url.path == "/links":
             self.sent.append(json.loads(req.content))
+            if self.refuse is not None:
+                return httpx.Response(self.refuse, json={"error": "the paper is too large"})
             key = req.headers["idempotency-key"]
             if key not in self.keys:
                 self.keys[key] = find_id = f"find-{len(self.keys) + 1}"
@@ -149,12 +160,15 @@ async def urls(conn: Session, paper_id: str = A.id) -> list[str]:
     return [link.url for link in await in_read(conn, store.of_paper, paper_id)]
 
 
-async def night(db: DatabaseGate, models: Scripted) -> None:
-    """The nightly's classify and analyse of A, on the served configuration's rules."""
-    with spending(deadline=datetime.now(UTC) + timedelta(hours=1)):
-        async with model_run(db, "nightly", models=models.gate(SERVED)) as run:
-            await nightly.classify(db, SERVED, run, ids=[A.id])
-            await nightly.analyse(db, SERVED, run, ids=[A.id])
+def key(version: int | None, updated: str | None = None, paper_id: str = A.id) -> str:
+    return Identity(version, updated).key(paper_id)
+
+
+async def night(db: DatabaseGate, models: Scripted, config: Config = SERVED) -> None:
+    """The nightly, as it runs (`nightly.run`), without fetching or digests."""
+    await nightly.run(
+        db, config, fetch=False, models=models.gate(config), with_digests=False, night=None
+    )
 
 
 def scripted() -> Scripted:
@@ -163,31 +177,53 @@ def scripted() -> Scripted:
     return models
 
 
+async def item_of(conn: Session, k: str) -> WorkItem:
+    found = await in_read(conn, queue.find, store.FIND, k)
+    assert found is not None
+    return found
+
+
+async def owners(db: DatabaseGate, paper_id: str = A.id) -> WorkItem:
+    async with db.write("asked", taxonomy="shared", papers=[paper_id]) as unit:
+        item = await links.request(unit, paper_id)
+    assert item is not None
+    return item
+
+
+async def page_of(db: DatabaseGate, *, finds: bool = True) -> dict[str, Any]:
+    async with db.read("the page") as unit:
+        return await integrations_api.release_links(unit, A.id, finds=finds, processed=True)
+
+
 async def test_finds_run_once_per_version_after_the_nightly_s_analysis_and_after_a_new_version(
     held: Session, db: DatabaseGate
 ):
     models = scripted()
     finder = Finder({"result": {"links": [found("https://github.com/o/probes", "public")]}})
     client, fake = archive()
+    rules = settling.configured(SERVED)
     async with served(
         db, SERVED, models=models.gate(SERVED), integrations=[deep(finder)], archive=client
     ):
         await night(db, models)
         await until(all_ended(held, 1), "the find of v1 ends")
         assert await urls(held) == ["https://github.com/o/probes"]
-        # Rewritten at the same version, the paper is analysed again: its find is answered.
-        rewritten = A.model_copy(update={"abstract": "Linear probes, read anew. Code released."})
-        await batch.store(db, [rewritten], source="oai", rules=settling.configured(SERVED))
-        await night(db, models)
-        assert len(await finds(held)) == 1
-        # arXiv's second version, of the same text: found again, none this time.
+        # arXiv's second version, its abstract rewritten: no analysis of it yet, so no find
+        # when it is stored; the nightly analyses it, and that finds it, none this time.
         fake.texts[A.id] = (2, BODY)
-        v2 = rewritten.model_copy(update={"version": 2})
-        await batch.store(db, [v2], source="oai", rules=settling.configured(SERVED))
+        v2 = A.model_copy(update={"version": 2, "abstract": "Linear probes, read anew."})
+        await batch.store(db, [v2], source="oai", rules=rules)
+        assert len(await finds(held)) == 1
+        await night(db, models)
         await until(all_ended(held, 2), "the find of v2 ends")
+        # Another trigger of v2 (its analysis recorded again, the nightly's): its answer holds.
+        async with db.write("analysed again", taxonomy="shared", papers=[A.id]) as unit:
+            await links.due(unit, [A.id])
+        await night(db, models)
+        assert len(await finds(held)) == 2
     assert finder.started == 2
     ended = await finds(held)
-    assert [f["key"] for f in ended] == [find_key(A.id, 1, None), find_key(A.id, 2, None)]
+    assert [f["key"] for f in ended] == [key(1), key(2)]
     assert [f["cost"] for f in ended] == [Decimal("0.01")] * 2  # what deep reported
     assert [s["paper"]["body"] for s in finder.sent] == [BODY, BODY]  # from the paper's text
     assert finder.sent[0].get("comments") is None  # A has none: sent as absent
@@ -204,10 +240,7 @@ async def test_with_automatic_reads_off_links_are_still_found(held: Session, db:
     async with served(
         db, off, models=models.gate(off), integrations=[deep(finder)], archive=client
     ):
-        with spending(deadline=datetime.now(UTC) + timedelta(hours=1)):
-            async with model_run(db, "nightly", models=models.gate(off)) as run:
-                await nightly.classify(db, off, run, ids=[A.id])
-                await nightly.analyse(db, off, run, ids=[A.id])
+        await night(db, models, off)
         await until(all_ended(held, 1), "the find ends")
     assert finder.started == 1
     assert settling.configured(SERVED.model_copy(update={"integrations": {}})).find_links is False
@@ -220,7 +253,7 @@ async def test_no_find_for_a_paper_whose_analysis_says_no_release(held: Session,
     assert await finds(held) == []
 
 
-async def test_a_failed_find_fails_its_item_with_its_cost_and_a_later_nightly_finds_again(
+async def test_a_failed_find_fails_its_item_with_its_cost_and_the_next_nightly_finds_again(
     held: Session, db: DatabaseGate
 ):
     models = scripted()
@@ -243,21 +276,37 @@ async def test_a_failed_find_fails_its_item_with_its_cost_and_a_later_nightly_fi
         assert kept[1]["failed"] == "the deep service broke"
         assert kept[1]["usage"]["list_cost"] == 0.01  # paid for, though it failed
         assert finder.started == 1  # ended for good: not asked again by its key
-        await night(db, models)  # nothing to analyse; the failed find is tried again
+        # A Process chunk's analysis of other papers does not retry it; the nightly does.
+        with spending(deadline=datetime.now(UTC) + timedelta(hours=1)):
+            async with model_run(db, "job", models=models.gate(SERVED)) as run:
+                await nightly.analyse(db, SERVED, run, ids=["2601.99999"])
+        assert len(await finds(held)) == 1
+        await night(db, models)
         await until(all_ended(held, 2), "the second find ends")
     first, second = await finds(held)
-    assert first["key"] == second["key"] == find_key(A.id, 1, None)
+    assert first["key"] == second["key"] == key(1)
     assert second["outcome"] == "done" and finder.started == 2
     assert len(set(finder.keys)) == 2  # a fresh find on deep, by the new item's key
     assert await urls(held) == ["https://github.com/o/probes"]
+
+
+async def test_a_find_the_service_turns_down_fails_with_its_failure_recorded(held: Session, db):
+    await seed.analyse(held, A, code=True)
+    async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
+        await links.due(unit, [A.id])
+    item = await item_of(held, key(1))
+    finder = Finder(refuse=413)
+    with pytest.raises(FindError, match="refused the find: 413"):
+        await FindWorker(db, archive()[0], deep(finder))(item)
+    (kept,) = await in_read(held, queue.results, item.id)
+    assert "413" in kept[1]["failed"]
 
 
 async def test_a_find_whose_answer_was_lost_follows_the_same_find(held: Session, db):
     await seed.analyse(held, A, code=True)
     async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
         await links.due(unit, [A.id])
-        item = await queue.find(unit, store.FIND, find_key(A.id, 1, None))
-    assert item is not None
+    item = await item_of(held, key(1))
     finder = Finder({"result": {"links": [found("https://github.com/o/probes", "public")]}}, lose=1)
     worker = FindWorker(db, archive()[0], deep(finder))
     assert isinstance(await worker(item), Later)  # the submission's answer lost
@@ -273,46 +322,135 @@ async def test_a_find_tried_again_after_its_end_committed_does_not_ask_again(
     await seed.analyse(held, A, code=True)
     async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
         await links.due(unit, [A.id])
-        item = await queue.find(unit, store.FIND, find_key(A.id, 1, None))
-    assert item is not None
+    item = await item_of(held, key(1))
     finder = Finder({"result": {"links": [found("https://github.com/o/probes", "public")]}})
     worker = FindWorker(db, archive()[0], deep(finder))
     first, second = await worker(item), await worker(item)
     assert isinstance(first, Done) and first == second and first.cost == Decimal("0.01")
     assert finder.started == 1 and len(finder.sent) == 1
     assert await urls(held) == ["https://github.com/o/probes"]
-    async with db.write("asked", taxonomy="shared", papers=[A.id]) as unit:
-        owners = await links.request(unit, A.id)
-    assert owners is not None
+    mine = await owners(db)
     failing = Finder({"error": "the finder stopped without answering", "failure": "paper"})
     worker = FindWorker(db, archive()[0], deep(failing))
     for _ in range(2):
-        with pytest.raises(Exception, match="the finder stopped without answering"):
-            await worker(owners)
+        with pytest.raises(FindError, match="the finder stopped without answering"):
+            await worker(mine)
     assert failing.started == 1 and len(failing.sent) == 1
 
 
-async def test_a_find_of_what_the_paper_no_longer_is_replaces_nothing(held: Session, db):
+async def test_a_find_of_what_the_paper_no_longer_is_hands_over_and_replaces_nothing(
+    held: Session, db, monkeypatch
+):
     await seed.analyse(held, A, code=True)
     async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
         await links.due(unit, [A.id])
-        v1 = await queue.find(unit, store.FIND, find_key(A.id, 1, None))
-    assert v1 is not None
-    await batch.store(
-        db, [A.model_copy(update={"version": 2})], source="oai", rules=settling.configured(SERVED)
-    )
+    v1 = await item_of(held, key(1))
     finder = Finder({"result": {"links": [found("https://github.com/o/probes", "public")]}})
     worker = FindWorker(db, archive()[0], deep(finder))
-    assert await worker(v1) == Done(result=links.SUPERSEDED)  # before it is sent
+    # v2 stored while the find waits for the archive: seen right before it pays.
+    read_text = worker_module.read_text
+
+    async def stored_meanwhile(*args, **kwargs):
+        # By a path that submits no find (`papers.upsert` alone): the hand-over keeps it found.
+        async with db.write("v2", taxonomy="shared", papers=[A.id]) as unit:
+            await papers_store.upsert(unit, [A.model_copy(update={"version": 2})])
+        return await read_text(*args, **kwargs)
+
+    monkeypatch.setattr(worker_module, "read_text", stored_meanwhile)
+    assert await worker(v1) == Done(result=links.SUPERSEDED)
+    monkeypatch.setattr(worker_module, "read_text", read_text)
     assert finder.started == 0
-    # Its answer, had it come as the version was stored: under the paper's row, refused.
+    # Its answer, had it come as the version was stored: under the paper's lock, refused.
     answer = contract.LinksAnswer.model_validate({"links": [found("https://o.io/x", "public")]})
-    async with db.write("a late answer") as unit:
+    async with db.write("a late answer", taxonomy="shared", papers=[A.id]) as unit:
         assert await links.record(unit, v1, answer, {"links": 1}) == links.SUPERSEDED
     assert await urls(held) == []
-    v2 = await in_read(held, queue.find, store.FIND, find_key(A.id, 2, None))
-    assert v2 is not None and isinstance(await worker(v2), Done)  # the current one stays due
+    # The current one stays due, once: handed over twice, it is the same item.
+    assert [f["key"] for f in await finds(held)] == [key(1), key(2)]
+    assert isinstance(await worker(await item_of(held, key(2))), Done)
     assert await urls(held) == ["https://github.com/o/probes"]
+
+
+async def ended_by_the_gate(conn: Session, item: WorkItem, result: dict[str, Any]) -> None:
+    await conn.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'done', result = %s, ended_at = now() "
+        "WHERE id = %s",
+        (Jsonb(result), item.id),
+    )
+
+
+async def test_the_owners_find_of_an_older_version_hands_over_and_blocks_nothing(held: Session, db):
+    await seed.analyse(held, A, code=False)  # no automatic find
+    rules = settling.configured(SERVED)
+    client, fake = archive()
+    fake.texts[A.id] = (3, BODY)
+    finder = Finder({"result": {"links": []}})
+    worker = FindWorker(db, client, deep(finder))
+    v1 = await owners(db)
+    await batch.store(db, [A.model_copy(update={"version": 2})], source="oai", rules=rules)
+    page = await page_of(db)
+    assert (page["owner_find"], page["links_findable"]) == (None, True)  # v1's is not v2's
+    # Worked, v1's is asked again of the paper as it is.
+    assert await worker(v1) == Done(result=links.SUPERSEDED)
+    await ended_by_the_gate(held, v1, links.SUPERSEDED)
+    assert [(f["scope"]["by"], f["scope"]["version"]) for f in await finds(held)] == [
+        ("owner", 1),
+        ("owner", 2),
+    ]
+    v2 = await owners(db)  # the owner asking again is that one
+    assert v2.id == (await finds(held))[-1]["id"]
+    # A third version: the owner's ask is a new find, and v2's, worked, hands over to it.
+    await batch.store(db, [A.model_copy(update={"version": 3})], source="oai", rules=rules)
+    v3 = await owners(db)
+    assert v3.id != v2.id and v3.scope["version"] == 3
+    assert await worker(v2) == Done(result=links.SUPERSEDED)
+    await ended_by_the_gate(held, v2, links.SUPERSEDED)
+    assert len(await finds(held)) == 3
+    page = await page_of(db)  # a superseded find is no answer
+    assert page["link_answer"] is None and page["owner_find"].state == "queued"
+    assert not page["links_findable"]
+    assert isinstance(await worker(v3), Done) and finder.started == 1
+    page = await page_of(db)
+    assert page["link_answer"].links == 0  # none found, of v3
+
+
+async def test_an_owners_find_open_keeps_the_automatic_one_which_ends_once_answered(
+    held: Session, db
+):
+    mine = await owners(db)  # asked before the analysis lands
+    await seed.analyse(held, A, code=True)
+    async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
+        await links.due(unit, [A.id])
+    automatic = await item_of(held, key(1))  # submitted though the owner's is open
+    finder = Finder({"result": {"links": [found("https://github.com/o/probes", "public")]}})
+    worker = FindWorker(db, archive()[0], deep(finder))
+    assert isinstance(await worker(mine), Done)  # answered, its item not yet ended
+    assert await worker(automatic) == Done(result=links.ANSWERED)  # without asking deep
+    assert finder.started == 1
+
+
+async def test_an_owners_find_that_fails_leaves_the_automatic_one_to_run(held: Session, db):
+    finder = Finder(
+        {"error": "the finder stopped without answering", "failure": "paper"},
+        {"result": {"links": [found("https://github.com/o/probes", "public")]}},
+    )
+    client, _ = archive()
+    async with served(
+        db, SERVED, models=Scripted().gate(SERVED), integrations=[deep(finder)], archive=client
+    ) as app:
+        async with app_client(app) as http:
+            asked = await http.post(f"/api/papers/{A.id}/links")
+        assert asked.status_code == 202
+        await until(all_ended(held, 1), "the owner's find fails")
+        await seed.analyse(held, A, code=True)
+        async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
+            await links.due(unit, [A.id])
+        await until(all_ended(held, 2), "the automatic find ends")
+    assert [(f["scope"]["by"], f["outcome"]) for f in await finds(held)] == [
+        ("owner", "failed"),
+        ("finder", "done"),
+    ]
+    assert finder.started == 2 and await urls(held) == ["https://github.com/o/probes"]
 
 
 async def test_a_new_version_the_owners_action_stores_is_found_again(held: Session, db):
@@ -325,10 +463,7 @@ async def test_a_new_version_the_owners_action_stores_is_found_again(held: Sessi
     v2 = A.model_copy(update={"version": 2})
     async with db.write("owner's action", taxonomy="shared", papers=[A.id]) as unit:
         await misses.keep(unit, A.id, v2, rules)
-    assert [f["key"] for f in await finds(held)] == [
-        find_key(A.id, 1, None),
-        find_key(A.id, 2, None),
-    ]
+    assert [f["key"] for f in await finds(held)] == [key(1), key(2)]
 
 
 async def test_a_paper_of_no_known_version_is_found_once_per_update(held: Session, db):
@@ -340,13 +475,21 @@ async def test_a_paper_of_no_known_version_is_found_once_per_update(held: Sessio
     async with db.write("analysed", taxonomy="shared", papers=[b.id]) as unit:
         await links.due(unit, [b.id])
     await batch.store(db, [b.model_copy(update={"updated": second})], source="oai", rules=rules)
-    # Its version learnt for the update already found: no new find.
+    # Its version learnt for the update already found: no new find, and that one is current.
     known = b.model_copy(update={"updated": second, "version": 3})
     await batch.store(db, [known], source="oai", rules=rules)
-    assert [f["key"] for f in await finds(held)] == [
-        f"{b.id}@{datetime.fromisoformat(first).isoformat()}",
-        f"{b.id}@{datetime.fromisoformat(second).isoformat()}",
-    ]
+    at = [datetime.fromisoformat(t).isoformat() for t in (first, second)]
+    assert [f["key"] for f in await finds(held)] == [key(None, u, b.id) for u in at]
+    finder = Finder({"result": {"links": [found("https://github.com/o/v", "public")]}})
+    client, fake = archive()
+    fake.texts[b.id] = (3, BODY)
+    async with served(
+        db, SERVED, models=Scripted().gate(SERVED), integrations=[deep(finder)], archive=client
+    ):
+        await until(all_ended(held, 2), "both finds end")
+    ended = await finds(held)
+    assert (ended[0]["result"], ended[1]["result"]["links"]) == (links.SUPERSEDED, 1)
+    assert finder.started == 1 and await urls(held, b.id) == ["https://github.com/o/v"]
 
 
 async def test_the_owners_find_links_runs_a_fresh_find_each_time(held: Session, db, monkeypatch):
@@ -383,28 +526,31 @@ async def test_the_owners_find_links_runs_a_fresh_find_each_time(held: Session, 
     assert [(link["url"], link["state"], link["found_by"]) for link in page["links"]] == [
         ("https://github.com/o/probes", "placeholder", "owner")
     ]
-    assert (page["link_find"]["state"], page["link_find"]["by"]) == ("done", "owner")
-    assert page["owner_find"] is None and not page["finding_links"] and page["links_findable"]
+    owner_find = page["owner_find"]
+    assert (owner_find["state"], owner_find["answered"], owner_find["links"]) == ("done", True, 1)
+    assert page["link_answer"]["links"] == 1
+    assert page["open_find"] is None and not page["finding_links"] and page["links_findable"]
     assert await in_read(held, papers_store.held, [b.id]) == {b.id}
     assert await urls(held, b.id) == ["https://github.com/o/b"]
 
 
-async def test_the_page_tells_the_owners_open_find_from_an_automatic_one(held: Session, db):
+async def test_the_page_polls_only_a_find_that_runs_here(held: Session, db):
     """Read with no Worker running: the finds stay as they are submitted."""
     await seed.analyse(held, A, code=True)
     async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
         await links.due(unit, [A.id])  # an automatic find, open
-    # No card provider here: none would run the owner's find, so none is offered.
+    # No card provider here: none would run a find, so none is offered or polled.
     gate = Scripted().gate(SERVED)
     async with served(db, SERVED, models=gate, integrations=[]) as app, app_client(app) as http:
         page = (await http.get(f"/api/papers/{A.id}")).json()
         refused = await http.post(f"/api/papers/{A.id}/links")
-    assert (page["owner_find"], page["finding_links"], page["links_findable"]) == (
-        None,
-        True,
+    assert page["open_find"]["state"] == "queued" and page["owner_find"] is None
+    assert (page["finding_links"], page["links_findable"], refused.status_code) == (
         False,
+        False,
+        409,
     )
-    assert refused.status_code == 409
+    assert "(A find of its links is queued.)" in mcp._links_lines(s.Paper.model_validate(page))
     finder = Finder()
     client, _ = archive()
     off = SERVED.model_copy(update={"schedule": Schedule(enabled=False)})
@@ -416,33 +562,13 @@ async def test_the_page_tells_the_owners_open_find_from_an_automatic_one(held: S
     ):  # the schedule off: no find Worker runs
         page = (await http.get(f"/api/papers/{A.id}")).json()
         refused = await http.post(f"/api/papers/{A.id}/links")
-    assert (page["links_findable"], refused.status_code) == (False, 409)
-    async with db.write("asked", taxonomy="shared", papers=[A.id]) as unit:
-        owners = await links.request(unit, A.id)
-    assert owners is not None
-    async with (
-        served(
-            db, off, models=Scripted().gate(off), integrations=[deep(finder)], archive=client
-        ) as app,
-        app_client(app) as http,
-    ):
-        page = (await http.get(f"/api/papers/{A.id}")).json()
-    assert page["owner_find"]["state"] == "queued" and page["finding_links"]
-    # The last finished is the one that ended last, whichever was submitted first.
-    automatic, _ = [f["id"] for f in await finds(held)]
-    await held.execute(
-        "UPDATE work_items SET state = 'ended', outcome = 'done', ended_at = now() + "
-        "CASE WHEN id = %s THEN interval '1 minute' ELSE interval '0' END WHERE kind = %s",
-        (automatic, store.FIND),
+    assert (page["finding_links"], page["links_findable"], refused.status_code) == (
+        False,
+        False,
+        409,
     )
-    async with (
-        served(
-            db, off, models=Scripted().gate(off), integrations=[deep(finder)], archive=client
-        ) as app,
-        app_client(app) as http,
-    ):
-        page = (await http.get(f"/api/papers/{A.id}")).json()
-    assert page["link_find"]["by"] == "finder"
+    page = await page_of(db)  # where finds run
+    assert page["finding_links"] and page["links_findable"] and page["owner_find"] is None
 
 
 async def test_an_answer_that_breaks_the_contract_fails_the_find_and_replaces_nothing(
@@ -451,10 +577,16 @@ async def test_an_answer_that_breaks_the_contract_fails_the_find_and_replaces_no
     await seed.analyse(held, A, code=True)
     async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
         await links.due(unit, [A.id])
+    bad = [
+        [found("https://o.io/x", "public"), found("not a URL", "public")],
+        [found("https://o.io/y", "public", checked="2026-11-26")],
+        [found("https://[", "public")],
+        [found("https://o.io:99999/x", "public")],
+        [found("https://o.io/z", "public", checked="2026-02-30T03:00:00Z")],
+    ]
     finder = Finder(
         {"result": {"links": [found("https://github.com/o/probes", "public")]}},
-        {"result": {"links": [found("https://o.io/x", "public"), found("not a URL", "public")]}},
-        {"result": {"links": [found("https://o.io/y", "public", checked="2026-11-26")]}},
+        *({"result": {"links": b}} for b in bad),
     )
     client, _ = archive()
     async with served(
@@ -462,11 +594,12 @@ async def test_an_answer_that_breaks_the_contract_fails_the_find_and_replaces_no
     ) as app:
         await until(all_ended(held, 1), "the first find ends")
         async with app_client(app) as http:
-            await http.post(f"/api/papers/{A.id}/links")
-            await until(all_ended(held, 2), "the second find ends")
-            await http.post(f"/api/papers/{A.id}/links")
-            await until(all_ended(held, 3), "the third find ends")
-    assert [f["outcome"] for f in await finds(held)] == ["done", "failed", "failed"]
+            for n in range(len(bad)):
+                await http.post(f"/api/papers/{A.id}/links")
+                await until(all_ended(held, n + 2), f"find {n + 2} ends")
+    outcomes = [(f["outcome"], f["error"] or "") for f in await finds(held)]
+    assert [o for o, _ in outcomes] == ["done"] + ["failed"] * len(bad)
+    assert all("cannot read" in e for _, e in outcomes[1:])
     assert await urls(held) == ["https://github.com/o/probes"]
 
 
@@ -581,8 +714,7 @@ async def test_a_re_check_tried_again_after_its_write_committed_asks_nothing(
     await seed.analyse(held, A, code=True)
     async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
         await links.due(unit, [A.id])
-        item = await queue.find(unit, store.FIND, find_key(A.id, 1, None))
-    assert item is not None
+    item = await item_of(held, key(1))
     await FindWorker(db, archive()[0], deep(Finder({"result": {"links": PLACEHOLDER}})))(item)
     (first,) = await rechecks(held)
     check = await in_read(held, queue.find, store.RECHECK, first["key"])
@@ -622,87 +754,42 @@ async def test_a_placeholder_that_has_its_code_now_is_public_and_left(
     assert len(await rechecks(held)) == 1  # never again
 
 
-HF_GATED = {"gated": "manual", "siblings": [{"rfilename": "model-00001-of-00002.safetensors"}]}
+# The host checks' table, shared with deep's finder (deep/src/hostcheck.ts).
+HOST_CHECKS = json.loads(
+    (Path(__file__).parent.parent / "deep/tests/fixtures/host-checks.json").read_text()
+)["cases"]
 
 
-@pytest.mark.parametrize(
-    ("url", "kind", "answers", "checked"),
-    [
-        ("https://github.com/o/gone", "code", {}, ("missing", None)),
-        ("https://github.com/o/probes", "code", {"/repos/o/probes": 403}, None),  # rate limited
-        ("https://example.org/code", "code", {}, None),  # not a host it checks
-        (
-            "https://github.com/o/old",  # renamed: followed to its contents
-            "code",
-            {
-                "/repos/o/old": (301, "https://api.github.com/repositories/7"),
-                "/repositories/7": {"full_name": "o/probes", "license": None},
-                "/repos/o/probes/contents": [{"path": "train.py"}],
-            },
-            ("public", None),
-        ),
-        (
-            "https://github.com/o/away",  # a redirect off GitHub's API is not followed
-            "code",
-            {"/repos/o/away": (301, "https://elsewhere.test/repos/o/away")},
-            None,
-        ),
-        (
-            "https://huggingface.co/o/m",
-            "weights",
-            {"/api/models/o/m": HF_GATED | {"cardData": {"license": "llama3"}}},
-            ("gated", "llama3"),
-        ),
-        (
-            "https://huggingface.co/o/m",
-            "weights",
-            {"/api/models/o/m": {"siblings": [{"rfilename": "model.gguf"}]}},
-            ("public", None),
-        ),
-        (
-            "https://huggingface.co/o/m",  # a README and a config hold no weights
-            "weights",
-            {
-                "/api/models/o/m": {
-                    "gated": False,
-                    "siblings": [{"rfilename": "README.md"}, {"rfilename": "config.json"}],
-                }
-            },
-            ("placeholder", None),
-        ),
-        (
-            "https://huggingface.co/datasets/o/d",
-            "code",
-            {
-                "/api/datasets/o/d": {
-                    "gated": False,
-                    "siblings": [{"rfilename": "README.md"}],
-                    "tags": ["license:cc-by-4.0"],
-                }
-            },
-            ("placeholder", "cc-by-4.0"),
-        ),
-    ],
-)
-async def test_a_hosts_api_says_what_a_link_holds(monkeypatch, url, kind, answers, checked):
+@pytest.mark.parametrize("case", HOST_CHECKS, ids=[c["name"] for c in HOST_CHECKS])
+async def test_a_hosts_api_says_what_a_link_holds_as_the_shared_table_says(monkeypatch, case):
     def handle(req: httpx.Request) -> httpx.Response:
-        answer = answers.get(req.url.path, 404)
-        if isinstance(answer, int):
-            return httpx.Response(answer)
-        if isinstance(answer, tuple):
-            return httpx.Response(answer[0], headers={"location": answer[1]})
-        return httpx.Response(200, json=answer)
+        answer = case["answers"].get(str(req.url))
+        if answer is None:
+            return httpx.Response(404)
+        if "location" in answer:
+            return httpx.Response(answer["status"], headers={"location": answer["location"]})
+        if "json" in answer:
+            return httpx.Response(answer["status"], json=answer["json"])
+        return httpx.Response(answer["status"])
 
     hosting(monkeypatch, handle)
-    assert await adapter.check(url, kind) == checked
+    if not adapter.checkable(case["url"]):
+        said: Any = "unsupported"
+    else:
+        checked = await adapter.check(case["url"], case["kind"])
+        said = (
+            None
+            if checked is None
+            else {"state": checked[0]} | ({"license": checked[1]} if checked[1] else {})
+        )
+    assert said == case["expect"]
 
 
 async def test_a_paper_dropped_during_its_find_keeps_its_links(held: Session, db):
     await seed.analyse(held, A, code=True)
     async with db.write("analysed", taxonomy="shared", papers=[A.id]) as unit:
         await links.due(unit, [A.id])
-        item = await queue.find(unit, store.FIND, find_key(A.id, 1, None))
-    assert item is not None
+    item = await item_of(held, key(1))
     await held.execute("UPDATE papers SET dismissed_at = now() WHERE id = %s", (A.id,))
     finder = Finder({"result": {"links": [found("https://github.com/o/probes", "public")]}})
     ended = await FindWorker(db, archive()[0], deep(finder))(item)

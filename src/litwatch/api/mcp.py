@@ -831,18 +831,17 @@ OLDER_CARD = "(Written from an older text of this paper than the one above.)"
 
 def _links_lines(p: s.Paper) -> list[str]:
     """Where the paper's code and weights are, each with its access state as last checked; or
-    that a find found none, or is under way."""
+    that a find of the paper as it is found none; and an open find, queued or running."""
     out = [
         f"- {link.kind}: {link.url} · {link.state}"
         + (f" · license {link.license}" if link.license else "")
         + f" · checked {_day(link.checked_at)}"
         for link in p.links
     ]
-    f = p.link_find
-    if p.finding_links:
-        out.append("(A find of its links is under way.)")
-    elif not out and f is not None and f.state == "done":
-        out.append(f"None found ({_day(f.at)}).")
+    if p.open_find is not None:
+        out.append(f"(A find of its links is {p.open_find.state}.)")
+    elif not out and p.link_answer is not None and p.link_answer.links == 0:
+        out.append(f"None found ({_day(p.link_answer.at)}).")
     return out
 
 

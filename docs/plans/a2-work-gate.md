@@ -396,6 +396,11 @@ Found while building, owned by the stage named.
   configured. The rollback step is a choice: keep deep configured and accept the automatic reads until the image is
   upgraded again, or disable `[integrations.deep]`, the only way the previous image stops them, which also pauses
   the owner's Deep read requests until deep is enabled again.
+- **Back up to P6 after a rollback that spanned a nightly.** The image before P6 finds no links: the analyses and
+  versions it recorded triggered no find. Upgraded again, nothing submits them at once. The next nightly's `due`
+  sweep covers only the papers it analyses that night and the failed finds of the last week, so a paper analysed or
+  versioned under the old image is not found by it; the owner's "Find links" covers those, one paper at a time. No
+  catch-up is built.
 
 ## Evidence
 

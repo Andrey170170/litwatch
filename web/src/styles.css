@@ -695,6 +695,7 @@ html[data-theme="light"] .tprow .vd b.askt { color: var(--fg); }
 .agrid > .on, .agrid > .pri { background: var(--acc); border-color: var(--acc); color: var(--acc-fg); }
 .agrid > .wide { grid-column: 1 / -1; }
 .agrid > .quiet { color: var(--fg3); border-style: dashed; }
+.agrid > .fail { color: var(--sig); }
 .agrid > .rlink { color: var(--st); box-shadow: inset 3px 0 0 var(--st); }
 .agrid > .rlink[data-state="placeholder"] { border-style: dashed; }
 .agrid > *:active { transform: translateY(1px); }

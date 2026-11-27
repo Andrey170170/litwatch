@@ -213,7 +213,8 @@ italics. It offers no Deep read. Where a row of it shows (a digest that listed i
 - The quick actions as a 2×2 grid: Save, BibTeX ⧉, arXiv ↗, PDF ↗, with Deep read across the full width while the
   paper has no card. For a paper outside the collection: Process, BibTeX, Deep read, Report as a miss. Where a card
   provider is configured, Find links comes last, across the full width, so the cells before it keep their places: it
-  asks for the paper's release links afresh and reads "Find links · queued" (or "· finding") while that find is open. Process
+  asks for the paper's release links afresh and reads "Find links · queued" (or "· finding") while that find is open,
+  then how it ended: "· none found", or "· failed" in the signal colour, its error on hover; the same cell on the phone. Process
   fetches it and starts a job that processes it now (Jobs); the button reads "Processing" while it runs. A paper
   litwatch fetched but never processed (a lookup, a miss report) gets the same Process. While the schedule is off,
   which runs no jobs, Process only fetches the paper, and a fetched one reads "Fetched · next run" instead.

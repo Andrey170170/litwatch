@@ -3,9 +3,10 @@
  * where a paper's code and model weights are released and how each can be had. It works in the Deep read's session
  * (`repl.ts`) over the paper's text, with the same public fetch and Semantic Scholar (`hosts.ts`), on its own model
  * and effort, and gives a small structured answer through `answer()`: each link's kind, its access state and its
- * license when cheap to see; none found is an answer too. The answer is refused until each link it gives was fetched
- * in the session, itself or by its repository's API page (`confirms`), with an answer that shows the state it is
- * given (`shows`); each link's `checked_at` is when the last such fetch was made.
+ * license when cheap to see; none found is an answer too. A GitHub or Hugging Face link takes its state from the
+ * host's API (`hostcheck.ts`), whatever the model drafted. Any other link must have been fetched in the session, by its
+ * own URL, with an answer that shows the state it is given, a quote of the page among it (`shows`); each link's
+ * `checked_at` is when that fetch, or the host's check, was made.
  *
  * The finds have a queue of their own (`LinkQueue`), so a find never waits behind a Deep read.
  */
@@ -21,7 +22,8 @@ import { buildHosts, pacer, type HostConfig } from "./hosts.ts";
 import { Queue } from "./jobs.ts";
 import { headings } from "./paper.ts";
 import { Repl, type HostFn } from "./repl.ts";
-import { isWebUrl, schemaErrors } from "./schema.ts";
+import { schemaErrors } from "./schema.ts";
+import { hostState, type Get, type HostState } from "./hostcheck.ts";
 import type { Static } from "typebox";
 
 /** The finder's budget: it looks a few things up, it writes nothing long. */
@@ -33,12 +35,19 @@ const MAX_LINKS = 12;
 
 const DraftSchema = Type.Object(
   {
-    links: Type.Array(Type.Object(LINK_FIELDS, { additionalProperties: false }), { maxItems: MAX_LINKS }),
+    links: Type.Array(
+      Type.Object(
+        { ...LINK_FIELDS, evidence: Type.Optional(Type.String({ maxLength: 300, description: "A passage of its fetched page that shows its state." })) },
+        { additionalProperties: false },
+      ),
+      { maxItems: MAX_LINKS },
+    ),
     note: Type.Optional(Type.String({ maxLength: 500 })),
   },
   { additionalProperties: false },
 );
 type Draft = Static<typeof DraftSchema>;
+type Link = LinksAnswer["links"][number];
 
 export interface LinksOutcome {
   result: LinksAnswer | null;
@@ -51,114 +60,118 @@ export interface LinksOutcome {
 
 type Progress = (event: TraceEvent, stats: Stats) => void;
 
-/** One fetch the session made, as a link is confirmed by it: the URL asked, the one that answered, its status (none
- * when the host's name did not resolve), whether Hugging Face's API says the repository is gated, and when. */
+/** One fetch the session made, as a link on another host is confirmed by it: the URL asked, the one that answered,
+ * its status (none when the host's name did not resolve), the text it read, and when. */
 export interface Fetched {
   asked: string;
   answered?: string;
   status?: number;
-  gated?: boolean;
+  text?: string;
   at: string;
 }
 
-/** A URL as it is compared: scheme and host lower-cased (as `URL` writes them), the path without a trailing slash,
- * the query kept, no fragment. */
-function normal(url: string): string | null {
+/** A URL as it is compared: an absolute http(s) URL with a host, its scheme and host lower-cased (as `URL` writes
+ * them), the path without a trailing slash, the query kept, no fragment; null for anything else. */
+export function normal(url: string): string | null {
   try {
     const u = new URL(url);
+    if ((u.protocol !== "https:" && u.protocol !== "http:") || !u.hostname) return null;
     return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}${u.search}`;
   } catch {
     return null;
   }
 }
 
-/** The API page that speaks for a repository link: a GitHub repository's (`api.github.com/repos/<owner>/<repo>`) or a
- * Hugging Face model's, dataset's or space's (`huggingface.co/api/<models|datasets|spaces>/<owner>/<name>`). None for
- * any other link, a file or folder in a repository among them. */
-function apiPage(link: string): string | null {
-  const u = new URL(link);
-  const host = u.hostname.replace(/^www\./, "");
-  const parts = u.pathname.split("/").filter(Boolean);
-  if (u.search) return null;
-  if (host === "github.com" && parts.length === 2) return `https://api.github.com/repos/${parts[0]}/${parts[1]}`;
-  if (host !== "huggingface.co") return null;
-  const [kind, owner, name, ...rest] = parts[0] === "datasets" || parts[0] === "spaces" ? parts : ["models", ...parts];
-  return owner && name && !rest.length ? `https://huggingface.co/api/${kind}/${owner}/${name}` : null;
-}
-
-/** Whether a fetch of `fetched` speaks for the link `link`: the same URL (`normal`), or the repository's API page. */
+/** Whether a fetch of `fetched` speaks for the link `link`: the same URL (`normal`). */
 export function confirms(link: string, fetched: string): boolean {
   const l = normal(link);
-  const f = normal(fetched);
-  if (l === null || f === null) return false;
-  if (l === f) return true;
-  const api = apiPage(link);
-  return api !== null && normal(api) === f;
+  return l !== null && l === normal(fetched);
 }
 
-/** Whether what a fetch answered shows the state a link is given: a page there for public and placeholder (and not
- * gated), not there (404 or 410, or a name that does not resolve) for missing, and the host's gate (Hugging Face's
- * flag, or a 401 or 403 at the page itself) for gated. A rate limit, a server's error or GitHub's API refusing shows
- * nothing. */
-export function shows(state: LinksAnswer["links"][number]["state"], f: Fetched): boolean {
+/** Whether `evidence`, a passage the model quotes, is in a fetched page's text: whitespace and case aside, a dozen
+ * characters at least. */
+function quoted(evidence: string | undefined, text: string | undefined): boolean {
+  const squash = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const said = squash(evidence ?? "");
+  return said.length >= 12 && text !== undefined && squash(text).includes(said);
+}
+
+/** Whether a fetch of a link on another host than those checked by their API shows the state the link is given:
+ * missing by a 404 or 410, or a name that does not resolve; gated by a 401 or 403, or a page whose text the model
+ * quotes as its request form; public or a placeholder by a 2xx with the model's quote of what the page holds. A rate
+ * limit or a server's error shows nothing. */
+export function shows(state: Link["state"], f: Fetched, evidence?: string): boolean {
   if (f.status === undefined) return state === "missing";
   const there = f.status >= 200 && f.status < 300;
-  const api = (f.answered ?? f.asked).startsWith("https://api.github.com/");
   switch (state) {
-    case "public":
-    case "placeholder":
-      return there && !f.gated;
     case "missing":
       return f.status === 404 || f.status === 410;
     case "gated":
-      return (there && f.gated === true) || ((f.status === 401 || f.status === 403) && !api);
+      return f.status === 401 || f.status === 403 || (there && quoted(evidence, f.text));
+    default:
+      return there && quoted(evidence, f.text);
   }
 }
 
-/** The answer a draft makes, each link stamped with its latest confirming fetch that shows its state; or what is
- * wrong with it. */
-export function answered(draft: unknown, fetched: readonly Fetched[]): { errors: string[] } | { answer: LinksAnswer } {
+/** The host's API's word on a supported link (`hostState`): its state, or null when it could not say, or undefined
+ * for a link on another host. */
+export type Check = (url: string, kind: Link["kind"]) => Promise<HostState | null | undefined>;
+
+/** The answer a draft makes, or what is wrong with it. A link on GitHub or Hugging Face takes its state (and license,
+ * where the host gives one) from the host's API, whatever the draft says; one the host could not say of, and a link
+ * elsewhere, must be fetched in the session, by its own URL, with an answer that shows its state (`shows`). A link
+ * given only a page that answered, with no quote of what it holds, is dropped; a link given twice (by `normal` URL
+ * and kind) is kept once. `notes` say what was replaced or dropped. */
+export async function answered(
+  draft: unknown,
+  fetched: readonly Fetched[],
+  check: Check,
+): Promise<{ errors: string[] } | { answer: LinksAnswer; notes: string[] }> {
   const errors = schemaErrors(DraftSchema, draft);
   if (errors.length) return { errors };
   const { links, note } = draft as Draft;
   const out: LinksAnswer["links"] = [];
+  const notes: string[] = [];
+  const seen = new Set<string>();
   for (const [i, link] of links.entries()) {
-    if (!isWebUrl(link.url)) {
-      errors.push(`/links/${i}/url: must be an absolute http(s) URL`);
+    const url = normal(link.url);
+    if (url === null) {
+      errors.push(`/links/${i}/url: must be an absolute http(s) URL with a host`);
       continue;
     }
-    if (out.some((o) => o.url === link.url && o.kind === link.kind)) continue; // given twice, kept once
+    if (seen.has(`${link.kind} ${url}`)) continue; // given twice, kept once
+    seen.add(`${link.kind} ${url}`);
+    const { license, evidence, ...rest } = link;
+    const host = await check(link.url, link.kind);
+    if (host) {
+      if (host.state !== link.state) notes.push(`${link.url}: ${host.state} by its host's API (answered ${host.status}), not ${link.state}`);
+      const kept = host.license ?? license ?? undefined;
+      out.push({ ...rest, state: host.state, ...(kept ? { license: kept } : {}), checked_at: new Date().toISOString() });
+      continue;
+    }
     const by = fetched.filter((f) => confirms(link.url, f.asked) || (f.answered !== undefined && confirms(link.url, f.answered)));
     if (!by.length) {
-      errors.push(`/links/${i}: ${link.url} was not fetched in this session; fetch it, or its API page, to confirm it before answering`);
+      errors.push(`/links/${i}: ${link.url} was not fetched in this session; fetch it to confirm it before answering`);
       continue;
     }
-    const shown = by.filter((f) => shows(link.state, f));
+    const shown = by.filter((f) => shows(link.state, f, evidence));
+    const last = by.at(-1)!;
+    if (!shown.length && link.state !== "missing" && by.some((f) => f.status !== undefined && f.status >= 200 && f.status < 300)) {
+      notes.push(`${link.url}: dropped, its page answered with no quote of what it holds`);
+      continue;
+    }
     if (!shown.length) {
-      const last = by.at(-1)!;
-      const said = last.status === undefined ? "its host did not resolve" : `its fetch answered ${last.status}${last.gated ? " (gated)" : ""}`;
+      const said = last.status === undefined ? "its host did not resolve" : `its fetch answered ${last.status}`;
       errors.push(`/links/${i}: ${link.url}: ${said}, which does not show it ${link.state}; give the state its fetch shows, or fetch it again`);
       continue;
     }
-    const { license, ...rest } = link;
     out.push({ ...rest, ...(license ? { license } : {}), checked_at: shown.at(-1)!.at });
   }
-  return errors.length ? { errors } : { answer: { links: out, ...(note ? { note } : {}) } };
+  return errors.length ? { errors } : { answer: { links: out, ...(note ? { note } : {}) }, notes };
 }
 
 /** Whether a failed fetch failed because its host's name does not resolve: a link that leads nowhere. */
 const unresolved = (e: unknown): boolean => /ENOTFOUND/.test(e instanceof Error ? e.message : String(e));
-
-/** Hugging Face's API's word on a repository's gate, from a fetched page's text. */
-function gate(url: string | undefined, text: unknown): boolean | undefined {
-  if (!url?.startsWith("https://huggingface.co/api/") || typeof text !== "string") return undefined;
-  try {
-    const gated = (JSON.parse(text) as { gated?: unknown }).gated;
-    return gated !== undefined ? gated !== false : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 export function linksPrompt(maxCells: number): string {
   return `You find where one arXiv paper's code and model weights are released, and check each link. You work in a JavaScript session through the tool run_code; state persists between cells and top-level await works.
@@ -176,13 +189,14 @@ Where to look, in this order:
 2. The paper's text: find(/github\\.com|gitlab\\.com|huggingface\\.co|code (is|will be)|weights|checkpoint/i), footnotes, the end of the introduction, the conclusion, the appendix.
 3. Only when those give no link, the open web: the Hugging Face models and datasets that cite the paper (https://huggingface.co/api/models?filter=arxiv:<id>, https://huggingface.co/api/datasets?filter=arxiv:<id>), its Hugging Face paper page (https://huggingface.co/api/papers/<id>), and GitHub's search (https://api.github.com/search/repositories?q=<id>). Take a link from the web only when it is plainly this paper's: its title, its arXiv id or its authors say so.
 
-Confirm each link before you answer: fetch it, or its API page. GitHub: https://api.github.com/repos/<owner>/<repo>, and https://api.github.com/repos/<owner>/<repo>/contents for what it holds. Hugging Face: https://huggingface.co/api/models/<owner>/<name> (datasets: /api/datasets/…), whose "siblings" are its files and "gated" says whether it is gated. Then give each link:
+Confirm each link before you answer. A GitHub repository or a Hugging Face model, dataset or space: litwatch's service reads its state from the host's API itself when you answer, so give the state you believe; to decide, its API is https://api.github.com/repos/<owner>/<repo> (and /contents for what it holds) or https://huggingface.co/api/models/<owner>/<name> (datasets: /api/datasets/…), whose "siblings" are its files and "gated" says whether it is gated. Any other link: fetch that very URL, and give evidence: a short passage, quoted exactly from its fetched text, that shows its state (what it holds, or its request form). Then give each link:
 - url: the repository's or the model's page (https://github.com/<owner>/<repo>, https://huggingface.co/<owner>/<name>), not a file in it; one link per repository.
 - kind: "code" for a code repository, "weights" for model weights or a checkpoint.
-- state: "public", anyone can have it now; "gated", behind a request form or a licence to accept; "placeholder", the repository is there but holds nothing but a README (a licence or .gitignore beside it), "code coming soon"; "missing", a link the paper gives that leads nowhere (a 404, a deleted repository).
+- state: "public", anyone can have it now; "gated", behind a request form or a licence to accept; "placeholder", the repository is there but holds nothing but a README (a licence or .gitignore beside it), "code coming soon", or a weights link with no weight file yet; "missing", a link the paper gives that leads nowhere (a 404, a deleted repository).
 - license: when the API shows it (GitHub's license.spdx_id, Hugging Face's cardData.license or a license:<id> tag); leave it out otherwise.
+- evidence: for a link on any other host, the quoted passage; a link there without one is dropped.
 
-No link found is an answer: answer({links: []}). Never give a link you have not fetched in this session, or a state its fetch does not show (a 404 is missing, not public; a rate limit shows nothing, so fetch again): the answer is refused. You have ${maxCells} cells; answer as soon as you know.`;
+No link found is an answer: answer({links: []}). Never give a link on another host that you have not fetched in this session, or a state its fetch does not show (a 404 is missing, not public; a rate limit shows nothing, so fetch again): the answer is refused. You have ${maxCells} cells; answer as soon as you know.`;
 }
 
 export function linksMessage(input: LinksInput): string {
@@ -194,7 +208,15 @@ export function linksMessage(input: LinksInput): string {
   return `arXiv:${paper.id}: ${paper.title}\n\nAbstract:\n${paper.abstract}\n\narXiv comments: ${comments || "none"}\n\n${text}`;
 }
 
-export async function findLinks(input: LinksInput, models: Models, hostCfg: HostConfig, opts: RunOptions, progress: Progress = () => undefined): Promise<LinksOutcome> {
+/** A find. A supported link's host is asked through `hostGet` (tests give their own), else the session's own fetch. */
+export async function findLinks(
+  input: LinksInput,
+  models: Models,
+  hostCfg: HostConfig,
+  opts: RunOptions,
+  progress: Progress = () => undefined,
+  hostGet?: Get,
+): Promise<LinksOutcome> {
   const model = models.getModel(PROVIDER, opts.model);
   if (!model) throw new Error(`model ${opts.model} is not available from ${PROVIDER}`);
   await requireSubscription(models);
@@ -246,7 +268,7 @@ export async function findLinks(input: LinksInput, models: Models, hostCfg: Host
       const at = new Date().toISOString();
       try {
         const value = (await base.fetch!(args, detail)) as { url?: string; status?: number; text?: unknown };
-        fetched.push({ asked: String(args[0]), answered: value?.url, status: value?.status, gated: gate(value?.url, value?.text), at });
+        fetched.push({ asked: String(args[0]), answered: value?.url, status: value?.status, text: typeof value?.text === "string" ? value.text : undefined, at });
         return value;
       } catch (e) {
         if (unresolved(e)) fetched.push({ asked: String(args[0]), at });
@@ -254,17 +276,27 @@ export async function findLinks(input: LinksInput, models: Models, hostCfg: Host
       }
     }),
     answer: async ([draft]) => {
-      const found = answered(draft, fetched);
+      const found = await answered(draft, fetched, (url, kind) => hostState(url, kind, get));
       if ("errors" in found) {
         record({ t: now(), type: "submit", ok: false, errors: found.errors.slice(0, 30) });
         return { ok: false, errors: found.errors };
       }
       answer = found.answer;
-      record({ t: now(), type: "submit", ok: true });
+      record({ t: now(), type: "submit", ok: true, ...(found.notes.length ? { notes: found.notes } : {}) });
       return { ok: true, links: answer.links.length };
     },
   };
 
+  const get: Get =
+    hostGet ??
+    (async (url) => {
+      try {
+        const v = (await hosts.fetch!([url])) as { url?: string; status?: number; text?: unknown };
+        return { status: v.status ?? 0, url: v.url ?? url, text: typeof v.text === "string" ? v.text : "" };
+      } catch {
+        return null;
+      }
+    });
   const repl = await Repl.create(
     {
       paper: paper.body,

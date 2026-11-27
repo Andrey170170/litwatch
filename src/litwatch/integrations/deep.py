@@ -43,7 +43,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 from pydantic import ValidationError
@@ -264,6 +264,9 @@ class DeepClient:
                 answer = job.result if job.status == "done" else None
                 failure = job.failure or ("service" if answer is None else None)
                 error = job.error or (None if answer is not None else "the find gave no answer")
+                if answer is not None and (wrong := _off_the_wire(answer)):
+                    answer, failure = None, "service"
+                    error = f"the deep service returned a find litwatch cannot read: {wrong}"
                 return Found(answer, job.model or "", job.stats.model_dump(), error, failure)
             if datetime.now(UTC) > deadline:
                 error = "litwatch stopped waiting for the find, to follow it again"
@@ -331,6 +334,26 @@ class DeepClient:
     @property
     def limit(self) -> timedelta:
         return timedelta(seconds=self.timeout_seconds)
+
+
+def _off_the_wire(answer: contract.LinksAnswer) -> str | None:
+    """What is wrong with a find's answer that its schema lets by, if anything: each link's URL
+    must parse as an absolute http(s) URL with a host, and its `checked_at` as a time in UTC."""
+    for i, link in enumerate(answer.links):
+        try:
+            url = urlsplit(link.url)
+            url.port  # noqa: B018 — a port that is not one raises
+            if url.scheme.lower() not in ("http", "https") or not url.hostname:
+                raise ValueError("not an absolute http(s) URL with a host")
+        except ValueError as exc:
+            return f"links.{i}.url: {link.url!r}: {exc}"
+        try:
+            at = datetime.fromisoformat(link.checked_at)
+            if at.utcoffset() != timedelta(0):
+                raise ValueError("not in UTC")
+        except ValueError as exc:
+            return f"links.{i}.checked_at: {link.checked_at!r}: {exc}"
+    return None
 
 
 @dataclass

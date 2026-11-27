@@ -105,12 +105,12 @@ export function ReleaseChip({ link, name }: { link: ReleaseLink; name: string })
   );
 }
 
-/** Why a kind has no link: none is known yet, or the paper's last find found none; `announced` when the analysis says
- * the paper releases it. */
+/** Why a kind has no link: none is known yet, or the last answer for the paper as it is found none; `announced` when
+ * the analysis says the paper releases it. */
 export function noLinkTitle(paper: Paper, kind: "code" | "weights", announced = true) {
-  const f = paper.link_find;
+  const a = paper.link_answer;
   const said = announced ? `The abstract announces ${kind}; ` : "";
-  const none = f?.state === "done" ? `no link was found (${fullDate(f.at)})` : "no link is known yet";
+  const none = a ? `no link was found (${fullDate(a.at)})` : "no link is known yet";
   return said ? said + none : none.charAt(0).toUpperCase() + none.slice(1);
 }
 
@@ -143,17 +143,28 @@ function NoLink({ paper, kind }: { paper: Paper; kind: "code" | "weights" }) {
   );
 }
 
-/** Find links asks the deep service for the paper's release links afresh; while the owner's find is open the cell
- * says so. It comes last in its grid, so the cells before it keep their places. */
+/** What the owner's last find of the paper as it is says on its cell: queued or finding while open; then that it
+ * failed, or found none; nothing once it found links, which show in their cells. */
+function ownersOutcome(f: Paper["owner_find"]): string | null {
+  if (!f) return null;
+  if (f.state === "queued") return "queued";
+  if (f.state === "running") return "finding";
+  if (f.state === "failed") return "failed";
+  return f.answered && f.links === 0 ? "none found" : null;
+}
+
+/** Find links asks the deep service for the paper's release links afresh; its label says how the owner's last find of
+ * the paper as it is stands or ended. It comes last in its grid, so the cells before it keep their places. */
 export function FindLinksCell({ paper }: { paper: Paper }) {
   const find = useFindLinks(paper.id);
-  const open = paper.owner_find;
+  const f = paper.owner_find;
+  const open = f?.state === "queued" || f?.state === "running";
   if (!paper.links_findable && !open) return null;
-  const f = paper.link_find;
-  const failed = f?.by === "owner" && f.state === "failed" ? `The last find failed: ${f.error ?? "no reason given"}` : undefined;
+  const outcome = ownersOutcome(f);
+  const failed = f?.state === "failed" ? `The last find failed: ${f.error ?? "no reason given"}` : undefined;
   return (
-    <button className="wide" onClick={() => find.mutate(undefined)} disabled={find.isPending || !!open} title={failed}>
-      {open ? `Find links · ${open.state === "running" ? "finding" : "queued"}` : "Find links"}
+    <button className={`wide${f?.state === "failed" ? " fail" : ""}`} onClick={() => find.mutate(undefined)} disabled={find.isPending || open} title={failed}>
+      {outcome ? `Find links · ${outcome}` : "Find links"}
     </button>
   );
 }

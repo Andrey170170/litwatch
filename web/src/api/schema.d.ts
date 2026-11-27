@@ -2314,9 +2314,9 @@ export interface components {
         };
         /**
          * LinkFind
-         * @description A find of the paper's release links: queued, running, done (its links, none included,
-         *     are the paper's, unless a newer version's find was under way) or failed; the finder's or
-         *     the owner's; when it ended, started or is due.
+         * @description A find of the paper's release links: queued, running, done or failed; the finder's or
+         *     the owner's; when it ended, started or is due; whether it answered (done with its answer,
+         *     `links` of them, none found included; a find skipped or superseded ended done unanswered).
          */
         LinkFind: {
             /**
@@ -2336,6 +2336,13 @@ export interface components {
             at: string;
             /** Error */
             error?: string | null;
+            /**
+             * Answered
+             * @default false
+             */
+            answered: boolean;
+            /** Links */
+            links?: number | null;
         };
         /** LinksRequested */
         LinksRequested: {
@@ -2620,8 +2627,9 @@ export interface components {
             card_requestable: boolean;
             /** Links */
             links?: components["schemas"]["ReleaseLink"][];
-            link_find?: components["schemas"]["LinkFind"] | null;
+            link_answer?: components["schemas"]["LinkFind"] | null;
             owner_find?: components["schemas"]["LinkFind"] | null;
+            open_find?: components["schemas"]["LinkFind"] | null;
             /**
              * Finding Links
              * @default false

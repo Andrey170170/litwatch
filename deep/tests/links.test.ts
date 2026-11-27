@@ -4,7 +4,9 @@ import { fauxAssistantMessage, type Models } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import { LinkJobSchema, LinksAnswerSchema, type LinksInput } from "../src/contracts.ts";
 import { JobQueue } from "../src/jobs.ts";
-import { confirms, type Fetched, findLinks, LinkQueue, shows } from "../src/links.ts";
+import { readFileSync } from "node:fs";
+import { hostState, type Get } from "../src/hostcheck.ts";
+import { confirms, type Fetched, findLinks, LinkQueue, normal, shows } from "../src/links.ts";
 import { buildServer } from "../src/server.ts";
 import { cell, HOSTS, models, OPEN, OPTS, PAPER, withSite } from "./support.ts";
 
@@ -12,19 +14,15 @@ const INPUT: LinksInput = { paper: PAPER, comments: "Code: https://github.com/a/
 const find = (m: Models, site: string) => findLinks(INPUT, m, { ...HOSTS, litwatchUrl: site, guard: OPEN }, OPTS);
 const answers = (links: unknown[]) => cell(`console.log(JSON.stringify(await answer(${JSON.stringify({ links })})))`);
 
-test("a link is confirmed by a fetch of that URL, or of its repository's API page", () => {
-  assert.ok(confirms("https://github.com/a/probes", "HTTPS://GITHUB.COM/a/probes/"), "the scheme's and host's case, a trailing slash");
-  assert.ok(confirms("https://github.com/a/probes", "https://api.github.com/repos/a/probes"));
-  assert.ok(confirms("https://huggingface.co/a/m", "https://huggingface.co/api/models/a/m"));
-  assert.ok(confirms("https://huggingface.co/datasets/a/d", "https://huggingface.co/api/datasets/a/d"));
+test("a link elsewhere is confirmed by a fetch of that URL, its scheme's and host's case and a trailing slash aside", () => {
+  assert.ok(confirms("https://o.io/probes", "HTTPS://O.IO/probes/"));
   assert.ok(confirms("https://o.io/download?file=weights", "https://o.io/download?file=weights"));
   assert.ok(!confirms("https://o.io/download?file=weights", "https://o.io/download?file=readme"), "another query is another resource");
-  assert.ok(!confirms("https://github.com/a/probes", "https://github.com/a/probes/tree/main"), "a page under it is not it");
-  assert.ok(!confirms("https://github.com/a/probes", "https://api.github.com/repos/a/probes/contents/nope"), "a child's contents speak for that child");
-  assert.ok(!confirms("https://github.com/a/probes", "https://github.com/a/probes-v2"), "a sibling is not the repository");
-  assert.ok(!confirms("https://github.com/a/probes", "https://api.github.com/repos/a/other"));
-  assert.ok(!confirms("https://huggingface.co/a/m", "https://huggingface.co/api/datasets/a/m"), "a dataset is not the model");
+  assert.ok(!confirms("https://o.io/probes", "https://o.io/probes/tree/main"), "a page under it is not it");
+  assert.ok(!confirms("https://o.io/probes", "https://o.io/probes-v2"), "a sibling is not it");
   assert.ok(!confirms("not a url", "https://github.com/a"));
+  assert.equal(normal("https://["), null);
+  assert.equal(normal("ftp://o.io/x"), null);
 });
 
 test("the contract takes an absolute http(s) URL and a time in UTC, nothing else", () => {
@@ -38,18 +36,82 @@ test("the contract takes an absolute http(s) URL and a time in UTC, nothing else
   }
 });
 
-test("a fetch shows a state only by what it answered", () => {
+test("a fetch of a link elsewhere shows a state by its status and the page the model quotes", () => {
   const at = "2026-11-26T03:00:00.000Z";
-  const page = (status?: number, extra: Partial<Fetched> = {}): Fetched => ({ asked: "https://o.io/x", answered: "https://o.io/x", status, at, ...extra });
-  const api = (status: number): Fetched => ({ asked: "https://api.github.com/repos/a/p", answered: "https://api.github.com/repos/a/p", status, at });
-  assert.ok(shows("public", page(200)) && shows("placeholder", page(204)));
-  assert.ok(!shows("public", page(404)) && !shows("public", page(429)) && !shows("public", page(500)));
+  const text = "Weights: download the 7B checkpoint below. Request access by filling in this form.";
+  const page = (status?: number): Fetched => ({ asked: "https://o.io/x", answered: "https://o.io/x", status, text, at });
+  const quote = "download the 7B checkpoint below";
+  assert.ok(shows("public", page(200), quote) && shows("placeholder", page(204), quote));
+  assert.ok(!shows("public", page(200)), "a page that answered, unquoted, shows nothing");
+  assert.ok(!shows("public", page(200), "a passage the page does not have"));
+  assert.ok(!shows("public", page(404), quote) && !shows("public", page(429), quote) && !shows("public", page(500), quote));
   assert.ok(shows("missing", page(404)) && shows("missing", page(410)) && shows("missing", page(undefined)), "a name that does not resolve leads nowhere");
   assert.ok(!shows("missing", page(429)) && !shows("missing", page(403)));
-  assert.ok(shows("gated", page(200, { gated: true })) && !shows("public", page(200, { gated: true })));
-  assert.ok(shows("gated", page(401)) && shows("gated", page(403)));
-  assert.ok(!shows("gated", api(403)), "GitHub's API refusing is its rate limit, no gate");
+  assert.ok(shows("gated", page(401)) && shows("gated", page(403)) && shows("gated", page(200), "request access by filling in this form"));
   assert.ok(!shows("gated", page(200)));
+});
+
+type Answers = Record<string, { status: number; json?: unknown; location?: string }>;
+
+/** A host's API as the table gives it: each URL's answer (absent: 404), its redirects followed. */
+const tableGet =
+  (answers: Answers): Get =>
+  async (url) => {
+    let at = url;
+    for (let hops = 0; hops < 5; hops++) {
+      const got = answers[at];
+      if (!got) return { status: 404, url: at, text: "" };
+      if (!got.location) return { status: got.status, url: at, text: got.json === undefined ? "" : JSON.stringify(got.json) };
+      at = got.location;
+    }
+    return null;
+  };
+
+test("a host's API says what a link holds, as the table litwatch's re-check shares says", async () => {
+  const table = JSON.parse(readFileSync(new URL("./fixtures/host-checks.json", import.meta.url), "utf8")) as {
+    cases: { name: string; url: string; kind: "code" | "weights"; answers: Answers; expect: null | "unsupported" | { state: string; license?: string } }[];
+  };
+  assert.ok(table.cases.length > 10);
+  for (const c of table.cases) {
+    const got = await hostState(c.url, c.kind, tableGet(c.answers));
+    const said = got === undefined ? "unsupported" : got === null ? null : { state: got.state, ...(got.license ? { license: got.license } : {}) };
+    assert.deepEqual(said, c.expect, c.name);
+  }
+});
+
+test("a GitHub or Hugging Face link takes its state from the host's API, whatever the draft says", async () => {
+  const { models: m, faux } = models();
+  const hf = { url: "https://huggingface.co/o/m", kind: "weights", state: "public", license: null };
+  const gh = { url: "https://github.com/o/r", kind: "code", state: "public", license: null };
+  faux.setResponses([answers([hf, gh, { ...gh, url: "HTTPS://GITHUB.COM/o/r/" }])]);
+  const get = tableGet({
+    "https://huggingface.co/api/models/o/m": { status: 200, json: { gated: "manual", siblings: [{ rfilename: "model.safetensors" }] } },
+    "https://api.github.com/repos/o/r": { status: 200, json: { full_name: "o/r", default_branch: "main", license: { spdx_id: "MIT" } } },
+    "https://api.github.com/repos/o/r/contents": { status: 200, json: [{ path: "README.md" }] },
+  });
+  const outcome = await findLinks(INPUT, m, { ...HOSTS, guard: OPEN }, OPTS, () => undefined, get);
+  assert.deepEqual(
+    outcome.result?.links.map((l) => [l.url, l.state, l.license]),
+    [
+      [hf.url, "gated", undefined],
+      [gh.url, "placeholder", "MIT"],
+    ],
+    "the same repository given twice, by another spelling, is kept once",
+  );
+  const submit = outcome.trace.find((e) => e.type === "submit") as { notes?: string[] };
+  assert.match(submit.notes?.join("\n") ?? "", /gated by its host's API \(answered 200\), not public/);
+});
+
+test("a link elsewhere whose page answered, unquoted, is dropped", async () => {
+  await withSite(async ({ url }) => {
+    const { models: m, faux } = models();
+    const link = { url: `${url}/e-print/x`, kind: "code", state: "public", license: null };
+    faux.setResponses([cell(`await fetch(${JSON.stringify(link.url)})`), answers([link])]);
+    const outcome = await find(m, url);
+    assert.deepEqual(outcome.result?.links, []);
+    const submit = outcome.trace.find((e) => e.type === "submit") as { notes?: string[] };
+    assert.match(submit.notes?.[0] ?? "", /dropped, its page answered with no quote/);
+  });
 });
 
 test("an answer whose state its fetch contradicts is refused", async () => {

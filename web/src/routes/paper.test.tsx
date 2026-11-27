@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { freshClient, json, renderApp, scriptFetch, viewport } from "@/test/harness";
 import type { Paper } from "@/components/paper/Actions";
 import { pollEvery } from "./paper";
@@ -590,12 +590,12 @@ describe("a paper's page", () => {
 
 describe("a paper's release links", () => {
   const link = (kind: string, state: string, url: string) => ({ url, kind, state, license: state === "public" ? "MIT" : null, checked_at: "2026-11-20T03:00:00Z", found_by: "finder" });
-  const done = { state: "done", by: "finder", at: "2026-11-20T03:00:00Z" };
+  const answer = (links: number) => ({ state: "done", by: "finder", at: "2026-11-20T03:00:00Z", answered: true, links });
 
   it("show as chips coloured by state among the facts, and in the phone's grid in the Code and Weights places", async () => {
     viewport(true);
     const links = [link("code", "public", "https://github.com/o/r"), link("weights", "placeholder", "https://huggingface.co/o/m")];
-    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, links, link_find: done, facets: { ...paper.facets, releases_code: true } } });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": { ...paper, links, link_answer: answer(2), facets: { ...paper.facets, releases_code: true } } });
     const { unmount } = renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
     const code = screen.getByRole("link", { name: "⟨/⟩ code ↗" });
@@ -634,7 +634,7 @@ describe("a paper's release links", () => {
     const card = { card: { code_url: "https://github.com/card/code" }, among: [] };
     scriptFetch({
       "GET /api/topics": [],
-      "GET /api/papers/2610.00002": { ...paper, card, facets: { ...paper.facets, releases_code: false, releases_weights: true }, link_find: done },
+      "GET /api/papers/2610.00002": { ...paper, card, facets: { ...paper.facets, releases_code: false, releases_weights: true }, link_answer: answer(0) },
     });
     renderApp("/paper/2610.00002");
     await screen.findByRole("heading", { name: "Epic one" });
@@ -675,10 +675,40 @@ describe("a paper's release links", () => {
     expect(screen.queryByRole("button", { name: /Find links/ })).toBeNull();
   });
 
-  it("poll while any find is queued or running, whatever the find that ended last", () => {
-    const at = (finding: boolean) => pollEvery({ ...paper, states: [], finding_links: finding, link_find: { state: "done", by: "owner", at: "2026-11-26T10:00:00Z" } } as unknown as Paper, false);
-    expect(at(true)).toBe(15_000);
-    expect(at(false)).toBe(false);
+  it("say on the Find links cell that the owner's find found none, or failed", async () => {
+    viewport(true);
+    const owners = (fields: object) => ({ ...paper, links_findable: true, owner_find: { by: "owner", at: "2026-11-26T10:00:00Z", ...fields } });
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": owners({ state: "done", answered: true, links: 0 }) });
+    const { unmount } = renderApp("/paper/2610.00002");
+    expect(await screen.findByRole("button", { name: "Find links · none found" })).toBeEnabled();
+    unmount();
+    // Superseded (a newer version came) or the paper dismissed: no answer, so not "none found".
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": owners({ state: "done", answered: false, links: null }) });
+    const again = renderApp("/paper/2610.00002");
+    expect(await screen.findByRole("button", { name: "Find links" })).toBeEnabled();
+    again.unmount();
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": owners({ state: "failed", error: "FindError: the deep service broke" }) });
+    renderApp("/paper/2610.00002");
+    const failed = await screen.findByRole("button", { name: "Find links · failed" });
+    expect(failed.title).toMatch(/the deep service broke/);
+    expect([...failed.parentElement!.children].at(-1)).toBe(failed); // last: the cells before it keep their places
+  });
+
+  it("poll while a find is open, and stop once the page sees it end", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => void vi.useRealTimers());
+    viewport(true);
+    let reads = 0;
+    const open = { ...paper, finding_links: true, open_find: { state: "running", by: "finder", at: "2026-11-26T10:00:00Z" } };
+    scriptFetch({ "GET /api/topics": [], "GET /api/papers/2610.00002": () => (++reads < 3 ? open : { ...paper, link_answer: answer(0) }) });
+    renderApp("/paper/2610.00002");
+    await screen.findByRole("heading", { name: "Epic one" });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await waitFor(() => expect(reads).toBe(2));
+    await vi.advanceTimersByTimeAsync(15_000);
+    await waitFor(() => expect(reads).toBe(3));
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(reads).toBe(3);
   });
 });
 

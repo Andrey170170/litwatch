@@ -11,6 +11,7 @@ from psycopg.types.json import Jsonb
 
 from litwatch.core import Paper, events, rewritten, withdrawn_at
 from litwatch.core.digests import announced, first_listing
+from litwatch.core.links import Identity
 from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import outbox
 
@@ -31,8 +32,8 @@ class Upserted:
     rewritten: list[str] = field(default_factory=list)
     # Ids withdrawn, or brought back by a later version: dropped or not from now on.
     withdrawn: list[str] = field(default_factory=list)
-    # Stored ids whose arXiv version changed, or, of no known version, whose update did: what a
-    # find of their release links is of (`core.links.find_key`).
+    # Stored ids that are another paper for release links than they were (`core.links.Identity`):
+    # a new arXiv version, or, of no known version, a new update.
     versioned: list[str] = field(default_factory=list)
 
 
@@ -237,9 +238,8 @@ async def upsert(
                 )
             if (row["withdrawn_at"] is None) != (old["withdrawn_at"] is None):
                 result.withdrawn.append(p.id)
-            if row["version"] != old["version"] or (
-                row["version"] is None and row["updated"] != old["updated"]
-            ):
+            was = Identity.at(old["version"], old["updated"])
+            if not was.covers(Identity.at(row["version"], row["updated"])):
                 result.versioned.append(p.id)
             if changed or row["version"] != old["version"]:
                 await outbox.emit(

@@ -314,22 +314,34 @@ asked for, or arXiv's PDF of it. Everything else answers it 403.
 The service also finds where a paper's code and weights are released (`POST /links`, followed at
 `GET /links/<id>`, the same key protocol as a read; `deep/README.md`). A find is a work item of
 kind `links` (`litwatch.links`), worked only by a `serve` with the schedule on and an archive to
-read papers from. An automatic one runs when the paper's analysis says it releases code or
-weights, of the paper as it is: at its arXiv version, or at its update when no version is known.
-It is keyed by that, and only an answer, "none found" included, holds it for good: a failed one
-ends failed with its error and cost, and a later trigger (an analysis again, the nightly's
-retries of the last week, three failures at most) submits a fresh one. A new version, or update,
-is found again, wherever it is stored (intake, or an owner's action fetching the paper). The
-owner's "Find links" (`POST /api/papers/<id>/links`) always runs a fresh one, on a paper only in
-the archive too, which it stores first. A find of what the paper no longer is (a newer version
-stored meanwhile) ends without asking deep, or with its answer dropped. Its answer replaces the
-paper's links (`release_links`: url, kind, access state, license, when checked, what set it), in
-the unit that ends its item; deep confirms each link by a fetch of it, or of its repository's API
-page, that shows its state. A placeholder link on GitHub or Hugging Face is checked again by a
-plain request to their API (`links.adapter`), a week apart, four times, each check its own work
-item, then left alone; no other link is. A Hugging Face weights link holds its weights only when
-the repository lists a weight file. The paper page shows each link as a chip coloured by its
-state, and `get_paper` lists them. Digests and the Notion export do not show them yet.
+read papers from. Each find is of the paper as it is when submitted (`core.links.Identity`): its
+arXiv version, or its update when no version is known; every decision about it asks whether it is
+of the paper as it is now. An automatic one runs when the paper's analysis says it releases code
+or weights, unless the paper as it is has an answer, "none found" included, the owner's or an
+automatic one's, or an automatic find of it is open; an open find of the owner's does not count,
+so should it fail the automatic one still runs. A failed automatic find ends failed with its
+error and cost, and a later trigger (an analysis again, or the nightly's retries of the last
+week, run after its analyses; three failures at most) submits a fresh one. A new version, or
+update, is found again, wherever it is stored (intake, or an owner's action fetching the paper).
+The owner's "Find links" (`POST /api/papers/<id>/links`) runs a fresh find of the paper as it is,
+unless one of theirs of the same is open, on a paper only in the archive too, which it stores
+first. Right before a find pays, after any wait for the archive's text, and again with its answer,
+under the paper's locks: a find of what the paper no longer is ends superseded without paying, or
+with its answer dropped, and hands over in the same unit (the owner's is asked again of the paper
+as it is, an automatic one is due again); an automatic find whose paper another find answered
+meanwhile ends without asking deep. A find's answer replaces the paper's links (`release_links`:
+url, kind, access state, license, when checked, what set it) and is recorded with its item's
+result in one commit, by which a find tried again ends without asking again; the Work gate ends
+the item in a second. A wrong answer (a URL that is not absolute http(s), a time that is not one
+in UTC) fails the find and touches nothing. A GitHub or Hugging Face link takes its state from
+the host's API, by one check shared by deep's finder and the weekly re-check (`deep/src/hostcheck.ts`,
+`links.adapter`, both suites driven by `deep/tests/fixtures/host-checks.json`); deep confirms any
+other link by a fetch of it that shows its state. A placeholder link on GitHub or Hugging Face is
+checked again by that check, a week apart, four times, each check its own work item, then left
+alone; no other link is. The paper page shows each link as a chip coloured by its state, and
+"Find links" says how the owner's last find of the paper as it is ended ("none found", "failed");
+`get_paper` lists the links, or "None found" for a current answer of none, or that a find is
+queued or running. Digests and the Notion export do not show them yet.
 
 ### The Notion export
 

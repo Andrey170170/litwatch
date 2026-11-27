@@ -170,14 +170,18 @@ the repository's root, which does all of it; CI fails on a generated file that i
 `POST /links` finds where one paper's code and model weights are released (`LinksInputSchema`: the paper as
 `/process` takes it, its body empty when litwatch has no text, and its arXiv comments), on a queue of its own beside
 the reads', one find at a time, with the same `Idempotency-Key` protocol: `GET /links/<id>` reports it
-(`LinkJobSchema`), `GET /links/keys/<key>` finds it by key, `GET /links` lists them. A narrow agent on
-`DEEP_LINKS_MODEL` (`src/links.ts`), in the same REPL with the same hosts, starts from the abstract, the comments and
-the paper's text, and goes to the open web only when they say nothing. It answers through `answer({links, note?})`;
-each link (`url`, `kind` code or weights, `state` public, gated, placeholder or missing, `license` where the page
-gives it cheaply) must be one it fetched in the session, or whose API page it fetched (a GitHub repository through
-`api.github.com/repos/…`, a Hugging Face one through `huggingface.co/api/…`); an unfetched one is refused back to it
-to confirm. Its `checked_at` is the confirming fetch's time. An empty list is an answer: none found. It has 30
-cells and 15 minutes; a find that never answers is the paper's failure, a model error the service's, as for a read.
+(`LinkJobSchema`), `GET /links/keys/<key>` finds it by key; a finished find is kept six hours at least. A narrow
+agent on `DEEP_LINKS_MODEL` (`src/links.ts`), in the same REPL with the same hosts, starts from the abstract, the
+comments and the paper's text, and goes to the open web only when they say nothing. It answers through
+`answer({links, note?})`: each link's `url`, `kind` (code or weights), `state` (public, gated, placeholder or
+missing) and `license` where it is cheap to see. A GitHub or Hugging Face link takes its state from the host's API
+(`src/hostcheck.ts`, the same check as litwatch's weekly re-check, both driven by `tests/fixtures/host-checks.json`),
+whatever the agent drafted. Any other link must be one it fetched in the session, by that URL, with an answer that
+shows its state: a 404 or 410 (or no such host) for missing, a 401 or 403 or a quoted request form for gated, a 2xx
+with a quote of what the page holds for public; a page that answered but is not quoted is dropped, and anything else
+is refused back to it. Its `checked_at` is that fetch's, or the check's, time. An empty list is an answer: none found.
+It has 30 cells and 15 minutes; a find that never answers is the paper's failure, a model error the service's, as
+for a read.
 
 ## Running it
 

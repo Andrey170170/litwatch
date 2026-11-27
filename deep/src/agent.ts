@@ -40,7 +40,7 @@ export type TraceEvent =
   | { t: number; type: "assistant"; text: string; thinking: string; stop: string; usage: TurnUsage }
   | { t: number; type: "cell"; n: number; code: string; output: string; error?: string; ms: number; timedOut?: true; images?: number }
   | { t: number; type: "host"; name: string; args: string; ms: number; ok: boolean; chars: number; error?: string; fetch?: FetchRecord }
-  | { t: number; type: "submit"; ok: boolean; errors?: string[]; stood?: string[] }
+  | { t: number; type: "submit"; ok: boolean; errors?: string[]; stood?: string[]; notes?: string[] }
   | { t: number; type: "review"; round: number; passed?: boolean; error?: string; usage: TurnUsage }
   | { t: number; type: "system"; text: string };
 

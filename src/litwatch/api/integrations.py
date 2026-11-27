@@ -23,6 +23,7 @@ from litwatch.api.jobs import DROPPED
 from litwatch.archive import ArchiveError
 from litwatch.core import FAILED_RUNS, Cause, SearchFilters, SearchHit, SearchProvider
 from litwatch.core.fulltext import REQUESTED
+from litwatch.core.links import Find
 from litwatch.feedback import misses, word
 from litwatch.fulltext import deep as deep_passes
 from litwatch.gates.database import DatabaseGate, ReadUnit
@@ -360,35 +361,45 @@ _FIND_STATES: dict[tuple[str, str | None], Any] = {
 }
 
 
-def _find(row: dict[str, Any] | None) -> s.LinkFind | None:
-    if row is None:
+def _find(found: Find | None) -> s.LinkFind | None:
+    if found is None:
         return None
     return s.LinkFind(
-        state=_FIND_STATES[(row["state"], row["outcome"])],
-        by="owner" if row["by"] == "owner" else "finder",
-        at=row["at"],
-        error=row["error"],
+        state=_FIND_STATES[(found.state, found.outcome)],
+        by=found.by,
+        at=found.at,
+        error=found.error,
+        answered=found.answered,
+        links=found.links,
     )
 
 
 async def release_links(
     c: ReadUnit, paper_id: str, *, finds: bool, processed: bool
 ) -> dict[str, Any]:
-    """The paper page's release links (`s.Paper`'s fields): those stored, shown whatever is
-    loaded; the find that ended last; the owner's open find and whether any is open; and
-    whether "Find links" applies: finds run here (`finds`, `link_finder`), the paper is
-    `processed` (not dropped), and no find of the owner's is open."""
+    """The paper page's release links (`s.Paper`'s fields), as the paper is now (`links`'s
+    identity): those stored, shown whatever is loaded; the last answer for the paper as it is;
+    the owner's last find of it; its open find, and whether one runs here (`finds`,
+    `link_finder`); and whether "Find links" applies: finds run here, the paper is `processed`
+    (not dropped), and no find of the owner's of it is open."""
     stored = [
         s.ReleaseLink(**link.model_dump()) for link in await links_store.of_paper(c, paper_id)
     ]
-    open_finds = await links_store.open_finds(c, paper_id)
-    owners = next((f for f in open_finds if f["by"] == "owner"), None)
+    all_finds = await links_store.finds(c, paper_id)
+    now = await links_store.current(c, paper_id)
+    of_now = links.covering(all_finds, now.of) if now else []
+    answers = sorted((f for f in of_now if f.answered), key=lambda f: f.at)
+    owners = [f for f in of_now if f.by == "owner"]
+    open_finds = sorted(
+        (f for f in all_finds if f.open), key=lambda f: (f.state != "running", f.id)
+    )
     return {
         "links": stored,
-        "link_find": _find(await links_store.last_finished(c, paper_id)),
-        "owner_find": _find(owners),
-        "finding_links": bool(open_finds),
-        "links_findable": finds and processed and owners is None,
+        "link_answer": _find(answers[-1] if answers else None),
+        "owner_find": _find(owners[-1] if owners else None),
+        "open_find": _find(open_finds[0] if open_finds else None),
+        "finding_links": finds and bool(open_finds),
+        "links_findable": finds and processed and not any(f.open for f in owners),
     }
 
 

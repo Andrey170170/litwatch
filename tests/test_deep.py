@@ -77,7 +77,7 @@ from tests.conftest import (
 from tests.deep_service import CARD, DONE, USAGE, Q, make
 from tests.digesting import MON, TUE, Writer, area, day, listed, week
 from tests.fakes_http import FakeArchive, FakeDeep, mock
-from tests.scripted import Scripted
+from tests.scripted import ANALYSIS, CONFIG, Scripted, decision
 from tests.seed import analyse, classify
 from tests.seed import grade as verdict
 from tests.sessions import Bridge, Session, in_read, in_write
@@ -1761,27 +1761,26 @@ async def test_with_automatic_reads_off_a_must_read_queues_none_and_the_owners_r
     db: Session, gate, monkeypatch
 ):
     """`[integrations.deep] automatic = false`, as production sets it, in `serve` on the
-    configuration's own rules: settling a must read queues no Deep pass, and the owner's
-    request is worked on deep by `serve`'s own Deep worker."""
+    configuration's own rules: the nightly grading a paper a must read queues no Deep pass, and
+    the owner's request is worked on deep by `serve`'s own Deep worker."""
     monkeypatch.setattr(word, "rules", settling.configured)
     deep = {"url": "http://deep.test", "automatic": False}
-    off = Config(schedule=QUIET, integrations={"deep": deep})
-    verdict = Verdict(
-        paper_id=P.id, topic=FAITH.slug, topic_version="v", fit=Fit.CENTRAL, reason="r", opinions={}
-    )
-    await in_write(db, verdicts.add, verdict)
-    await settling.settle(db, P.id, cause=Cause.VERDICT, rules=word.rules(off))
-    grades = await in_read(db, word_store.effective_for, P.id)
-    assert grades[FAITH.slug].grade == Grade.MUST_READ  # one an automatic Deep read is for
-    assert await deep_rows(db) == []
+    off = CONFIG.model_copy(update={"schedule": QUIET, "integrations": {"deep": deep}})
+    models = Scripted()  # P is on CoT faithfulness, central by both labs: a must read
+    models.decisions[P.title] = decision("cot-faithfulness", **{"cot-faithfulness": 0.9})
+    models.analyses[P.title] = ANALYSIS | {"releases_code": False}  # no find of its links
+    models.fits[("judge", P.title)] = models.fits[("check", P.title)] = {
+        "reason": "On it.",
+        "fit": "central",
+    }
     integrations = [make(FakeDeep(DONE))]
     async with served(
-        gate,
-        off,
-        models=Scripted().gate(off),
-        integrations=integrations,
-        archive=archive(with_text(P)),
+        gate, off, models=models.gate(off), integrations=integrations, archive=archive(with_text(P))
     ) as app:
+        await nightly.run(gate, off, fetch=False, models=models.gate(off), with_digests=False)
+        grades = await in_read(db, word_store.effective_for, P.id)
+        assert grades[FAITH.slug].grade == Grade.MUST_READ  # one an automatic Deep read is for
+        assert await deep_rows(db) == []
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://t",

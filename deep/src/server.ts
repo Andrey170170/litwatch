@@ -51,7 +51,6 @@ async function route(req: IncomingMessage, res: ServerResponse, deps: ServerDeps
   const path = url.pathname.replace(/\/+$/, "") || "/";
   if (req.method === "GET" && path === "/healthz") return json(res, 200, { ...(await deps.health()), ...deps.jobs.active, links: deps.links.active });
   if (req.method === "GET" && path === "/jobs") return json(res, 200, deps.jobs.list());
-  if (req.method === "GET" && path === "/links") return json(res, 200, deps.links.list());
   const finds = path.startsWith("/links/");
   const served: Served = finds ? deps.links : deps.jobs;
   const rest = finds ? path.slice("/links".length) : path;

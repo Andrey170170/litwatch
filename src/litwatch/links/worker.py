@@ -2,16 +2,17 @@
 the deep service (`FindWorker`, items of kind `store.links.FIND`) and a re-check of one
 placeholder link at its host (`RecheckWorker`, kind `store.links.RECHECK`).
 
-A find is of the paper as it was when submitted (`store.links.Identity`): one of what the paper
-no longer is ends `links.SUPERSEDED` before it is sent, and its answer replaces no links. A find
-reads the paper's text from the archive first, waiting for it a while as a Deep pass does, then
-goes on without it: the finder starts from the abstract and arXiv's comments. Its submission is
-keyed by its item, so while its end is not known (no reply, litwatch stopped waiting, the
-service lost it) the item is tried again after `PAUSE` and follows the same find. Its answer is
-recorded in the item's own unit (`links.record`), its end too when it failed (the finder never
-answered, the service turned it down or broke), with the usage the service reported, and a try
-after that commit ends as it did: no find is paid for twice, nor a failure replayed. A failed
-find fails its item; a later trigger submits a fresh one (`links.due`).
+A find reads the paper's text from the archive first, waiting for it a while as a Deep pass
+does, then goes on without it: the finder starts from the abstract and arXiv's comments. Right
+before it pays, after any wait, it asks whether it is still to be asked (`links.check`: the
+paper dropped, another identity now, handed over; or answered meanwhile). Its submission is keyed
+by its item, so while its end is not known (no reply, litwatch stopped waiting, the service lost
+it) the item is tried again after `PAUSE` and follows the same find. Its answer is recorded in
+the item's own unit (`links.record`), its failure too (the finder never answered, the service
+turned it down, broke, or answered what is not the contract's), with the usage the service
+reported; a try after that commit ends as it did: no find is paid for twice, nor a failure
+replayed. A failed find fails its item; a later trigger submits a fresh one (`links.due`). The
+Work gate ends the item in a commit of its own after the Worker's.
 
 A re-check is the link's `check`th of four: its count, what it found and the next check, a
 week later, commit in the unit it ends with, so a try after that commit finds the count past it
@@ -40,7 +41,7 @@ from litwatch.core.links import RECHECK_EVERY, ReleaseLink, rechecked_again
 from litwatch.core.work import WorkItem
 from litwatch.gates.database import DatabaseGate
 from litwatch.gates.work import Done, Later
-from litwatch.integrations.deep import Deep, find_input
+from litwatch.integrations.deep import Deep, Found, RejectedError, find_input
 from litwatch.links import adapter
 from litwatch.store import links as store
 from litwatch.store import papers as papers_store
@@ -74,18 +75,15 @@ class FindWorker:
 
     async def __call__(self, item: WorkItem) -> Done | Later:
         paper_id = item.scope["paper_id"]
-        async with self.db.write("find links: look") as unit:
+        async with self.db.read("find links: look") as unit:
             if kept := await work.results(unit, item.id):  # by a try whose end was lost
                 body = kept[-1][1]
                 if "failed" in body:
                     raise FindError(body["failed"])
                 return Done(_cost(body.get("usage")), body)
-            of = await store.identity(unit, paper_id)
             paper = await papers_store.get(unit, paper_id)
-        if of is None or paper is None or of.dropped:
+        if paper is None:
             return Done(result=links.SKIPPED)
-        if of.find != item.scope["find"]:
-            return Done(result=links.SUPERSEDED)
         text: PaperText | None = None
         try:
             text = await read_text(self.archive, paper, URGENT)
@@ -98,11 +96,19 @@ class FindWorker:
         else:
             if text is None and item.attempts < TEXT_TRIES:  # the archive is fetching it
                 return Later(datetime.now(UTC) + TEXT_WAIT)
+        # Right before it pays, after any wait: the paper as it is now.
+        async with self.db.write("find links: check", taxonomy="shared", papers=[paper_id]) as unit:
+            if (ended := await links.check(unit, item)) is not None:
+                return Done(result=ended)
+            paper = await papers_store.get(unit, paper_id)
+        assert paper is not None  # held: `check` found it
         try:
             find_id = await self.deep.client.find(
                 find_input(paper, text), key=f"links:{item.id}:{paper_id}"
             )
             found = await self.deep.client.follow_find(find_id)
+        except RejectedError as exc:  # turned down for what it is: sent again, so again
+            found = Found(None, error=f"the deep service refused the find: {exc}", failure="paper")
         except httpx.HTTPError as exc:  # sent again by its key, it is the same find
             log.warning("find links %s: the deep service: %s", paper_id, exc)
             return Later(datetime.now(UTC) + PAUSE)
@@ -117,7 +123,9 @@ class FindWorker:
                 await work.put_result(unit, item, failed)
             raise FindError(error)
         result = {"links": len(found.answer.links), "model": found.model, "usage": found.usage}
-        async with self.db.write("record release links") as unit:
+        async with self.db.write(
+            "record release links", taxonomy="shared", papers=[paper_id]
+        ) as unit:
             ended = await links.record(unit, item, found.answer, result)
         return Done(cost, ended)
 

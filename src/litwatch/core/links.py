@@ -4,8 +4,10 @@ placeholder is checked again."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Literal
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -17,7 +19,7 @@ FoundBy = Literal["finder", "owner", "recheck"]
 # A placeholder is checked again this often, this many times, then left alone; no other state is.
 RECHECK_EVERY = timedelta(days=7)
 RECHECKS = 4
-# An automatic find of one version that failed is tried again, by a later trigger, until this
+# An automatic find of one identity that failed is tried again, by a later trigger, until this
 # many have failed.
 FIND_TRIES = 3
 
@@ -44,10 +46,62 @@ def wants_find(releases_code: bool, releases_weights: bool) -> bool:
     return releases_code or releases_weights
 
 
-def find_key(paper_id: str, version: int | None, updated: str | None) -> str:
-    """What a find is of: the paper at its arXiv `version`; at its last update (`updated`, as
-    arXiv's record gives it) when no version is known, so each update is a find of its own."""
-    return f"{paper_id}@v{version}" if version is not None else f"{paper_id}@{updated or '?'}"
+@dataclass(frozen=True)
+class Identity:
+    """What a find of a paper is of: the paper at its arXiv `version`, or, when no version is
+    known, at its last update (`updated`, as arXiv's record gives it, in UTC). Whether a find is
+    of the paper as it is now is `covers`, and nothing else compares a paper's versions for
+    release links: scheduling, the owner's request, the Worker before it pays, the write under
+    the paper's lock, a new version stored, and what the page shows."""
+
+    version: int | None
+    updated: str | None
+
+    @classmethod
+    def of(cls, scope: Mapping[str, Any]) -> Identity:
+        """The identity a find's scope names."""
+        return cls(scope.get("version"), scope.get("updated"))
+
+    @classmethod
+    def at(cls, version: int | None, updated: datetime | None) -> Identity:
+        """The identity of a paper stored at `version` and `updated`."""
+        return cls(version, updated.astimezone(UTC).isoformat() if updated else None)
+
+    def key(self, paper_id: str) -> str:
+        """An automatic find's key: one per identity."""
+        if self.version is not None:
+            return f"{paper_id}@v{self.version}"
+        return f"{paper_id}@{self.updated or '?'}"
+
+    def covers(self, now: Identity) -> bool:
+        """Whether a find of this identity is a find of the paper as it is `now`: of the same
+        version; for a find that knew no version, of the same update, a version learnt since
+        for that update included."""
+        if self.version is not None:
+            return self.version == now.version
+        return self.updated == now.updated
+
+
+@dataclass(frozen=True)
+class Find:
+    """One find of a paper, its work item: by the owner or the finder, of what (`of`), where it
+    stands (`state`, `outcome` once ended), whether it answered (ended done with its answer,
+    "none found" included) and with how many links, its error, and when it ended, started or is
+    due (`at`)."""
+
+    id: int
+    by: Literal["owner", "finder"]
+    of: Identity
+    state: Literal["pending", "running", "ended"]
+    outcome: Literal["done", "failed"] | None
+    answered: bool
+    links: int | None
+    error: str | None
+    at: datetime
+
+    @property
+    def open(self) -> bool:
+        return self.state != "ended"
 
 
 def rechecked_again(state: State, rechecks: int) -> bool:
