@@ -1,6 +1,6 @@
 # Architecture
 
-Status (2026-11-23): **agreed; A0 and A1 built,** A2 next. This is the shape of litwatch's backend rework: the rules every part of
+Status (2026-11-27): **agreed; A0, A1 and A2 built,** A3 next. This is the shape of litwatch's backend rework: the rules every part of
 the backend follows, and the milestones that bring the code to them. It fixes only what every milestone depends on.
 How each gate works inside is settled by that milestone's own shape and plan, under
 [`architecture/`](architecture/) and [`../plans/`](../plans/). A milestone may amend this spec, in its own PR,

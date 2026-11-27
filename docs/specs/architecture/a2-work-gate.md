@@ -1,7 +1,8 @@
 # A2. Work gate
 
-Status (2026-11-23): **planned, not built.** The build plan is
-[`plans/a2-work-gate.md`](../../plans/a2-work-gate.md). This is milestone A2 of [the architecture](../architecture.md): every
+Status (2026-11-27): **built**, P1–P7, T1 and T2, deployed through P6; P7's deploy and the night that checks the
+milestone (V9) follow. The build plan, with its evidence, is [`plans/a2-work-gate.md`](../../plans/a2-work-gate.md).
+This is milestone A2 of [the architecture](../architecture.md): every
 background loop becomes a Worker over one Work gate, one Model gate serves the whole process, and every gate call
 knows what it serves. It also builds one new kind of work, the release-link finder, on the gate. Decisions from the
 shaping talk of 2026-11-23 (Q1–Q15).
@@ -173,7 +174,7 @@ the finder on the Work gate, its first kind of work built for the gate rather th
 
 ## Folded in
 
-These are under A2 in [`backlog.md`](../../backlog.md), and A2 is done when they are merged:
+These were under A2 in [`backlog.md`](../../backlog.md), and are merged with it:
 
 - **Python and deep share their contracts** instead of declaring each other's types by hand, and the two LaTeX
   outline parsers become one (review, project 3). The release-link answer is one of the contracts.
