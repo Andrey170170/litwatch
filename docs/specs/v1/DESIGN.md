@@ -228,8 +228,8 @@ its section; diagrams and wide tables scroll sideways. The bottom bar: ☆ Save,
 the paper's place in its list ("3/22"), 👎, and ⋯. ⋯ opens the paper sheet: a label per topic (the topic's name, its
 grade and whose Fit it shows, then the Fit control; in the rail's order and fold), the actions and links as the same grid (arXiv, PDF, LaTeX, Code,
 Weights, BibTeX, then Deep read and Find links; Code and Weights are always there, so a find moves no cell: the first
-release link of each, in its state's colour with a 3 px left edge, else as the header has it, else empty, dashed and
-quiet), then versions, published version and classes, and Done. A swipe steps to the previous or next paper
+release link of each, in its state's colour with a 3 px left edge (a placeholder dashed all round instead), else as
+the header has it, else empty and quiet: the ordinary solid border, its label dimmed, so only a placeholder is dashed), then versions, published version and classes, and Done. A swipe steps to the previous or next paper
 of the list it was opened from.
 
 A paper outside the collection on the phone: the header and the Abstract (no Gist or Brief), and a bottom bar of

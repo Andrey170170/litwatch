@@ -141,6 +141,8 @@ Shape (with sketches), blueprint, drive.
 - **Evals as checks** (review, project 6): maintained inputs in `evals/` apart from historical reports, then a
   performance evaluation CI can run (API latency on the main pages and search, bundle size, render counts).
 - **The evaluation harnesses resume past a half-written last line** (review, project 8).
+- **Release links' waits and host requests are logged:** a find's wait for the archive's text, and a re-check's host
+  request, log nothing today. They show only as `attempts` and the link's `checked_at`.
 
 ### A5. Fetch, Compute and Files gates
 
@@ -215,12 +217,16 @@ Built between milestones, on whatever structure exists then.
 - **The release-link finder's judgement,** once the finder has run long enough to show where it goes wrong. A2
   handles the finder's data; how well it judges a link is this. From P6's round-3 review:
   - a candidate it could not confirm is dropped, so the answer turns into "none found" and replaces stored links;
-  - a GitHub repository with a README and `assets/` counts as code;
+  - a GitHub repository with a README and `assets/` counts as code: PMS-SR (2611.03390), a README and a folder of
+    PNG figures, is stored as public;
   - on other hosts, the evidence for a state, and a redirect's final URL standing for the link;
   - provenance: a URL the paper never gave, accepted on a host's 404 or on an unrelated repository;
   - a GitHub API check that says nothing (a 403) falls back to the model's state, and a license the API did not
     give is kept;
-  - the newest observation of a resource should win over an older one in the same find.
+  - the newest observation of a resource should win over an older one in the same find;
+  - deep caps an answer at 12 links: LoopTitan's (2611.34821) 18 weight repositories became 12. The finder's note
+    naming the rest stays in deep's job, and nothing in litwatch shows that more exist;
+  - Hugging Face datasets are stored as kind "code" (AliceAI, 2611.34529): the contract has only code and weights.
 
   *Needs shaping.*
 
