@@ -405,11 +405,11 @@ async def test_get_paper_lists_the_release_links_with_their_states(conn: Session
     links = [
         contract.ReleaseLink(
             url="https://github.com/o/probes", kind="code", state="public", license="MIT",
-            checked_at="2026-11-20T03:00:00+00:00",
+            checked_at="2026-11-20T03:00:00Z",
         ),
         contract.ReleaseLink(
             url="https://huggingface.co/o/m", kind="weights", state="gated", license=None,
-            checked_at="2026-11-21T03:00:00+00:00",
+            checked_at="2026-11-21T03:00:00Z",
         ),
     ]  # fmt: skip
     await in_write(conn, links_store.replace, P.id, 1, links, "finder")
