@@ -11,6 +11,7 @@ import psycopg
 import pytest
 
 from litwatch import events
+from litwatch.api import app as app_module
 from litwatch.api import create_app
 from litwatch.config import Models
 from litwatch.events import dispatch
@@ -413,33 +414,45 @@ async def test_an_emitter_that_looked_before_the_first_cursor_was_made_strands_n
         await other.close()
 
 
-async def test_an_event_written_as_serve_starts_is_delivered(conn: Session, db):
+async def test_an_event_written_as_serve_starts_is_delivered(conn: Session, db, monkeypatch):
     """A write that emits an event while `serve` starts (a CLI's `taxonomy import`) wakes no
     turn: no `workers` row delivers yet. The startup sweep's turn, run before it commits, sees
-    nothing and ends; the gate's catch-up submits a turn once the event has committed."""
-    rec = Recorder()
-    await start(db, rec)
-    gate, workers = WorkGate(db, poll=0.2), {outbox.DELIVERY: DeliveryWorker(db, [rec])}
-    delivery = workers[outbox.DELIVERY]
+    nothing and ends; `serve`'s gate catches up on its poll once the event has committed, with
+    no notification to wake it."""
+    posted: list[int] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content)["id"])
+        return httpx.Response(200)
+
+    hook = Webhook(
+        "http://hook.test", http=httpx.AsyncClient(transport=httpx.MockTransport(answer))
+    )
+    await start(db, hook)
+
+    async def deaf(gate) -> None:  # no notification wakes the gate: its poll alone
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(WorkGate, "_listen", deaf)
+    monkeypatch.setattr(app_module, "WorkGate", lambda db: WorkGate(db, poll=0.2))
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    app = create_app(dsn, "t", integrations=[hook])
     emitter = await sessions.sibling(conn)
-    task = None
     try:
-        async with emitter.transaction():
-            unit = staged(emitter)
-            event = await outbox.emit(unit, events.PAPER_SAVED, "2610.00001")
-            await outbox.wake_all(unit)  # as its commit does: no row delivers yet
-            await delivery.sweep()  # `serve` starts: its first turn
-            task = asyncio.create_task(
-                gate.run(workers, keys={outbox.DELIVERY: delivery.keys}, upkeep=[delivery.catch_up])
-            )
-            await until(lambda: _ended(conn, rec.name), "the first turn ends, seeing nothing")
-        await until(lambda: _seen(rec, [event]), "the event is delivered")
+        async with contextlib.AsyncExitStack() as stack:
+            async with emitter.transaction():
+                unit = staged(emitter)
+                event = await outbox.emit(unit, events.PAPER_SAVED, "2610.00001")
+                await outbox.wake_all(unit)  # as its commit does: no row delivers yet
+                await stack.enter_async_context(app.router.lifespan_context(app))  # it starts
+                await until(lambda: _ended(conn, hook.name), "the first turn ends unseeing")
+            await until(lambda: _posted(posted, [event]), "the event is delivered")
     finally:
-        if task is not None:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
         await emitter.close()
+
+
+async def _posted(posted: list[int], ids: list[int]) -> bool:
+    return posted == ids
 
 
 async def test_serve_starts_while_an_event_is_being_written(conn: Session, db):
