@@ -182,7 +182,7 @@ async def started(conn: Session, kind: str, *args: Any, alive: bool = False, **k
     if alive:
         await conn.execute(
             "WITH i AS (INSERT INTO work_items (kind, key, admission, state, lease_token, "
-            "lease_until) VALUES ('command', %(key)s, %(key)s, 'running', gen_random_uuid(), "
+            "lease_until) VALUES ('test', %(key)s, %(key)s, 'running', gen_random_uuid(), "
             "now() + interval '1 hour') RETURNING id, lease_token) "
             "UPDATE runs SET (work_id, lease_token) = (SELECT id, lease_token FROM i) "
             "WHERE id = %(run)s",

@@ -6,7 +6,7 @@ its Work gate running (`served`); and a `litwatch` command through its real CLI 
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping, Sequence
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -67,10 +67,11 @@ async def serving(
     gate: WorkGate,
     workers: Mapping[str, Worker],
     keys: Mapping[str, Collection[str]] | None = None,
+    upkeep: Sequence[Callable[[], Awaitable[None]]] = (),
 ) -> AsyncGenerator[asyncio.Task]:
-    """`gate.run(workers, keys=keys)` for the block, listening and asleep before it starts;
-    stopped at the end."""
-    task = asyncio.create_task(gate.run(workers, keys=keys))
+    """`gate.run(workers, keys=keys, upkeep=upkeep)` for the block, listening and asleep before
+    it starts; stopped at the end."""
+    task = asyncio.create_task(gate.run(workers, keys=keys, upkeep=upkeep))
 
     async def idle() -> bool:
         return gate.listening.is_set() and gate.idle

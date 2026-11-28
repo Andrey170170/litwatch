@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from litwatch.core import FAILED_RUNS, Paper
 from litwatch.gates.database import ReadUnit, WriteUnit
+from litwatch.store.text import stored
 
 type Step = Literal["classification", "analysis", "grading"]
 
@@ -33,8 +34,8 @@ async def failed(
     (the model answered, unusably) adds a failed run; any other keeps the count and records
     the error. `refused` are the roles whose every model refused on this text (a Focus side
     stays refused while the other side is asked); with `stops`, that refusal stops the step at
-    once, for the owner, and the failure says so (`stopped_by_refusal`). Returns the failed runs
-    in a row."""
+    once, for the owner, and the failure says so (`stopped_by_refusal`). The error is stored as
+    a text column takes it (`stored`). Returns the failed runs in a row."""
     row = await (
         await unit.execute(
             """
@@ -58,7 +59,7 @@ async def failed(
                 "revision": paper.revision,
                 "counts": int(counts),
                 "floor": FAILED_RUNS if stops else 0,
-                "error": error,
+                "error": stored(error),
                 "refused": sorted(refused),
                 "stops": stops,
             },

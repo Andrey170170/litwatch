@@ -11,55 +11,17 @@ it are merged. A note leaves `docs/notes/` once every item it holds is merged.
 
 ## Now
 
-The rework's A2, below: shaped ([`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md)) and planned
-([`plans/a2-work-gate.md`](plans/a2-work-gate.md)); building.
+The rework's A2 is built ([`plans/a2-work-gate.md`](plans/a2-work-gate.md)); one weekday night after its last deploy
+checks it (V9). A3, below, is next: shape first.
 
 ## The rework
 
 The backend brought to the roles and gates of [`specs/architecture.md`](specs/architecture.md), one milestone at a
 time. A0, the role checks and the baseline, was merged on 2026-11-10
 ([`plans/a0-rules-baseline.md`](plans/a0-rules-baseline.md)). A1, the Database gate, was built and deployed by
-2026-11-21 ([`plans/a1-database-gate.md`](plans/a1-database-gate.md)); A2 is next. Each milestone's shape goes in
-`specs/architecture/`, its plan in `plans/`.
-
-### A2. Work gate
-
-Shaped: [`specs/architecture/a2-work-gate.md`](specs/architecture/a2-work-gate.md). Planned:
-[`plans/a2-work-gate.md`](plans/a2-work-gate.md). Drive.
-
-- **The OpenAI adapter** in the Model gate, for the owner's OpenAI credit: normal calls and the Batch API. Which
-  roles use it is decided by an evaluation once it is in.
-- **Release links:** code and weights links found by a narrow agent on the deep service, with their access state,
-  shown on the paper's page and in the API; placeholders re-checked weekly for four weeks; the deep service running
-  with automatic Deep reads off (the spec, "Release links"). Replaces the code and weights item that was outside the
-  rework.
-- **Python and deep share their contracts** instead of declaring each other's types by hand; the two LaTeX outline
-  parsers become one (review, project 3).
-- **The deep service brought up to date:** Pi to the newest version that knows the GPT-6.2 models, and the Deep
-  read's default model to `gpt-6.2-sol`.
-- **A first Deep read while the paper's Process job runs** marks the job as asked again by the owner, so it runs
-  once more over what is due when it ends: harmless but the paper shows Processing longer. Narrow the trigger to
-  owner changes that affect the job's steps (Codex on #127).
-- **Leases replace the presence session.** A1's P4 made each process's Database gate hold a presence connection
-  outside its pool, whose `(pid, backend_start)` (`DatabaseGate.identity`) stands for the process in run records and
-  job claims (`runs.start`, `ALIVE`, the job SQL, `take_back`); a presence that drops is opened again under a new
-  identity, and the worker closes its runs and claims afresh. The Work gate's work records replace it with leases
-  and heartbeats, and the presence connection goes (decided 2026-11-18, `docs/plans/a1-database-gate.md`, "Choices
-  made without asking").
-- **Work fenced when its ownership is lost.** Since A1's P4, what owns a piece of work lives on side sessions (the
-  session locks' connections, the presence session) that the pooled work never watches (the plan's notes, "A2: work
-  is not fenced when its ownership is lost"). Until A2:
-  - if only a lock's or the presence's session drops, or Postgres restarts while litwatch keeps running, the work
-    goes on to the end of its block, and a peer may take the lock or the job and run the same work beside it;
-  - a nightly can look dead while it still works, so background Deep work may start beside it;
-  - a run whose last close fails (its pool backend terminated, or no pool connection within the timeout) stays
-    alive and keeps queued jobs waiting until the process restarts;
-  - a pooled connection lost in the middle of a job's chunk, or a Postgres restart that recovers within the pool's
-    wait, ends the job `failed`, for the owner to retry: before P4, ending it failed on the same dead connection and
-    the worker took the job back. A2's worker recovery leaves such a job to be tried again.
-
-  A2 fences work once its lease is lost; its acceptance includes a worker that exits while its last bookkeeping
-  write fails. The run lock's case stays open through A3, which removes that lock.
+2026-11-21 ([`plans/a1-database-gate.md`](plans/a1-database-gate.md)). A2, the Work gate, was built by 2026-11-27
+([`plans/a2-work-gate.md`](plans/a2-work-gate.md)); what it deferred is below, under "Model gate hardening", "Work
+with more than one writer" and A4. Each milestone's shape goes in `specs/architecture/`, its plan in `plans/`.
 
 ### Model gate hardening
 
@@ -188,6 +150,8 @@ Its own project on top of A6: the labelled query set and goals first, then work 
   - a CLI nightly submitted while a scheduled fire or chunk is admitted: an extra wait or run, the run lock still
     serializing;
   - overlapping `serve` processes can delete each other's live `workers` row (a registration supersedes every row);
+  - a `serve` ends the delivery turns of every integration it does not deliver to (`store.work.UNSERVED`), another
+    `serve`'s included, and an event wakes the cursors any `workers` row lists, a dead one's until it is replaced;
   - two `serve`s on cloned databases sharing one deep can reuse each other's release-link find on deep where a paper
     and an item id coincide (the find's key, `links:<item>:<paper>`).
 
@@ -201,13 +165,16 @@ Its own project on top of A6: the labelled query set and goals first, then work 
 
 Built between milestones, on whatever structure exists then.
 
+- **Which roles move to OpenAI:** an evaluation, now that A2's OpenAI adapter is in, of which roles to run on the
+  owner's OpenAI credit (A2's spec, "Not in A2").
+
 - **Deep reads back on**, once models write well enough without the agent's heavy tooling. The Deep read
   ([`specs/deep-read.md`](specs/deep-read.md)) is built (P1 to P6) and off since 2026-11-15: the owner's read of P6
   found it still not well written. Needs shaping first: what to try (a newer model, a lighter setup) and how to
   judge it before switching on. To switch on: build the deep image from litwatch's commit, then enable the `deep`
   service and `[integrations.deep]`; settling queues automatic reads only while that is configured.
-  Once A2 is in, the deep service also runs the release-link finder, and automatic reads have a switch of their own
-  (A2's spec, "Release links"), which switching on sets too. Then: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the
+  Since A2, the deep service also runs the release-link finder, and automatic reads have a switch of their own
+  (`[integrations.deep] automatic`, `false` in production; A2's spec, "Release links"), which switching on sets too. Then: a Deep quality harness (`litwatch eval deep`, a judge from another lab), and the
   prose rules shared between `writing.py` and the deep prompt instead of copied.
 
 - **Release links in the digests and the Notion export,** once A2's finder has run long enough to show how often

@@ -26,7 +26,7 @@ from litwatch.store import work
 from litwatch.store.failures import ACTIONABLE
 from litwatch.store.fulltext import STARTED, STUCK, stuck_params
 from litwatch.store.reading import SHOWN_MEMBER
-from litwatch.store.runs import ALIVE, SESSION
+from litwatch.store.runs import ALIVE
 from litwatch.store.text import stored
 
 # The states each of the Jobs page's groups shows (DESIGN.md, Jobs); `discarded` is hidden.
@@ -347,14 +347,12 @@ async def claim(unit: WriteUnit, job_id: int, *, afresh: bool) -> dict[str, Any]
     was another's (its process gone, its item taken back, or this process restarted); a
     Process job then starts over from its paper, so a step the owner's action left due while it
     ran is done too, and the mark of that action (`settle_process`) is handled: its claim is
-    stamped by the clock after the row's lock, so `finish` does not ask the job again. The session
-    writing it goes in the old liveness columns, which the image before the Work gate reads
-    until P7. Its next chunk is arranged (`arrange`): one running goes on."""
+    stamped by the clock after the row's lock, so `finish` does not ask the job again. Its next
+    chunk is arranged (`arrange`): one running goes on."""
     row = await (
         await unit.execute(
-            f"""
+            """
             UPDATE jobs j SET state = 'running',
-                   (backend_pid, backend_start) = (SELECT a.pid, a.backend_start FROM {SESSION}),
                    done = CASE WHEN %(afresh)s AND j.kind = 'process' AND j.state = 'running'
                                THEN 0 ELSE j.done END,
                    changed_at = CASE WHEN j.state = 'running'
@@ -449,7 +447,6 @@ async def finish(
     cur = await unit.execute(
         """
         UPDATE jobs SET error = %(error)s, changed_at = now(),
-               backend_pid = NULL, backend_start = NULL,
                state = CASE WHEN %(state)s::text = 'done' AND queued_at > changed_at
                             THEN 'queued' ELSE %(state)s::text END,
                done = CASE WHEN %(state)s::text = 'done' AND queued_at > changed_at
@@ -469,8 +466,7 @@ async def fail(unit: WriteUnit, job_id: int, error: str) -> dict[str, Any] | Non
     row = await (
         await unit.execute(
             f"""
-            UPDATE jobs j SET state = 'failed', error = %s, changed_at = now(),
-                   backend_pid = NULL, backend_start = NULL
+            UPDATE jobs j SET state = 'failed', error = %s, changed_at = now()
             WHERE j.id = %s AND {_RUNNABLE} RETURNING j.*
             """,
             (stored(error), job_id),

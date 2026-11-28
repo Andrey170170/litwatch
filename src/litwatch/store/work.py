@@ -28,9 +28,6 @@ from litwatch.store.text import stored
 # The channel a submission, and an item's settling, notify the Work gates on; the payload is the
 # item's kind.
 CHANNEL = "litwatch_work"
-# The kind of a CLI command's work as the P3 image ran it, in the command's own process: none is
-# made any more, and one left running is ended once its lease lapses (`_retire_commands`).
-COMMAND = "command"
 # The channel a command's results are notified on (`put_result`), its payload the item's id:
 # the command following the item listens on it, the Work gates do not.
 RESULTS = "litwatch_work_results"
@@ -38,6 +35,11 @@ RESULTS = "litwatch_work_results"
 # follow or cancel from the CLI, and those tried once (`once`).
 COMMANDS = "command:%"
 CANCELLED = "cancelled by the owner"
+# The kind of an integration's delivery turns, keyed by its name (`store.outbox`, which names
+# it too): the one kind a process serves for some keys alone, the integrations it delivers to.
+DELIVERY = "deliver"
+# How a delivery turn ends when no process delivers to its integration (`_retire_unserved`).
+UNSERVED = "no delivery worker for this integration"
 # How a command's item ends when its one attempt could not finish: `serve` stopped, or lost
 # the database, while it ran. The command submits it again (`litwatch.cli`).
 STOPPED = "serve stopped while it ran"
@@ -318,42 +320,58 @@ async def take_back(
     a unit holds (one fenced on it, or a settling) is left for a later call. Returns those taken
     back.
 
-    A command's item whose lease expired ends failed, whatever admission it holds, as does one
-    of the P3 image's CLI commands (`_retire_commands`): neither is tried again."""
+    A command's item whose lease expired ends failed instead, whatever admission it holds
+    (`_retire_commands`): it is not tried again. So does a delivery turn, pending or with its
+    lease expired, for an integration none of the delivery `keys` names (`_retire_unserved`)."""
     params = _serving(kinds, keys)
     await _retire_commands(unit)
+    await _retire_unserved(unit, keys or {})
     rows = await (
         await unit.execute(
             "UPDATE work_items SET state = 'pending', lease_token = NULL, lease_until = NULL, "
             "not_before = LEAST(not_before, now()), resubmitted = false "
             f"WHERE id IN (SELECT id FROM work_items w WHERE {_served('w')} "
-            "AND w.kind <> %(command)s AND w.kind NOT LIKE %(commands)s "
+            "AND w.kind NOT LIKE %(commands)s "
             "AND state = 'running' AND lease_until < now() FOR UPDATE SKIP LOCKED) "
             f"RETURNING {_COLUMNS}",
-            params | {"command": COMMAND, "commands": COMMANDS},
+            params | {"commands": COMMANDS},
         )
     ).fetchall()
     return [_item(r) for r in rows]
 
 
+async def _retire_unserved(unit: WriteUnit, keys: Mapping[str, Collection[str]]) -> None:
+    """End failed (`UNSERVED`) the delivery turns, when `keys` names the integrations delivered
+    to, of every other integration: pending, or running with its lease expired. Under D4 this
+    process is the one `serve`, so no one would take them: a turn for an integration it does
+    not deliver to (no longer configured, or reacting to no event), left by an earlier image
+    or configuration. One running under a live lease is left until it lapses; one a unit
+    holds, for a later call."""
+    if DELIVERY not in keys:
+        return
+    await unit.execute(
+        "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
+        "error = %(error)s, lease_token = NULL, lease_until = NULL, resubmitted = false "
+        "WHERE id IN (SELECT id FROM work_items WHERE kind = %(kind)s "
+        "AND key <> ALL(%(keys)s) AND (state = 'pending' "
+        "OR (state = 'running' AND lease_until < now())) FOR UPDATE SKIP LOCKED)",
+        {"kind": DELIVERY, "keys": sorted(keys[DELIVERY]), "error": UNSERVED},
+    )
+
+
 async def _retire_commands(unit: WriteUnit) -> None:
-    """End failed the CLI commands' items whose lease expired, which no process runs again: a
-    command's (`once`), its `serve` gone (`STOPPED`, or `CANCELLED` when its owner's cancel was
-    asked first), and one of the P3 image's (kind `command`,
-    which ran in the command's own process), left by a command killed as this image took over.
-    Either holds its admission (`deep`, `publications`) until then. P7 removes the P3 kind's
-    with the old liveness columns."""
+    """End failed the CLI commands' items (`once`) whose lease expired, which no process runs
+    again: their `serve` is gone (`STOPPED`, or `CANCELLED` when the owner's cancel was asked
+    first). Each holds its admission (`deep`, `publications`) until then."""
     retired = await (
         await unit.execute(
             "UPDATE work_items SET state = 'ended', outcome = 'failed', ended_at = now(), "
-            "error = CASE WHEN kind = %(command)s THEN 'its process stopped' "
-            "WHEN cancel_asked IS NOT NULL THEN %(cancelled)s ELSE %(stopped)s END, "
+            "error = CASE WHEN cancel_asked IS NOT NULL THEN %(cancelled)s ELSE %(stopped)s END, "
             "lease_token = NULL, lease_until = NULL, resubmitted = false "
-            "WHERE id IN (SELECT id FROM work_items c "
-            "WHERE (c.kind = %(command)s OR c.kind LIKE %(commands)s) "
+            "WHERE id IN (SELECT id FROM work_items c WHERE c.kind LIKE %(commands)s "
             "AND c.state = 'running' AND c.lease_until < now() FOR UPDATE SKIP LOCKED) "
             "RETURNING kind",
-            {"command": COMMAND, "commands": COMMANDS, "stopped": STOPPED, "cancelled": CANCELLED},
+            {"commands": COMMANDS, "stopped": STOPPED, "cancelled": CANCELLED},
         )
     ).fetchall()
     for kind in sorted({r["kind"] for r in retired}):
@@ -656,8 +674,16 @@ async def results(unit: ReadUnit, item_id: int, after: int = 0) -> list[tuple[in
 # -- the processes that serve work items -----------------------------------------------------------
 
 
-async def register(unit: WriteUnit, name: str, kinds: list[str], *, supersede: bool = False) -> int:
-    """Record a process serving `kinds` as `name`; returns its row's id. With `supersede`
+async def register(
+    unit: WriteUnit,
+    name: str,
+    kinds: list[str],
+    keys: Mapping[str, Collection[str]] | None = None,
+    *,
+    supersede: bool = False,
+) -> int:
+    """Record a process serving `kinds` as `name`, and of a kind in `keys` only those keys
+    (which an event's wake reads, `store.outbox.wake_all`); returns its row's id. With `supersede`
     (`serve`'s), every earlier row goes in the same unit: under D4 one `serve` serves, and one
     killed leaves its row, which would advertise what it served until its heartbeat aged a
     lease, whatever host name its replacement runs under."""
@@ -665,7 +691,8 @@ async def register(unit: WriteUnit, name: str, kinds: list[str], *, supersede: b
         await unit.execute("DELETE FROM workers")
     row = await (
         await unit.execute(
-            "INSERT INTO workers (name, kinds) VALUES (%s, %s) RETURNING id", (name, kinds)
+            "INSERT INTO workers (name, kinds, keys) VALUES (%s, %s, %s) RETURNING id",
+            (name, kinds, Jsonb({kind: sorted(each) for kind, each in (keys or {}).items()})),
         )
     ).fetchone()
     assert row is not None  # the insert returns it

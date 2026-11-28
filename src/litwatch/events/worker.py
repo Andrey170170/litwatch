@@ -1,7 +1,9 @@
 """The delivery Worker (docs/plans/a2-work-gate.md, P2): each work item of kind `deliver` is one
 turn of one integration's delivery (`events.dispatch`), keyed by its name. A process serves the
-keys of the integrations it loads alone (`keys`, which `serve` gives `WorkGate.run`): a turn for
-one it does not load waits for a process that does.
+keys of the integrations it loads alone (`keys`, which `serve` gives `WorkGate.run`, none when
+none reacts to events): an event wakes only those (`store.outbox.wake_all`), and the gate's
+take-back ends a turn of any other (`store.work.UNSERVED`), whose cursor keeps its place. An
+event whose wake saw no `workers` row yet gets its turn from the catch-up (`catch_up`).
 
 A turn sets the integration up, the first time in this process, then delivers one batch; one
 that hands nothing over calls the integration's `idle` hook, at most once every
@@ -59,6 +61,18 @@ class DeliveryWorker:
                 if getattr(self.loaded[name], "setup", None) is None:
                     await outbox.setup_done(unit, name)
                 await self._arrange(unit, name)
+
+    async def catch_up(self) -> None:
+        """Submit the turn of each integration loaded whose events wait with no turn open (an
+        event's wake that saw no `workers` row delivering to it: written as `serve` started),
+        as an event's wake would (`outbox.wake`), its backoff kept. The gate runs it with every
+        take-back (`WorkGate.run`, `upkeep`), so such an event waits at most a poll."""
+        async with self.db.read("deliveries: unwoken") as unit:
+            names = await outbox.unwoken(unit, self.keys)
+        if names:
+            async with self.db.write("deliveries: catch up") as unit:
+                for name in names:
+                    await outbox.wake(unit, name)
 
     async def __call__(self, item: WorkItem) -> None:
         integration = self.loaded[item.key]

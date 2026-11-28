@@ -33,6 +33,7 @@ from litwatch.gates.database import ReadUnit, WriteUnit
 from litwatch.store import jobs, outbox
 from litwatch.store.analyses import CURRENT_GIST
 from litwatch.store.reading import SCOPE, STANDING, _rank, _scope
+from litwatch.store.text import stored
 
 _PUBLISHED = "(" + ", ".join(f"'{s.value}'" for s in PUBLISHED) + ")"
 
@@ -591,7 +592,7 @@ async def record(unit: WriteUnit, o: Outcome, run_id: int | None) -> int | None:
                 "text": o.text,
                 "counts": Jsonb(o.counts),
                 "best": o.best_rarity,
-                "error": o.error[:2000] if o.error else None,
+                "error": None if o.error is None else stored(o.error),
                 "model": o.model,
                 "run": run_id,
             },

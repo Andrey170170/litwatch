@@ -254,7 +254,7 @@ async def test_finds_run_once_per_version_after_the_nightly_s_analysis_and_after
         await night(db, held)
         await until(all_ended(held, 2), "the find of v2 ends")
         # Another trigger of v2 (its analysis recorded again, the nightly's): its answer holds,
-        # its item's results pruned too (P7's cleanup), the ended item's own record standing.
+        # its item's results pruned too (A4's retention), the ended item's own record standing.
         await held.execute("DELETE FROM work_results")
         async with db.write("analysed again", taxonomy="shared", papers=[A.id]) as unit:
             await links.due(unit, [A.id])

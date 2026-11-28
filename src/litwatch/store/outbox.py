@@ -5,8 +5,9 @@ own. Only events whose transaction is older than every transaction still running
 (`_SETTLED`), so an event that commits late can never land behind a position already passed.
 
 Each integration with a cursor is delivered to by work items of its own (docs/plans/a2-work-gate.md,
-P2), one turn each, keyed and admitted by its name (`wake`): an event wakes every one of them as
-it commits (`wake_all`), as the owner's retry or skip wakes theirs.
+P2), one turn each, keyed and admitted by its name (`wake`): an event wakes, as it commits, those
+of the integrations a process's `workers` row says it delivers to (`wake_all`), as the owner's
+retry or skip wakes theirs.
 
 The cursor's row serializes when its delivery runs: every write that schedules a turn (an
 event's wake, the owner's retry or skip, a turn arranging the next) locks the cursor's row
@@ -29,7 +30,7 @@ from litwatch.store import work
 from litwatch.store.text import stored
 
 # The kind of the deliveries' work items.
-DELIVERY = "deliver"
+DELIVERY = work.DELIVERY
 
 _EVENT = "xid::text::bigint AS xid, id, type, paper_id, payload, created_at"
 # Every transaction below the snapshot's xmin has finished: its events are all there is.
@@ -92,8 +93,8 @@ def _cursor(row: dict) -> Cursor:
 
 async def emit(unit: WriteUnit, type: str, paper_id: str | None = None, **payload: Any) -> int:
     """Record an event of `type` (`core.events`), in the unit that writes what it describes, and
-    wake every integration's delivery as the unit commits (`wake_all`). Returns the event's
-    id."""
+    wake, as the unit commits, the delivery of every integration a process delivers to
+    (`wake_all`). Returns the event's id."""
     row = await (
         await unit.execute(
             "INSERT INTO outbox (type, paper_id, payload) VALUES (%s, %s, %s) RETURNING id",
@@ -105,11 +106,20 @@ async def emit(unit: WriteUnit, type: str, paper_id: str | None = None, **payloa
 
 
 async def wake_all(unit: WriteUnit) -> None:
-    """Wake the delivery of every integration with a cursor (`wake`), in the order of their
+    """Wake the delivery of every integration with a cursor that a process delivers to (`wake`):
+    one whose `workers` row serves deliveries, for its keys or for all (`store.work.register`),
+    whatever its heartbeat (D4: one `serve`'s row, or one killed, which its replacement
+    supersedes as it registers). A cursor no one delivers to keeps its position and backoff,
+    and gets its turn from the startup sweep of a `serve` that loads it. In the order of their
     names, so two emitters lock the cursors in one order: the last write of a unit that
     emitted, since every such unit locks those rows."""
     rows = await (
-        await unit.execute("SELECT name FROM integration_cursors ORDER BY name")
+        await unit.execute(
+            "SELECT c.name FROM integration_cursors c WHERE EXISTS (SELECT 1 FROM workers w "
+            "WHERE %(kind)s = ANY(w.kinds) AND (NOT w.keys ? %(kind)s "
+            "OR w.keys -> %(kind)s ? c.name)) ORDER BY c.name",
+            {"kind": DELIVERY},
+        )
     ).fetchall()
     for r in rows:
         await wake(unit, r["name"])
@@ -132,6 +142,24 @@ async def wake(unit: WriteUnit, name: str, *, at: datetime | None = None) -> Non
     if at is None and row is not None:
         at = row["backoff"]
     await work.submit(unit, DELIVERY, name, admission=f"deliver:{name}", not_before=at)
+
+
+async def unwoken(unit: ReadUnit, names: list[str]) -> list[str]:
+    """The integrations of `names` with events after their cursor and no open turn: an event
+    whose wake was missed (written while no `workers` row delivered to it yet, as `serve`
+    started). In the order of their names."""
+    rows = await (
+        await unit.execute(
+            "SELECT c.name FROM integration_cursors c WHERE c.name = ANY(%(names)s) "
+            "AND NOT EXISTS (SELECT 1 FROM work_items w WHERE w.kind = %(kind)s "
+            "AND w.key = c.name AND w.state <> 'ended') "
+            "AND EXISTS (SELECT 1 FROM outbox o "
+            "WHERE (o.xid, o.id) > (c.position_xid, c.position)) "
+            "ORDER BY c.name",
+            {"names": names, "kind": DELIVERY},
+        )
+    ).fetchall()
+    return [r["name"] for r in rows]
 
 
 async def waiting(unit: ReadUnit, name: str) -> tuple[bool, bool]:

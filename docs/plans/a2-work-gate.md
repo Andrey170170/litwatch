@@ -2,7 +2,7 @@
 
 Approved by the owner on 2026-11-23. The build plan for milestone A2 of
 [`docs/specs/architecture.md`](../specs/architecture.md), shaped in
-[`docs/specs/architecture/a2-work-gate.md`](../specs/architecture/a2-work-gate.md); its folded items are listed
+[`docs/specs/architecture/a2-work-gate.md`](../specs/architecture/a2-work-gate.md); its folded items were listed
 under "A2" in [`docs/backlog.md`](../backlog.md). Where this plan and the spec differ, the spec wins and this plan is
 corrected.
 
@@ -114,10 +114,11 @@ Found in a survey of the code at 548857e3:
 - **Until P5, the CLI's inline commands run as items in their own process.** P3 retires the presence session, so a
   command that still runs work inline (`nightly`, `digests write`, `fulltext`, …) does it as a work item through an
   in-process Worker, whose lease gives its run liveness. P5 sends the same items to `serve` instead.
-- **Rollback is a handoff of live work.** Until P7, P2 and P3 keep writing the claim state the previous image reads:
-  the passes' leases, job states, the old liveness columns (`backend_pid`, `backend_start`). A version switch stops
-  `serve` first; the receiving version resumes from the current pass, job, run and cursor records (the old image takes
-  back sessionless jobs and lapsed passes; the new one's startup sweep submits what is queued or runnable). P2 and P3
+- **Rollback is a handoff of live work.** P2 and P3 keep writing the claim state the previous image reads: the
+  passes' leases and job states, and until P7 the old liveness columns (`backend_pid`, `backend_start`), which P7
+  drops ("Rolling back from P7", below). A version switch stops `serve` first; the receiving version resumes from
+  the current pass, job, run and cursor records (the old image takes back sessionless jobs and lapsed passes; the new
+  one's startup sweep submits what is queued or runnable). P2 and P3
   each rehearse upgrade, rollback and upgrade again with unfinished work on a migrated sandbox. The pass sweep only
   makes sure an item exists (`store.work.ensure`; the delivery sweep reschedules its turn through `submit`): one the
   old image left keeps its time and state, so a pending item waits out at most the claim, retry or pause it was set
@@ -141,7 +142,8 @@ Found in a survey of the code at 548857e3:
   The rehearsal shows it: a `fulltext --deep` killed, the rollback with this step, then the image before claims a
   pending Deep pass. Chosen over a row shape the image before does not count (the shared admission in a column of
   its own): kept race-free between a command and `serve`, the admission index must cover that column, and then it
-  fails the image before's claim on the same stale row.
+  fails the image before's claim on the same stale row. Since P7 no such item is left: migration 0053 ended any
+  still open, and none is made since P5. What remains is P5's step below, which ends them too.
 - **Rolling back from P5: the commands' items, ended by hand.** P5's command items are of kinds `command:<name>`,
   which the image before neither serves nor takes back; one left running holds its admission (`deep`, `publications`)
   there for good, and one pending never runs. So the switch is made with no command waiting, and the step above ends
@@ -160,6 +162,28 @@ Found in a survey of the code at 548857e3:
   answer is one the same role gave, validated as production validates it, and a refusal is one the same model gave the
   same question, which production would only ask again to be refused; and an estimate is a mean the next nights' calls
   dilute. A filter that P4 alone would read was not worth a step of its own.
+- **Rolling back from P7: the old liveness columns, added back by hand.** Migration 0053 drops `backend_pid` and
+  `backend_start` from `runs` and `jobs`, which every image before P7 still writes (`runs.start`, `jobs.claim`,
+  `jobs.finish`, `jobs.fail`), so none of them runs on the migrated database until the columns are back. After
+  `serve` stops and before the image before starts, they are added back, empty, and 0053 is forgotten, so the next
+  upgrade drops them again (in the stack's terms):
+
+  ```sh
+  dc exec -T litwatch-db psql -U litwatch -d litwatch -c "ALTER TABLE runs ADD COLUMN backend_pid integer, ADD COLUMN backend_start timestamptz; ALTER TABLE jobs ADD COLUMN backend_pid integer, ADD COLUMN backend_start timestamptz; DELETE FROM schema_migrations WHERE version = 53"
+  ```
+
+  With that step, every image back to the one before the Work gate runs again, each with the steps for the later
+  stages it crosses, but for P3's:
+  - P6's (1ac688b7): that step alone;
+  - P5's: also the notes for rolling back P6 (automatic Deep reads, below);
+  - P3's and P4's: also P5's step for the commands' items, with the evaluations drained before the switch;
+  - P2's: the same. It reads liveness from the columns, which P7's rows leave empty, so an open run reads dead and a
+    running job is taken back, as after a process that died; with `serve` stopped, that is what they are;
+  - P1's and the image before the Work gate: the same, and deep too. They predate T1: their LaTeX submissions carry
+    no `outline`, which today's deep requires, so deep is rolled back with litwatch as an image pair (T1's row), or
+    `[integrations.deep]` is disabled until the upgrade.
+
+  None of them needs P3's step for its `command` items: no such item is left.
 - **Rolling back from P4: a reservation the image before does not count.** P4 counts a call's unknown charge at its
   reservation (`inference_calls.reserved`, migration 0050) against its job's ceiling; the image before counts it as
   nothing. So after a rollback, a job whose runs have an unknown charge can spend past its ceiling by that charge's
@@ -261,7 +285,7 @@ CLI ── submit + wait (row, NOTIFY, work_results) ── refuses without a wo
 | **P4** | **One Model gate.** Providers, limits and batchers per (provider, deadline) in one gate per process; ceiling, deadline and journal from the work context; recovery once at startup (a batch a live claim then held, once that claim's lease lapses); `work_id` on calls; `eval ladders` through it. One task per batch, known by one identity (its first call's id) and registered before its rows commit, with its own deadline; a call with no deadline looks once at a batch (its next look or lookup; none while it is being made), a limit of its own, and one no one followed is settled as at a deadline; a nightly after its deadline drains it; a call sees the batches its gate follows, a live item's included. | V4; V3 again; then merge and deploy. |
 | **P5** | **CLI and attribution.** The model and pipeline commands submit and wait; evaluations carry their inputs and stream their results to their files; Ctrl-C asks whether to cancel or detach, and `litwatch work follow ID` picks an item back up. The API, MCP, monitor and CLI set request attribution, and the check turns strict. | V5, V6; then merge and deploy. |
 | **P6** | **Release links.** The finder's endpoint and prompt in deep; `release_links`; the triggers (an analysis, a new version, the owner's action); placeholder re-checks; the paper's page, the API and MCP; the automatic Deep read switch. | V7; then merge and deploy with deep's image. |
-| **P7** | **Cleanup.** The old liveness columns (`backend_pid`, `backend_start`, written through `store.runs.SESSION`) dropped, now that no image reads them; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
+| **P7** | **Cleanup.** The old liveness columns (`backend_pid`, `backend_start`, written through `store.runs.SESSION`) dropped, now that no image reads them, with a rollback step that adds them back; the P3 image's `command` items ended once, and no longer at every take-back; an event's wake and the take-back following the integrations `serve` delivers to (migration 0054), the others' turns ended; `digests`' and `failures`' error text stored as the others'; the held-across-calls list down to the run lock; the spec's status updated. | CI green; merge and deploy; then the night (V9). |
 | **T1** ∥ | **Deep track:** the shared contracts (D2), one LaTeX parser (D3), Pi to the newest release, `gpt-6.2-sol` for the Deep read (high effort), the finder's own model setting (`gpt-6.2-sol`, medium). Starts with P1; P6 needs it. | V8; deployed, and rolled back if need be, as a litwatch and deep image pair. |
 | **T2** ∥ | **OpenAI adapter:** the Responses API with structured output, the Batch API behind the batcher's interface, prices and bounds. Built against today's provider interface from P1 on; it moves into the gate in P4. | V4's adapter part; merged before P4 starts. |
 
@@ -327,14 +351,20 @@ Found while building, owned by the stage named.
 - **P2 (hindsight from P1's review): one task fewer per claim.** Done in P2: the run loop owns each claim through
   its commit and starts the item's supervisor with it. One shielded task per take is left, so a claim committing
   as the gate stops is still given back.
-- **P7 (from P2): deliveries are served by name.** `WorkGate.run(workers, keys=)` serves a kind for some keys alone;
-  `serve` gives it the integrations it loads, so a process takes, takes back and waits on only its own deliveries.
-  An item no process serves keeps its state: one pending is never taken, and one `running` whose lease expired is
-  never taken back. One dropped from the configuration leaves it for good, which P7's cleanup could end.
-- **P7 (from P2): failure text.** Errors from outside go through `store.text.stored` before a text column
-  takes them. The outbox's, the passes', the jobs' and, since P4, `runs`' and `inference_calls`' do; `digests`
-  and `failures` still cut text alone.
-- **P7 (from P3): each job write that can change whether or when it runs arranges its chunk.** A job's chunk
+- **Later (from P2, P7): deliveries are served by name.** `WorkGate.run(workers, keys=)` serves a kind for some
+  keys alone; `serve` gives it the integrations that react to events (none, when none does), so a process takes,
+  takes back and waits on only its own deliveries. Its `workers` row records those keys (`workers.keys`, migration
+  0054), and an event's commit wakes only the cursors a row delivers to (`store.outbox.wake_all`), whatever its
+  heartbeat: one `serve`'s row, or a killed one's until its replacement registers. An event whose wake saw no
+  row (written as `serve` starts) gets its turn from the delivery Worker's catch-up, which the gate runs with
+  every take-back (`DeliveryWorker.catch_up`, `WorkGate.run`'s `upkeep`): an integration it delivers to with
+  events after its cursor and no open turn is woken as an event would wake it, its backoff kept, so such an event
+  waits at most a poll (30 s). Each take-back ends failed
+  (`store.work.UNSERVED`) the turns of every other integration, pending or with their lease lapsed; one under a
+  live lease is left until it lapses. A cursor no one delivers to keeps its position and backoff, and a `serve`
+  that loads it again sweeps its first turn. Built for one `serve` (D4): a second one, loading other integrations,
+  would end the first's turns and wake none of them.
+- **A3 (from P3): each job write that can change whether or when it runs arranges its chunk.** A job's chunk
   is a `job` item keyed by its id; such a write (its creation or queueing, a claim, progress, a wait, a finish or
   failure, a release) arranges its next chunk in its unit, from the job's row it locked (`store.jobs.arrange`,
   `submit`); a run link or a digest settling changes neither, so arranges none:
@@ -342,17 +372,12 @@ Found while building, owned by the stage named.
   ran, so the chunk's item ends with the decision of the job's last write. An error the chunk's handling did not
   record fails the job, which arranges none (`JobWorker._fail`); closing a run only records it. The lock order is
   the job's row, then its item's, a settle's paper locks before either.
-- **P7 (from P3): the old liveness columns.** `runs.start` and `jobs.claim` still write `backend_pid` and
-  `backend_start` (`store.runs.SESSION`) and `jobs.finish` and `jobs.fail` clear them, for the image before the
-  Work gate; jobs keep their states. Nothing in this image reads them. Migration 0049's columns
-  (`runs.lease_token`, `jobs.run_id`) are additive: the image before ignores them. P7 drops them with `SESSION`. The held-across-calls list is down
-  to the run lock already (the `schedule` lock went in P3, with `held`'s key argument).
-- **P7 (from P3, settled in P5): runs and their items.** A run is alive while the claim it runs under holds a live
+- **A4 (from P3, P5): runs and their items.** A run is alive while the claim it runs under holds a live
   lease (`store.runs.ALIVE`, `runs.lease_token`, moved as each chunk links its job's run, migration 0049);
   `runs.work_id` and `work_items.run_id` stay as the history of which item ran what. A run opened outside any item
   reads dead at once: only the API's grade now (`api/settings.py`, kind `grading`), which P5 attributes as its
   request and leaves outside an item, as nothing reads its liveness.
-- **P7 (from P5): the CLI's commands.** A command `serve` runs is an item of kind `command:<name>` with a fresh
+- **A4 (from P5): the CLI's commands.** A command `serve` runs is an item of kind `command:<name>` with a fresh
   uuid key (a replay's, its run's id), its inputs in the scope (`jobs.commands`), admitted by its key or by the kind
   whose work it does (`deep`, `publications`); every `serve` serves them whatever its schedule (one without an archive
   or a deep service not those that need it), under its own configuration, so the commands lost `--config` but for the
@@ -375,24 +400,22 @@ Found while building, owned by the stage named.
   stopper, and only one is followed or cancelled from the CLI. Each evaluation's output names the item writing it
   (`<file>.item`, a ladders directory's `item.json`): a rerun first writes in that item's results, its reservations
   included, so a follower that stopped loses nothing, and follows the item first while it is open. `work_results` rows
-  are kept with their item; P7's cleanup may prune an ended item's. `intake archive --here` is no item: it runs in the
+  are kept with their item; A4's retention may prune an ended item's. `intake archive --here` is no item: it runs in the
   command, with no Work gate and no Model gate, for a database no `serve` works from (the sandbox's build). A gate
   that stops retires its `workers` row first, before its items drain, so no command is accepted for a kind no one will
   run; a `serve` killed leaves its row until the next `serve` replaces it or its heartbeat is a lease old
   (3 minutes at the default lease), and a command submitted meanwhile waits for the next `serve`. No CLI builds a
   Model gate any more: P4's findings on a second gate meeting `serve`'s batches (`owner()` sees only its process) need
   no fix while that holds, and `jobs.context.model_gate` serves `serve` alone.
-- **P7 (from P5): the P3 `command` kind.** `store.work._retire_commands` still ends an expired P3-image `command`
-  item at every take-back; P7 drops it with the rollback steps.
-- **P7 (from P5): the nightly and the chunks.** No chunk starts while a nightly waits (`store.jobs.nightly_waits`,
+- **A3 (from P5): the nightly and the chunks.** No chunk starts while a nightly waits (`store.jobs.nightly_waits`,
   P3's rules): a CLI's `command:nightly` item counts always, a scheduled fire's only where this process's
   configuration runs fires (`fires=`).
 
-- **P7 (from P6): release links keep nothing for rollback.** Migration 0052 (`release_links`, the `work_items_finds`
-  index) is additive; the image before serves neither `links` nor `link check`, so their items wait for this one. A
+- **A4 (from P6): release links keep nothing for rollback.** Migration 0052 (`release_links`, the
+  `work_items_finds` index) is additive; the image before serves neither `links` nor `link check`, so their items wait for this one. A
   find's `work_results` row, its answer or its failure, is what a retried find reads to end without asking deep again
   (`links.record`), and what says the find answered while its item is open; once the item ends, its own `result` says
-  so (`store.links.finds`), so P7's cleanup may prune the row with the ended item's other results.
+  so (`store.links.finds`), so A4's retention may prune the row with the ended item's other results.
 - **Rolling back P6 turns automatic Deep reads back on.** The image before P6 ignores `[integrations.deep]
   automatic`: rolled back with `automatic = false` installed, it writes automatic Deep reads wherever deep is
   configured. The rollback step is a choice: keep deep configured and accept the automatic reads until the image is

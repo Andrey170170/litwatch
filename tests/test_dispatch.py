@@ -11,6 +11,7 @@ import psycopg
 import pytest
 
 from litwatch import events
+from litwatch.api import app as app_module
 from litwatch.api import create_app
 from litwatch.config import Models
 from litwatch.events import dispatch
@@ -245,8 +246,10 @@ def delivering(db, *integrations) -> tuple[WorkGate, dict]:
 
 
 def served(gate: WorkGate, workers: dict):
-    """`serving` the delivery Worker for the keys it loads, as `serve` gives them."""
-    return serving(gate, workers, keys={outbox.DELIVERY: workers[outbox.DELIVERY].keys})
+    """`serving` the delivery Worker for the keys it loads, with its catch-up, as `serve` gives
+    them."""
+    delivery = workers[outbox.DELIVERY]
+    return serving(gate, workers, keys={outbox.DELIVERY: delivery.keys}, upkeep=[delivery.catch_up])
 
 
 async def turns(conn: Session, name: str) -> list[dict]:
@@ -292,11 +295,12 @@ async def test_a_turn_that_leaves_events_arranges_the_next(conn: Session, db, mo
     ids = await emit(conn, *[events.PAPER_SAVED] * 5)  # waiting before any turn runs
     await settled(db)
     gate, workers = delivering(db, rec)
+    await workers[outbox.DELIVERY].sweep()  # as `serve` starts: no one delivered meanwhile
     async with served(gate, workers):
         await until(lambda: _seen(rec, ids), "every event is delivered")
         await until(lambda: _ended(conn, rec.name), "the last turn ends")
-    # A batch a turn, each turn its own record: the first was woken by the events, the next
-    # two arranged by the turn before.
+    # A batch a turn, each turn its own record: the first arranged by the sweep, the next two
+    # by the turn before.
     assert [t["outcome"] for t in await turns(conn, rec.name)] == ["done"] * 3
 
 
@@ -364,19 +368,16 @@ async def test_a_process_takes_only_the_deliveries_of_the_integrations_it_loads(
     gone, rec = Recorder("gone"), Recorder()
     for each in (gone, rec):
         await start(db, each)
-    gate, workers = delivering(db, rec)  # `gone` is configured in another process, or none
-    # What a turn's item holds reads back in any session's zone (one parked at the end of time
-    # read as the year 10000 in Tokyo, and broke the emitting write).
-    await conn.execute("SET TimeZone = 'Asia/Tokyo'")
+    gate, workers = delivering(db, rec)  # `gone` is no longer configured
     async with served(gate, workers):
         ids = await emit(conn, events.PAPER_SAVED)
         await until(lambda: _seen(rec, ids), "the loaded one gets it")
         ids += await emit(conn, events.PAPER_SAVED, events.PAPER_SAVED)
         await until(lambda: _seen(rec, ids), "the loaded one gets them")
         await until(lambda: _ended(conn, rec.name), "its last turn ends")
-    # Never taken here: one item, waiting for a process that loads it.
-    assert [(t["state"], t["attempts"]) for t in await turns(conn, gone.name)] == [("pending", 0)]
-    gate, workers = delivering(db, gone)  # a process that loads it starts
+    # No turn is made for it, which no one would take; its cursor keeps its place.
+    assert await turns(conn, gone.name) == []
+    gate, workers = delivering(db, gone)  # configured again, a `serve` delivers to it
     await workers[outbox.DELIVERY].sweep()
     async with served(gate, workers):
         await until(lambda: _seen(gone, ids), "it delivers what waited")
@@ -411,6 +412,68 @@ async def test_an_emitter_that_looked_before_the_first_cursor_was_made_strands_n
             await until(caught_up, "no event is left behind the cursor")
     finally:
         await other.close()
+
+
+async def test_an_event_written_as_serve_starts_is_delivered(conn: Session, db, monkeypatch):
+    """A write that emits an event while `serve` starts (a CLI's `taxonomy import`) wakes no
+    turn: no `workers` row delivers yet. The startup sweep's turn, run before it commits, sees
+    nothing and ends; `serve`'s gate catches up on its poll once the event has committed, with
+    no notification to wake it."""
+    posted: list[int] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content)["id"])
+        return httpx.Response(200)
+
+    hook = Webhook(
+        "http://hook.test", http=httpx.AsyncClient(transport=httpx.MockTransport(answer))
+    )
+    await start(db, hook)
+
+    async def deaf(gate) -> None:  # no notification wakes the gate: its poll alone
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(WorkGate, "_listen", deaf)
+    monkeypatch.setattr(app_module, "WorkGate", lambda db: WorkGate(db, poll=0.2))
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    app = create_app(dsn, "t", integrations=[hook])
+    emitter = await sessions.sibling(conn)
+    try:
+        async with contextlib.AsyncExitStack() as stack:
+            async with emitter.transaction():
+                unit = staged(emitter)
+                event = await outbox.emit(unit, events.PAPER_SAVED, "2610.00001")
+                await outbox.wake_all(unit)  # as its commit does: no row delivers yet
+                await stack.enter_async_context(app.router.lifespan_context(app))  # it starts
+                await until(lambda: _ended(conn, hook.name), "the first turn ends unseeing")
+            await until(lambda: _posted(posted, [event]), "the event is delivered")
+    finally:
+        await emitter.close()
+
+
+async def _posted(posted: list[int], ids: list[int]) -> bool:
+    return posted == ids
+
+
+async def test_serve_starts_while_an_event_is_being_written(conn: Session, db):
+    """An emitter holding its transaction open (a taxonomy import settling its papers) keeps
+    `serve` from nothing: it registers and serves at once."""
+    await start(db, Recorder("hook"))
+    hook = Webhook(
+        "http://hook.test",
+        http=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200))),
+    )
+    emitter = await sessions.sibling(conn)
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    app = create_app(dsn, "t", integrations=[hook])
+    try:
+        async with emitter.transaction():
+            await outbox.emit(staged(emitter), events.PAPER_SAVED, "2610.00001")
+            lifespan = app.router.lifespan_context(app)
+            await asyncio.wait_for(lifespan.__aenter__(), 10)
+            await lifespan.__aexit__(None, None, None)
+    finally:
+        await emitter.close()
 
 
 class Picky(Recorder):
@@ -511,6 +574,8 @@ async def test_an_emitter_kept_waiting_wakes_by_the_backoff_as_it_stands_then(co
     first, failing = Recorder("a"), Recorder("b")
     for each in (first, failing):
         await start(db, each)
+    # A `serve` delivers to both, so an event wakes them.
+    await conn.execute("INSERT INTO workers (name, kinds) VALUES ('serve', '{deliver}')")
     failing.fail_all = True
     (a,) = await emit(conn, events.PAPER_SAVED)
     await deliver(db, failing)  # fails: half a minute's backoff
@@ -602,9 +667,13 @@ async def test_the_idle_hook_is_called_while_a_failure_waits_out_its_backoff(
     assert rec.seen == []
 
 
-async def test_serve_takes_back_and_delivers_its_own_turns_and_leaves_another_processs(
+async def test_serve_delivers_its_own_turns_and_ends_and_wakes_none_of_the_others(
     conn: Session, db, monkeypatch
 ):
+    """`serve` takes back the turn of an integration it delivers to, and delivers it. The turns
+    of the others end failed as it starts, pending or with their lease lapsed: one no longer
+    configured, and deep, configured but reacting to no event. One under a live lease is left
+    to lapse. A later event wakes none of theirs, and the served one's again."""
     posted: list[int] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
@@ -614,17 +683,22 @@ async def test_serve_takes_back_and_delivers_its_own_turns_and_leaves_another_pr
     hook = Webhook(
         "http://hook.test", http=httpx.AsyncClient(transport=httpx.MockTransport(answer))
     )
-    gone = Recorder("gone")  # loaded by another process, now dead
-    for each in (hook, gone):
+    deep = Deep(DeepClient("http://deep.test"))
+    gone = Recorder("gone")  # configured before, no longer
+    for each in (hook, gone, Recorder(deep.name)):  # deep's cursor, from when it reacted
         await start(db, each)
-    # A turn of each whose process died with it running, its lease lapsed.
-    for name in (hook.name, gone.name):
+    # Turns whose process died with them running, their leases lapsed, and one still leased.
+    for name, lease in (
+        (hook.name, "- interval '1 minute'"),
+        (gone.name, "- interval '1 minute'"),
+        ("leased", "+ interval '1 hour'"),
+    ):
         await conn.execute(
             "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until, "
-            "attempts) VALUES (%s, %s, %s, 'running', gen_random_uuid(), "
-            "now() - interval '1 minute', 1)",
+            f"attempts) VALUES (%s, %s, %s, 'running', gen_random_uuid(), now() {lease}, 1)",
             (outbox.DELIVERY, name, f"deliver:{name}"),
         )
+    await in_write(conn, queue.submit, outbox.DELIVERY, deep.name, admission="deliver:deep")
     ids = await emit(conn, events.PAPER_SAVED)
     waits: list[float | None] = []
     wait_seconds = queue.wait_seconds
@@ -635,17 +709,48 @@ async def test_serve_takes_back_and_delivers_its_own_turns_and_leaves_another_pr
 
     monkeypatch.setattr(queue, "wait_seconds", recording)
     dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
-    app = create_app(dsn, "t", integrations=[hook])
+    app = create_app(dsn, "t", integrations=[hook, deep])
 
     async def delivered() -> bool:  # and the gate sleeps with nothing of its own to wait for
         return posted == ids and await _ended(conn, hook.name) and waits[-1:] == [None]
 
     async with app.router.lifespan_context(app):
         await until(delivered, "the webhook is posted the event, and the gate sleeps")
-    first, *_ = await turns(conn, hook.name)
-    assert first["attempts"] == 2  # taken back from the dead process, and run again
-    left = [(t["state"], t["attempts"]) for t in await turns(conn, gone.name)]
-    assert left == [("running", 1)]  # not this process's to take back
+        first, *_ = await turns(conn, hook.name)
+        assert first["attempts"] == 2  # taken back from the dead process, and run again
+        ids += await emit(conn, events.PAPER_SAVED)
+        await until(delivered, "the next event is posted too")
+    for name in (gone.name, deep.name):
+        (left,) = await turns(conn, name)  # and none made since
+        assert (left["state"], left["outcome"], left["error"]) == (
+            "ended",
+            "failed",
+            queue.UNSERVED,
+        )
+    (leased,) = await turns(conn, "leased")
+    assert (leased["state"], leased["outcome"]) == ("running", None)
+
+
+async def test_a_turn_no_one_serves_ends_once_its_lease_lapses(conn: Session):
+    """The take-back of a process that serves deliveries for some integrations alone leaves the
+    running turn of another while its lease holds, and ends it failed once it lapses. Another
+    kind served for some keys alone keeps the items of the others."""
+    await conn.execute("INSERT INTO work_items (kind, key, admission) VALUES ('other', 'x', 'x')")
+    await conn.execute(
+        "INSERT INTO work_items (kind, key, admission, state, lease_token, lease_until, "
+        "attempts) VALUES (%s, 'gone', 'deliver:gone', 'running', gen_random_uuid(), "
+        "now() + interval '1 hour', 1)",
+        (outbox.DELIVERY,),
+    )
+    keys = {outbox.DELIVERY: ["hook"], "other": ["y"]}
+    assert await in_write(conn, queue.take_back, [outbox.DELIVERY], keys) == []
+    (turn,) = await turns(conn, "gone")
+    assert turn["state"] == "running"
+    await conn.execute("UPDATE work_items SET lease_until = now() - interval '1 second'")
+    assert await in_write(conn, queue.take_back, [outbox.DELIVERY], keys) == []
+    (turn,) = await turns(conn, "gone")
+    assert (turn["state"], turn["outcome"], turn["error"]) == ("ended", "failed", queue.UNSERVED)
+    assert [t["state"] for t in await items_of(conn, "other", "x")] == ["pending"]
 
 
 async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_integration(
@@ -661,7 +766,7 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
     recorder.aclose = aclose
     served, given = {}, {}
 
-    async def run(gate, workers, *, keys=None, supersede=False):
+    async def run(gate, workers, *, keys=None, supersede=False, upkeep=()):
         served.update(workers)
         given.update(keys or {})
         gate.registered.set()  # as its `workers` row is written

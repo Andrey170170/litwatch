@@ -88,9 +88,10 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     have the archive fetch, so, like the schedule, they wait for cutover), Deep passes and finds
     of release links when a card provider is loaded as well;
     and deliveries when any integration that reacts to events is loaded. Each kind is swept for
-    what waits before the gate starts. And the MCP server (its session manager and PDF executor)
-    while `/mcp` is served. Once the gate has stopped, the jobs' open runs are closed, then
-    every integration, also when a sweep failed.
+    what waits before the gate starts; the gate serves no other integration's deliveries, and
+    ends their turns as it takes back (`store.work.UNSERVED`). And the MCP server (its session
+    manager and PDF executor) while `/mcp` is served. Once the gate has stopped, the jobs' open
+    runs are closed, then every integration, also when a sweep failed.
 
     Every model call of the process goes through one Model gate (`app.state.models`): the one
     given to `create_app`, else one built here on the app's Database gate and closed once
@@ -137,11 +138,14 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
         app.state.publications,
     )
     workers |= commands.CommandWorker(serving).kinds()
-    keys: dict[str, list[str]] = {}
-    if reacting := events.reacting(app.state.integrations):
-        delivery = workers[outbox.DELIVERY] = DeliveryWorker(db, reacting)
-        keys[outbox.DELIVERY] = delivery.keys  # another process's integrations are not ours
+    delivery = DeliveryWorker(db, events.reacting(app.state.integrations))
+    # Its integrations' turns alone, none when none reacts: the gate's take-back ends the others'.
+    keys = {outbox.DELIVERY: delivery.keys}
+    upkeep = []
+    if delivery.keys:
+        workers[outbox.DELIVERY] = delivery
         swept.append(delivery.sweep)
+        upkeep.append(delivery.catch_up)
     gate = None
     try:
         with attributed(SERVE):
@@ -149,7 +153,9 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
             for sweep in swept:
                 await sweep()
             work_gate = WorkGate(db)
-            gate = asyncio.create_task(work_gate.run(workers, keys=keys, supersede=True))
+            gate = asyncio.create_task(
+                work_gate.run(workers, keys=keys, supersede=True, upkeep=upkeep)
+            )
             await _registered(work_gate, gate)
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield

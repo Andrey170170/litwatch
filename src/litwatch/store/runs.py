@@ -16,10 +16,6 @@ _JSON = {"counts", "intake"}
 _FIELDS = {"fetched", "inserted", "updated", "cost", "error", *_JSON}
 
 
-# The row of the session a statement runs in, as `pg_stat_activity` shows it (`a`): what the old
-# liveness columns (`backend_pid`, `backend_start`) are written from.
-SESSION = "pg_stat_activity a WHERE a.pid = pg_backend_pid()"
-
 # Whether run `r` is alive: the claim of the work item it runs in (`runs.lease_token`, the one
 # it was opened under, or its job's latest chunk's) is still held, unexpired. A process that
 # dies without closing its run (killed, out of memory) stops renewing the lease, so its run is
@@ -42,18 +38,14 @@ async def start(
     It names the work item it was opened in (`work_id`, docs/specs/architecture/a2-work-gate.md,
     "Work records"), which keeps which item ran it when that item later runs another (taken
     back, it opens a run of its own); a run of kind `job` names its job too, and each chunk item
-    that works it names the run and moves its claim to that chunk's (`store.jobs.link`). The old
-    liveness columns get the session writing it, which ends with the process: until P7 they are
-    what the image before the Work gate reads (docs/plans/a2-work-gate.md, "Rollback is a
-    handoff of live work")."""
+    that works it names the run and moves its claim to that chunk's (`store.jobs.link`)."""
     work = current_work()
     work_id = work.item.id if work is not None else None
     token = work.item.lease_token if work is not None else None
     row = await (
         await unit.execute(
-            "INSERT INTO runs (kind, window_from, window_to, job_id, work_id, lease_token, "
-            "backend_pid, backend_start) SELECT %s, %s, %s, %s, %s, %s, a.pid, a.backend_start "
-            f"FROM {SESSION} RETURNING id",
+            "INSERT INTO runs (kind, window_from, window_to, job_id, work_id, lease_token) "
+            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
             (kind, window_from, window_to, job_id, work_id, token),
         )
     ).fetchone()
