@@ -686,15 +686,7 @@ async def register(
     (which an event's wake reads, `store.outbox.wake_all`); returns its row's id. With `supersede`
     (`serve`'s), every earlier row goes in the same unit: under D4 one `serve` serves, and one
     killed leaves its row, which would advertise what it served until its heartbeat aged a
-    lease, whatever host name its replacement runs under.
-
-    A row that names the integrations it delivers to waits first for every unit still writing
-    an event (`LOCK outbox IN SHARE MODE`): such a unit woke the turns of the rows it saw
-    (`store.outbox.wake_all`), so one that ran before this row commits would wake none of its
-    own, and a delivery turn run meanwhile would not see its event yet. Its event is
-    committed, then, before this process takes any turn."""
-    if keys is not None and DELIVERY in keys:
-        await unit.execute("LOCK TABLE outbox IN SHARE MODE")
+    lease, whatever host name its replacement runs under."""
     if supersede:
         await unit.execute("DELETE FROM workers")
     row = await (

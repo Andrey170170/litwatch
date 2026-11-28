@@ -44,7 +44,7 @@ import contextlib
 import logging
 import os
 import socket
-from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -260,11 +260,14 @@ class WorkGate:
         *,
         keys: Mapping[str, Collection[str]] | None = None,
         supersede: bool = False,
+        upkeep: Sequence[Callable[[], Awaitable[None]]] = (),
     ) -> None:
         """Serve the kinds of `workers`, each by its Worker, until cancelled; of a kind in
         `keys`, only the items of those keys (an integration's deliveries, which only a process
-        that loads it can run). Cancelled, each claim's supervisor stops its Worker and gives
-        back the claim it still owns; a command's, tried once, ends failed instead
+        that loads it can run). Each of `upkeep` runs with every take-back, woken or on the
+        poll: work a Worker submits for itself that nothing else would (a delivery's catch-up,
+        `events.worker.DeliveryWorker.catch_up`). Cancelled, each claim's supervisor stops its
+        Worker and gives back the claim it still owns; a command's, tried once, ends failed instead
         (`store.work.once`). With `supersede` (`serve`'s gate), this process's `workers` row
         replaces every earlier one: under D4 one `serve` serves, so a row left by one killed,
         whatever its host's name (a container recreated), advertises nothing any more.
@@ -282,6 +285,8 @@ class WorkGate:
                         try:
                             await self._cancels()
                             await self.take_back(kinds)
+                            for each in upkeep:
+                                await each()
                             while await self._claim(kinds, workers, supervisors):
                                 pass
                             async with self.db.read("work: next wait") as unit:

@@ -141,9 +141,11 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
     delivery = DeliveryWorker(db, events.reacting(app.state.integrations))
     # Its integrations' turns alone, none when none reacts: the gate's take-back ends the others'.
     keys = {outbox.DELIVERY: delivery.keys}
+    upkeep = []
     if delivery.keys:
         workers[outbox.DELIVERY] = delivery
         swept.append(delivery.sweep)
+        upkeep.append(delivery.catch_up)
     gate = None
     try:
         with attributed(SERVE):
@@ -151,7 +153,9 @@ async def _running(app: FastAPI) -> AsyncIterator[None]:
             for sweep in swept:
                 await sweep()
             work_gate = WorkGate(db)
-            gate = asyncio.create_task(work_gate.run(workers, keys=keys, supersede=True))
+            gate = asyncio.create_task(
+                work_gate.run(workers, keys=keys, supersede=True, upkeep=upkeep)
+            )
             await _registered(work_gate, gate)
         async with mcp.running(app.state) if app.state.mcp else contextlib.nullcontext():
             yield

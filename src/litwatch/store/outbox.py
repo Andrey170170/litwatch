@@ -144,6 +144,24 @@ async def wake(unit: WriteUnit, name: str, *, at: datetime | None = None) -> Non
     await work.submit(unit, DELIVERY, name, admission=f"deliver:{name}", not_before=at)
 
 
+async def unwoken(unit: ReadUnit, names: list[str]) -> list[str]:
+    """The integrations of `names` with events after their cursor and no open turn: an event
+    whose wake was missed (written while no `workers` row delivered to it yet, as `serve`
+    started). In the order of their names."""
+    rows = await (
+        await unit.execute(
+            "SELECT c.name FROM integration_cursors c WHERE c.name = ANY(%(names)s) "
+            "AND NOT EXISTS (SELECT 1 FROM work_items w WHERE w.kind = %(kind)s "
+            "AND w.key = c.name AND w.state <> 'ended') "
+            "AND EXISTS (SELECT 1 FROM outbox o "
+            "WHERE (o.xid, o.id) > (c.position_xid, c.position)) "
+            "ORDER BY c.name",
+            {"names": names, "kind": DELIVERY},
+        )
+    ).fetchall()
+    return [r["name"] for r in rows]
+
+
 async def waiting(unit: ReadUnit, name: str) -> tuple[bool, bool]:
     """Whether events wait after the integration's cursor: settled ones, which a delivery would
     read now, and any, those whose transaction an older one still running holds back

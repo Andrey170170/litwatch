@@ -245,8 +245,10 @@ def delivering(db, *integrations) -> tuple[WorkGate, dict]:
 
 
 def served(gate: WorkGate, workers: dict):
-    """`serving` the delivery Worker for the keys it loads, as `serve` gives them."""
-    return serving(gate, workers, keys={outbox.DELIVERY: workers[outbox.DELIVERY].keys})
+    """`serving` the delivery Worker for the keys it loads, with its catch-up, as `serve` gives
+    them."""
+    delivery = workers[outbox.DELIVERY]
+    return serving(gate, workers, keys={outbox.DELIVERY: delivery.keys}, upkeep=[delivery.catch_up])
 
 
 async def turns(conn: Session, name: str) -> list[dict]:
@@ -413,38 +415,51 @@ async def test_an_emitter_that_looked_before_the_first_cursor_was_made_strands_n
 
 async def test_an_event_written_as_serve_starts_is_delivered(conn: Session, db):
     """A write that emits an event while `serve` starts (a CLI's `taxonomy import`) wakes no
-    turn: no `workers` row delivers yet. The startup sweep's turn, run before it commits, would
-    see nothing; so registering the delivery keys waits for it, and the turn then delivers it."""
+    turn: no `workers` row delivers yet. The startup sweep's turn, run before it commits, sees
+    nothing and ends; the gate's catch-up submits a turn once the event has committed."""
     rec = Recorder()
     await start(db, rec)
-    gate, workers = delivering(db, rec)
+    gate, workers = WorkGate(db, poll=0.2), {outbox.DELIVERY: DeliveryWorker(db, [rec])}
+    delivery = workers[outbox.DELIVERY]
     emitter = await sessions.sibling(conn)
-
-    async def registering_waits_or_the_turn_ended() -> bool:
-        found = await conn.execute(
-            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE relation = 'outbox'::regclass "
-            "AND mode = 'ShareLock' AND NOT granted) AS waits"
-        )
-        return (await found.fetchone())["waits"] or await _ended(conn, rec.name)
-
     task = None
     try:
         async with emitter.transaction():
             unit = staged(emitter)
             event = await outbox.emit(unit, events.PAPER_SAVED, "2610.00001")
             await outbox.wake_all(unit)  # as its commit does: no row delivers yet
-            await workers[outbox.DELIVERY].sweep()  # `serve` starts: its first turn
+            await delivery.sweep()  # `serve` starts: its first turn
             task = asyncio.create_task(
-                gate.run(workers, keys={outbox.DELIVERY: workers[outbox.DELIVERY].keys})
+                gate.run(workers, keys={outbox.DELIVERY: delivery.keys}, upkeep=[delivery.catch_up])
             )
-            # Registering waits for the emitter; without that, the turn ran and ended unseeing.
-            await until(registering_waits_or_the_turn_ended, "registering or the turn")
+            await until(lambda: _ended(conn, rec.name), "the first turn ends, seeing nothing")
         await until(lambda: _seen(rec, [event]), "the event is delivered")
     finally:
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        await emitter.close()
+
+
+async def test_serve_starts_while_an_event_is_being_written(conn: Session, db):
+    """An emitter holding its transaction open (a taxonomy import settling its papers) keeps
+    `serve` from nothing: it registers and serves at once."""
+    await start(db, Recorder("hook"))
+    hook = Webhook(
+        "http://hook.test",
+        http=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200))),
+    )
+    emitter = await sessions.sibling(conn)
+    dsn = f"{conn.test_dsn}?options=-csearch_path%3D{conn.test_schema}"
+    app = create_app(dsn, "t", integrations=[hook])
+    try:
+        async with emitter.transaction():
+            await outbox.emit(staged(emitter), events.PAPER_SAVED, "2610.00001")
+            lifespan = app.router.lifespan_context(app)
+            await asyncio.wait_for(lifespan.__aenter__(), 10)
+            await lifespan.__aexit__(None, None, None)
+    finally:
         await emitter.close()
 
 
@@ -738,7 +753,7 @@ async def test_the_app_delivers_only_to_what_reacts_to_events_and_closes_every_i
     recorder.aclose = aclose
     served, given = {}, {}
 
-    async def run(gate, workers, *, keys=None, supersede=False):
+    async def run(gate, workers, *, keys=None, supersede=False, upkeep=()):
         served.update(workers)
         given.update(keys or {})
         gate.registered.set()  # as its `workers` row is written
